@@ -82,7 +82,7 @@ abstract class UiScreenBase(title: Component) : Screen(title) {
         height = (realH / s).toInt()
 
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.scale(s.toFloat(), s.toFloat())
         drawScreen(g, (mouseX / s).toInt(), (mouseY / s).toInt(), delta)
@@ -215,7 +215,7 @@ abstract class UiScreenBase(title: Component) : Screen(title) {
         super.render(g.pose(), mouseX, mouseY, delta)
     //?}
 
-    //? if >=1.20.2 <1.21.11 {
+    //? if >=1.20.2 <1.21.6 {
     // 1.21.1 strange background remover
     override fun renderBackground(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {}
     //?}

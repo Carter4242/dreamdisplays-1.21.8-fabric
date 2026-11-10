@@ -19,6 +19,8 @@ import net.minecraft.client.gui.narration.NarratedElementType
 import net.minecraft.client.gui.narration.NarrationElementOutput
 //? if >=1.21.11 {
 import net.minecraft.client.input.MouseButtonEvent
+//?}
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 import net.minecraft.network.chat.Component
@@ -75,7 +77,7 @@ class ValueSlider(
     }
 
     override fun draw(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int, partialTick: Float) {
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, trackSprite(), x, y, width, height)
         g.blitSprite(
             RenderPipelines.GUI_TEXTURED, handleSprite(),
@@ -108,7 +110,12 @@ class ValueSlider(
     }
     //?} else
     /*override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        //? if >=1.21.6 {
+        if (!isValidClickButton(button) || !isMouseOver(mouseX, mouseY)) return false
+        //?}
+        //? if <1.21.6 {
         if (!isValidClickButton(button) || !clicked(mouseX, mouseY)) return false
+        //?}
         setValueFromMouse(mouseX)
         playDownSound(Minecraft.getInstance().soundManager)
         return true

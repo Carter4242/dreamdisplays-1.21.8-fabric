@@ -49,7 +49,7 @@ fun GuiGraphicsCompat.drawText(font: Font, text: Component, x: Int, y: Int, colo
     this.drawString(font, text, x, y, color, shadow)
 }*/
 
-//? if <1.21.11 {
+//? if <1.21.6 {
 fun GuiGraphicsCompat.enableScissorPoseAware(x1: Int, y1: Int, x2: Int, y2: Int) {
     val m = pose().last().pose()
     //? if >=1.19.3 {

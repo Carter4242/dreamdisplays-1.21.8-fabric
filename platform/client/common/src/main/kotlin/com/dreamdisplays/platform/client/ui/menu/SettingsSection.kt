@@ -112,7 +112,7 @@ class SettingsSection(
 
     private fun renderTooltip(g: GuiGraphicsCompat, lines: List<Component>, x: Int, y: Int) {
         val font = Minecraft.getInstance().font
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.setComponentTooltipForNextFrame(font, lines, x, y)
         //?} else
         /*g.renderComponentTooltip(font, lines, x, y)*/

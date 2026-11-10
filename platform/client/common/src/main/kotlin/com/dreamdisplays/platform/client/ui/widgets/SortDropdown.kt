@@ -49,13 +49,13 @@ class SortDropdown(
         val height = ITEM_H * items.size
         rect = UiRect(anchorCenterX - WIDTH / 2, anchorY + 2, WIDTH, height)
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.nextStratum()
         //?}
 
         val scale = 0.85f + 0.15f * animProgress
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.translate(rect.centerX.toFloat(), rect.centerY.toFloat())
         matrices.scale(scale, scale)
@@ -98,7 +98,7 @@ class SortDropdown(
         if (visible && hovered >= 0 && animProgress > 0.5f) g.requestCursor(CursorTypes.POINTING_HAND)
         //?}
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.popMatrix()
         //?} else
         /*matrices.popPose()*/

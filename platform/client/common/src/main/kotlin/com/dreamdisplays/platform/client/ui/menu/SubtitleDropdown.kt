@@ -5,7 +5,7 @@ import com.dreamdisplays.platform.client.ui.ClientMessage
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.drawText
-//? if <1.21.11 {
+//? if <1.21.6 {
 import com.dreamdisplays.platform.client.ui.enableScissorPoseAware
 //?}
 import com.dreamdisplays.platform.client.ui.kit.*
@@ -89,7 +89,7 @@ class SubtitleDropdown(
 
         val scale = 0.85f + 0.15f * animProgress
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.translate(rect.centerX.toFloat(), rect.centerY.toFloat())
         matrices.scale(scale, scale)
@@ -114,7 +114,7 @@ class SubtitleDropdown(
         val font = Minecraft.getInstance().font
         val fy = (ITEM_H - font.lineHeight) / 2
         val textRight = if (paged) scrollbarRight - SCROLLBAR_W - 2 else rect.right - BORDER
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.enableScissor(rect.x, rowTop, rect.right, rowBottom)
         //?} else
         /*g.enableScissorPoseAware(rect.x, rowTop, rect.right, rowBottom)*/
@@ -157,7 +157,7 @@ class SubtitleDropdown(
         if (visible && (draggingScrollbar || overScrollbar) && animProgress > 0.5f) g.requestCursor(CursorTypes.RESIZE_NS)
         //?}
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.popMatrix()
         //?} else
         /*matrices.popPose()*/

@@ -17,6 +17,8 @@ import net.minecraft.client.InputType
 import net.minecraft.client.Minecraft
 //? if >=1.21.11 {
 import net.minecraft.client.input.MouseButtonEvent
+//?}
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 import net.minecraft.network.chat.Component
@@ -77,13 +79,13 @@ class ModeSlider<T : Any>(
         if (!isHovered && !sliderFocused) HANDLE else HANDLE_HIGHLIGHTED
 
     override fun draw(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int, partialTick: Float) {
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, trackSprite(), x, y, width, height)
         //?} else
         /*g.blitSprite(trackSprite(), x, y, width, height)*/
         val idx = modes.indexOf(mode).coerceAtLeast(0)
         val handleX = x + ((width - 8) * idx / (modes.size - 1).toDouble()).toInt()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, handleSprite(), handleX, y, 8, height)
         //?} else
         /*g.blitSprite(handleSprite(), handleX, y, 8, height)*/
@@ -118,7 +120,12 @@ class ModeSlider<T : Any>(
     }
     //?} else
     /*override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        //? if >=1.21.6 {
+        if (!isValidClickButton(button) || !isMouseOver(mouseX, mouseY)) return false
+        //?}
+        //? if <1.21.6 {
         if (!isValidClickButton(button) || !clicked(mouseX, mouseY)) return false
+        //?}
         trySelect(mouseX)
         return true
     }*/
