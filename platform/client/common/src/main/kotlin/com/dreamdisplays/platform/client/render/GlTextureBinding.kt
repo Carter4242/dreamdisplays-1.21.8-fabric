@@ -1,9 +1,9 @@
 package com.dreamdisplays.platform.client.render
 
-//? if >=1.21.11 <26.3 {
+//? if >=1.21.5 <26.3 {
 import com.mojang.blaze3d.opengl.GlStateManager
 //?}
-//? if <1.21.11 {
+//? if <1.21.5 {
 import com.mojang.blaze3d.platform.GlStateManager
 //?}
 import org.lwjgl.opengl.GL11

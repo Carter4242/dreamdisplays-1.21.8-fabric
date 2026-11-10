@@ -3,8 +3,10 @@ package com.dreamdisplays.platform.client.render
 import com.dreamdisplays.platform.client.utils.identifier
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
 import com.dreamdisplays.platform.client.Initializer
-//? if >=1.21.11 <26.3 {
+//? if >=1.21.6 <26.3 {
 import com.mojang.blaze3d.pipeline.RenderPipeline
+//?}
+//? if >=1.21.11 <26.3 {
 import com.mojang.blaze3d.textures.AddressMode
 import com.mojang.blaze3d.textures.FilterMode
 import com.mojang.blaze3d.textures.GpuSampler
@@ -28,6 +30,7 @@ import net.minecraft.resources.Identifier
  * and converts to RGB in the fragment shader.
  */
 object DisplayYuvRenderTypes {
+    //? if >=1.21.6 {
     //? if >=1.21.11 {
     private var sharedPlaneSampler: GpuSampler? = null
 
@@ -43,6 +46,7 @@ object DisplayYuvRenderTypes {
             FilterMode.LINEAR,
             1, java.util.OptionalDouble.empty(),
         ).also { sharedPlaneSampler = it }
+    //?}
 
     private const val SAMPLER_Y = "Sampler0"
     private const val SAMPLER_U = "Sampler1"
@@ -68,7 +72,10 @@ object DisplayYuvRenderTypes {
      */
     val active: Boolean
         get() = !ShaderPackCompat.isShaderPackActive
+                //? if >=1.21.11 {
                 && (isSupported || Yuv262Reflect.isAvailable)
+                //?} else
+                /*&& isSupported*/
                 && NativeMedia.isAvailable
 
     /** Creates one RED8 plane texture through the built-in (26.1-era) or reflective 26.2 API. */
@@ -77,11 +84,16 @@ object DisplayYuvRenderTypes {
         width: Int,
         height: Int
     ): net.minecraft.client.renderer.texture.AbstractTexture =
+        //? if >=1.21.11 {
         if (isSupported) VideoPlaneTexture(label, width, height)
         else Yuv262Reflect.createPlaneTexture(label, width, height)
+    //?} else
+    /*VideoPlaneTexture(label, width, height)*/
 
     private val pipeline: RenderPipeline by lazy {
+        //? if >=1.21.11 {
         if (!isSupported) return@lazy Yuv262Reflect.createPipeline()
+        //?}
         RenderPipelineCompat.createDisplayPipeline(
             identifier(Initializer.MOD_ID, "pipeline/display_yuv"),
             identifier(Initializer.MOD_ID, "core/display_fog" +
@@ -100,6 +112,7 @@ object DisplayYuvRenderTypes {
 
     /** Creates the [RenderType] drawing a display through the YUV pipeline from its three plane textures. */
     fun create(yId: Identifier, uId: Identifier, vId: Identifier): RenderType = DisplaySolidPhase.mark(
+        //? if >=1.21.11 {
         RenderType.create(
             "dream-displays-yuv",
             RenderSetup.builder(pipeline)
@@ -108,6 +121,8 @@ object DisplayYuvRenderTypes {
                 .withTexture(SAMPLER_V, vId) { planeSampler() }
                 .createRenderSetup(),
         )
+        //?} else
+        /*DisplayRenderType("dream-displays-yuv", pipeline, listOf(SAMPLER_Y to yId, SAMPLER_U to uId, SAMPLER_V to vId))*/
     )
 
     private var whiteTextureId: Identifier? = null

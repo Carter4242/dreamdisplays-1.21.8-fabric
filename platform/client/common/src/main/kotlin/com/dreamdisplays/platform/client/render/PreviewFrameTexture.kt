@@ -86,7 +86,7 @@ class PreviewFrameTexture(private val uuid: UUID) {
             tex?.close()
             textureId?.let { mc.textureManager.release(it) }
             val img = NativeImage(NativeImage.Format.RGBA, fw, fh, false)
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             tex = DynamicTexture({ "dreamdisplays:preview" }, img)
             //?} else
             /*tex = DynamicTexture(img)*/

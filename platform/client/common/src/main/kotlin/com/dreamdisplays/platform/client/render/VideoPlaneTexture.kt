@@ -1,9 +1,13 @@
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 package com.dreamdisplays.platform.client.render
 
 import com.mojang.blaze3d.systems.RenderSystem
 //? if <26.3 {
 import com.mojang.blaze3d.textures.GpuTexture
+//?}
+//? if <1.21.11 {
+import com.mojang.blaze3d.textures.AddressMode
+import com.mojang.blaze3d.textures.FilterMode
 //?}
 import net.minecraft.client.renderer.texture.AbstractTexture
 
@@ -16,7 +20,11 @@ class VideoPlaneTexture(label: String, width: Int, height: Int) : AbstractTextur
         val device = RenderSystem.getDevice()
         texture = createRed8Texture(device, label, width, height)
         textureView = device.createTextureView(texture!!)
+        //? if >=1.21.11 {
         sampler = DisplayYuvRenderTypes.planeSampler()
+        //?} else
+        /*texture!!.setTextureFilter(FilterMode.LINEAR, false)
+        texture!!.setAddressMode(AddressMode.CLAMP_TO_EDGE)*/
     }
 
     private fun createRed8Texture(device: Any, label: String, width: Int, height: Int): GpuTexture {

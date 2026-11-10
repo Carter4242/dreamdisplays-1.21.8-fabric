@@ -107,7 +107,7 @@ internal class DisplayFrameUploader(private val uuid: UUID) {
 
     @Suppress("UNUSED")
     private fun gpuHandle(texture: AbstractTexture, width: Int, height: Int): GpuTextureHandle {
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         return GpuTextureHandle(texture.getTexture())
         //?} else
         /*return GpuTextureHandle(texture.getId(), width, height)*/
