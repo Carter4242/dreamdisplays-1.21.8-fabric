@@ -528,7 +528,7 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
-        //? if <1.21.11 {
+        //? if <1.21.6 {
         suggestions.redrawSortDropdownOnTop(g, mouseX, mouseY)
         //?}
         settings.renderTooltips(g, mouseX, mouseY, toRealX(mouseX), toRealY(mouseY))

@@ -20,12 +20,16 @@ import com.dreamdisplays.platform.client.ui.compat.GuiGraphics
 //?}
 */
 import net.minecraft.client.gui.components.AbstractWidget
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
+//?}
+//? if >=1.21.11 {
 import net.minecraft.resources.Identifier
-import net.minecraft.util.ARGB
 //?} else
 /*import net.minecraft.resources.ResourceLocation as Identifier*/
+//? if >=1.21.6 {
+import net.minecraft.util.ARGB
+//?}
 import kotlin.math.max
 
 /**
@@ -148,7 +152,7 @@ val DROPDOWN_SPRITE: Identifier = identifier(Initializer.MOD_ID, "widgets/dropdo
  * sprite's own baked-in translucency, unchanged).
  */
 fun GuiGraphicsCompat.drawPanelSprite(r: UiRect, sprite: Identifier = PANEL_SPRITE, alpha: Float = 1f) {
-    //? if >=1.21.11 {
+    //? if >=1.21.6 {
     blitSprite(RenderPipelines.GUI_TEXTURED, sprite, r.x, r.y, r.w, r.h, ARGB.white(alpha))
     //?} else
     /*blitSprite(sprite, r.x, r.y, r.w, r.h)*/

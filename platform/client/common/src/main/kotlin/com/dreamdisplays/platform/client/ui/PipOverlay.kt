@@ -2,10 +2,10 @@ package com.dreamdisplays.platform.client.ui
 
 import com.dreamdisplays.platform.client.utils.buttonClickSound
 import com.dreamdisplays.platform.client.utils.identifier
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 //?} else
 /*import com.mojang.blaze3d.systems.RenderSystem*/
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 //? if >=1.21.11 {
@@ -196,7 +196,7 @@ class PipOverlay(
             tex?.close()
             textureId?.let { mc.textureManager.release(it) }
             val img = NativeImage(NativeImage.Format.RGBA, fw, fh, false)
-            //? if >=1.21.11 {
+            //? if >=1.21.6 {
             tex = DynamicTexture({ "dreamdisplays:pip" }, img)
             //?} else
             /*tex = DynamicTexture(img)*/
@@ -297,7 +297,7 @@ class PipOverlay(
         val alpha = animProgress
 
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.translate(cx + pipW / 2f, cy + pipH / 2f)
         matrices.scale(scale, scale)
@@ -311,8 +311,8 @@ class PipOverlay(
         // Video content only. The main display texture is padded to fit the in-world display.
         // On 1.21.1 the legacy blit draws with the POSITION_TEX shader (alpha comes from the shader
         // color) but does not enable blending, so the fade alpha is invisible without enableBlend.
-        // 1.21.11+ uses a render pipeline that already blends, and bakes alpha into the blit color.
-        //? if >=1.21.11 {
+        // 1.21.6+ uses a render pipeline that already blends, and bakes alpha into the blit color.
+        //? if >=1.21.6 {
         g.blit(
             RenderPipelines.GUI_TEXTURED,
             id,
@@ -343,7 +343,7 @@ class PipOverlay(
             renderCloseButton(g, closeX, closeY, alpha)
         }
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.popMatrix()
         //?} else
         /*matrices.popPose()*/
@@ -502,7 +502,7 @@ class PipOverlay(
     private fun renderCloseButton(g: GuiGraphicsCompat, hx: Int, hy: Int, alpha: Float) {
         val tint = scaleAlpha(if (hoveringClose) UiTheme.ACCENT_UPDATE else 0xFFFFFFFF.toInt(), alpha)
         val margin = 2
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(
             RenderPipelines.GUI_TEXTURED, IconButton.modIcon("cross"),
             hx + margin, hy + margin, CLOSE_SZ - margin * 2, CLOSE_SZ - margin * 2, tint,

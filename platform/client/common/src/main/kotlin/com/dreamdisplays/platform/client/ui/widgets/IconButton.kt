@@ -17,6 +17,8 @@ import net.minecraft.client.gui.components.WidgetSprites
 import com.dreamdisplays.platform.client.ui.blitSprite*/
 //? if >=1.21.11 {
 import net.minecraft.client.input.MouseButtonEvent
+//?}
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 import net.minecraft.network.chat.Component
@@ -24,7 +26,7 @@ import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 //?} else
 /*import net.minecraft.resources.ResourceLocation as Identifier*/
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.util.ARGB
 //?}
 import kotlin.math.min
@@ -55,7 +57,12 @@ class IconButton(
     }
     //?} else
     /*override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        //? if >=1.21.6 {
+        if (!isValidClickButton(button) || !isMouseOver(mouseX, mouseY)) return false
+        //?}
+        //? if <1.21.6 {
         if (!isValidClickButton(button) || !clicked(mouseX, mouseY)) return false
+        //?}
         onPress()
         playDownSound(Minecraft.getInstance().soundManager)
         return true
@@ -64,7 +71,7 @@ class IconButton(
     override fun draw(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int, partialTick: Float) {
         if (width <= 0 || height <= 0) return
         val sprite = sprites.get(active, isHoveredOrFocused)
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, width, height, ARGB.white(alpha))
         //?} else
         /*g.blitSprite(sprite, x, y, width, height)*/
@@ -72,7 +79,7 @@ class IconButton(
         val iconSide = min(width - 2 * margin, height - 2 * margin)
         val dx = x + width / 2 - iconSide / 2
         val dy = y + height / 2 - iconSide / 2
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, icon(), dx, dy, iconSide, iconSide, ARGB.white(alpha))
         //?} else
         /*g.blitSprite(icon(), dx, dy, iconSide, iconSide)*/
