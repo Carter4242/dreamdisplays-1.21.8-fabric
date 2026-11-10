@@ -78,7 +78,7 @@ object AmbientGrid {
             for (cx in 0 until GRID_W) {
                 val idx = cy * GRID_W + cx
                 val cellArgb = (0xFF shl 24) or (grid.r[idx] shl 16) or (grid.g[idx] shl 8) or grid.b[idx]
-                //? if >=1.21.11 {
+                //? if >=1.21.5 {
                 image.setPixelABGR(cx, cy, argbToAbgr(cellArgb))
                 //?} else
                 /*image.setPixelRGBA(cx, cy, argbToAbgr(cellArgb))*/

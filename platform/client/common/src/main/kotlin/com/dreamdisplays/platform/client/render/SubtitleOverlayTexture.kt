@@ -5,8 +5,10 @@ import com.mojang.blaze3d.platform.NativeImage
 //? if >=1.21.11 {
 import net.minecraft.client.renderer.rendertype.RenderType
 //?} else
-/*import net.minecraft.client.renderer.RenderType
-import net.minecraft.util.FastColor*/
+/*import net.minecraft.client.renderer.RenderType*/
+//? if <1.21.5 {
+import net.minecraft.util.FastColor
+//?}
 import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.DynamicTexture
 //? if >=1.21.11 {
@@ -56,7 +58,7 @@ class SubtitleOverlayTexture {
         ).also { identifier = it }
 
         val dynamic =
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             DynamicTexture({ "dreamdisplays-subtitle" }, native)
         //?} else
         /*DynamicTexture(native)*/
@@ -141,7 +143,7 @@ class SubtitleOverlayTexture {
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val argb = image.getRGB(x, y)
-                //? if >=1.21.11 {
+                //? if >=1.21.5 {
                 native.setPixel(x, y, argb)
                 //?} else
                 /*val a = (argb ushr 24) and 0xFF

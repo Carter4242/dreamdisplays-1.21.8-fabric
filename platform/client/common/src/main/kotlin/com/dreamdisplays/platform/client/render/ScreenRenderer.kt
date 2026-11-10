@@ -303,7 +303,7 @@ object ScreenRenderer {
             draw262(stack, type, appendVertices)
             //?} else
             /*run {
-                //? if <1.21.11 {
+                //? if <1.21.6 {
                 RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
                 //?}
                 try {
@@ -324,7 +324,7 @@ object ScreenRenderer {
                     //?}
                     //?}
                 } finally {
-                    //? if <1.21.11 {
+                    //? if <1.21.6 {
                     RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
                     //?}
                 }

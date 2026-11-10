@@ -1,4 +1,4 @@
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 package com.dreamdisplays.platform.client.render
 
 //? if <26.3 {
@@ -7,7 +7,10 @@ import com.mojang.blaze3d.shaders.UniformType
 import com.mojang.blaze3d.vertex.VertexFormat
 //?}
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
+//? if >=1.21.11 {
 import net.minecraft.resources.Identifier
+//?} else
+/*import net.minecraft.resources.ResourceLocation as Identifier*/
 
 internal object RenderPipelineCompat {
     /** Creates a render pipeline for a display quad. */

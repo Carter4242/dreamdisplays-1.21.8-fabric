@@ -203,7 +203,7 @@ object ScrubPreview {
         Minecraft.getInstance().execute {
             runCatching {
                 val texKey = "$key@$timestampNanos"
-                //? if >=1.21.11 {
+                //? if >=1.21.5 {
                 val tex = DynamicTexture({ "scrub-$texKey" }, image)
                 //?} else
                 /*val tex = DynamicTexture(image)*/
@@ -236,7 +236,7 @@ object ScrubPreview {
                     ((argb shr 16) and 0xFF)
             val x = i % w
             val y = i / w
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             image.setPixelABGR(x, y, abgr)
             //?} else
             /*image.setPixelRGBA(x, y, abgr)*/

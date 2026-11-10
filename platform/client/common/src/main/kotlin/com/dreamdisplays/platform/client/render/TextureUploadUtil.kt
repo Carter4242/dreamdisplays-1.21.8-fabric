@@ -1,6 +1,6 @@
 package com.dreamdisplays.platform.client.render
 
-//? if >=1.21.11 {
+//? if >=1.21.5 {
 import com.mojang.blaze3d.systems.RenderSystem
 //? if <26.3 {
 import com.mojang.blaze3d.opengl.GlTexture
@@ -19,8 +19,14 @@ import java.nio.ByteOrder
 object TextureUploadUtil {
     /** Enables bilinear filtering on a texture (default is nearest-neighbor). */
     fun applyBilinearFilter(tex: DynamicTexture) {
+        //? if >=1.21.5 <1.21.11 {
+        // The texture carries its own filter / address state and re-applies it whenever it is bound, which would
+        // overwrite raw GL parameters; clamp so linear sampling does not wrap the opposite edge in.
+        tex.setFilter(true, false)
+        tex.setClamp(true)
+        //?}
         if (!RenderBackendCompat.canUseDirectOpenGl()) return
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         val glId = (tex.getTexture() as? GlTexture)?.glId() ?: return
         //?} else
         /*val glId = tex.getId()*/
@@ -42,7 +48,7 @@ object TextureUploadUtil {
         rgbaScratch: ByteBuffer?,
         setRgbaScratch: (ByteBuffer) -> Unit,
     ) {
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         upload(
             texture = texture.getTexture(),
             src = src,
@@ -57,7 +63,7 @@ object TextureUploadUtil {
         /*glUploader().upload(texture.getId(), src, w, h, format)*/
     }
 
-    //? if >=1.21.11 {
+    //? if >=1.21.5 {
     /** Uploads a raw RGB24 video frame to a Minecraft texture. */
     @Suppress("UNUSED")
     fun uploadRgb(
@@ -146,6 +152,7 @@ object TextureUploadUtil {
         }
     }
 
+    //? if >=1.21.11 {
     private class WriteMethod(val method: Method, val takesFormat: Boolean)
 
     private val writeMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, WriteMethod>()
@@ -187,6 +194,35 @@ object TextureUploadUtil {
             throw e.targetException
         }
     }
+    //?}
+    //? if >=1.21.5 <1.21.11 {
+    private var paddedScratch: ByteBuffer? = null
+
+    /**
+     * 1.21.5-1.21.10 only take pixel data as an [java.nio.IntBuffer] and validate its length as one int per pixel,
+     * whatever the format. Single-byte formats are therefore copied into a zero-padded scratch buffer with four bytes per
+     * pixel; the encoder still reads only `w * h * components` bytes from its start.
+     */
+    private fun writeToTexture(texture: GpuTexture, pixels: ByteBuffer, w: Int, h: Int, format: NativeImage.Format) {
+        val bytes = w * h * format.components()
+        if (bytes <= 0 || pixels.remaining() < bytes) return
+        val source = if (format.components() == 4 && pixels.isDirect) {
+            pixels.duplicate()
+        } else {
+            val size = w * h * 4
+            val scratch = paddedScratch?.takeIf { it.capacity() >= size }
+                ?: ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder()).also { paddedScratch = it }
+            scratch.clear()
+            val view = pixels.duplicate()
+            view.limit(view.position() + bytes)
+            scratch.put(view)
+            scratch.position(0).limit(size)
+            scratch
+        }
+        val ints = source.order(ByteOrder.nativeOrder()).asIntBuffer()
+        RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, ints, format, 0, 0, 0, 0, w, h)
+    }
+    //?}
     //?}
 
     private fun rgbToRgba(src: ByteBuffer, dst: ByteBuffer, w: Int, h: Int) {

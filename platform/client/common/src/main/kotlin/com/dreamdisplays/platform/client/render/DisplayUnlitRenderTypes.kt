@@ -2,10 +2,10 @@ package com.dreamdisplays.platform.client.render
 
 import com.dreamdisplays.platform.client.utils.identifier
 import com.dreamdisplays.platform.client.Initializer
-//? if >=1.21.11 {
-//? if <26.3 {
+//? if >=1.21.6 <26.3 {
 import com.mojang.blaze3d.pipeline.RenderPipeline
 //?}
+//? if >=1.21.11 {
 import net.minecraft.client.renderer.rendertype.RenderSetup
 import net.minecraft.client.renderer.rendertype.RenderType
 import net.minecraft.resources.Identifier
@@ -25,7 +25,7 @@ import net.minecraft.resources.ResourceLocation as Identifier*/
  * lighting pipelines: shader packs commonly replace those and end up shading the video.
  */
 object DisplayUnlitRenderTypes {
-    //? if >=1.21.11 {
+    //? if >=1.21.6 {
     private const val SAMPLER_TEXTURE = "Sampler0"
 
     private val texturedPipeline: RenderPipeline by lazy {
@@ -49,12 +49,15 @@ object DisplayUnlitRenderTypes {
 
     /** Creates an unlit [RenderType] named [name] that samples texture [id]. */
     fun create(name: String, id: Identifier): RenderType = DisplaySolidPhase.mark(
+        //? if >=1.21.11 {
         RenderType.create(
             name,
             RenderSetup.builder(texturedPipeline)
                 .withTexture(SAMPLER_TEXTURE, id)
                 .createRenderSetup(),
         )
+        //?} else
+        /*DisplayRenderType(name, texturedPipeline, listOf(SAMPLER_TEXTURE to id))*/
     )
 
     private fun assignIrisTexturedProgram(pipeline: RenderPipeline) {
