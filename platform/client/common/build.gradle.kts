@@ -45,10 +45,11 @@ dependencies {
     )
     if (scVersions.getOrNull("neoform.version") != null) {
         compileOnly("org.spongepowered:mixin:0.8.7")
-        compileOnly("org.lwjgl:lwjgl:3.4.3")
-        compileOnly("org.lwjgl:lwjgl-glfw:3.4.3")
-        compileOnly("org.lwjgl:lwjgl-sdl:3.4.3")
-        compileOnly("org.lwjgl:lwjgl-opengl:3.4.3")
+        val lwjgl = scVersions.getOrNull("lwjgl.version") ?: "3.4.3"
+        compileOnly("org.lwjgl:lwjgl:$lwjgl")
+        compileOnly("org.lwjgl:lwjgl-glfw:$lwjgl")
+        if (lwjgl == "3.4.3") compileOnly("org.lwjgl:lwjgl-sdl:$lwjgl")
+        compileOnly("org.lwjgl:lwjgl-opengl:$lwjgl")
     }
 }
 
