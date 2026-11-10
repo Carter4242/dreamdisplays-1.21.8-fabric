@@ -109,7 +109,8 @@
       "commons.codec.version": "1.17.1",
       "commons.io.version": "2.17.0",
       "commons.lang3.version": "3.17.0",
-      "lwjgl.version": "3.3.3"
+      "lwjgl.version": "3.3.3",
+      "neoforge.compile.version": "21.8.57"
     },
     "1.21.11": {
       "minecraft.version": "1.21.11",
