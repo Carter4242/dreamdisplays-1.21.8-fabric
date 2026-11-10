@@ -28,27 +28,27 @@ load-after:
     bootstrap: false
 permissions:
   dreamdisplays.create:
-    default: true
+    default: op
   dreamdisplays.video:
-    default: true
+    default: op
   dreamdisplays.info:
-    default: true
+    default: op
   dreamdisplays.help:
-    default: true
+    default: op
   dreamdisplays.local:
-    default: true
+    default: op
   dreamdisplays.synced:
-    default: true
+    default: op
   dreamdisplays.broadcast:
-    default: true
+    default: op
   dreamdisplays.watchparty:
-    default: true
+    default: op
   dreamdisplays.custom:
-    default: true
+    default: op
   dreamdisplays.lock:
-    default: true
+    default: op
   dreamdisplays.delete:
-    default: true
+    default: op
   dreamdisplays.lock.bypass.worldguard:
     default: op
   dreamdisplays.delete.others:
@@ -78,10 +78,10 @@ permissions:
   dreamdisplays.remote:
     default: op
   dreamdisplays.name:
-    default: true
+    default: op
   dreamdisplays.name.others:
     default: op
   dreamdisplays.schedule:
-    default: true
+    default: op
   dreamdisplays.schedule.others:
     default: op

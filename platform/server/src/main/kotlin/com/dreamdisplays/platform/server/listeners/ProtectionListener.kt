@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.listeners
 
 import com.dreamdisplays.platform.server.ModLoaderOnly
+import com.dreamdisplays.platform.server.PaperServer
 //? if >=1.21.1 {
 //? if >=26 {
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent as NeoForgeBreakEvent
@@ -48,7 +49,10 @@ class ProtectionListener : Listener {
     @EventHandler
     fun onBlockBreak(event: BlockBreakEvent) {
         val loc = event.block.location
-        if (DisplayManager.isContains(loc) != null && PlayerManager.getVersion(event.player) == null) {
+        // only players who can create displays are told why; everyone else just sees a protected block
+        if (DisplayManager.isContains(loc) != null && PlayerManager.getVersion(event.player) == null &&
+            event.player.hasPermission(PaperServer.config.permissions.create)
+        ) {
             ServerMessage.DISPLAY_BLOCK_BREAK.sendTo(event.player)
         }
         cancelIfProtected(loc, event)

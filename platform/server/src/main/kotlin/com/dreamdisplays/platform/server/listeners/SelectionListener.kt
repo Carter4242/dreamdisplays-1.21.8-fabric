@@ -62,6 +62,8 @@ class SelectionListener(plugin: PaperServer) : Listener {
         if (heldItem != PaperServer.config.settings.selectionMaterial ||
             !PaperSurfaces.of(PaperServer.config.settings.baseMaterial).accepts(block.type.name)
         ) return
+        // players who can't create displays get vanilla behaviour (no cancel, no message)
+        if (!player.hasPermission(PaperServer.config.permissions.create)) return
         event.isCancelled = true
 
         when (event.action) {

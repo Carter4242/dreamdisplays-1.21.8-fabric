@@ -36,6 +36,8 @@ object CommandRegistrar {
     /** Builds the full tree for the `/display` command with all subcommands. */
     fun buildDisplayCommand(): LiteralCommandNode<CommandSourceStack> =
         literal<CommandSourceStack>("display") {
+            // hidden from tab-complete and unusable for anyone without the help permission (op by default)
+            requires { it.sender !is Player || it.sender.hasPermission(PaperServer.config.permissions.help) }
             executesCommand { ctx -> HelpCommand().execute(ctx.source.sender, emptyArray()) }
 
             createBranch()
