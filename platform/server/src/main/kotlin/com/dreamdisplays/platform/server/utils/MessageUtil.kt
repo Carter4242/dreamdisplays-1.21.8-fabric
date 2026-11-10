@@ -296,7 +296,7 @@ object MessageUtil {
         if (clickEvent?.string("action") == "open_url") {
             clickEvent.string("value")?.let { url ->
                 runCatching { URI.create(url) }.getOrNull()?.let {
-                    //? if >=1.21.11 {
+                    //? if >=1.21.5 {
                     style = style.withClickEvent(net.minecraft.network.chat.ClickEvent.OpenUrl(it))
                     //?} else
                     /*style = style.withClickEvent(
@@ -311,7 +311,7 @@ object MessageUtil {
             val hoverComponent = nmsComponentFromJsonValue(hoverEvent["value"])
                 ?: hoverEvent.string("value")?.let(::literalText)
             hoverComponent?.let {
-                //? if >=1.21.11 {
+                //? if >=1.21.5 {
                 style = style.withHoverEvent(net.minecraft.network.chat.HoverEvent.ShowText(it))
                 //?} else
                 /*style = style.withHoverEvent(

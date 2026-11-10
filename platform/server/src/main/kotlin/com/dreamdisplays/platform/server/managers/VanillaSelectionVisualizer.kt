@@ -40,7 +40,7 @@ object VanillaSelectionVisualizer {
     }
 
     private fun dust(rgb: Int): ParticleOptions =
-        //? if >=1.21.11 {
+        //? if >=1.21.2 {
         DustParticleOptions(rgb, DUST_SCALE)
     //?} else
     /*
@@ -55,7 +55,7 @@ object VanillaSelectionVisualizer {
     */
 
     private fun send(level: ServerLevel, player: ServerPlayer, options: ParticleOptions, x: Double, y: Double, z: Double) {
-        //? if >=1.21.11 {
+        //? if >=1.21.4 {
         level.sendParticles(player, options, false, false, x, y, z, 1, 0.0, 0.0, 0.0, 0.0)
         //?} else
         /*level.sendParticles(player, options, false, x, y, z, 1, 0.0, 0.0, 0.0, 0.0)*/

@@ -304,7 +304,7 @@ object VanillaDisplayActions {
     /** Checks if [player] has operator level 2 permissions, the no-LuckPerms fallback for privileged actions. */
     fun isOpLevel2(player: ServerPlayer): Boolean {
         val server =
-            //? if >=1.21.11 {
+            //? if >=1.21.6 {
             player.level().server
         //?} else
         /*
