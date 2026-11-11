@@ -124,6 +124,30 @@ class AudioRenderChainTest {
         }
     }
 
+    @Test
+    fun `a muted or out-of-range source is silent from its very first block, also after a reset`() {
+        for (quality in [AcousticQuality.BASIC, AcousticQuality.ADVANCED, AcousticQuality.ULTRA]) {
+            for (binaural in [true, false]) {
+                val chain = newChain(quality = quality, binaural = binaural)
+                chain.updateState(defaultState().copy(muted = true))
+                assertEquals(0.0, rms(tone(0.5).also { chain.process(it, it.size, 1.0) }), 1e-4, "$quality muted, first block")
+                chain.updateState(defaultState())
+                chain.reset() // a new session (seek, restart) on a display past its audio radius
+                assertEquals(0.0, rms(tone(0.5).also { chain.process(it, it.size, 0.0) }), 1e-4, "$quality gain 0 after reset")
+            }
+        }
+    }
+
+    @Test
+    fun `an audible source starts at its settled level instead of ramping down from full gain`() {
+        val chain = newChain(quality = AcousticQuality.BASIC, binaural = false)
+        chain.updateState(defaultState())
+        val first = rms(tone(0.1).also { chain.process(it, it.size, 0.3) })
+        var settled = 0.0
+        repeat(40) { settled = rms(tone(0.1).also { chain.process(it, it.size, 0.3) }) }
+        assertEquals(1.0, first / settled, 0.15)
+    }
+
     private fun settledRms(quality: AcousticQuality, amplitude: Double): Double {
         val chain = newChain(quality = quality, binaural = false, normalization = true)
         chain.updateState(defaultState())

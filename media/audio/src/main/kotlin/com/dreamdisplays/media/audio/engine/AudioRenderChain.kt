@@ -79,6 +79,10 @@ internal class AudioRenderChain(
     private var floatR = FloatArray(0)
     private var lastMakeup = 1f
 
+    /** True until the first spatial block after construction or [reset] (see [process]). */
+    @Volatile
+    private var fresh = true
+
     /** This source's own tier (a display policy), or null to use the engine's global tier. */
     @Volatile
     var qualityOverride: AcousticQuality? = null
@@ -96,6 +100,12 @@ internal class AudioRenderChain(
         if (frames <= 0) return
         ensureCapacity(frames)
         decode(buf, frames)
+        // The first block after a reset starts every parameter at its own target: ramping from the reset values (full
+        // gain, centre, open filter) played that block loud even when the source was muted or out of range
+        val seed = fresh
+        fresh = false
+        fun ParamSmoother.step(target: Float, dt: Float): Float = if (seed) target.also { snap(it) } else next(target, dt)
+        fun LinearRamp.toward(target: Float, samples: Int) = if (seed) snap(target) else rampTo(target, samples)
 
         val listener = engine.currentListener()
         val plane = st.plane
@@ -110,22 +120,22 @@ internal class AudioRenderChain(
         val dtBlock = frames / sampleRate
         val refDistance = max(4.0, sqrt(plane.width * plane.height) * 0.5)
         val toCenterDir = (listenerPos - center).normalized()
-        val directivity = directivitySmoother.next(
+        val directivity = directivitySmoother.step(
             EmitterLayout.directivityGain(normal, toCenterDir).toFloat(), dtBlock,
         )
 
         val leftEmitter = EmitterLayout.leftEmitter(center, uAxis, plane.width)
         val rightEmitter = EmitterLayout.rightEmitter(center, uAxis, plane.width)
 
-        val gL = distanceGainL.next(
+        val gL = distanceGainL.step(
             EmitterLayout.distanceGain((listenerPos - leftEmitter).length(), refDistance).toFloat(), dtBlock,
         ) * directivity
-        val gR = distanceGainR.next(
+        val gR = distanceGainR.step(
             EmitterLayout.distanceGain((listenerPos - rightEmitter).length(), refDistance).toFloat(), dtBlock,
         ) * directivity
 
-        val latL = lateralL.next(lateralOf(leftEmitter, listenerPos, listenerRight), dtBlock)
-        val latR = lateralR.next(lateralOf(rightEmitter, listenerPos, listenerRight), dtBlock)
+        val latL = lateralL.step(lateralOf(leftEmitter, listenerPos, listenerRight), dtBlock)
+        val latR = lateralR.step(lateralOf(rightEmitter, listenerPos, listenerRight), dtBlock)
 
         val binaural = engine.currentBinaural() && tier != AcousticQuality.BASIC
         if (binaural) {
@@ -154,16 +164,16 @@ internal class AudioRenderChain(
                 max(AIR_ABSORPTION_MIN_CUTOFF_HZ, MAX_CUTOFF_HZ * (AIR_ABSORPTION_REF_DISTANCE / centerDist))
             min(occCutoff, airCutoff)
         } else MAX_CUTOFF_HZ
-        logCutoffRamp.rampTo(ln(occlusionCutoff.next(cutoffTarget, dtBlock)), frames)
+        logCutoffRamp.toward(ln(occlusionCutoff.step(cutoffTarget, dtBlock)), frames)
         var cutoffCountdown = 0
-        val occGain = occlusionGain.next(if (advanced) 1f - occ * (1f - OCCLUSION_MIN_GAIN) else 1f, dtBlock)
-        gainRampL.rampTo(gL * userGain * occGain, frames)
-        gainRampR.rampTo(gR * userGain * occGain, frames)
+        val occGain = occlusionGain.step(if (advanced) 1f - occ * (1f - OCCLUSION_MIN_GAIN) else 1f, dtBlock)
+        gainRampL.toward(gL * userGain * occGain, frames)
+        gainRampR.toward(gR * userGain * occGain, frames)
 
         val reverbTargetWet = if (advanced) env.reverbWetGain.coerceIn(0f, 1f) else 0f
         val wetFrom = wetRamp.value
-        val wetGain = reverbWet.next(reverbTargetWet, dtBlock)
-        wetRamp.rampTo(wetGain, frames)
+        val wetGain = reverbWet.step(reverbTargetWet, dtBlock)
+        wetRamp.toward(wetGain, frames)
         val reverbActive = wetFrom > 1e-3f || wetGain > 1e-3f || reverbTargetWet > 1e-3f // -60 dB threshold
         if (reverbActive) {
             reverb.updateParams((env.reverbDecaySeconds / REVERB_MAX_DECAY_SECONDS).coerceIn(0f, 1f), env.reverbDamping)
@@ -252,6 +262,7 @@ internal class AudioRenderChain(
         gainRampL.snap(1f); gainRampR.snap(1f)
         logCutoffRamp.snap(ln(MAX_CUTOFF_HZ))
         wetRamp.snap(0f)
+        fresh = true
     }
 
     private fun nextMakeup(normalize: Boolean, dtBlock: Float): Float {
