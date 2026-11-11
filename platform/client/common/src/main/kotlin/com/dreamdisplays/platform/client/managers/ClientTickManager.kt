@@ -14,6 +14,7 @@ import com.dreamdisplays.platform.client.input.*
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.utils.MinecraftScreenUtil
+import com.dreamdisplays.platform.client.net.ProtocolRouter
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen
@@ -46,6 +47,9 @@ object ClientTickManager {
         FullscreenOverlayManager.onClientTick(minecraft)
         FullscreenController.onClientTick()
         DisplayRegistry.tickReconfirm()
+        if (minecraft.level != null) {
+            ProtocolRouter.tickHelloRefresh(DisplayRegistry.getScreens().any { !it.virtual && !it.isDormant })
+        }
 
         val level = minecraft.level
         if (level != null && (minecraft.currentServer != null || minecraft.isLocalServer)) {

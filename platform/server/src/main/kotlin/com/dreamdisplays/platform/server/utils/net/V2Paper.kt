@@ -56,6 +56,20 @@ object PaperV2Networking : PluginMessageListener {
         maxDisplays = maxDisplaysFor(player.hasPermission(PaperServer.config.permissions.createBypass)),
     )
 
+    /**
+     * Greets every online player whose client listens on [V2_CHANNEL] but who has not said hello to this plugin
+     * instance: after a plugin reload the tracker is empty while everyone is still connected. Clients that know
+     * this greeting answer with their hello, which restores displays without a relog; older clients ignore it.
+     */
+    fun greetOnlinePlayers() {
+        val waiting = plugin.server.onlinePlayers.filter {
+            !V2PlayerTracker.isV2(it.uniqueId) && V2_CHANNEL in it.listeningPluginChannels
+        }
+        if (waiting.isEmpty()) return
+        waiting.forEach { player -> send([player], buildServerHello(player)) }
+        logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
+    }
+
     private fun serverFeatureWires(): List<String> =
         if (WorldGuardRegions.isAvailable()) {
             ServerFeature.playbackFeatureWires + ServerFeature.REGION_ACCESS.wire

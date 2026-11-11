@@ -15,6 +15,7 @@ import com.dreamdisplays.platform.server.registrar.ChannelRegistrar
 import com.dreamdisplays.platform.server.registrar.CommandRegistrar
 import com.dreamdisplays.platform.server.registrar.ListenerRegistrar
 import com.dreamdisplays.platform.server.storage.StorageBackend
+import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
 import io.github.arnodoelinger.platformweaver.PaperOnly
 //? if >=1.20.5 {
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
@@ -96,6 +97,8 @@ class PaperServer : JavaPlugin() {
 
         ListenerRegistrar.registerListeners(this)
         ChannelRegistrar.registerChannels(this)
+        // Players still online across a plugin reload: let their clients handshake again
+        Scheduler.runSync { runCatching { PaperV2Networking.greetOnlinePlayers() } }
         runRepeatingTasks()
 
         TelemetryMetrics.register(this, Metrics(this, 26488))
