@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
+import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.share.ScreenShareRelayTemplates
@@ -15,6 +17,7 @@ import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.StoredVideo
 import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.PaperPlaybackTransport
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
@@ -386,6 +389,10 @@ object ScreenShareActions {
                 restore = share.previousPlayback ?: SavedPlayback(0L, PlaybackSpeed.NORMAL),
             )
             QueueManager.resumePlayingEntry(display, share.previousEntry)
+            // A Local display has no clock to come back paused on: its viewers' players are told to stay paused
+            if (display.mode == PlaybackMode.LOCAL && share.previousUrl.isNotBlank()) {
+                PaperPlaybackTransport.broadcast(display, RemotePlaybackToggle(display.id, paused = true))
+            }
             // Viewers' clients closed their fullscreen of this display when the share's picture went away: open it again
             FullscreenBroadcastManager.redeliver(display.id)
             // Entries queued while the share ran on an empty display waited for an end the live stream never had
