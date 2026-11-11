@@ -49,6 +49,8 @@ object SchedulerRegistrar {
         // Queue advances land within a tenth of a second of a video's end; a no-op while nothing is queued
         runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) {
             step("queue tick") { QueueManager.tick() }
+            // A video with nothing queued restarts for everyone at its end
+            step("loop ends") { TimelineManager.tickEnds() }
             // Karaoke stages (who hears a singer, their pings) stay at most a tenth of a second old
             step("karaoke tick") { KaraokeManager.tick() }
         }

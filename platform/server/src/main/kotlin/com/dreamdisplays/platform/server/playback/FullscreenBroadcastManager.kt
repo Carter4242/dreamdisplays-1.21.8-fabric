@@ -107,6 +107,10 @@ object FullscreenBroadcastManager {
     fun knowsDisplay(displayId: UUID): Boolean =
         preparations.containsKey(displayId) || sessions.values.any { it.display.id == displayId }
 
+    /** False when a fullscreen session on real display [displayId] is set not to loop: its end is the session's to handle. */
+    fun loopsAtEnd(displayId: UUID): Boolean =
+        sessions.values.firstOrNull { !it.virtual && it.display.id == displayId }?.loop ?: true
+
     /** True if a session with [sessionId] is currently live. */
     fun hasSession(sessionId: String): Boolean = sessions.containsKey(sessionId)
 

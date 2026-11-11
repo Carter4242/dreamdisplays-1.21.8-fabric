@@ -37,6 +37,12 @@ object TimelineManager {
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
 
+    /**
+     * A loop restart is sent this long before the end at most ([tickEnds] runs every 100 ms): the timeline's end is
+     * [QueueTiming.END_SAFETY_MS] past the media's, so viewers get it as their stream ends and start on the end instant.
+     */
+    private const val LOOP_EARLY_MS = 150L
+
     /** Older clients loop their own player at end of stream by seeking to 0; those reports are not seeks. */
     private val endOfStream = EndOfStreamGuard()
 
@@ -429,6 +435,38 @@ object TimelineManager {
         timelines[display.id] = current.copy(durationMs = scheduledMs, loop = true)
         broadcast(display, timelines.getValue(display.id))
     }
+
+    /**
+     * Restarts every playing display that reaches the end of its video with nothing queued from 0, for everyone,
+     * scheduled at the end instant ([QueueTiming.loopRestartAtMs]); clients hold the last frame at end of stream and
+     * never loop a shared display themselves. A display whose queue moves on at the end, a watch party, a start hold
+     * or a fullscreen session that does not loop is left alone. Called every couple of ticks.
+     */
+    fun tickEnds() {
+        if (timelines.isEmpty()) return
+        val now = transport.nowMs()
+        for ((displayId, timeline) in timelines) {
+            if (timeline.paused || startHolds.containsKey(displayId)) continue
+            val display = DisplayManager.getDisplayData(displayId) ?: continue
+            if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
+            val durationMs = knownDurationMs(display, timeline)
+            val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, durationMs) ?: continue
+            if (WatchPartyManager.hasSession(displayId) || QueueManager.advancesAtEnd(display)) continue
+            if (!FullscreenBroadcastManager.loopsAtEnd(displayId)) continue
+            // Late end-of-stream loops from older clients around this end are not seeks
+            endOfStream.onVideoChanged(displayId, restartAt)
+            val restarted = Timeline(0, restartAt, paused = false, durationMs = durationMs, loop = true, rate = timeline.rate)
+            timelines[displayId] = restarted
+            broadcast(display, restarted)
+            logger.info("Display {}: reached the end of its video; restarted from 0 for everyone.", displayId)
+        }
+    }
+
+    /** [display]'s video length to loop at: the timeline's, else the display's stored one, else its queue entry's. */
+    private fun knownDurationMs(display: DisplayData, timeline: Timeline): Long =
+        timeline.durationMs.takeIf { it > 0L }
+            ?: durationMsOf(display).takeIf { it > 0L }
+            ?: QueueTiming.scheduledDurationMs(QueueManager.playingEntryDurationMs(display))
 
     /** Forgets a removed display. */
     fun remove(displayId: UUID) {

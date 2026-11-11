@@ -275,6 +275,13 @@ object QueueManager {
         if (after != before) changed(display)
     }
 
+    /** True when [display]'s queue moves on to a next entry at the end of the video ([tick]). */
+    fun advancesAtEnd(display: DisplayData): Boolean {
+        if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return false
+        val queue = queues[display.id] ?: return false
+        return synchronized(queue) { queue.hasNext() }
+    }
+
     /** Duration (ms) of the queue entry [display] plays now, 0 when it plays none or that is unknown. */
     fun playingEntryDurationMs(display: DisplayData): Long {
         val queue = queues[display.id] ?: return 0L
