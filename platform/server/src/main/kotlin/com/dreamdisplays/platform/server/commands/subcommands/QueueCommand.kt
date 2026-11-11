@@ -90,13 +90,25 @@ object QueueCommand {
 
     private fun actorOf(sender: CommandSender, display: DisplayData) = (sender as? Player)?.uniqueId ?: display.ownerId
 
-    private fun add(sender: CommandSender, display: PaperDisplayData, ctx: PlaybackContext, raw: String) {
-        val url = canonical(raw) ?: return ServerMessage.INVALID_URL.sendTo(sender)
+    /** [raw] as a link that may be queued, or null after telling [sender] why not. */
+    internal fun queueableUrl(sender: CommandSender, raw: String): String? {
+        val url = canonical(raw) ?: run {
+            ServerMessage.INVALID_URL.sendTo(sender)
+            return null
+        }
         CustomMediaGate.refusalKey(
             url,
             PaperServer.config.settings.customMediaPolicy,
             hasPermission = true,
-        )?.let { return MessageUtil.sendMessage(sender, it) }
+        )?.let {
+            MessageUtil.sendMessage(sender, it)
+            return null
+        }
+        return url
+    }
+
+    private fun add(sender: CommandSender, display: PaperDisplayData, ctx: PlaybackContext, raw: String) {
+        val url = queueableUrl(sender, raw) ?: return
         val result = QueueManager.add(
             display, ctx, actorOf(sender, display), sender.name,
             url, "", "", 0L, "", throttled = false,
@@ -111,7 +123,7 @@ object QueueCommand {
         block(item.itemId)
     }
 
-    private fun report(sender: CommandSender, display: DisplayData, result: QueueManager.Result, okKey: String) {
+    internal fun report(sender: CommandSender, display: DisplayData, result: QueueManager.Result, okKey: String) {
         val key = when (result) {
             QueueManager.Result.OK -> okKey
             QueueManager.Result.DISABLED -> "queueDisabled"

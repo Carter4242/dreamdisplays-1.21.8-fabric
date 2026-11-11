@@ -49,6 +49,7 @@ object CommandRegistrar {
             listBranch()
             scheduleBranch()
             queueBranch()
+            karaokeBranch()
             fullscreenBranch()
             statsBranch()
             clientsBranch()
@@ -351,6 +352,98 @@ object CommandRegistrar {
                 }
             }
         }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.karaokeBranch() {
+        val op = java.util.function.Predicate<CommandSourceStack> { KaraokeCommand.operator(it.sender) }
+        literal("karaoke", tip("suggestKaraoke")) {
+            requires { KaraokeCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> karaoke(ctx) }
+                literal("on", tip("suggestKaraokeOn")) { requires(op); executesCommand { ctx -> karaoke(ctx, "on") } }
+                literal("off", tip("suggestKaraokeOff")) { requires(op); executesCommand { ctx -> karaoke(ctx, "off") } }
+                literal("status", tip("suggestKaraokeStatus")) {
+                    requires(op)
+                    executesCommand { ctx -> karaoke(ctx, "status") }
+                }
+                literal("trim", tip("suggestKaraokeTrim")) {
+                    requires(op)
+                    argument("ms", StringArgumentType.word()) { executesCommand { ctx -> karaoke(ctx, "trim", arg(ctx, "ms")) } }
+                }
+                literal("singer", tip("suggestKaraokeSinger")) {
+                    requires(op)
+                    literal("add", tip("suggestKaraokeSingerAdd")) {
+                        then(karaokePlayer(online = true) {
+                            executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player")) }
+                            argument("lead", StringArgumentType.word()) {
+                                executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player"), arg(ctx, "lead")) }
+                            }
+                        })
+                    }
+                    literal("remove", tip("suggestKaraokeSingerRemove")) {
+                        then(karaokePlayer(online = false) {
+                            executesCommand { ctx -> karaoke(ctx, "singer", "remove", arg(ctx, "player")) }
+                        })
+                    }
+                    literal("trim", tip("suggestKaraokeSingerTrim")) {
+                        then(karaokePlayer(online = false) {
+                            argument("ms", StringArgumentType.word()) {
+                                executesCommand { ctx -> karaoke(ctx, "singer", "trim", arg(ctx, "player"), arg(ctx, "ms")) }
+                            }
+                        })
+                    }
+                }
+                literal("join", tip("suggestKaraokeJoin")) {
+                    argument("url", StringArgumentType.greedyString()) {
+                        suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
+                        executesCommand { ctx -> karaoke(ctx, "join", arg(ctx, "url")) }
+                    }
+                }
+                literal("leave", tip("suggestKaraokeLeave")) { executesCommand { ctx -> karaoke(ctx, "leave") } }
+                literal("line", tip("suggestKaraokeLine")) {
+                    executesCommand { ctx -> karaoke(ctx, "line") }
+                    literal("add", tip("suggestKaraokeLineAdd")) {
+                        requires(op)
+                        then(karaokePlayer(online = true) {
+                            argument("url", StringArgumentType.greedyString()) {
+                                suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
+                                executesCommand { ctx -> karaoke(ctx, "line", "add", arg(ctx, "player"), arg(ctx, "url")) }
+                            }
+                        })
+                    }
+                    literal("remove", tip("suggestKaraokeLineRemove")) {
+                        requires(op)
+                        then(karaokePlayer(online = false) {
+                            executesCommand { ctx -> karaoke(ctx, "line", "remove", arg(ctx, "player")) }
+                        })
+                    }
+                    literal("clear", tip("suggestKaraokeLineClear")) {
+                        requires(op)
+                        executesCommand { ctx -> karaoke(ctx, "line", "clear") }
+                    }
+                }
+            }
+        }
+    }
+
+    /** A `player` argument: online players, or (not [online]) the display's singers and line too. */
+    private fun karaokePlayer(
+        online: Boolean,
+        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
+    ): RequiredArgumentBuilder<CommandSourceStack, String> =
+        RequiredArgumentBuilder.argument<CommandSourceStack, String>("player", StringArgumentType.word()).apply {
+            suggests(suggesting(tips) { ctx, _, typed ->
+                val names = if (online) PaperFullscreenCommand.onlinePlayerNames()
+                else KaraokeCommand.knownNames(target(ctx)) + PaperFullscreenCommand.onlinePlayerNames()
+                DisplaySuggestions.players(names.distinct(), typed)
+            })
+            block()
+        }
+
+    private fun arg(ctx: CommandContext<CommandSourceStack>, name: String): String = StringArgumentType.getString(ctx, name)
+
+    private fun karaoke(ctx: CommandContext<CommandSourceStack>, vararg args: String) {
+        KaraokeCommand.execute(ctx.source.sender, target(ctx), args.toList())
     }
 
     private fun queuePosition(

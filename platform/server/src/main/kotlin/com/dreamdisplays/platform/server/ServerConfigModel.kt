@@ -29,6 +29,7 @@ data class SettingsSection(
     val fullscreen: FullscreenConfig = FullscreenConfig(),
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
     val queue: QueueConfig = QueueConfig(),
+    val karaoke: KaraokeConfig = KaraokeConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
     val policy: DisplayPolicy = DisplayPolicy.EMPTY,
     val clients: ClientsConfig = ClientsConfig(),
@@ -103,6 +104,20 @@ data class SettingsSection(
         val enabled: Boolean = true,
         val max_items: Int = 50,
         val max_per_player: Int = 10,
+    )
+
+    /**
+     * `[karaoke]` section: singers' timeline lead and the latency constants the voice alignment uses (needs Simple
+     * Voice Chat). [default_lead_ms] 0 = automatic per singer. [absent_singer] is `skip` or `play`.
+     */
+    data class KaraokeConfig(
+        val default_lead_ms: Int = 0,
+        val lead_margin_ms: Int = 40,
+        val min_lead_ms: Int = 260,
+        val max_lead_ms: Int = 1_500,
+        val singer_output_capture_ms: Int = 60,
+        val listener_buffer_output_ms: Int = 120,
+        val absent_singer: String = "skip",
     )
 
     /** Reports section. */
@@ -230,6 +245,8 @@ data class PermissionsSection(
     val schedule get() = permissions.schedule
     val scheduleOthers get() = permissions.schedule_others
     val queue get() = permissions.queue
+    val karaoke get() = permissions.karaoke
+    val karaokeJoin get() = permissions.karaoke_join
 
     data class PermissionsConfig(
         val create: String = "dreamdisplays.create",
@@ -261,6 +278,8 @@ data class PermissionsSection(
         val schedule: String = "dreamdisplays.schedule",
         val schedule_others: String = "dreamdisplays.schedule.others",
         val queue: String = "dreamdisplays.queue",
+        val karaoke: String = "dreamdisplays.karaoke",
+        val karaoke_join: String = "dreamdisplays.karaoke.join",
     )
 }
 
@@ -328,6 +347,15 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_items = t.numberOrNull("queue.max_items")?.toInt()?.coerceIn(0, 500) ?: 50,
             max_per_player = t.numberOrNull("queue.max_per_player")?.toInt()?.coerceIn(0, 500) ?: 10,
         ),
+        karaoke = SettingsSection.KaraokeConfig(
+            default_lead_ms = t.numberOrNull("karaoke.default_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 0,
+            lead_margin_ms = t.numberOrNull("karaoke.lead_margin_ms")?.toInt()?.coerceIn(0, 1_000) ?: 40,
+            min_lead_ms = t.numberOrNull("karaoke.min_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 260,
+            max_lead_ms = t.numberOrNull("karaoke.max_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 1_500,
+            singer_output_capture_ms = t.numberOrNull("karaoke.singer_output_capture_ms")?.toInt()?.coerceIn(0, 1_000) ?: 60,
+            listener_buffer_output_ms = t.numberOrNull("karaoke.listener_buffer_output_ms")?.toInt()?.coerceIn(0, 1_000) ?: 120,
+            absent_singer = t?.getString("karaoke.absent_singer")?.lowercase()?.takeIf { it == "skip" || it == "play" } ?: "skip",
+        ),
         policy = parsePolicy(t),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
@@ -385,6 +413,8 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             schedule = t?.getString("permissions.schedule") ?: "dreamdisplays.schedule",
             schedule_others = t?.getString("permissions.schedule_others") ?: "dreamdisplays.schedule.others",
             queue = t?.getString("permissions.queue") ?: "dreamdisplays.queue",
+            karaoke = t?.getString("permissions.karaoke") ?: "dreamdisplays.karaoke",
+            karaoke_join = t?.getString("permissions.karaoke_join") ?: "dreamdisplays.karaoke.join",
         )
     ),
     proxy = ProxySection(

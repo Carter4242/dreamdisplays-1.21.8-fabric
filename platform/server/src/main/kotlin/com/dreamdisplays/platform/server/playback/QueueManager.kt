@@ -77,6 +77,12 @@ object QueueManager {
     var applyVideo: (display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>) -> Boolean =
         { _, _, _ -> false }
 
+    /**
+     * Called just before [display] switches to queue entry [item] (karaoke: make its singer the active one, so the
+     * first timeline of the new video already carries their lead). False skips the entry like a refused one.
+     */
+    var beforeStart: (display: DisplayData, item: QueueItem) -> Boolean = { _, _ -> true }
+
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
     private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
     private val addThrottle = ActionThrottle()
@@ -302,7 +308,10 @@ object QueueManager {
             }
             val ready = readyFor(display, next)
             rosters.remove(display.id)
-            val applied = runCatching { applyVideo(display, next, ready) }
+            val starts = runCatching { beforeStart(display, next) }
+                .onFailure { logger.warn("Queue start hook failed for display {}.", display.id, it) }
+                .getOrDefault(true)
+            val applied = starts && runCatching { applyVideo(display, next, ready) }
                 .onFailure { logger.warn("Could not switch display {} to its next queued video.", display.id, it) }
                 .getOrDefault(false)
             if (applied) {
