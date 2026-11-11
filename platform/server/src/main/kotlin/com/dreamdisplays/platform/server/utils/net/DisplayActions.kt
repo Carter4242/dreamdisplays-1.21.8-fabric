@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.platform.server.karaoke.KaraokeManager
+import com.dreamdisplays.core.sync.EmptyDisplays
 import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
@@ -171,7 +172,11 @@ object DisplayActions {
         )
 
         if (persist) runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
+        // Back to no video (a screen share ended on a display that had none): the same as a clear for viewers
+        val emptied = !EmptyDisplays.hasVideo(url) && EmptyDisplays.hasVideo(previousUrl)
+        if (emptied) DisplayManager.dropForPreClearClients(displayData)
         DisplayManager.broadcastUpdate(displayData)
+        if (emptied) FullscreenBroadcastManager.endSessionsOf(displayData.id)
         TimelineManager.onVideoChanged(displayData, restore = restore)
         QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
