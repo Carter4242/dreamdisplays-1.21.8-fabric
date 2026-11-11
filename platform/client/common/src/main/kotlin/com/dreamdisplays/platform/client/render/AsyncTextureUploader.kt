@@ -66,6 +66,17 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         }.getOrDefault(false)
     }
 
+    /**
+     * `glMemoryBarrier` is GL 4.2 (or `ARB_shader_image_load_store`); buffer storage can come without it as an
+     * extension, and calling a function the driver does not have is a native crash.
+     */
+    private val memoryBarrierSupported: Boolean by lazy {
+        runCatching {
+            val caps = GL.getCapabilities()
+            caps.OpenGL42 || caps.GL_ARB_shader_image_load_store
+        }.getOrDefault(false)
+    }
+
     override val supportsAsync: Boolean = true
 
     override val maxTextureSize: Int = 8192
@@ -292,7 +303,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
             src.position(savedPos)
         }
         // https://github.com/arnodoelinger/dreamdisplays/issues/199
-        GL42.glMemoryBarrier(GL44.GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT)
+        if (memoryBarrierSupported) GL42.glMemoryBarrier(GL44.GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT)
     }
 
     private fun copyIntoMappedPbo(src: ByteBuffer, size: Int) {
