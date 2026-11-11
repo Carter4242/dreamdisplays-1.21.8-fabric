@@ -12,6 +12,9 @@ import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.toSync
+import com.dreamdisplays.core.queue.DurationReports
+import com.dreamdisplays.core.queue.QueueTiming
+import com.dreamdisplays.core.queue.VideoDurations
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.storage.FullscreenSessionStore
@@ -38,6 +41,12 @@ object FullscreenBroadcastManager {
 
     /** Live preparations by display id; a display holds at most one. */
     private val preparations = ConcurrentHashMap<UUID, Preparation>()
+
+    /** Lengths the viewers' clients reported for URL-only (virtual) displays, which no display timeline keeps. */
+    private val virtualDurations = VideoDurations()
+
+    /** A looping virtual session's restart is sent this long before its end at most ([tickEnds] runs every 100 ms). */
+    private const val LOOP_EARLY_MS = 150L
 
     /** How long a preparation lives before it lets go; the platform points this at `fullscreen.prepare_timeout_seconds`. */
     var prepareTimeoutMs: () -> Long = { 600_000L }
@@ -150,6 +159,7 @@ object FullscreenBroadcastManager {
         }
         val virtual = transport.createVirtualDisplay(virtualDisplayId ?: UUID.randomUUID(), ownerId) ?: return null
         virtual.url = url
+        virtual.mode = PlaybackMode.BROADCAST
         return virtual to true
     }
 
@@ -229,7 +239,9 @@ object FullscreenBroadcastManager {
             namedTargets = namedTargets,
             radius = radius,
             // Prepared clients hold the start frame: schedule it a moment ahead so they all begin together
-            timeline = if (virtual) Timeline.start(timelineAnchorMs ?: (now + preparedLead(display, preparation)), loop = true) else null,
+            timeline = if (virtual) {
+                virtualTimeline(display, loop, timelineAnchorMs ?: (now + preparedLead(display, preparation)))
+            } else null,
         )
         sessions[sessionId] = session
         deliverToAll(session)
@@ -248,12 +260,73 @@ object FullscreenBroadcastManager {
         return sessionId
     }
 
+    /**
+     * A fresh timeline for virtual [display] starting at [startAtMs], with the length its viewers reported when known. A
+     * session that does not loop stops at that end ([tickEnds]); one that loops is restarted there for everyone.
+     */
+    private fun virtualTimeline(display: DisplayData, loop: Boolean, startAtMs: Long): Timeline {
+        val durationMs = QueueTiming.scheduledDurationMs(virtualDurations.mediaMsOf(display.id, display.url))
+        return Timeline.start(startAtMs, durationMs = durationMs, loop = loop || durationMs <= 0L)
+    }
+
+    /**
+     * A client reported the length of virtual display [displayId]'s video: from a player a session of it is shown to,
+     * or a preparation of it reached, about its current video. The session's timeline takes it, as a real display's
+     * does ([TimelineManager.onDurationReported]). False when [displayId] is no virtual display here.
+     */
+    fun onDurationReported(
+        displayId: UUID, senderId: UUID, durationMs: Long, url: String, mediaGen: Long, observedEnd: Boolean,
+    ): Boolean {
+        val session = sessions.values.firstOrNull { it.virtual && it.display.id == displayId }
+        val preparation = preparations[displayId]?.takeIf { it.virtual }
+        val display = session?.display ?: preparation?.display ?: return false
+        val audience = session?.shownTo.orEmpty() + preparation?.roster?.delivered.orEmpty()
+        if (senderId !in audience) return true
+        if (!DurationReports.accepts(durationMs, url, mediaGen, display.url, display.mediaGen, Long.MAX_VALUE)) return true
+        val mediaMs = virtualDurations.report(
+            displayId, display.url, senderId, durationMs, 0L, transport.nowMs(), observedEnd, audience,
+        ) ?: return true
+        val timeline = session?.timeline ?: return true
+        val now = transport.nowMs()
+        val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
+        session.timeline = timeline.anchoredAt(now).copy(durationMs = scheduledMs, loop = session.loop)
+        for (playerId in session.shownTo) sendTimeline(session, playerId, now)
+        return true
+    }
+
+    /**
+     * Ends of virtual sessions, which no display timeline drives: one that does not loop is over at its video's end
+     * (its viewers closed the overlay at their end of stream; the server forgets it, or a rejoin or restart would show
+     * it again), one that loops starts over for everyone at that end. Called every couple of ticks.
+     */
+    fun tickEnds() {
+        if (sessions.isEmpty()) return
+        val now = transport.nowMs()
+        for (session in sessions.values) {
+            if (!session.virtual) continue
+            val timeline = session.timeline ?: continue
+            if (timeline.paused || timeline.durationMs <= 0L) continue
+            if (!session.loop) {
+                if (QueueTiming.loopRestartAtMs(timeline.copy(loop = false), now, 0L, timeline.durationMs) != null) {
+                    logger.info("Fullscreen session ${session.sessionId} reached the end of its video.")
+                    stop(session.sessionId)
+                }
+                continue
+            }
+            val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, timeline.durationMs) ?: continue
+            val restarted = Timeline(0, restartAt, paused = false, durationMs = timeline.durationMs, loop = true, rate = timeline.rate)
+            session.timeline = restarted
+            for (playerId in session.shownTo) sendTimeline(session, playerId, now)
+        }
+    }
+
     private fun preparedLead(display: DisplayData, preparation: Preparation?): Long =
         if (preparation == null) 0L else ReadinessTracker.leadMs(display.id, preparation.roster.delivered)
 
     /** Stops [sessionId], notifying every player it was shown to. Returns false if it doesn't exist. */
     fun stop(sessionId: String): Boolean {
         val session = sessions.remove(sessionId) ?: return false
+        forgetVirtualLength(session.display)
         teardown(session)
         persist()
         return true
@@ -458,8 +531,15 @@ object FullscreenBroadcastManager {
 
     private fun cancelPreparation(preparation: Preparation) {
         if (!preparations.remove(preparation.display.id, preparation)) return
+        forgetVirtualLength(preparation.display)
         for (playerId in preparation.roster.delivered) withdrawPrepare(preparation, playerId)
         logger.info("Cancelled fullscreen preparation ${preparation.prepareId}.")
+    }
+
+    /** A virtual display nothing shows or prepares any more: its reported length goes with it. */
+    private fun forgetVirtualLength(display: DisplayData) {
+        if (!display.virtual || knowsDisplay(display.id)) return
+        virtualDurations.forget(display.id)
     }
 
     private fun reconcilePreparation(preparation: Preparation, now: Long) {
@@ -602,6 +682,7 @@ object FullscreenBroadcastManager {
         val display = transport.createVirtualDisplay(id, ownerId) ?: return null
         display.url = record.url
         display.lang = record.lang
+        display.mode = PlaybackMode.BROADCAST
         return display
     }
 

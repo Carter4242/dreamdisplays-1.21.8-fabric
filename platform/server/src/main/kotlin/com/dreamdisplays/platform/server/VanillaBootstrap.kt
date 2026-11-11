@@ -75,6 +75,7 @@ object VanillaBootstrap {
                         TimelineManager.tick()
                         WatchPartyManager.tick()
                         FullscreenBroadcastManager.tick()
+                        FullscreenBroadcastManager.tickEnds()
                         VanillaProxyBridge.tick(server)
                     }
                 }

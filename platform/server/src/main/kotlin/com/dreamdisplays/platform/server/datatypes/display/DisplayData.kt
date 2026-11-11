@@ -46,8 +46,13 @@ interface DisplayData {
     /** Boolean view of [mode]: `true` only when the mode is [PlaybackMode.SYNCED]. */
     val isSync: Boolean get() = mode == PlaybackMode.SYNCED
 
-    /** Max video height clients must not exceed (0 = uncapped, 360 for [PlaybackMode.BROADCAST]). */
-    val qualityCap: Int; get() = if (mode == PlaybackMode.BROADCAST) PlaybackPermissions.BROADCAST_QUALITY_CAP else 0
+    /**
+     * Max video height clients must not exceed (0 = uncapped; the Broadcast cap for [PlaybackMode.BROADCAST] world
+     * displays). A virtual (URL-only fullscreen) display is Broadcast for its shared clock; its session's quality and
+     * `fullscreen` limits decide its height.
+     */
+    val qualityCap: Int
+        get() = if (mode == PlaybackMode.BROADCAST && !virtual) PlaybackPermissions.BROADCAST_QUALITY_CAP else 0
 }
 
 /**

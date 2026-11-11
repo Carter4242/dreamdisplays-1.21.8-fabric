@@ -53,6 +53,7 @@ object SchedulerRegistrar {
             step("queue tick") { QueueManager.tick() }
             // A video with nothing queued restarts for everyone at its end
             step("loop ends") { TimelineManager.tickEnds() }
+            step("fullscreen ends") { FullscreenBroadcastManager.tickEnds() }
             // Karaoke stages (who hears a singer, their pings) stay at most a tenth of a second old
             step("karaoke tick") { KaraokeManager.tick() }
             // Sharers and their viewers learn the server's clock, so share latency can be measured end to end

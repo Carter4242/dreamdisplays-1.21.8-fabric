@@ -278,7 +278,11 @@ object VanillaDisplayActions {
         player: ServerPlayer, displayId: java.util.UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L,
         observedEnd: Boolean = false,
     ) {
-        val displayData = DisplayManager.getDisplayData(displayId) ?: return
+        val displayData = DisplayManager.getDisplayData(displayId) ?: run {
+            // A URL-only fullscreen broadcast: its session keeps the length
+            FullscreenBroadcastManager.onDurationReported(displayId, player.uuid, durationMs, url, mediaGen, observedEnd)
+            return
+        }
         TimelineManager.onDurationReported(displayData, player.uuid, durationMs, url, mediaGen, observedEnd)
     }
 
