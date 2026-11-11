@@ -645,7 +645,7 @@ object FullscreenBroadcastManager {
             if (targeted && !shown) {
                 deliverTo(session, playerId)
             } else if (!targeted && shown) {
-                transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, active = false))
+                transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
                 forget(session, playerId)
             } else if (targeted) {
                 val unconfirmed = playerId !in session.confirmedBy &&
@@ -660,7 +660,7 @@ object FullscreenBroadcastManager {
     private fun teardown(session: Session) {
         val now = transport.nowMs()
         for (playerId in session.shownTo) {
-            transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, active = false))
+            transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
             if (session.virtual) transport.sendTo(playerId, DisplayDelete(session.display.id))
         }
         logger.info("Stopped fullscreen session ${session.sessionId} (reached ${session.shownTo.size} player(s)) at $now.")
