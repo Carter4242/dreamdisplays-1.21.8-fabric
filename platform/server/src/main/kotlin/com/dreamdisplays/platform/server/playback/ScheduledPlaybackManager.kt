@@ -81,12 +81,17 @@ object ScheduledPlaybackManager {
         ServerCoroutines.io.launch {
             val remaining = at - Clock.System.now()
             if (remaining > Duration.ZERO) delay(remaining)
-            transport.runOnMainThread { fire(displayId) }
+            transport.runOnMainThread { fire(displayId, at) }
         }
 
-    private fun fire(displayId: UUID) {
-        jobs.remove(displayId)
+    /**
+     * The countdown for [at] ran out. Only while that is still [displayId]'s schedule: one cancelled or replaced after
+     * its countdown already handed this to the main thread does nothing.
+     */
+    private fun fire(displayId: UUID, at: Instant) {
         val display = DisplayManager.getDisplayData(displayId) ?: return
+        if (display.scheduledStart != at) return
+        jobs.remove(displayId)
         val action = display.scheduledAction ?: PlaybackAction.PLAY
         display.scheduledStart = null
         display.scheduledAction = null
