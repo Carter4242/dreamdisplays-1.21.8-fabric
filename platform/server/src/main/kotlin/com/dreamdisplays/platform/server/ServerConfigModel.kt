@@ -389,6 +389,9 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
             ?.let { name -> DisplayPolicy.Acoustics.entries.firstOrNull { it.name == name } },
         unshadedDisplays = t.boolOrNull("policy.client.unshaded_displays"),
         displayDistanceChunks = t.numberOrNull("policy.client.display_distance_chunks")?.toInt(),
+        audioOutputProfile = (t?.get("policy.client.audio_output_profile") as? String)?.trim()?.uppercase()
+            ?.let { name -> DisplayPolicy.OutputProfile.entries.firstOrNull { it.name == name } },
+        audioNormalization = t.boolOrNull("policy.client.audio_normalization"),
     )
     val debug = DisplayPolicy.Debug(
         syncLogIntervalSeconds = t.numberOrNull("policy.debug.sync_log_interval_seconds")?.toInt(),

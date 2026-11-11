@@ -15,6 +15,7 @@ import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.audio.AcousticEnvironment
 import com.dreamdisplays.api.media.audio.AcousticQuality
+import com.dreamdisplays.platform.client.core.modules.ClientAudioModule
 import com.dreamdisplays.api.media.audio.SourceAcousticState
 import com.dreamdisplays.api.media.audio.SourcePlane
 import com.dreamdisplays.core.display.policy.DisplayPolicy
@@ -486,6 +487,9 @@ class DisplayScreen(
     var customData: Map<String, ByteArray> = emptyMap()
 
     private var policyBytes: ByteArray? = null
+
+    /** Acoustics tier last handed to the engine for this display (null = following the global tier). */
+    private var pushedAcoustics: AcousticQuality? = null
 
     /**
      * Server-controlled behaviour for this display ([DisplayPolicy]), with the client defaults filled in for
@@ -1234,7 +1238,13 @@ class DisplayScreen(
         } else {
             updateDistanceQuality((distance / renderDistance.coerceAtLeast(1)).toFloat())
         }
-        if (ServerOverrides.audioAcoustics == AcousticQuality.OFF) return
+        // The display's own tier (its policy) wins over the server-wide / player tier for this source only
+        val ownTier = ServerOverrides.displayAcoustics(policy)
+        if (ownTier != pushedAcoustics) {
+            pushedAcoustics = ownTier
+            ClientAudioModule.setSourceQuality(uuid, ownTier)
+        }
+        if ((ownTier ?: ServerOverrides.audioAcoustics) == AcousticQuality.OFF) return
         val plane = sourcePlane()
         DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.updateSource(
             uuid,
@@ -1250,7 +1260,7 @@ class DisplayScreen(
     }
 
     private fun probeEnvironment(plane: SourcePlane, distance: Double): AcousticEnvironment {
-        val tier = ServerOverrides.audioAcoustics
+        val tier = ServerOverrides.audioAcoustics(policy)
         if (isPopoutActive || !acousticsEnabled || (tier != AcousticQuality.ADVANCED && tier != AcousticQuality.ULTRA)) {
             cachedEnvironment = AcousticEnvironment.OPEN_AIR
             cachedReverb = null

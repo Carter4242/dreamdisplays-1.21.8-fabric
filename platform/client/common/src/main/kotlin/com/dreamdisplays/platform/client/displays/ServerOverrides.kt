@@ -7,6 +7,7 @@ import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.core.modules.ClientAudioModule
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import org.slf4j.LoggerFactory
 
@@ -50,6 +51,7 @@ object ServerOverrides {
         runCatching {
             DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.setGlobalQuality(audioAcoustics)
         }
+        runCatching { ClientAudioModule.applyOutputSettings() }
         if (previous.verbose != next.verbose) VerboseLogging.set(next.verbose)
     }
 
@@ -69,6 +71,19 @@ object ServerOverrides {
             val name = settings.audioAcoustics(own.name)
             return AcousticQuality.entries.firstOrNull { it.name == name } ?: own
         }
+
+    /** Binaural (headphones) rendering: the server's output profile when it sets one, else the player's. */
+    val audioBinauralOutput: Boolean get() = settings.audioBinauralOutput(ClientStateManager.config.audioBinauralOutput)
+
+    /** Loudness normalization: the server's when it sets it, else the player's. */
+    val audioNormalization: Boolean get() = settings.audioNormalization(ClientStateManager.config.audioNormalization)
+
+    /** The acoustics tier the display with [policy] sets for itself, or null (then [audioAcoustics] applies). */
+    fun displayAcoustics(policy: DisplayPolicy?): AcousticQuality? =
+        settings.displayAcoustics(policy)?.let { name -> AcousticQuality.entries.firstOrNull { it.name == name } }
+
+    /** Effective acoustics tier for the display with [policy]: its own, else the server-wide, else the player's. */
+    fun audioAcoustics(policy: DisplayPolicy?): AcousticQuality = displayAcoustics(policy) ?: audioAcoustics
 
     val unshadedDisplays: Boolean get() = settings.unshadedDisplays(ClientStateManager.config.unshadedDisplays)
 

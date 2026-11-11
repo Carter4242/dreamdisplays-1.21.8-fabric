@@ -19,6 +19,7 @@ class AcousticsEngine(private val sampleRate: Float = 44100f) : AudioAcousticsSe
     private val qualityRef = atomic(AcousticQuality.ADVANCED)
     private val binauralRef = atomic(true)
     private val normalizationRef = atomic(true)
+    private val sourceQuality = ConcurrentHashMap<UUID, AcousticQuality>()
 
     internal fun currentListener(): ListenerPose = listenerRef.value
     internal fun currentQuality(): AcousticQuality = qualityRef.value
@@ -36,9 +37,22 @@ class AcousticsEngine(private val sampleRate: Float = 44100f) : AudioAcousticsSe
     }
 
     override fun registerSource(id: UUID): AudioDspStage =
-        chains.computeIfAbsent(id) { AudioRenderChain(sampleRate, this) }
+        chains.computeIfAbsent(id) { AudioRenderChain(sampleRate, this).also { it.qualityOverride = sourceQuality[id] } }
+
+    /**
+     * Gives one source its own quality tier ([quality] = null: follow the global tier again). Set before the source
+     * is registered it applies from the start; [unregisterSource] forgets it.
+     */
+    fun setSourceQuality(id: UUID, quality: AcousticQuality?) {
+        if (quality == null) sourceQuality.remove(id) else sourceQuality[id] = quality
+        chains[id]?.qualityOverride = quality
+    }
+
+    /** The tier source [id] renders with: its own, else the global one. */
+    fun qualityFor(id: UUID): AcousticQuality = sourceQuality[id] ?: qualityRef.value
 
     override fun unregisterSource(id: UUID) {
+        sourceQuality.remove(id)
         chains.remove(id)?.close()
     }
 

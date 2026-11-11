@@ -80,6 +80,10 @@ object PolicyPaths {
         Path("client.display_distance_chunks", "client.displayDistanceChunks", Kind.Whole(0, 32)) {
             it.client?.displayDistanceChunks
         },
+        Path("client.audio_output_profile", "client.audioOutputProfile", Kind.Choice(listOf("headphones", "speakers"))) {
+            it.client?.audioOutputProfile?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.audio_normalization", "client.audioNormalization", Kind.Bool) { it.client?.audioNormalization },
         Path("debug.sync_log_interval_seconds", "debug.syncLogIntervalSeconds", Kind.Whole(0, 3_600)) {
             it.debug?.syncLogIntervalSeconds
         },

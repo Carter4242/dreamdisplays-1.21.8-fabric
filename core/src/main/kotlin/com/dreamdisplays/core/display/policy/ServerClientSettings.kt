@@ -3,7 +3,8 @@ package com.dreamdisplays.core.display.policy
 /**
  * The player's own client settings with the server's overrides on top. [serverWide] is the last server-wide
  * policy the server sent (null = none yet, e.g. a server without this feature: everything is the player's own).
- * A per-display policy can only add [DisplayPolicy.Client.enabled] and [DisplayPolicy.Client.displayDistanceChunks].
+ * A per-display policy can only add [DisplayPolicy.Client.enabled], [DisplayPolicy.Client.displayDistanceChunks] and
+ * [DisplayPolicy.Client.audioAcoustics].
  *
  * Nothing here changes the player's saved config; values are clamped so a server cannot push anything harmful.
  */
@@ -26,6 +27,23 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
 
     /** The acoustics tier name (`OFF`, `BASIC`, ...) to use, or [own] when the server leaves it. */
     fun audioAcoustics(own: String): String = client?.audioAcoustics?.name ?: own
+
+    /**
+     * The acoustics tier for one display: its own policy's tier, else the server-wide one, else [own] (the
+     * player's setting).
+     */
+    fun audioAcoustics(own: String, policy: DisplayPolicy?): String =
+        policy?.client?.audioAcoustics?.name ?: audioAcoustics(own)
+
+    /** Only the display's own tier, or null when it sets none (then the global tier applies). */
+    fun displayAcoustics(policy: DisplayPolicy?): String? = policy?.client?.audioAcoustics?.name
+
+    /** Binaural (headphones) rendering, or [own] when the server leaves the output profile to the player. */
+    fun audioBinauralOutput(own: Boolean): Boolean =
+        client?.audioOutputProfile?.let { it == DisplayPolicy.OutputProfile.HEADPHONES } ?: own
+
+    /** Loudness normalization, or [own] when the server leaves it to the player. */
+    fun audioNormalization(own: Boolean): Boolean = client?.audioNormalization ?: own
 
     val acousticsForced: Boolean get() = client?.audioAcoustics != null
 

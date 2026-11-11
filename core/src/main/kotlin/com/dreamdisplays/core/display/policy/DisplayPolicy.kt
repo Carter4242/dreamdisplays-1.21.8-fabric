@@ -105,8 +105,9 @@ data class DisplayPolicy(
     }
 
     /**
-     * Overrides for the player's own client settings; null fields keep the player's setting. Only [enabled] and
-     * [displayDistanceChunks] can differ per display, the rest apply to the whole client ([GLOBAL_ONLY]).
+     * Overrides for the player's own client settings; null fields keep the player's setting. [enabled],
+     * [displayDistanceChunks] and [audioAcoustics] can differ per display, the rest apply to the whole client
+     * ([GLOBAL_ONLY]).
      */
     @Serializable
     data class Client(
@@ -116,12 +117,16 @@ data class DisplayPolicy(
         val maxActiveDisplays: Int? = null,
         /** False forces software video decoding; applies to videos loaded after the change. */
         val hardwareDecoding: Boolean? = null,
-        /** 3D acoustics tier for display audio. */
+        /** 3D acoustics tier for display audio (per display: that display's sound only). */
         val audioAcoustics: Acoustics? = null,
         /** Draw the video untouched by shader packs (false = let the shader pack grade it). */
         val unshadedDisplays: Boolean? = null,
         /** How far displays stay loaded, in chunks; 0 = follow the render / simulation distance. */
         val displayDistanceChunks: Int? = null,
+        /** Spatial audio rendering: binaural for headphones or panned for speakers. */
+        val audioOutputProfile: OutputProfile? = null,
+        /** Loudness normalization of display audio (quiet videos raised, loud ones lowered). */
+        val audioNormalization: Boolean? = null,
     ) {
         fun mergedOver(base: Client?): Client = Client(
             enabled = enabled ?: base?.enabled,
@@ -130,7 +135,18 @@ data class DisplayPolicy(
             audioAcoustics = audioAcoustics ?: base?.audioAcoustics,
             unshadedDisplays = unshadedDisplays ?: base?.unshadedDisplays,
             displayDistanceChunks = displayDistanceChunks ?: base?.displayDistanceChunks,
+            audioOutputProfile = audioOutputProfile ?: base?.audioOutputProfile,
+            audioNormalization = audioNormalization ?: base?.audioNormalization,
         )
+    }
+
+    @Serializable
+    enum class OutputProfile {
+        @SerialName("headphones")
+        HEADPHONES,
+
+        @SerialName("speakers")
+        SPEAKERS,
     }
 
     @Serializable
@@ -184,7 +200,9 @@ data class DisplayPolicy(
 
     /** What travels with one display: everything except the server-wide-only fields ([GLOBAL_ONLY]). */
     fun forDisplay(): DisplayPolicy {
-        val perDisplay = client?.let { Client(enabled = it.enabled, displayDistanceChunks = it.displayDistanceChunks) }
+        val perDisplay = client?.let {
+            Client(enabled = it.enabled, displayDistanceChunks = it.displayDistanceChunks, audioAcoustics = it.audioAcoustics)
+        }
         return copy(client = perDisplay?.takeIf { it != Client() }, debug = null)
     }
 
@@ -218,7 +236,8 @@ data class DisplayPolicy(
 
         /** Field paths that only work server-wide (`[policy.*]` defaults), never as one display's override. */
         val GLOBAL_ONLY: Set<String> = setOf(
-            "client.maxActiveDisplays", "client.hardwareDecoding", "client.audioAcoustics", "client.unshadedDisplays",
+            "client.maxActiveDisplays", "client.hardwareDecoding", "client.unshadedDisplays",
+            "client.audioOutputProfile", "client.audioNormalization",
             "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds",
         )
 

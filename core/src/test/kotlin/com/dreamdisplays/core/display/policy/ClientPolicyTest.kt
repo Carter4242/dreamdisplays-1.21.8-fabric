@@ -59,7 +59,10 @@ class ClientPolicyTest {
     @Test
     fun `per-display payload drops server-wide-only fields`() {
         val perDisplay = full.forDisplay()
-        assertEquals(DisplayPolicy.Client(enabled = false, displayDistanceChunks = 6), perDisplay.client)
+        assertEquals(
+            DisplayPolicy.Client(enabled = false, displayDistanceChunks = 6, audioAcoustics = DisplayPolicy.Acoustics.BASIC),
+            perDisplay.client,
+        )
         assertNull(perDisplay.debug)
         assertEquals(full.sync, perDisplay.sync)
         assertNull(DisplayPolicy(client = DisplayPolicy.Client(maxActiveDisplays = 2)).forDisplay().client)
@@ -76,7 +79,9 @@ class ClientPolicyTest {
         for (field in DisplayPolicy.GLOBAL_ONLY) {
             val value: Any = when {
                 field.endsWith("Acoustics") -> "off"
-                field.endsWith("Decoding") || field.endsWith("Displays") && !field.contains("max") || field.endsWith("verbose") -> true
+                field.endsWith("OutputProfile") -> "speakers"
+                field.endsWith("Decoding") || field.endsWith("Displays") && !field.contains("max") ||
+                        field.endsWith("verbose") || field.endsWith("Normalization") -> true
                 else -> 1
             }
             assertNotNull(DisplayPolicy.withField(null, field, value), field)
@@ -84,14 +89,77 @@ class ClientPolicyTest {
         val serverWide = PolicyPaths.all.filter { it.serverWideOnly }.map { it.name }.toSet()
         assertEquals(
             setOf(
-                "client.max_active_displays", "client.hardware_decoding", "client.audio_acoustics",
-                "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose",
+                "client.max_active_displays", "client.hardware_decoding", "client.audio_output_profile",
+                "client.audio_normalization", "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose",
                 "debug.report_interval_seconds",
             ),
             serverWide,
         )
         assertFalse(PolicyPaths.find("client.enabled")!!.serverWideOnly)
         assertFalse(PolicyPaths.find("client.display_distance_chunks")!!.serverWideOnly)
+        assertFalse(PolicyPaths.find("client.audio_acoustics")!!.serverWideOnly)
+    }
+
+    @Test
+    fun `acoustics precedence is display, then server-wide, then the player`() {
+        val serverBasic = ServerClientSettings.fromWire(
+            DisplayPolicy(client = DisplayPolicy.Client(audioAcoustics = DisplayPolicy.Acoustics.BASIC)).encode(),
+        )
+        val displayUltra = DisplayPolicy(client = DisplayPolicy.Client(audioAcoustics = DisplayPolicy.Acoustics.ULTRA))
+        val displayNone = DisplayPolicy(client = DisplayPolicy.Client(enabled = true))
+        assertEquals("ULTRA", serverBasic.audioAcoustics("OFF", displayUltra))
+        assertEquals("BASIC", serverBasic.audioAcoustics("OFF", displayNone))
+        assertEquals("BASIC", serverBasic.audioAcoustics("OFF", null))
+        assertEquals("OFF", ServerClientSettings.NONE.audioAcoustics("OFF", displayNone))
+        assertEquals("ULTRA", ServerClientSettings.NONE.audioAcoustics("OFF", displayUltra))
+        assertEquals("ULTRA", serverBasic.displayAcoustics(displayUltra))
+        assertNull(serverBasic.displayAcoustics(displayNone))
+        // A per-display tier travels with the display; the server-wide payload never carries display fields
+        assertEquals(DisplayPolicy.Acoustics.ULTRA, displayUltra.forDisplay().client?.audioAcoustics)
+        assertNull(DisplayPolicy(sync = DisplayPolicy.Sync(deadBandMs = 1)).serverWide().client)
+    }
+
+    @Test
+    fun `older clients still read a display policy that carries an acoustics tier`() {
+        // The field already existed in the released schema; per display it just arrives in another payload
+        val wire = DisplayPolicy(
+            client = DisplayPolicy.Client(enabled = true, audioAcoustics = DisplayPolicy.Acoustics.OFF, displayDistanceChunks = 4),
+        ).forDisplay().encode().toString(Charsets.UTF_8)
+        assertEquals("{\"v\":1,\"client\":{\"enabled\":true,\"audioAcoustics\":\"off\",\"displayDistanceChunks\":4}}", wire)
+        val read = assertNotNull(decode(wire))
+        assertEquals(true, read.client?.enabled)
+        assertEquals(4, read.client?.displayDistanceChunks)
+    }
+
+    @Test
+    fun `output profile and normalization overrides`() {
+        val none = ServerClientSettings.NONE
+        assertEquals(true, none.audioBinauralOutput(true))
+        assertEquals(false, none.audioBinauralOutput(false))
+        assertEquals(false, none.audioNormalization(false))
+        val forced = ServerClientSettings.fromWire(
+            DisplayPolicy(
+                client = DisplayPolicy.Client(
+                    audioOutputProfile = DisplayPolicy.OutputProfile.SPEAKERS, audioNormalization = false,
+                ),
+            ).encode(),
+        )
+        assertEquals(false, forced.audioBinauralOutput(true))
+        assertEquals(false, forced.audioNormalization(true))
+        val headphones = ServerClientSettings.fromWire(
+            DisplayPolicy(client = DisplayPolicy.Client(audioOutputProfile = DisplayPolicy.OutputProfile.HEADPHONES)).encode(),
+        )
+        assertEquals(true, headphones.audioBinauralOutput(false))
+        assertEquals(true, headphones.audioNormalization(true))
+        // Never per display
+        val perDisplay = DisplayPolicy(
+            client = DisplayPolicy.Client(audioOutputProfile = DisplayPolicy.OutputProfile.SPEAKERS, audioNormalization = false),
+        ).forDisplay()
+        assertNull(perDisplay.client)
+        val profile = PolicyPaths.find("client.audio_output_profile")!!
+        assertEquals(DisplayPolicy.OutputProfile.SPEAKERS, PolicyPaths.apply(null, profile, "Speakers")?.client?.audioOutputProfile)
+        assertNull(PolicyPaths.apply(null, profile, "earbuds"))
+        assertEquals(false, PolicyPaths.apply(null, PolicyPaths.find("client.audio_normalization")!!, "off")?.client?.audioNormalization)
     }
 
     @Test

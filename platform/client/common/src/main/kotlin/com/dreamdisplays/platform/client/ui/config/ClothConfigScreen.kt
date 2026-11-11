@@ -83,7 +83,8 @@ object ClothConfigScreen {
 
         builder.setSavingRunnable {
             config.save()
-            ClientAudioModule.setLoudnessNormalization(config.audioNormalization)
+            // The server may override it; the player's choice is saved either way
+            ClientAudioModule.applyOutputSettings()
         }
         return builder.build()
     }

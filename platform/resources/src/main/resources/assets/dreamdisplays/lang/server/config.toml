@@ -87,9 +87,11 @@ auto_pause_when_empty_seconds = 0
 # enabled = true            # false = displays are not loaded or played at all (emergency switch; per display too)
 # max_active_displays = 0   # how many displays may play at once, nearest first; 0 = no limit (server-wide only)
 # hardware_decoding = true  # false = software video decoding, for videos loaded afterwards (server-wide only)
-# audio_acoustics = "advanced"  # 3D audio: "off", "basic", "advanced" or "ultra" (server-wide only)
+# audio_acoustics = "advanced"  # 3D audio: "off", "basic", "advanced" or "ultra" (per display too)
 # unshaded_displays = true  # false = shader packs may grade the video (server-wide only)
 # display_distance_chunks = 0  # how far displays stay loaded; 0 = render / simulation distance (per display too)
+# audio_output_profile = "headphones"  # 3D audio rendering: "headphones" (binaural) or "speakers" (server-wide only)
+# audio_normalization = true  # false = no loudness levelling between videos (server-wide only)
 
 [policy.debug]
 # Client diagnostics (server-wide only); clients read these without needing an update.

@@ -65,9 +65,13 @@ internal class AudioRenderChain(
     private var floatR = FloatArray(0)
     private var lastMakeup = 1f
 
+    /** This source's own tier (a display policy), or null to use the engine's global tier. */
+    @Volatile
+    var qualityOverride: AcousticQuality? = null
+
     override fun process(buf: ByteArray, len: Int, legacyGain: Double) {
         val st = state
-        val tier = engine.currentQuality()
+        val tier = qualityOverride ?: engine.currentQuality()
         val normalize = engine.currentNormalization()
         if (tier == AcousticQuality.OFF || st == null || st.bypassSpatial || !st.acousticsEnabled) {
             if (normalize) applyNormalizedGain(buf, len, legacyGain) else applyLegacyGain(buf, len, legacyGain)
