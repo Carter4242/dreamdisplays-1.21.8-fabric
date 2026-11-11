@@ -142,13 +142,13 @@ class DriftControllerTest {
     @Test
     fun `back-to-back seeks stretch the cooldown and the stretch decays`() {
         val c = DriftController(settings)
-        assertTrue(c.update(5_000.0, 0.0).seek)
-        assertTrue(c.update(5_000.0, 8_000.0).seek) // streak 1 -> next cooldown 16 s
-        assertFalse(c.update(5_000.0, 20_000.0).seek)
-        assertTrue(c.update(5_000.0, 24_000.0).seek) // streak 2 -> 24 s
-        assertFalse(c.update(5_000.0, 40_000.0).seek)
-        assertTrue(c.update(5_000.0, 48_000.0).seek) // streak 3 -> 32 s
-        assertTrue(c.update(5_000.0, 80_000.0).seek) // > 30 s apart: streak forgotten
+        assertTrue(c.update(1_800.0, 0.0).seek)
+        assertTrue(c.update(1_800.0, 8_000.0).seek) // streak 1 -> next cooldown 16 s
+        assertFalse(c.update(1_800.0, 20_000.0).seek)
+        assertTrue(c.update(1_800.0, 24_000.0).seek) // streak 2 -> 24 s
+        assertFalse(c.update(1_800.0, 40_000.0).seek)
+        assertTrue(c.update(1_800.0, 48_000.0).seek) // streak 3 -> 32 s
+        assertTrue(c.update(1_800.0, 80_000.0).seek) // > 30 s apart: streak forgotten
         assertEquals(8_000.0, c.currentCooldownMs())
     }
 

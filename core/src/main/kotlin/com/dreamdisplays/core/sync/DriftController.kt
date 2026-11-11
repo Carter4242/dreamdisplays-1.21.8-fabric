@@ -12,7 +12,8 @@ import kotlin.math.sign
  * Beyond it the playback rate is nudged proportionally (closing roughly within [CONVERGE_MS], never more than
  * [SyncSettings.maxRatePct]) until the drift is back under [settleMs], then the rate returns to 1. Past the seek
  * threshold a seek is requested, at most once per cooldown; seeks that follow each other within
- * [STREAK_RESET_MS] stretch the cooldown (up to x4), and that stretch is forgotten once seeks stop.
+ * [STREAK_RESET_MS] stretch the cooldown (up to x4), and that stretch is forgotten once seeks stop. Drift past
+ * [LARGE_DRIFT_MS] ignores the stretch: seconds off are never left to a 1 % rate for minutes.
  */
 class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
     /** What to do now: play at [ratio] (content per output time) or [seek] to the target. */
@@ -72,16 +73,26 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
         val drift = filteredMs ?: return Decision(1.0, false).also { ratio = 1.0 }
         val threshold = if (cheapSeeks) minOf(settings.seekThresholdMs.toDouble(), CHEAP_SEEK_THRESHOLD_MS)
         else settings.seekThresholdMs.toDouble()
-        val cooldown = if (cheapSeeks) minOf(currentCooldownMs(), CHEAP_SEEK_COOLDOWN_MS) else currentCooldownMs()
+        val stretched = if (abs(drift) > LARGE_DRIFT_MS) settings.seekCooldownMs.toDouble() else currentCooldownMs()
+        val cooldown = if (cheapSeeks) minOf(stretched, CHEAP_SEEK_COOLDOWN_MS) else stretched
         if (abs(drift) > threshold && nowMs - lastSeekMs >= cooldown) {
-            seekStreak = if (nowMs - lastSeekMs < STREAK_RESET_MS) (seekStreak + 1).coerceAtMost(MAX_STREAK) else 0
-            lastSeekMs = nowMs
+            noteSeek(nowMs)
             resetMeasurement()
             return Decision(1.0, true)
         }
         ratio = rateFor(drift)
         return Decision(ratio, false)
     }
+
+    /** Records a seek made outside [decide] (a landing correction), so the cooldown counts from it. */
+    fun noteSeek(nowMs: Double) {
+        seekStreak = if (nowMs - lastSeekMs < STREAK_RESET_MS) (seekStreak + 1).coerceAtMost(MAX_STREAK) else 0
+        lastSeekMs = nowMs
+    }
+
+    /** Whether a seek / start that landed [landingDriftMs] off gets one corrective seek at once, outside the cooldown. */
+    fun landingNeedsReseek(landingDriftMs: Double): Boolean =
+        abs(landingDriftMs) > minOf(settings.seekThresholdMs.toDouble(), LANDING_RESEEK_MS)
 
     /** Cooldown before the next seek may happen, given the recent streak. */
     fun currentCooldownMs(): Double = settings.seekCooldownMs.toDouble() * (1 + seekStreak)
@@ -125,5 +136,21 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
         const val STREAK_RESET_MS = 30_000.0
 
         private const val MAX_STREAK = 3
+
+        /** Drift past this may seek once the plain cooldown has passed, whatever the streak. */
+        const val LARGE_DRIFT_MS = 2_000.0
+
+        /** A landing further off than this (or the seek threshold, if smaller) is re-aimed at once. */
+        const val LANDING_RESEEK_MS = 1_000.0
+
+        /** A landing further off than this is an outlier (stale target, stall), not a restart cost to learn. */
+        const val MAX_LEARN_LANDING_MS = 1_000.0
+
+        /** A game stall longer than this around a seek makes its landing meaningless for the lead. */
+        const val MAX_LEARN_STALL_MS = 250.0
+
+        /** Whether a landing [landingDriftMs] off, with a game stall of [stallMs] around it, may teach the restart lead. */
+        fun learnsFromLanding(landingDriftMs: Double, stallMs: Double): Boolean =
+            abs(landingDriftMs) <= MAX_LEARN_LANDING_MS && stallMs <= MAX_LEARN_STALL_MS
     }
 }

@@ -60,6 +60,15 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     /** The next landing that is off may be corrected by one seek at once, outside the controller's cooldown. */
     private var correctAfterLanding = false
 
+    /** The pending landing follows a corrective seek: if it misses again, the controller's cooldown takes over. */
+    private var landingIsCorrection = false
+
+    /** Longest game stall (ms) around the pending landing: such a landing is re-aimed, never learned from. */
+    private var landingStallMs = 0.0
+    private var lastTickNanos = 0L
+    private var lastStallEndNanos = 0L
+    private var lastStallMs = 0.0
+
     /** What the follower did, in order of significance for the periodic log line. */
     private enum class Action(val label: String) { NONE("none"), RATE("rate"), SNAP("snap"), SEEK("seek") }
 
@@ -85,6 +94,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             controller.reset()
             landing = null
             landingRunningSinceNanos = 0L
+            landingIsCorrection = false
+            lastTickNanos = 0L
+            lastStallEndNanos = 0L
             lastSnapNanos = 0L
             coldAfterSnap = false
             warmAdopted = false
@@ -209,6 +221,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     /** Called every client tick for a loaded display: measures drift and corrects it. */
     fun tick() {
         synchronized(lock) {
+            noteTickGap(System.nanoTime())
             if (!screen.followsServerTimeline) {
                 pushRatio(1.0, System.nanoTime())
                 return
@@ -217,6 +230,19 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             logIfDue(System.nanoTime())
         }
     }
+
+    /** A long gap between ticks is a game stall: timeline packets queued behind it arrive late and stale. */
+    private fun noteTickGap(now: Long) {
+        val gapNanos = if (lastTickNanos == 0L) 0L else now - lastTickNanos
+        lastTickNanos = now
+        if (gapNanos <= STALL_NANOS) return
+        lastStallEndNanos = now
+        lastStallMs = gapNanos / NANOS_PER_MS
+        if (landing != null) landingStallMs = maxOf(landingStallMs, lastStallMs)
+    }
+
+    private fun recentlyStalled(now: Long, windowNanos: Long, minStallMs: Double = 0.0): Boolean =
+        lastStallEndNanos != 0L && now - lastStallEndNanos < windowNanos && lastStallMs >= minStallMs
 
     private fun evaluate(now: Long) {
         if (!estimator.hasTimeline || !screen.videoStarted) return
@@ -267,20 +293,40 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             if (landingRunningSinceNanos == 0L) landingRunningSinceNanos = now
             val filtered = controller.observe(drift.toDouble(), now / NANOS_PER_MS)
             val settle = if (kind == LeadKind.WARM || kind == LeadKind.QUICK_SEEK) QUICK_SETTLE_NANOS else LANDING_SETTLE_NANOS
-            if (now - landingRunningSinceNanos < settle) {
+            // Out of a long stall, wait for queued packets to bring the target up to date before judging the landing
+            if (now - landingRunningSinceNanos < settle || recentlyStalled(now, STALL_SETTLE_NANOS, LONG_STALL_MS)) {
                 pushRatio(1.0, now)
                 return
             }
-            if (kind != LeadKind.WARM) learnLead(kind, filtered)
+            if (kind != LeadKind.WARM) {
+                // A landing far off (a target gone stale over a game stall) says nothing about the restart cost
+                if (DriftController.learnsFromLanding(filtered, landingStallMs)) learnLead(kind, filtered)
+                else logVerbose("[dd-sync] {} landed {}ms after {} (stall {}ms); not learned",
+                    shortId(), signed(filtered), kind.name.lowercase(), landingStallMs.roundToLong())
+            }
             landing = null
+            val wasCorrection = landingIsCorrection
+            landingIsCorrection = false
             // Landed off after a start or resume: one seek fixes it in a frame or two where rate correction at 1 %
-            // would take a minute. Only once per start, so a seek that lands off again is left to the controller.
-            if (correctAfterLanding && abs(filtered) > POST_START_SEEK_MS && screen.seeksCheaply) {
-                correctAfterLanding = false
+            // would take a minute. Any landing far off is re-aimed at once from the fresh target, outside the
+            // controller's cooldown and streak. Only once: a correction that misses again is left to the controller.
+            val startFix = correctAfterLanding && abs(filtered) > POST_START_SEEK_MS && screen.seeksCheaply
+            val farOff = controller.landingNeedsReseek(filtered)
+            correctAfterLanding = false
+            if (!wasCorrection && (startFix || farOff)) {
+                if (farOff) controller.noteSeek(now / NANOS_PER_MS)
+                logVerbose("[dd-sync] {} re-aiming landing {}ms off", shortId(), signed(filtered))
                 seekPlaying(target, durationMs, now)
+                landingIsCorrection = true
                 return
             }
-            correctAfterLanding = false
+        }
+
+        // Just out of a game stall: packets queued behind it may still be catching the target up, so measure but
+        // don't seek on it yet
+        if (recentlyStalled(now, STALL_SETTLE_NANOS, LONG_STALL_MS)) {
+            controller.observe(drift.toDouble(), now / NANOS_PER_MS)
+            return
         }
 
         val decision = controller.update(drift.toDouble(), now / NANOS_PER_MS, cheapSeeks = screen.seeksCheaply)
@@ -328,6 +374,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private fun expectLanding(kind: LeadKind) {
         landing = kind
         landingRunningSinceNanos = 0L
+        landingIsCorrection = false
+        landingStallMs = if (recentlyStalled(System.nanoTime(), STALL_LOOKBACK_NANOS)) lastStallMs else 0.0
         controller.resetMeasurement()
     }
 
@@ -413,6 +461,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         intervalAction = Action.NONE
     }
 
+    private fun logVerbose(format: String, vararg args: Any?) {
+        if (ServerOverrides.settings.logLevel >= com.dreamdisplays.core.display.policy.ClientLogLevel.VERBOSE) {
+            logger.info(format, *args)
+        }
+    }
+
     private fun shortId(): String = screen.uuid.toString().take(8)
 
     private fun signed(ms: Double): String = ms.roundToLong().let { if (it >= 0) "+$it" else "$it" }
@@ -481,7 +535,19 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
         private const val MAX_QUICK_LEAD_MS = 1_500L
         private const val RATIO_REFRESH_NANOS = 1_000_000_000L
-        private const val MAX_LEAD_MS = 8_000L
+        private const val MAX_LEAD_MS = 3_000L
+
+        /** A gap between client ticks longer than this is a game stall. */
+        private const val STALL_NANOS = 250_000_000L
+
+        /** A stall this recent before a seek still counts against its landing. */
+        private const val STALL_LOOKBACK_NANOS = 1_000_000_000L
+
+        /** A stall this long holds seek decisions for [STALL_SETTLE_NANOS] (shorter ones are just low frame rate). */
+        private const val LONG_STALL_MS = 1_000.0
+
+        /** After a long stall, no seek is decided for this long (queued packets may still move the target). */
+        private const val STALL_SETTLE_NANOS = 1_000_000_000L
         private const val MAX_RTT_MS = 2_000
         private const val LEAD_GAIN = 0.7
         private const val MAX_LEAD_STEP_MS = 500L
