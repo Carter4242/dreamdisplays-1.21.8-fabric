@@ -85,6 +85,9 @@ class PaperServer : JavaPlugin() {
             // Shares started under the old [live] settings end first: their captures never pick up new ones
             com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onSettingsChanged()
             PaperV2Networking.refreshServerHellos()
+            // Default display policies travel in each display's description: far fullscreen viewers and PiP pinners
+            // get no periodic one, so every display is described again to everyone who follows it
+            DisplayManager.getDisplays().filterIsInstance<PaperDisplayData>().forEach(DisplayManager::broadcastUpdate)
         }
         // A screen share's relay URL is never stored: every save of a shared display keeps the video it had before
         com.dreamdisplays.platform.server.managers.StoredVideos.override =
