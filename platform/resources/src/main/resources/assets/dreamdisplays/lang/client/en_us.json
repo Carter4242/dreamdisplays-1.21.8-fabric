@@ -83,7 +83,7 @@
   "dreamdisplays.share.windows": "Windows",
   "dreamdisplays.share.audio": "Sound",
   "dreamdisplays.share.audio.except_game": "Everything except Minecraft",
-  "dreamdisplays.share.audio.whole_pc": "Whole PC",
+  "dreamdisplays.share.audio.whole_pc": "Whole PC (game and voice chat too)",
   "dreamdisplays.share.audio.app": "Just %s",
   "dreamdisplays.share.audio.this_app": "Just this app (%s)",
   "dreamdisplays.share.audio.none": "No audio",

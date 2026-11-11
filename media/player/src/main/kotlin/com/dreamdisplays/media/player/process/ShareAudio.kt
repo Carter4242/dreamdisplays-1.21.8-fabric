@@ -14,7 +14,7 @@ object ShareAudio {
         /** Everything this PC plays except Minecraft (game sounds, and the voice chat it plays). The default. */
         data object ExceptGame : Choice
 
-        /** Everything this PC plays, Minecraft included. */
+        /** Everything this PC plays, Minecraft and the voice chat it plays included. */
         data object WholePc : Choice
 
         /** One app: process [pid] and the processes it started (a browser's audio runs in a child process). */
@@ -81,11 +81,15 @@ object ShareAudio {
      */
     fun includesGame(root: Long, selfPid: Long, selfAncestors: List<Long>): Boolean = root == selfPid || root in selfAncestors
 
-    /** The choice selected when the audio step opens: a picked window's own app, else everything but the game. */
+    /**
+     * The choice selected when the audio step opens: a picked window's own app, else everything but the game. Where
+     * only the whole PC can be captured (Linux, Windows before process loopback) no sound: the whole PC carries the
+     * game and the voice chat it plays, which the people at the display would hear again as an echo.
+     */
     fun defaultChoice(os: Os, processLoopback: Boolean, window: Choice.App? = null): Choice = when {
         os == Os.MAC -> Choice.Off
-        os == Os.LINUX -> Choice.WholePc
-        !processLoopback -> Choice.WholePc
+        os == Os.LINUX -> Choice.Off
+        !processLoopback -> Choice.Off
         window != null -> window
         else -> Choice.ExceptGame
     }

@@ -66,8 +66,11 @@ class ShareAudioTest {
             listOf(Choice.WholePc, Choice.Off),
             ShareAudio.options(Os.WINDOWS, processLoopback = false, apps = listOf(chrome), window = chrome),
         )
-        assertEquals(Choice.WholePc, ShareAudio.defaultChoice(Os.WINDOWS, false, window = chrome))
+        // Whole PC carries the game and voice chat (an echo at the display): offered, never preselected
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.WINDOWS, false, window = chrome))
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.WINDOWS, false))
         assertEquals(listOf(Choice.WholePc, Choice.Off), ShareAudio.options(Os.LINUX, false, emptyList()))
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.LINUX, false))
         assertTrue(ShareAudio.options(Os.MAC, false, emptyList()).isEmpty())
         assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.MAC, false))
     }
