@@ -527,32 +527,36 @@ object FullscreenBroadcastManager {
         if (records.isEmpty()) return
         var restored = 0
         for (record in records) {
-            val display = resolveRecordDisplay(record) ?: run {
-                logger.warn("Dropping persisted fullscreen session ${record.sessionId}: display unavailable.")
-                continue
-            }
-            val ownerId = runCatching { UUID.fromString(record.ownerId) }.getOrNull() ?: continue
-            val now = transport.nowMs()
-            val session = Session(
-                sessionId = record.sessionId,
-                display = display,
-                virtual = record.virtual,
-                transientSession = false,
-                ownerId = ownerId,
-                mode = FullscreenMode.entries.getOrElse(record.mode) { FullscreenMode.STANDARD },
-                forced = record.forced,
-                volume = record.volume,
-                loop = record.loop,
-                quality = record.quality,
-                title = record.title,
-                namedTargets = record.namedTargets?.map(UUID::fromString)?.toSet(),
-                radius = record.radiusWorld?.let { world ->
-                    FullscreenRadiusTarget(world, record.radiusX, record.radiusY, record.radiusZ, record.radiusBlocks)
-                },
-                timeline = if (record.virtual) Timeline.start(now, loop = true) else null,
-            )
-            sessions[session.sessionId] = session
-            restored++
+            // One bad record (a malformed id) is skipped, never fatal to the enable
+            val ok = runCatching {
+                val display = resolveRecordDisplay(record) ?: run {
+                    logger.warn("Dropping persisted fullscreen session ${record.sessionId}: display unavailable.")
+                    return@runCatching false
+                }
+                val ownerId = runCatching { UUID.fromString(record.ownerId) }.getOrNull() ?: return@runCatching false
+                val now = transport.nowMs()
+                val session = Session(
+                    sessionId = record.sessionId,
+                    display = display,
+                    virtual = record.virtual,
+                    transientSession = false,
+                    ownerId = ownerId,
+                    mode = FullscreenMode.entries.getOrElse(record.mode) { FullscreenMode.STANDARD },
+                    forced = record.forced,
+                    volume = record.volume,
+                    loop = record.loop,
+                    quality = record.quality,
+                    title = record.title,
+                    namedTargets = record.namedTargets?.map(UUID::fromString)?.toSet(),
+                    radius = record.radiusWorld?.let { world ->
+                        FullscreenRadiusTarget(world, record.radiusX, record.radiusY, record.radiusZ, record.radiusBlocks)
+                    },
+                    timeline = if (record.virtual) Timeline.start(now, loop = true) else null,
+                )
+                sessions[session.sessionId] = session
+                true
+            }.onFailure { logger.warn("Dropping persisted fullscreen session ${record.sessionId}: unreadable.", it) }
+            if (ok.getOrDefault(false)) restored++
         }
         if (restored > 0) logger.info("Restored $restored persisted fullscreen session(s).")
     }
