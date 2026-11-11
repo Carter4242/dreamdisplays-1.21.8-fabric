@@ -108,7 +108,7 @@ open class ScreenOverlay {
         if (!FullscreenOverlayManager.isEmpty &&
             MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))
         ) {
-            //? if >=1.21.11 {
+            //? if >=1.21.6 {
             graphics.nextStratum()
             //?}
             FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
@@ -116,7 +116,7 @@ open class ScreenOverlay {
         val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return
         if (overlays.isEmpty) return
         val leftPressed = MouseButtons.hardwareLeftDown()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         graphics.nextStratum()
         //?}
         overlays.renderAll(MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, leftPressed, partialTick))

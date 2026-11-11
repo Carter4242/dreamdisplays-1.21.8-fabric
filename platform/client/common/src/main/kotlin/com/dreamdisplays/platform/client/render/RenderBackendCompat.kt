@@ -36,7 +36,7 @@ internal object RenderBackendCompat {
     }
 
     private fun backendFingerprint(): String =
-    //? if >=1.21.11 {
+    //? if >=1.21.5 {
         //? if >=26.2 {
         RenderSystem.getDevice().deviceInfo.backendName().lowercase()
     //?} else

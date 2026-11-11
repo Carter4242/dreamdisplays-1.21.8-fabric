@@ -1,6 +1,6 @@
 package com.dreamdisplays.platform.server.mixins
 
-//? if >=1.21.11 {
+//? if >=1.21.2 {
 import net.minecraft.world.level.ServerExplosion
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable
 //?} else
@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.Inject
 
 @Suppress("NonJavaMixin")
-//? if >=1.21.11 {
+//? if >=1.21.2 {
 @Mixin(ServerExplosion::class)
 open class ExplosionProtectionMixin {
     @Shadow

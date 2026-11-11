@@ -64,7 +64,7 @@ object UnshadedDisplayPass {
         modelView.last().pose().set(pendingView)
         //?}
         */
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         //?} else
         /*RenderSystem.applyModelViewMatrix()*/
         try {
@@ -74,7 +74,7 @@ object UnshadedDisplayPass {
             modelView.popMatrix()
             //?} else
             /*modelView.popPose()*/
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             //?} else
             /*RenderSystem.applyModelViewMatrix()*/
         }

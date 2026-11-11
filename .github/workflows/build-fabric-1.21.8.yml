@@ -1,0 +1,74 @@
+name: Build & release (Fabric 1.21.8)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Read versions
+        id: v
+        run: |
+          echo "mod=$(grep '^version=' gradle.properties | cut -d= -f2 | tr -d '\r')" >> "$GITHUB_OUTPUT"
+          echo "mc=$(python3 -c 'import json; print(json.load(open("versions.json"))["active"])')" >> "$GITHUB_OUTPUT"
+
+      # The native video libraries (Rust + FFmpeg) don't depend on the Minecraft version, so instead of
+      # building them for every platform we take them from upstream's official Fabric 1.21.11 jar of the
+      # same mod version.
+      - name: Fetch prebuilt natives from the matching upstream release
+        env:
+          MOD: ${{ steps.v.outputs.mod }}
+        run: |
+          url=$(curl -sf "https://api.modrinth.com/v2/project/dreamdisplays/version?loaders=%5B%22fabric%22%5D&game_versions=%5B%221.21.11%22%5D" \
+            | python3 -c 'import json, os, sys; v = [x for x in json.load(sys.stdin) if x["version_number"] == os.environ["MOD"]]; print(v[0]["files"][0]["url"])')
+          echo "Natives source: $url"
+          curl -sfL -o upstream.jar "$url"
+          mkdir -p native/build/ci-bundle
+          unzip -q upstream.jar 'dreamdisplays-natives/*' -d native/build/ci-bundle
+          find native/build/ci-bundle -type f | sort
+
+      - name: Build
+        env:
+          DREAMDISPLAYS_REQUIRE_NATIVES: "true"
+        run: |
+          chmod +x gradlew
+          ./gradlew :platform:client:fabric:publishJar --no-daemon -Pdreamdisplays.autoBuildNatives=false
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOD: ${{ steps.v.outputs.mod }}
+          MC: ${{ steps.v.outputs.mc }}
+        run: |
+          jar="build/libs/dreamdisplays-fabric-${MC}-${MOD}.jar"
+          test -f "$jar"
+          tag="v${MOD}-mc${MC}"
+          notes="Unofficial Fabric ${MC} build of [Dream Displays](https://github.com/arnodoelinger/dreamdisplays) ${MOD}.
+
+          - Requires Fabric API. Works with the Dream Displays ${MOD} server plugin.
+          - Built from ${GITHUB_SHA::8}. Native video libraries come from upstream's official ${MOD} release."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$jar" --clobber
+            gh release edit "$tag" --notes "$notes"
+          else
+            gh release create "$tag" "$jar" --title "Dream Displays ${MOD} for Fabric ${MC}" --notes "$notes" --latest
+          fi

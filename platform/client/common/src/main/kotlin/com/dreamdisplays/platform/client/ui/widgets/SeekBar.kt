@@ -24,6 +24,8 @@ import net.minecraft.client.gui.narration.NarratedElementType
 import net.minecraft.client.gui.narration.NarrationElementOutput
 //? if >=1.21.11 {
 import net.minecraft.client.input.MouseButtonEvent
+//?}
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 import net.minecraft.network.chat.Component
@@ -32,7 +34,7 @@ import net.minecraft.network.chat.MutableComponent
 import net.minecraft.resources.Identifier
 //?} else
 /*import net.minecraft.resources.ResourceLocation as Identifier*/
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.util.ARGB
 //?}
 import net.minecraft.util.Mth
@@ -98,12 +100,12 @@ class SeekBar(
         hoverFade += (hoverTarget - hoverFade) * FADE_SPEED
 
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, trackSprite(), x, y, width, height)
         //?} else
         /*g.blitSprite(trackSprite(), x, y, width, height)*/
         val handleX = x + (value * (width - 8).toDouble()).toInt()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blitSprite(RenderPipelines.GUI_TEXTURED, handleSprite(), handleX, y, 8, height)
         //?} else
         /*g.blitSprite(handleSprite(), handleX, y, 8, height)*/
@@ -111,7 +113,7 @@ class SeekBar(
         if (hoverFade > 0.01f) {
             val hoverPct = Mth.clamp((mouseX - (x + 4).toDouble()) / (width - 8).toDouble(), 0.0, 1.0)
             val hoverX = x + (hoverPct * (width - 8)).toInt()
-            //? if >=1.21.11 {
+            //? if >=1.21.6 {
             g.blitSprite(
                 RenderPipelines.GUI_TEXTURED,
                 HANDLE,
@@ -194,7 +196,7 @@ class SeekBar(
         val scaleX = DISPLAY_WIDTH.toFloat() / textureW
         val scaleY = DISPLAY_HEIGHT.toFloat() / textureH
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.translate((boxX + 2).toFloat(), frameY.toFloat())
         matrices.scale(scaleX, scaleY)
@@ -269,7 +271,12 @@ class SeekBar(
     }
     //?} else
     /*override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        //? if >=1.21.6 {
+        if (!isValidClickButton(button) || !isMouseOver(mouseX, mouseY)) return false
+        //?}
+        //? if <1.21.6 {
         if (!isValidClickButton(button) || !clicked(mouseX, mouseY)) return false
+        //?}
         val dur = duration()
         if (dur <= 0) return false
         dragTargetNanos = positionFromMouse(mouseX, dur)

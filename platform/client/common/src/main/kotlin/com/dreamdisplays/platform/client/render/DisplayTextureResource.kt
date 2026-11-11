@@ -189,13 +189,13 @@ class DisplayTextureResource(private val uuid: UUID) {
     }
 
     private fun build(w: Int, h: Int): Allocation =
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         if (DisplayYuvRenderTypes.active) buildYuv(w, h) else buildRgba(w, h)
     //?} else
     /*buildRgba(w, h)*/
 
     private fun buildRgba(w: Int, h: Int): Allocation {
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         val newTexture = DynamicTexture(
             { UUID.randomUUID().toString() },
             NativeImage(NativeImage.Format.RGBA, w, h, false),
@@ -216,7 +216,7 @@ class DisplayTextureResource(private val uuid: UUID) {
         )
     }
 
-    //? if >=1.21.11 {
+    //? if >=1.21.6 {
     private fun buildYuv(w: Int, h: Int): Allocation {
         val cw = (w + 1) / 2
         val ch = (h + 1) / 2

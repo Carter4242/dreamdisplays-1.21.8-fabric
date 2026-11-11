@@ -214,7 +214,7 @@ object Thumbnails {
             val decoded = decode(bytes)
             image = decoded.image
             ambientImage = decoded.ambientImage
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             tex = DynamicTexture({ "yt-thumb-$key" }, image)
             //?} else
             /*tex = DynamicTexture(image)*/
@@ -225,7 +225,7 @@ object Thumbnails {
             READY.put(key, id)
 
             if (AMBIENT_TEX.getIfPresent(avgColorKey) == null) {
-                //? if >=1.21.11 {
+                //? if >=1.21.5 {
                 ambientTex = DynamicTexture({ "yt-thumb-ambient-$avgColorKey" }, ambientImage)
                 //?} else
                 /*ambientTex = DynamicTexture(ambientImage)*/
@@ -277,7 +277,7 @@ object Thumbnails {
             gSum += (argb ushr 8) and 0xFF
             bSum += argb and 0xFF
             val abgr = AmbientGrid.argbToAbgr(argb)
-            //? if >=1.21.11 {
+            //? if >=1.21.5 {
             image.setPixelABGR(i % w, i / w, abgr)
             //?} else
             /*image.setPixelRGBA(i % w, i / w, abgr)*/

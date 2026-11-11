@@ -111,7 +111,7 @@ object RegionUtil {
     fun playerServer(player: ServerPlayer): MinecraftServer = playerServerLevel(player).server
 
     private fun playerServerLevel(player: ServerPlayer): ServerLevel =
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         player.level()
     //?} else
     /*

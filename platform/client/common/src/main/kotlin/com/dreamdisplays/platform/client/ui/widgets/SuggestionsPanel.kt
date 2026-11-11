@@ -8,7 +8,7 @@ import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.render.Thumbnails
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.drawText
-//? if <1.21.11 {
+//? if <1.21.6 {
 import com.dreamdisplays.platform.client.ui.enableScissorPoseAware
 //?}
 import com.dreamdisplays.platform.client.ui.kit.*
@@ -23,6 +23,8 @@ import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.input.CharacterEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
+//?}
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 import net.minecraft.client.resources.sounds.SimpleSoundInstance
@@ -238,7 +240,7 @@ class SuggestionsPanel(
         scrollOffset = scrollOffsetF.roundToInt()
 
         val cards = controller.visibleCards
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.enableScissor(stripLeft, stripTop, stripRight, stripBottom)
         //?} else
         /*g.enableScissorPoseAware(stripLeft, stripTop, stripRight, stripBottom)*/
@@ -546,7 +548,7 @@ class SuggestionsPanel(
     }
 
     private fun blitTexture(g: GuiGraphicsCompat, id: Identifier, x: Int, y: Int, w: Int, h: Int) {
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h, w, h)
         //?} else
         /*g.blit(id, x, y, 0f, 0f, w, h, w, h)*/

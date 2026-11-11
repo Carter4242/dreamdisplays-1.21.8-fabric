@@ -40,9 +40,9 @@ scVersions.getOrNull("commons.compress.version")?.let { commonsCompressVersion -
     configurations.all {
         resolutionStrategy.force(
             "org.apache.commons:commons-compress:$commonsCompressVersion",
-            "commons-codec:commons-codec:1.16.0",
-            "commons-io:commons-io:2.15.1",
-            "org.apache.commons:commons-lang3:3.14.0",
+            "commons-codec:commons-codec:${scVersions.getOrNull("commons.codec.version") ?: "1.16.0"}",
+            "commons-io:commons-io:${scVersions.getOrNull("commons.io.version") ?: "2.15.1"}",
+            "org.apache.commons:commons-lang3:${scVersions.getOrNull("commons.lang3.version") ?: "3.14.0"}",
         )
     }
 }

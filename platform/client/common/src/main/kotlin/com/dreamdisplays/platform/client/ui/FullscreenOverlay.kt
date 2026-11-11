@@ -1,10 +1,10 @@
 package com.dreamdisplays.platform.client.ui
 
 import com.dreamdisplays.platform.client.utils.identifier
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 //?} else
 /*import com.mojang.blaze3d.systems.RenderSystem*/
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 //? if >=1.21.11 {
@@ -131,7 +131,7 @@ class FullscreenOverlay(
             tex?.close()
             textureId?.let { mc.textureManager.release(it) }
             val img = NativeImage(NativeImage.Format.RGBA, fw, fh, false)
-            //? if >=1.21.11 {
+            //? if >=1.21.6 {
             tex = DynamicTexture({ "dreamdisplays:fullscreen" }, img)
             //?} else
             /*tex = DynamicTexture(img)*/
@@ -206,7 +206,7 @@ class FullscreenOverlay(
         // Same subtle scale-up-while-fading-in as PipOverlay, so opening/closing reads consistently.
         val scale = 0.94f + 0.06f * animProgress
         val matrices = g.pose()
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.pushMatrix()
         matrices.translate(vx + vw / 2f, vy + vh / 2f)
         matrices.scale(scale, scale)
@@ -217,7 +217,7 @@ class FullscreenOverlay(
         matrices.scale(scale, scale, 1f)
         matrices.translate((-vw / 2f).toDouble(), (-vh / 2f).toDouble(), 0.0)*/
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blit(
             RenderPipelines.GUI_TEXTURED,
             id,
@@ -240,7 +240,7 @@ class FullscreenOverlay(
             g.drawOutline(UiRect(0, 0, vw, vh), scaleAlpha(UiTheme.PANEL_BORDER, alpha))
         }
 
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         matrices.popMatrix()
         //?} else
         /*matrices.popPose()*/

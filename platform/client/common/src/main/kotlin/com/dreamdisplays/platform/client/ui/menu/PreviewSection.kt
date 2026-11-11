@@ -2,7 +2,7 @@ package com.dreamdisplays.platform.client.ui.menu
 
 import com.dreamdisplays.platform.client.utils.translatableText
 import com.dreamdisplays.platform.client.utils.identifier
-//? if >=1.21.11 {
+//? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines
 //?}
 //? if >=1.21.11 {
@@ -237,7 +237,7 @@ class PreviewSection(
         texH: Int
     ) {
         val content = contentRect(texW, texH, ds.videoContentAspect)
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blit(
             RenderPipelines.GUI_TEXTURED,
             id,
@@ -574,7 +574,7 @@ class PreviewSection(
     }
 
     private fun blitTexture(g: GuiGraphicsCompat, id: Identifier, x: Int, y: Int, w: Int, h: Int) {
-        //? if >=1.21.11 {
+        //? if >=1.21.6 {
         g.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h, w, h)
         //?} else
         /*g.blit(id, x, y, 0f, 0f, w, h, w, h)*/
@@ -653,7 +653,7 @@ class PreviewSection(
             var tex = dynamicTexture
             if (tex == null) {
                 val img = NativeImage(NativeImage.Format.RGBA, gw, gh, false)
-                //? if >=1.21.11 {
+                //? if >=1.21.6 {
                 tex = DynamicTexture({ "dreamdisplays:ambient" }, img)
                 //?} else
                 /*tex = DynamicTexture(img)*/

@@ -22,7 +22,7 @@ class GpuFrameUploader : FrameUploader {
     private val rgbaScratchSetter: (ByteBuffer) -> Unit = { rgbaUploadBuffer = it }
 
     override fun canUpload(): Boolean =
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         //? if >=26.3 {
         !Minecraft.getInstance().window.isIconified
         //?} else
@@ -31,7 +31,7 @@ class GpuFrameUploader : FrameUploader {
     /*true*/
 
     override fun uploadInterleaved(target: GpuTextureRef, src: ByteBuffer, format: FramePixelFormat): Boolean {
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         val texture = (target as GpuTextureHandle).texture
         TextureUploadUtil.upload(
             texture = texture,
@@ -50,7 +50,7 @@ class GpuFrameUploader : FrameUploader {
     }
 
     override fun uploadPlanar(y: GpuTextureRef, u: GpuTextureRef, v: GpuTextureRef, src: ByteBuffer): Boolean {
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         TextureUploadUtil.uploadPlanar(
             y = (y as GpuTextureHandle).texture,
             u = (u as GpuTextureHandle).texture,

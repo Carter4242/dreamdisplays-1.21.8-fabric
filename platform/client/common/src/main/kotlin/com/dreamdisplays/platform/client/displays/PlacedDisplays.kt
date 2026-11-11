@@ -26,7 +26,7 @@ internal object PlacedDisplays {
     /** Game-tick fraction for interpolating moving placements. */
     fun partialTick(): Float {
         val mc = Minecraft.getInstance()
-        //? if >=1.21.11 {
+        //? if >=1.21.5 {
         return mc.deltaTracker.getGameTimeDeltaPartialTick(false)
         //?} else
         /*

@@ -51,7 +51,9 @@ fun scVersion(name: String): String = scVersions.get(name)
 // Legacy (obfuscated) Minecraft targets need layered Mojang+Parchment mappings and modImplementation;
 // year-versioned (deobfuscated) targets resolve the source set directly with plain implementation.
 val isLegacyObfuscated = scVersion("minecraft.version").startsWith("1.")
-val hasNeoForge = scVersions.getOrNull("neoforge.version") != null
+// NeoForge APIs are compile-only here (the shared server sources reference them); 1.21.8 has no NeoForge build of its own.
+val neoForgeCompileVersion = scVersions.getOrNull("neoforge.version") ?: scVersions.getOrNull("neoforge.compile.version")
+val hasNeoForge = neoForgeCompileVersion != null
 val clothConfigFabric = scVersions.getOrNull("cloth.config.fabric") ?: "${scVersion("cloth.config.version")}+fabric"
 
 // The rendertype package only exists from 1.21.11
@@ -61,6 +63,7 @@ val hasRenderTypePackage = (scVersion("minecraft.version").split(".").map { it.t
 fun fancyModLoaderVersion(neoForgeVersion: String): String = when (neoForgeVersion) {
     "21.1.233" -> "4.0.42"
     "21.11.42" -> "10.0.36"
+    "21.8.57" -> "9.0.18"
     else -> "11.0.13"
 }
 
@@ -144,9 +147,9 @@ dependencies {
     }
     compileOnly("io.papermc.paper:paper-api:${scVersion("paper.api.version")}")
     if (hasNeoForge) {
-        compileOnly("net.neoforged:neoforge:${scVersion("neoforge.version")}:universal")
+        compileOnly("net.neoforged:neoforge:$neoForgeCompileVersion:universal")
         compileOnly("net.neoforged:bus:8.0.5")
-        compileOnly("net.neoforged.fancymodloader:loader:${fancyModLoaderVersion(scVersion("neoforge.version"))}")
+        compileOnly("net.neoforged.fancymodloader:loader:${fancyModLoaderVersion(neoForgeCompileVersion!!)}")
     }
     implementation(libs.bstats)
     implementation(libs.tomlj)
