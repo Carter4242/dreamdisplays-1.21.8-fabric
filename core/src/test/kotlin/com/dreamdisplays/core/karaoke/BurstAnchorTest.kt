@@ -216,4 +216,50 @@ class BurstAnchorTest {
         assertEquals(-1, anchor.onFrame(at, 500))
         assertEquals(current, anchor.onFrame(at.also { at += frame }, 2_002))
     }
+
+    @Test
+    fun aRestartedCountInsideThePreviousBurstsRangeStartsANewBurst() {
+        val anchor = BurstAnchor()
+        var at = 0L
+        // The first burst of the song was numbered from 0, so the restarted count lands inside its range
+        for (q in 0L..2_949L) anchor.onFrame(at.also { at += frame }, q)
+        anchor.onFrame(at.also { at += frame }, 2_950, stop = true)
+        at += 500 * ms
+        for (q in 3_000L..3_049L) anchor.onFrame(at.also { at += frame }, q)
+        anchor.onFrame(at.also { at += frame }, 3_050, stop = true)
+        at += 2_000 * ms
+        assertEquals(-1, anchor.onFrame(at.also { at += frame }, 0))
+        assertEquals(-1, anchor.onFrame(at.also { at += frame }, 1))
+        val fresh = anchor.onFrame(at.also { at += frame }, 2)
+        assertNotEquals(-1, fresh)
+        // On its own grid, not one a minute in the past
+        assertEquals(at - frame, anchor.estimate(fresh, 2, lock = false))
+        assertEquals(fresh, anchor.onFrame(at.also { at += frame }, 3))
+    }
+
+    @Test
+    fun aRestartedCountInsideTheCurrentBurstsRangeStartsANewBurst() {
+        val anchor = BurstAnchor()
+        var at = 0L
+        val first = anchor.onFrame(at.also { at += frame }, 0)
+        for (q in 1L..499L) anchor.onFrame(at.also { at += frame }, q)
+        anchor.estimate(first, 0, lock = true)
+        // Voice chat reconnects 3 s later, mid-phrase (no stop frame), and counts from 0 again
+        at += 3_000 * ms
+        anchor.onFrame(at.also { at += frame }, 0)
+        anchor.onFrame(at.also { at += frame }, 1)
+        val fresh = anchor.onFrame(at.also { at += frame }, 2)
+        assertNotEquals(first, fresh)
+        assertEquals(at - frame, anchor.estimate(fresh, 2, lock = false))
+    }
+
+    @Test
+    fun aReorderedFrameOfTheCurrentBurstIsStillPlaced() {
+        val anchor = BurstAnchor()
+        val burst = anchor.onFrame(0, 0)
+        anchor.onFrame(2 * frame, 2)
+        anchor.onFrame(3 * frame, 3)
+        // Frame 1 overtaken by 2 and 3, 300 ms late
+        assertEquals(burst, anchor.onFrame(frame + 300 * ms, 1))
+    }
 }

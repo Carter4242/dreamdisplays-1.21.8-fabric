@@ -27,6 +27,7 @@ class BurstAnchor(
     private val reanchorNanos: Long = 40_000_000L,
     private val historySize: Int = 16,
     private val keptBursts: Int = 32,
+    private val maxStragglerNanos: Long = 1_000_000_000L,
 ) {
     private class Burst(val id: Int, var baseSeq: Long) {
         var lastSeq = baseSeq - 1
@@ -116,18 +117,21 @@ class BurstAnchor(
 
     private fun burstFor(arrivalNanos: Long, seq: Long): Burst? {
         val cur = current
-        if (cur != null && seq in cur.baseSeq..cur.lastSeq) return cur
+        if (cur != null && seq in cur.baseSeq..cur.lastSeq && !tooLate(cur, arrivalNanos, seq)) return cur
         val prev = previous
-        if (cur != null && seq < cur.baseSeq) {
-            prev?.takeIf { seq >= it.baseSeq && seq <= it.lastSeq }?.let { return it }
+        if (cur != null && seq <= cur.lastSeq) {
+            prev?.takeIf { seq >= it.baseSeq && seq <= it.lastSeq && !tooLate(it, arrivalNanos, seq) }?.let { return it }
             // Older than the start of this burst but after the last one: its first frames came in out of order.
             // Never file them under the previous burst, whose grid knows nothing of the silence in between.
-            if ((prev == null || seq > prev.lastSeq) && cur.baseSeq - seq <= MAX_REBASE_FRAMES) {
+            if (seq < cur.baseSeq && (prev == null || seq > prev.lastSeq) && cur.baseSeq - seq <= MAX_REBASE_FRAMES &&
+                !tooLate(cur, arrivalNanos, seq)
+            ) {
                 rebase(cur, seq)
                 return cur
             }
-            // Several new frames in a row numbered below everything known: the client started counting again (voice
-            // chat reconnected or reloaded its audio). A late straggler never comes as such a run.
+            // Several new frames in a row numbered at or below everything known (or inside a known burst but far too
+            // late for it): the client started counting again (voice chat reconnected or reloaded its audio). A late
+            // straggler never comes as such a run.
             orphanRun = if (seq == orphanSeq + 1) orphanRun + 1 else 1
             orphanSeq = seq
             if (orphanRun < RESTART_RUN_FRAMES) return null
@@ -148,6 +152,17 @@ class BurstAnchor(
         cur?.let(::learn)
         previous = cur
         return startBurst(seq)
+    }
+
+    /**
+     * True when frame [seq], numbered inside [burst], arrives far later than that burst's grid puts it: not a
+     * reordered straggler (those are late by network jitter) but a new frame of a count that started over, which
+     * would otherwise be sent at once on a grid seconds in the past.
+     */
+    private fun tooLate(burst: Burst, arrivalNanos: Long, seq: Long): Boolean {
+        val reference = burst.lockedOffset ?: burst.bestOffset
+        if (reference == Long.MAX_VALUE) return false
+        return arrivalNanos - (seq - burst.baseSeq) * frameNanos - reference > maxStragglerNanos
     }
 
     private fun startBurst(seq: Long): Burst {

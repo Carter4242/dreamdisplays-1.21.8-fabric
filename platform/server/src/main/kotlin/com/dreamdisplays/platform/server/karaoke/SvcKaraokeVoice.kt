@@ -16,6 +16,7 @@ import de.maxhenkel.voicechat.api.VoicechatPlugin
 import de.maxhenkel.voicechat.api.VoicechatServerApi
 import de.maxhenkel.voicechat.api.events.EventRegistration
 import de.maxhenkel.voicechat.api.events.MicrophonePacketEvent
+import de.maxhenkel.voicechat.api.events.PlayerConnectedEvent
 import de.maxhenkel.voicechat.api.Position
 import de.maxhenkel.voicechat.api.ServerPlayer
 import de.maxhenkel.voicechat.api.opus.OpusDecoder
@@ -113,12 +114,24 @@ class SvcKaraokeVoice : KaraokeVoice {
 
         override fun registerEvents(registration: EventRegistration) {
             registration.registerEvent(MicrophonePacketEvent::class.java, MicHandler(this@SvcKaraokeVoice))
+            registration.registerEvent(PlayerConnectedEvent::class.java, ConnectHandler(this@SvcKaraokeVoice))
         }
     }
 
     /** A named class (not a lambda) so the hot swap recognises it by package. */
     private class MicHandler(private val voice: SvcKaraokeVoice) : Consumer<MicrophonePacketEvent> {
         override fun accept(event: MicrophonePacketEvent) = voice.onMic(event)
+    }
+
+    /**
+     * A player (re)connected to voice chat: their client numbers its mic frames from 0 again, so a singer's grid and
+     * codecs start over (named class, see [MicHandler]).
+     */
+    private class ConnectHandler(private val voice: SvcKaraokeVoice) : Consumer<PlayerConnectedEvent> {
+        override fun accept(event: PlayerConnectedEvent) {
+            val playerId = event.connection?.player?.uuid ?: return
+            voice.voices.remove(playerId)?.close()
+        }
     }
 
     @Volatile
