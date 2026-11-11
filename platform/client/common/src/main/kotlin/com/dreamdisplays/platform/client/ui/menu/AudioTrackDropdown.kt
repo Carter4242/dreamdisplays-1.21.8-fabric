@@ -167,6 +167,12 @@ class AudioTrackDropdown(
                 mouseY in sbTrackTop..sbTrackBottom
         if (visible && (draggingScrollbar || overScrollbar) && animProgress > 0.5f) g.requestCursor(CursorTypes.RESIZE_NS)
         //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (visible && hoveredIndex >= 0 && animProgress > 0.5f) LegacyCursor.POINTING_HAND.request()
+        val overScrollbar = sbPaged && mouseX in (sbColLeft - SB_GRAB)..(sbColRight + 1) &&
+                mouseY in sbTrackTop..sbTrackBottom
+        if (visible && (draggingScrollbar || overScrollbar) && animProgress > 0.5f) LegacyCursor.RESIZE_NS.request()
+        //?}
 
         //? if >=1.21.6 {
         matrices.popMatrix()

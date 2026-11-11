@@ -6,6 +6,9 @@ import com.dreamdisplays.platform.client.utils.vanillaIdentifier
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.kit.UiWidget
+//? if >=1.21.6 <1.21.11 {
+import com.dreamdisplays.platform.client.ui.kit.LegacyCursor
+//?}
 //? if >=1.21.11 {
 import com.mojang.blaze3d.platform.cursor.CursorTypes
 //?}
@@ -86,6 +89,11 @@ class IconButton(
         //? if >=1.21.11 {
         if (isHovered) {
             g.requestCursor(if (active) CursorTypes.POINTING_HAND else CursorTypes.NOT_ALLOWED)
+        }
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (isHovered) {
+            (if (active) LegacyCursor.POINTING_HAND else LegacyCursor.NOT_ALLOWED).request()
         }
         //?}
     }

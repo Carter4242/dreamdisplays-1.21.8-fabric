@@ -203,6 +203,10 @@ class SuggestionsPanel(
 
         layoutChildren()
         searchBox.renderChild(g, mouseX, mouseY, partialTick)
+        //? if >=1.21.6 <1.21.11 {
+        // Newer vanilla EditBoxes request the text cursor themselves; the search box is always editable.
+        if (searchBox.isHovered()) LegacyCursor.IBEAM.request()
+        //?}
         clearButton.renderChild(g, mouseX, mouseY, partialTick)
         sortButton.renderChild(g, mouseX, mouseY, partialTick)
         searchButton.renderChild(g, mouseX, mouseY, partialTick)
@@ -285,11 +289,19 @@ class SuggestionsPanel(
         //? if >=1.21.11 {
         if (hoveredCard in cards.indices) g.requestCursor(CursorTypes.POINTING_HAND)
         //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (hoveredCard in cards.indices) LegacyCursor.POINTING_HAND.request()
+        //?}
 
         drawScrollbar(g, stripLeft, stripTop, stripRight, stripBottom, maxOff, viewportW, viewportH)
         //? if >=1.21.11 {
         if (draggingScrollbar || overScrollbar(mouseX.toDouble(), mouseY.toDouble())) {
             g.requestCursor(if (sbVertical) CursorTypes.RESIZE_NS else CursorTypes.RESIZE_EW)
+        }
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (draggingScrollbar || overScrollbar(mouseX.toDouble(), mouseY.toDouble())) {
+            (if (sbVertical) LegacyCursor.RESIZE_NS else LegacyCursor.RESIZE_EW).request()
         }
         //?}
         drawSortDropdown(g, mouseX, mouseY)

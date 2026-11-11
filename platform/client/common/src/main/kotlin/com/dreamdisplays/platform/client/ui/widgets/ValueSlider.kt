@@ -8,6 +8,9 @@ import com.dreamdisplays.platform.client.ui.blitSprite
 import com.dreamdisplays.platform.client.utils.vanillaIdentifier
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.kit.UiWidget
+//? if >=1.21.6 <1.21.11 {
+import com.dreamdisplays.platform.client.ui.kit.LegacyCursor
+//?}
 //? if >=1.21.11 {
 import com.mojang.blaze3d.platform.cursor.CursorTypes
 //?}
@@ -91,6 +94,11 @@ class ValueSlider(
         //? if >=1.21.11 {
         if (isHovered) {
             g.requestCursor(if (active) CursorTypes.RESIZE_EW else CursorTypes.NOT_ALLOWED)
+        }
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (isHovered) {
+            (if (active) LegacyCursor.RESIZE_EW else LegacyCursor.NOT_ALLOWED).request()
         }
         //?}
     }
