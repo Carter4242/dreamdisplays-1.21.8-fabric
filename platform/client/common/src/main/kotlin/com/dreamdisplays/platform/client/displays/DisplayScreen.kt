@@ -938,7 +938,11 @@ class DisplayScreen(
         } else {
             PlaybackMode.fromWire(packet.mode)
         }
+        val previousMode = mode
         mode = nextMode
+        // A server only takes a Local display's length in some versions: once the display is shared, say it again, or
+        // its timeline may never learn where the video ends (nothing else re-reports an unchanged video)
+        if (infoApplied && entersSharedMode(previousMode, nextMode)) media.reportDuration(force = true)
 
         qualityCap = packet.qualityCap
         isLocked = packet.isLocked
@@ -1799,3 +1803,9 @@ class DisplayScreen(
 
 /** Whether a server-scheduled play / pause applies to a display in [effectiveMode]: only one each viewer plays locally. */
 internal fun scheduledToggleApplies(effectiveMode: PlaybackMode): Boolean = effectiveMode == PlaybackMode.LOCAL
+
+/** Whether a display going from [previous] to [next] starts following a shared server timeline (Synced / Broadcast). */
+internal fun entersSharedMode(previous: PlaybackMode, next: PlaybackMode): Boolean {
+    fun shared(m: PlaybackMode) = m == PlaybackMode.SYNCED || m == PlaybackMode.BROADCAST
+    return shared(next) && !shared(previous)
+}
