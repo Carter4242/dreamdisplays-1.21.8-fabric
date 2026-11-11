@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.core.protocol.common.packets.MediaGen
+import com.dreamdisplays.core.protocol.common.packets.ReportKind
+import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
@@ -226,7 +228,18 @@ object TimelineManager {
             release(display, now)
         } else {
             broadcast(display, current)
+            askUnreported(display)
         }
+    }
+
+    /**
+     * A hold waits for viewers that never said whether they play [display] (their report went to a plugin that was
+     * reloaded, or was dropped with the previous video): ask them, so the hold ends when they answer instead of at its
+     * deadline. Protocol-11 clients drop the request.
+     */
+    private fun askUnreported(display: DisplayData) {
+        val request = ReportRequest(display.id, ReportKind.READINESS)
+        ReadinessTracker.unreported(display.id, viewersOf(display)).forEach { transport.sendTo(it, request) }
     }
 
     /** The viewers a start of [display] at [positionMs] still waits for (empty = it can start now). */
@@ -329,7 +342,7 @@ object TimelineManager {
         val now = transport.nowMs()
         val updated = current.withRate(speed, now)
         // Clients held ready at the old speed restart their streams at the new one: wait for them afresh
-        ReadinessTracker.forgetDisplay(display.id)
+        ReadinessTracker.forgetHeldStates(display.id)
         // A paused timeline (including one in a start hold) just takes the new speed and keeps its hold
         if (current.paused) {
             timelines[display.id] = updated
@@ -391,7 +404,7 @@ object TimelineManager {
         val speed = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
         if (startAtMs != null && readyAtStart.isNotEmpty()) {
             startHolds.remove(display.id)
-            ReadinessTracker.forgetDisplay(display.id)
+            ReadinessTracker.forgetHeldStates(display.id)
             readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
             // Anchored at the start instant: until then the wire timeline says "starts in N ms" (DisplaySync.startInMs)
             val scheduled = Timeline(0, maxOf(now, startAtMs), paused = false, durationMs = knownMs, loop = true, rate = speed)
@@ -402,7 +415,7 @@ object TimelineManager {
         val fresh = Timeline.start(now, paused = true, durationMs = knownMs, loop = true, rate = speed)
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
-        ReadinessTracker.forgetDisplay(display.id)
+        ReadinessTracker.forgetHeldStates(display.id)
         readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
         startWhenReady(display, now + START_HOLD_MS)
     }

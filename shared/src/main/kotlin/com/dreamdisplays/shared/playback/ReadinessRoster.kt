@@ -85,6 +85,22 @@ class ReadinessRoster(val toleranceMs: Long = DEFAULT_TOLERANCE_MS) {
         reports.remove(displayId)
     }
 
+    /**
+     * Drops the reports on [displayId] that belonged to its previous video or speed (a new video, a new speed), but
+     * keeps ABSENT: a client that does not play the display does not play it on any video, and says so only once
+     * (it reports again by itself when it starts playing the display).
+     */
+    fun forgetHeldStates(displayId: UUID) {
+        reports.computeIfPresent(displayId) { _, byPlayer ->
+            byPlayer.entries.removeIf { it.value.state != ReadinessState.ABSENT }
+            byPlayer.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    /** Of [players], those with no report at all on [displayId]. */
+    fun unreported(displayId: UUID, players: Collection<UUID>): List<UUID> =
+        players.filter { reportOf(displayId, it) == null }
+
     companion object {
         /** How far a held position may be from the start position and still count as ready there. */
         const val DEFAULT_TOLERANCE_MS = 300L

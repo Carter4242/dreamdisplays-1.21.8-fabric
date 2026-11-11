@@ -84,4 +84,36 @@ class ReadinessRosterTest {
         assertEquals(2, ReadinessState.ABSENT.wire)
         assertEquals(ReadinessState.NOT_READY, ReadinessState.fromWire(7))
     }
+
+    @Test
+    fun `a new video or speed forgets held states but keeps absent`() {
+        val roster = ReadinessRoster()
+        roster.report(display, a, ReadinessState.READY, 0, 0)
+        roster.report(display, b, ReadinessState.NOT_READY, 0, 0)
+        roster.report(display, c, ReadinessState.ABSENT, 0, 0)
+        roster.report(other, a, ReadinessState.READY, 0, 0)
+        roster.forgetHeldStates(display)
+        assertNull(roster.reportOf(display, a))
+        assertNull(roster.reportOf(display, b))
+        assertEquals(ReadinessState.ABSENT, roster.reportOf(display, c)?.state)
+        assertEquals(listOf(a, b), roster.waitingFor(display, 0, listOf(a, b, c)))
+        assertEquals(ReadinessState.READY, roster.reportOf(other, a)?.state)
+    }
+
+    @Test
+    fun `forgetting held states of a display with only held states leaves nothing`() {
+        val roster = ReadinessRoster()
+        roster.report(display, a, ReadinessState.READY, 0, 0)
+        roster.forgetHeldStates(display)
+        roster.forgetHeldStates(other)
+        assertEquals(listOf(a), roster.unreported(display, listOf(a)))
+    }
+
+    @Test
+    fun `unreported lists only viewers that never reported`() {
+        val roster = ReadinessRoster()
+        roster.report(display, a, ReadinessState.ABSENT, 0, 0)
+        roster.report(display, b, ReadinessState.NOT_READY, 0, 0)
+        assertEquals(listOf(c), roster.unreported(display, listOf(a, b, c)))
+    }
 }

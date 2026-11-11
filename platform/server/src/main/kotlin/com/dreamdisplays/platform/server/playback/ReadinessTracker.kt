@@ -87,4 +87,11 @@ object ReadinessTracker {
     }
 
     fun forgetDisplay(displayId: UUID) = roster.forgetDisplay(displayId)
+
+    /** The display changed video or speed: what its viewers held ready is void, ABSENT still holds. */
+    fun forgetHeldStates(displayId: UUID) = roster.forgetHeldStates(displayId)
+
+    /** Of [players], the readiness-reporting viewers that never reported on [displayId]. */
+    fun unreported(displayId: UUID, players: Collection<UUID>): List<UUID> =
+        roster.unreported(displayId, viewersOf(players))
 }

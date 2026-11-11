@@ -39,7 +39,8 @@ object DisplayLifecycleManager {
     /** Creates or updates a display from a server [DisplayInfo] packet, honoring render distance and size limits. */
     fun handleInfoPacket(packet: DisplayInfo) {
         // Known even while displays are off: its timelines must not look like ones for a display never described
-        ServerMediaGens.onInfo(packet)
+        // A display that got a new video: what this client said about the old one is void on the server
+        if (ServerMediaGens.onInfo(packet)) DisplayWarmup.reReport(packet.id)
         if (!ClientStateManager.displaysEnabled) return
         if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
             logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
