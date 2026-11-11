@@ -12,6 +12,7 @@ import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.api.display.model.property.DisplayRotation
 import com.dreamdisplays.api.display.model.property.DisplayFacing
 import com.dreamdisplays.api.media.model.DreamMediaException
+import com.dreamdisplays.api.media.model.FramePixelFormat
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.audio.AcousticEnvironment
 import com.dreamdisplays.api.media.audio.AcousticQuality
@@ -837,16 +838,22 @@ class DisplayScreen(
         textureResource.prepareDimensions(width, height, parseQualityOrDefault())
     }
 
-    /** Re-attaches the popout sink chain to a freshly created [player]. */
+    /** Re-attaches the popout sink chain, and the open menu's preview sink, to a freshly created [player]. */
     internal fun attachPopout(player: MediaPlayer) {
         popoutManager.attachTo(player) { videoContentAspect }
+        // A seamless queue switch never shows the menu a "not started" frame, so it would never re-attach by itself
+        previewSink?.let(player::setPreviewSink)
     }
 
-    /** Attaches or clears the menu preview raw-frame sink on the current player. */
+    /** The open menu's preview sink, kept so every new player gets it too. */
+    private var previewSink: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)? = null
+
+    /** Attaches or clears the menu preview raw-frame sink on the current player (and on every later one). */
     fun setPreviewFrameSink(sink: ((ByteBuffer, Int, Int, UploadPixelFormat) -> Unit)?) {
-        mediaPlayer?.setPreviewSink(
-            if (sink == null) null else { buf, w, h, fmt -> sink(buf, w, h, fmt.toUploadFormat()) },
-        )
+        val wrapped: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)? =
+            if (sink == null) null else { buf, w, h, fmt -> sink(buf, w, h, fmt.toUploadFormat()) }
+        previewSink = wrapped
+        mediaPlayer?.setPreviewSink(wrapped)
     }
 
     @Transient
