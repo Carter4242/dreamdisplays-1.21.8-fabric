@@ -5,6 +5,7 @@ import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.Timeline
+import com.dreamdisplays.shared.playback.FullscreenPrecedence
 import com.dreamdisplays.shared.playback.FullscreenSession
 import com.dreamdisplays.shared.playback.FullscreenPrepareRoster
 import com.dreamdisplays.shared.playback.FullscreenPrepareState
@@ -105,6 +106,8 @@ object FullscreenBroadcastManager {
         var lastTimelineResend: Long = 0,
         /** When it started (0 for one restored after a restart): the newest session a player is targeted by wins. */
         val startedAtMs: Long = 0,
+        /** When a player was added to it by name later ([addTarget]): for them it counts as starting then. */
+        val addedAtMs: MutableMap<UUID, Long> = ConcurrentHashMap(),
     )
 
     /** Wires the platform transport. */
@@ -397,6 +400,7 @@ object FullscreenBroadcastManager {
         sessions.values.forEach {
             forget(it, playerId)
             it.dismissedBy.remove(playerId)
+            it.addedAtMs.remove(playerId)
         }
         preparations.values.forEach { it.roster.forget(playerId) }
     }
@@ -412,7 +416,7 @@ object FullscreenBroadcastManager {
     /** Re-sends every live session's state to [playerId] on join, in case they're still within a radius/selector. */
     fun onPlayerJoin(playerId: UUID) {
         // One session per player: the newest that targets them
-        sessions.values.filter { isTargeted(it, playerId) }.maxByOrNull { it.startedAtMs }?.let { deliverTo(it, playerId) }
+        sessionFor(playerId)?.let { sessions[it] }?.let { deliverTo(it, playerId) }
         val now = transport.nowMs()
         for (preparation in preparations.values) {
             if (isTargeted(preparation, playerId) && supportsPrepare(playerId)) deliverPrepare(preparation, playerId, now)
@@ -427,6 +431,7 @@ object FullscreenBroadcastManager {
         val session = sessions[sessionId] ?: return false
         session.namedTargets = (session.namedTargets ?: emptySet()) + playerId
         session.dismissedBy.remove(playerId)
+        session.addedAtMs[playerId] = transport.nowMs()
         if (minimized) session.minimizedBy.add(playerId) else session.minimizedBy.remove(playerId)
         if (playerId in transport.onlinePlayerIds()) deliverTo(session, playerId)
         return true
@@ -767,10 +772,12 @@ object FullscreenBroadcastManager {
         }
     }
 
-    /** True when [playerId] is shown another session than [session] (which then leaves them to it). */
-    private fun watchingOther(session: Session, playerId: UUID): Boolean {
-        val other = viewing[playerId]?.takeIf { it != session.sessionId }?.let { sessions[it] } ?: return false
-        return playerId in other.shownTo
+    /** The session [playerId] is to be shown: the newest that targets them ([FullscreenPrecedence]); null for none. */
+    private fun sessionFor(playerId: UUID): String? {
+        val targeting = sessions.values.filter { isTargeted(it, playerId) }
+            .map { FullscreenPrecedence.Candidate(it.sessionId, maxOf(it.startedAtMs, it.addedAtMs[playerId] ?: 0L)) }
+        val watching = viewing[playerId]?.takeIf { sessions[it]?.shownTo?.contains(playerId) == true }
+        return FullscreenPrecedence.pick(targeting, watching)
     }
 
     /** [playerId] leaves [session] for another one: its overlay closes (a URL-only display goes too) before the new one opens. */
@@ -824,8 +831,9 @@ object FullscreenBroadcastManager {
             val targeted = isTargeted(session, playerId)
             val shown = playerId in session.shownTo
             if (targeted && !shown) {
-                // Shown a newer session meanwhile: this one waits until that is over for them
-                if (!watchingOther(session, playerId)) deliverTo(session, playerId)
+                // Only the newest session that targets them takes them (over from an older one); an older one waits
+                // until the newer one is over for them
+                if (sessionFor(playerId) == session.sessionId) deliverTo(session, playerId)
             } else if (!targeted && shown) {
                 transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
                 forget(session, playerId)
