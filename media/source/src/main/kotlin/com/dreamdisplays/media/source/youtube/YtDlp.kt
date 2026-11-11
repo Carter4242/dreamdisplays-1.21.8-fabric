@@ -3,6 +3,7 @@ package com.dreamdisplays.media.source.youtube
 import com.dreamdisplays.api.media.search.MediaSearchPage
 import com.dreamdisplays.api.media.search.MediaSearchResult
 import com.dreamdisplays.api.media.search.SortOrder
+import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
@@ -103,8 +104,20 @@ object YtDlp {
     /** Extracts the 11-character YouTube video ID from a full URL, short URL, or bare ID. Returns null if not recognized. */
     fun extractVideoId(url: String?): String? = YtDlpSearchCache.extractVideoId(url)
 
-    /** Removes [videoUrl] from the in-memory format cache, in-flight map, and disk cache. */
-    fun invalidateCache(videoUrl: String) = formatCache.invalidate(videoUrl)
+    /**
+     * Removes [videoUrl] from the in-memory format cache, in-flight map, and disk cache. Entries are
+     * keyed by the canonical URL the resolvers pass in, so a link as the player holds it (`youtu.be/…`,
+     * extra query parameters such as `&t=` or `&list=`) is canonicalized first; otherwise a stale or
+     * broken format list would survive every retry.
+     */
+    fun invalidateCache(videoUrl: String) {
+        formatCache.invalidate(videoUrl)
+        canonicalUrl(videoUrl)?.takeIf { it != videoUrl }?.let(formatCache::invalidate)
+    }
+
+    /** The URL the resolvers cache [videoUrl] under, or null when it has none. */
+    internal fun canonicalUrl(videoUrl: String): String? =
+        runCatching { MediaSource.from(videoUrl).toResolvableUrl() }.getOrNull()
 
     /** Returns a cached YouTube cookie header string for use by HTTP clients other than `yt-dlp`. */
     fun getPublicCookieHeader(): String? = cookies.header()
