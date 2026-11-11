@@ -274,5 +274,21 @@
   "suggestVolumeMuted": "Muted",
   "suggestVolumeMax": "Maximum",
   "suggestRadiusBlocks": "Blocks around the origin",
-  "suggestCoordinate": "Your {0}"
+  "suggestCoordinate": "Your {0}",
+  "policyHeader": "&7D |&f Policy of display &e%s&f (effective, then this display's override; - = default):",
+  "policyLine": "&7D |&7 %s = &f%s &8(override: &7%s&8)",
+  "policySet": "&7D |&f Set &e%s&f = &e%s&f on display &e%s",
+  "policyReset": "&7D |&f Cleared the &e%s&f override on display &e%s",
+  "policyResetAll": "&7D |&f Cleared every policy override on display &e%s",
+  "policyUnknownKey": "&7D |&f Unknown policy key &e%s&f. Keys: &7%s",
+  "policyBadValue": "&7D |&f Invalid value for &e%s&f (expected %s)",
+  "configHeader": "&7D |&f Display config (config.toml; - = built-in default):",
+  "configValue": "&7D |&7 %s = &f%s",
+  "configSet": "&7D |&f Set &e%s&f = &e%s&f in config.toml and reloaded",
+  "configReset": "&7D |&f Reset &e%s&f in config.toml and reloaded (now &e%s&f)",
+  "configUnknownKey": "&7D |&f Unknown config key &e%s",
+  "configBadValue": "&7D |&f Invalid value for &e%s&f (expected %s)",
+  "configWriteFailed": "&7D |&f Could not update config.toml: %s",
+  "suggestPolicy": "Show or change one display's policy",
+  "suggestConfig": "Show or change server-wide display settings"
 }

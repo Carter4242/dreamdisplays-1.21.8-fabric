@@ -38,6 +38,14 @@ object DisplayPolicies {
      */
     fun setOverride(display: DisplayData, path: String, value: Any?): Boolean {
         val updated = DisplayPolicy.withField(override(display), path, value) ?: return false
+        return setOverride(display, updated)
+    }
+
+    /**
+     * Replaces the whole override of [display] with [updated] (an empty policy removes it), then persists and
+     * re-sends the display. Returns false, changing nothing, if it would not fit the custom-data limits.
+     */
+    fun setOverride(display: DisplayData, updated: DisplayPolicy): Boolean {
         if (updated.isEmpty) {
             display.customData.remove(DisplayPolicy.KEY)
         } else {

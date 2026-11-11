@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server
 
+import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.shared.playback.FullscreenMode
@@ -63,6 +64,14 @@ data class SettingsSection(
     /** How long a seeked / restarted synced display stays parked while viewers re-buffer (0 = no hold). */
     val seekHoldMs get() = display.seek_hold_seconds * 1000L
 
+    /** Mode new displays are created in: [PlaybackMode.SYNCED] unless `default_mode = "local"`. */
+    val defaultMode: PlaybackMode
+        get() = if (display.default_mode.trim().equals("local", ignoreCase = true)) PlaybackMode.LOCAL
+        else PlaybackMode.SYNCED
+
+    /** A playing synced display nobody is near is paused after this long (0 = never). */
+    val autoPauseWhenEmptyMs get() = display.auto_pause_when_empty_seconds * 1000L
+
     /** Volume in [0, 1] ready for the wire. */
     val defaultVolume get() = display.default_volume / 200f
 
@@ -111,6 +120,8 @@ data class SettingsSection(
         val max_displays_per_player: Int = 100,
         val resume_hold_seconds: Int = 1,
         val seek_hold_seconds: Int = 3,
+        val default_mode: String = "synced",
+        val auto_pause_when_empty_seconds: Int = 0,
     )
 
     /**
@@ -271,6 +282,9 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_displays_per_player = t?.getLong("display.max_displays_per_player")?.toInt() ?: 100,
             resume_hold_seconds = t.numberOrNull("display.resume_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 1,
             seek_hold_seconds = t.numberOrNull("display.seek_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 3,
+            default_mode = (t?.get("display.default_mode") as? String) ?: "synced",
+            auto_pause_when_empty_seconds = t.numberOrNull("display.auto_pause_when_empty_seconds")?.toInt()
+                ?.coerceIn(0, 86_400) ?: 0,
         ),
         customMedia = SettingsSection.CustomMediaConfig(
             enabled = t?.getBoolean("custom_media.enabled") ?: true,

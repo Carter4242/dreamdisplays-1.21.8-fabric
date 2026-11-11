@@ -50,6 +50,8 @@ object CommandRegistrar {
             fullscreenBranch()
             statsBranch()
             reloadBranch()
+            policyBranch()
+            configBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
             helpBranch()
@@ -103,6 +105,62 @@ object CommandRegistrar {
         literal("reload", tip("suggestReload")) {
             requires { it.sender.hasPermission(PaperServer.config.permissions.reload) }
             executesCommand { ctx -> ReloadCommand().execute(ctx.source.sender, emptyArray()) }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.policyBranch() {
+        literal("policy", tip("suggestPolicy")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> PolicyCommand.execute(ctx.source.sender, target(ctx), null, null) }
+                argument("key", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        PolicyCommand.keySuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        PolicyCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "key"), null)
+                    }
+                    argument("value", StringArgumentType.word()) {
+                        suggests(suggesting(tips) { ctx, _, typed ->
+                            PolicyCommand.valueSuggestions(StringArgumentType.getString(ctx, "key"))
+                                .map { Suggestion(it) }.startingWith(typed)
+                        })
+                        executesCommand { ctx ->
+                            PolicyCommand.execute(
+                                ctx.source.sender, target(ctx),
+                                StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.configBranch() {
+        literal("config", tip("suggestConfig")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            executesCommand { ctx -> ConfigCommand.execute(ctx.source.sender, null, null) }
+            argument("key", StringArgumentType.word()) {
+                suggests(suggesting(tips) { _, _, typed ->
+                    ConfigCommand.keySuggestions().map { Suggestion(it) }.startingWith(typed)
+                })
+                executesCommand { ctx ->
+                    ConfigCommand.execute(ctx.source.sender, StringArgumentType.getString(ctx, "key"), null)
+                }
+                argument("value", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { ctx, _, typed ->
+                        ConfigCommand.valueSuggestions(StringArgumentType.getString(ctx, "key"))
+                            .map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        ConfigCommand.execute(
+                            ctx.source.sender,
+                            StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
+                        )
+                    }
+                }
+            }
         }
     }
 

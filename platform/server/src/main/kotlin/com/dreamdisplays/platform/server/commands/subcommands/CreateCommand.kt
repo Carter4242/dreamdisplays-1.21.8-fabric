@@ -103,6 +103,7 @@ class CreateCommand : SubCommand {
         }
         SelectionManager.selectionPoints.remove(player.uniqueId)
 
+        displayData.mode = PaperServer.config.settings.defaultMode
         DisplayManager.register(displayData)
         ServerMessage.SUCCESSFUL_CREATION.sendTo(player)
     }
@@ -231,6 +232,7 @@ object VanillaCreateCommand {
         }
         SelectionManager.selectionPoints.remove(player.uuid)
 
+        displayData.mode = VanillaServerState.config.settings.defaultMode
         DisplayManager.register(displayData)
         ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(displayData) }
 

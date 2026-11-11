@@ -8,6 +8,7 @@ import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
+import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -36,6 +37,12 @@ object TimelineManager {
 
     /** Hold after a seek or restart; the platform points this at `display.seek_hold_seconds`. */
     var seekHoldMs: () -> Long = { 3_000L }
+
+    /** Pause a playing synced display nobody is near after this long (0 = never); `display.auto_pause_when_empty_seconds`. */
+    var autoPauseWhenEmptyMs: () -> Long = { 0L }
+
+    private val emptySince = ConcurrentHashMap<UUID, Long>()
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
     fun init(transport: PlaybackTransport) {
@@ -173,6 +180,7 @@ object TimelineManager {
 
     /** Forgets a removed display. */
     fun remove(displayId: UUID) {
+        emptySince.remove(displayId)
         timelines.remove(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)
@@ -187,10 +195,44 @@ object TimelineManager {
         if (timelines.isEmpty()) return
         val now = transport.nowMs()
         releaseStartHolds(now)
+        autoPauseEmpty(now)
         for ((displayId, timeline) in timelines) {
             if (now - (lastBroadcast[displayId] ?: 0L) < PERIODIC_BROADCAST_MS) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             broadcast(display, timeline)
+        }
+    }
+
+    /**
+     * Pauses (server timeline) a playing `SYNCED` display once no player has been in its range for
+     * [autoPauseWhenEmptyMs], so a forgotten movie does not run on with nobody watching. It is not resumed
+     * automatically; the next viewer presses play.
+     */
+    private fun autoPauseEmpty(now: Long) {
+        val limit = autoPauseWhenEmptyMs()
+        if (limit <= 0L) {
+            emptySince.clear()
+            return
+        }
+        for ((displayId, timeline) in timelines) {
+            if (timeline.paused || startHolds.containsKey(displayId)) {
+                emptySince.remove(displayId)
+                continue
+            }
+            val display = DisplayManager.getDisplayData(displayId) ?: continue
+            if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(displayId) ||
+                transport.nearbyPlayerIds(display).isNotEmpty()
+            ) {
+                emptySince.remove(displayId)
+                continue
+            }
+            val since = emptySince.getOrPut(displayId) { now }
+            if (now - since < limit) continue
+            emptySince.remove(displayId)
+            val paused = timeline.withPaused(true, now)
+            timelines[displayId] = paused
+            broadcast(display, paused)
+            logger.info("Paused display {}: nobody has been near it for {} s.", displayId, limit / 1_000)
         }
     }
 

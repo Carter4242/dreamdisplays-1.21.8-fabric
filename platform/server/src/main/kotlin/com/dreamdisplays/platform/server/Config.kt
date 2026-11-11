@@ -18,6 +18,9 @@ import java.nio.file.Files
 @NullMarked
 class Config(private val plugin: PaperServer) {
     private val configFile = File(plugin.dataFolder, "config.toml")
+
+    /** The `config.toml` this config is read from. */
+    val file: File get() = configFile
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private val langStore = LanguageStore(

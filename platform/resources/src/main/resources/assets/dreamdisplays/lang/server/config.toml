@@ -49,8 +49,16 @@ max_displays_per_player = 0
 resume_hold_seconds = 1
 seek_hold_seconds = 3
 
+# Playback mode new displays start in: "synced" (everyone sees the same moment) or "local"
+default_mode = "synced"
+
+# Pause a playing synced display once nobody has been in its range for this many seconds.
+# It is not resumed automatically; the next viewer presses play. 0 = never
+auto_pause_when_empty_seconds = 0
+
 # Display policy: server-controlled client behaviour, sent with every display.
-# Anything left unset uses the client's own default. A display can override any of these for itself.
+# Anything left unset uses the client's own default. A display can override any of these for itself
+# with /display policy <display> <section.key> <value>; /display config <key> <value> edits this file in-game.
 [policy.sync]
 # Playback sync for Synced / Broadcast displays and watch parties
 # enabled = true            # false = no gentle rate correction (large drift is still fixed by seeking)

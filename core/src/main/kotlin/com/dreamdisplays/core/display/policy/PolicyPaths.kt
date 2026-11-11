@@ -1,0 +1,94 @@
+package com.dreamdisplays.core.display.policy
+
+import java.util.Locale
+
+/**
+ * The admin-facing names of every [DisplayPolicy] field: `section.field` in the config's snake_case
+ * (`audio.radius_blocks`), mapped to the policy's own field path (`audio.radiusBlocks`), its type and its
+ * allowed range. Used by commands and the config writer so both speak the same keys as `config.toml`.
+ */
+object PolicyPaths {
+    /** Value type of a policy field; [parse] turns command / config text into the matching value. */
+    sealed class Kind {
+        abstract fun parse(raw: String): Any?
+
+        data object Bool : Kind() {
+            override fun parse(raw: String): Any? = when (raw.lowercase(Locale.ROOT)) {
+                "true", "on", "yes" -> true
+                "false", "off", "no" -> false
+                else -> null
+            }
+        }
+
+        data class Whole(val min: Long, val max: Long) : Kind() {
+            override fun parse(raw: String): Any? = raw.toLongOrNull()?.takeIf { it in min..max }?.toInt()
+        }
+
+        data class Decimal(val min: Double, val max: Double) : Kind() {
+            override fun parse(raw: String): Any? =
+                raw.toDoubleOrNull()?.takeIf { it.isFinite() && it >= min && it <= max }
+        }
+
+        data class Choice(val values: List<String>) : Kind() {
+            override fun parse(raw: String): Any? = raw.lowercase(Locale.ROOT).takeIf { it in values }
+        }
+    }
+
+    /** One settable field. [get] reads it from a policy (null = unset). */
+    class Path(val name: String, val field: String, val kind: Kind, val get: (DisplayPolicy) -> Any?) {
+        /** Range or choices, for help / error text. */
+        val hint: String
+            get() = when (kind) {
+                Kind.Bool -> "true|false"
+                is Kind.Whole -> "${kind.min}..${kind.max}"
+                is Kind.Decimal -> "${fmt(kind.min)}..${fmt(kind.max)}"
+                is Kind.Choice -> kind.values.joinToString("|")
+            }
+    }
+
+    val all: List<Path> = listOf(
+        Path("sync.enabled", "sync.enabled", Kind.Bool) { it.sync?.enabled },
+        Path("sync.dead_band_ms", "sync.deadBandMs", Kind.Whole(0, 1_000)) { it.sync?.deadBandMs },
+        Path("sync.max_rate_pct", "sync.maxRatePct", Kind.Decimal(0.0, 5.0)) { it.sync?.maxRatePct },
+        Path("sync.seek_threshold_ms", "sync.seekThresholdMs", Kind.Whole(200, 60_000)) { it.sync?.seekThresholdMs },
+        Path("sync.seek_cooldown_ms", "sync.seekCooldownMs", Kind.Whole(1_000, 600_000)) { it.sync?.seekCooldownMs },
+        Path("audio.radius_blocks", "audio.radiusBlocks", Kind.Decimal(0.0, 4_096.0)) { it.audio?.radiusBlocks },
+        Path("audio.full_volume_blocks", "audio.fullVolumeBlocks", Kind.Decimal(0.0, 4_096.0)) {
+            it.audio?.fullVolumeBlocks
+        },
+        Path("audio.falloff", "audio.falloff", Kind.Choice(listOf("linear", "squared"))) {
+            it.audio?.falloff?.name?.lowercase(Locale.ROOT)
+        },
+        Path("audio.start_volume", "audio.startVolume", Kind.Decimal(0.0, 1.0)) { it.audio?.startVolume },
+        Path("audio.max_volume", "audio.maxVolume", Kind.Decimal(0.0, 2.0)) { it.audio?.maxVolume },
+        Path("visibility.max_distance_blocks", "visibility.maxDistanceBlocks", Kind.Decimal(0.0, 4_096.0)) {
+            it.visibility?.maxDistanceBlocks
+        },
+        Path("quality.max_height", "quality.maxHeight", Kind.Whole(144, 4_320)) { it.quality?.maxHeight },
+    )
+
+    private val byName = all.associateBy { it.name }
+
+    /** The path called [name] (case-insensitive), or null. */
+    fun find(name: String): Path? = byName[name.lowercase(Locale.ROOT)]
+
+    /**
+     * [base] with [path] set from the text [raw] (or cleared when [raw] is null). Returns null when the text
+     * does not parse or is out of range for that field.
+     */
+    fun apply(base: DisplayPolicy?, path: Path, raw: String?): DisplayPolicy? {
+        if (raw == null) return DisplayPolicy.withField(base, path.field, null)
+        val value = path.kind.parse(raw.trim()) ?: return null
+        return DisplayPolicy.withField(base, path.field, value)
+    }
+
+    /** Readable form of a policy value. */
+    fun format(value: Any?): String = when (value) {
+        null -> "-"
+        is Double -> fmt(value)
+        else -> value.toString()
+    }
+
+    private fun fmt(d: Double): String =
+        if (d == Math.floor(d) && kotlin.math.abs(d) < 1e15) d.toLong().toString() else d.toString()
+}
