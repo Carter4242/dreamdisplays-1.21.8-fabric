@@ -1,93 +1,64 @@
 ![Dream Displays](https://i.imgur.com/oJPS9DB.png)
 
-<div align="center">
-<a href="https://modrinth.com/plugin/dreamdisplays"><img src="https://i.imgur.com/C7yPsgr.png" height="48" alt="Modrinth"></a>
-<a href="https://www.curseforge.com/minecraft/mc-mods/dreamdisplays"><img src="https://i.imgur.com/p3OZHhH.png" height="48" alt="CurseForge"></a>
-<a href="https://github.com/arnodoelinger/dreamdisplays"><img src="https://i.imgur.com/fd254hJ.png" height="48" alt="GitHub"></a>
-<a href="https://discord.com/invite/uwMMZ2KWk6"><img src="https://i.imgur.com/g0O0JSQ.png" height="48" alt="Discord"></a>
-<a href="https://ko-fi.com/arnodoelinger"><img src="https://i.imgur.com/L3Zx1Wu.png" height="48" alt="Ko-Fi"></a>
-</div>
+# Dream Displays for Minecraft 1.21.8
 
-# Bring real video playback to Minecraft
+This is a fork of [Dream Displays](https://github.com/arnodoelinger/dreamdisplays) for Fabric 1.21.8 that adds features
+for watching videos together on a server.
 
-Watch videos, livestreams, and more directly on in-game displays — together with your friends.
+## Install
 
-Create a display, paste a link and that's it!
+Download both jars from the [latest release](https://github.com/Carter4242/dreamdisplays-1.21.8-fabric/releases/latest).
 
-![Player watching on displays](https://i.imgur.com/JoARVeu.png)
+- Players put the `dreamdisplays-fabric` jar in their `mods` folder. It needs Fabric Loader 0.16.14 or newer and Fabric API.
+- Servers put the `dreamdisplays-paper` jar in the `plugins` folder of a Paper 1.21.8 server.
+- Players and the server should use jars from the same release.
 
-# Watch anything
+## What this fork adds
 
-![Display menu](https://i.imgur.com/wGnDzrT.png)
+### Watching together
+- Every viewer sees the same frame, including players who join late or come back into range.
+- Play, pause, seek and video changes reach everyone at the same moment.
+- Each display has a queue, and pasting a YouTube playlist adds every video in it.
+- Playback speed goes from 0.1× to 10× and the pitch does not change.
+- A clear button removes the video from a display.
 
-|                                                                                                                                                                                                                                                                           | Source                        | What works                                                               |
-|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|--------------------------------------------------------------------------|
-| <img src="https://cdn.simpleicons.org/youtube" width="32" height="32" alt="YouTube">                                                                                                                                                                                      | **YouTube**                   | Videos and livestreams, ad-free, up to 4K, with multiple audio languages |
-| <img src="https://cdn.simpleicons.org/twitch" width="32" height="32" alt="Twitch">                                                                                                                                                                                        | **Twitch**                    | Live channels, VODs, and clips                                           |
-| <img src="https://cdn.simpleicons.org/kick" width="32" height="32" alt="Kick">                                                                                                                                                                                            | **Kick**                      | Live channels and VODs                                                   |
-| <img src="https://cdn.simpleicons.org/vimeo" width="32" height="32" alt="Vimeo">                                                                                                                                                                                          | **Vimeo**                     | Public videos and live events                                            |
-| <img src="https://cdn.simpleicons.org/bilibili" width="32" height="32" alt="Bilibili">                                                                                                                                                                                    | **Bilibili**                  | Videos, live channels, bungumi                                                 |
-| <img src="https://cdn.simpleicons.org/ffmpeg" width="32" height="32" alt="Video file">                                                                                                                                                                                    | **Any video link**            | Direct video files and live streams                                      |
-| <img src="https://cdn.simpleicons.org/googledrive" width="32" height="32" alt="Google Drive"><br><img src="https://cdn.simpleicons.org/dropbox" width="32" height="32" alt="Dropbox"><br><img src="https://cdn.simpleicons.org/imgur" width="32" height="32" alt="Imgur"> | **Share links**               | Google Drive, Dropbox, and Imgur direct links                            |
-| <img src="https://cdn.simpleicons.org/googlechrome" width="32" height="32" alt="Web">                                                                                                                                                                                     | **Pretty much anywhere else** | Not on the list? Try it anyway                                           |
+### Screen sharing
+- On Windows you can share a screen or a window, with audio.
+- On Linux you can share a screen, with audio.
+- On Mac you can share a screen. Mac shares have no sound.
 
-# Built for multiplayer
+### Karaoke
 
-Watch together with your friends with seamless multiplayer synchronization. Choose between local, synchronized, and
-broadcast playback depending on how you want your displays to behave.
+Karaoke needs [Simple Voice Chat](https://modrinth.com/plugin/simple-voice-chat).
 
-Dream Displays keeps playback synchronized across the server while keeping network usage extremely low.
+In normal voice chat, a singer's voice reaches everyone late. It has to travel from their microphone through the server
+to each listener, so it falls behind the music. This fork fixes that from both ends:
 
-![Cinema](https://i.imgur.com/PKxe0oG.png)
+- The singer's game plays the video slightly ahead of everyone else, so they are singing along to a part the audience
+  has not heard yet.
+- The server holds the singer's voice back separately for each listener, so it arrives exactly when that listener's
+  video reaches the same moment.
+- The delays are measured automatically from each player's connection, audio device and microphone. Singers do not
+  have to set anything up.
 
-# Made for you
+Players can sign up in a line to take turns, and any number of people can sing together. Singers in a group hear each
+other only faintly. Each of them hears the song early, at their own offset, so the other singers would sound out of
+time at full volume.
 
-Dream Displays is built to make watching videos in Minecraft feel as natural as possible.
+### Playback
+- Videos with transparency (WebM) play correctly.
+- Display audio gets quieter with distance and follows your volume settings.
+- You can watch a display in picture-in-picture, in a separate window or in fullscreen.
+- YouTube videos that fail to load are retried with other methods.
 
-<table>
-<tr>
-<td valign="top" width="50%" align="center">
+## Server setup
 
-## Your experience
+- Run `/display help` to see every command.
+- All commands are op-only by default. Permissions start with `dreamdisplays.` and work with LuckPerms.
+- You can change settings in `plugins/DreamDisplays/config.toml` or with `/display config`.
+- Screen sharing needs a [MediaMTX](https://github.com/bluenviron/mediamtx) relay, which you set up under `[live]` in the config.
+- Errors from players' clients are saved to `plugins/DreamDisplays/client-errors.log`, and `/display diag errors` shows them.
 
-<div align="left">
+## Credits
 
-- **Seamless multiplayer playback** — with several modes
-- **Powerful media player** — search, Picture-in-Picture & more
-- **Ad-free YouTube** — no ads with multiple audio languages
-- **Immersive audio** — 3D sound, volume up to 200% & more
-- **Customizable displays** — size, brightness & orientation
-- **Hardware-accelerated playback** — smooth and efficient video decoding
-
-</div>
-
-</td>
-<td valign="top" width="50%" align="center">
-
-## Your server
-
-<div align="left">
-
-- **Broad server support** — Paper, Folia, Fabric, NeoForge
-- **Fullscreen mode** — great for events and presentations
-- **Simple config** — precise control over displays and playback
-- **Permissions** — fine-grained control with LuckPerms support
-- **Ultra-low network impact** — minimal impact for your traffic
-- **Persistent displays** — settings survive server restarts and unloading
-
-</div>
-
-</td>
-</tr>
-</table>
-
-# Get started
-Now it's your turn! Build your first display, invite your friends, and make displays a part of your world.
-
-- [Install Dream Displays](https://github.com/arnodoelinger/dreamdisplays/wiki/%C2%A71.-Installation)
-- [Create your first display](https://github.com/arnodoelinger/dreamdisplays/wiki/%C2%A72.-Using-displays)
-- [Browse the full wiki](https://github.com/arnodoelinger/dreamdisplays/wiki)
-
----
-
-<sub><img src="https://i.imgur.com/BDbw8NI.png" height="20" alt="Thanks to WHYSUMI for renders"></sub> ∙ Thanks to [@whysumi_official](https://t.me/whysumi_official) for renders.
+The original [Dream Displays](https://github.com/arnodoelinger/dreamdisplays) is by [arnodoelinger](https://github.com/arnodoelinger) and contributors. This fork uses the same [LGPL-3.0](LICENSE) license.
