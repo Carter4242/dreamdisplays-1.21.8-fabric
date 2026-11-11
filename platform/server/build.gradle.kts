@@ -7,6 +7,8 @@ plugins {
     id("dreamdisplays.kotlin-conventions")
     id("dreamdisplays.serialization-conventions")
     id("dreamdisplays.shadow-conventions")
+    // The plugin's own build id (BuildInfo), the build clients are expected to run when [clients] latest_build is unset
+    id("dreamdisplays.build-info")
     alias(libs.plugins.paperweight)
     alias(libs.plugins.platformweaver)
 }

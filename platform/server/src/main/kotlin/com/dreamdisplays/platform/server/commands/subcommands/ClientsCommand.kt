@@ -20,7 +20,7 @@ object ClientsCommand {
     private const val OLDER = "older"
 
     fun execute(sender: CommandSender) {
-        val latest = ClientBuild.normalizeLatest(PaperServer.config.settings.clients.latest_build)
+        val latest = expectedBuild()
         val versions = PlayerManager.getVersions()
         val rows = Bukkit.getOnlinePlayers()
             .filter { V2PlayerTracker.isV2(it.uniqueId) || versions.containsKey(it.uniqueId) }
@@ -36,13 +36,27 @@ object ClientsCommand {
             return
         }
         val differing = rows.count { ClientBuild.differs(it.third, latest) }
-        ServerMessage.CLIENTS_HEADER.sendTo(sender, rows.size.toString(), latest.ifEmpty { "-" }, differing.toString())
+        ServerMessage.CLIENTS_HEADER.sendTo(sender, rows.size.toString(), latest.ifEmpty { "unknown" }, differing.toString())
         rows.forEach { (name, version, commit) ->
             val build = ClientBuild.of(commit) ?: OLDER
             val message = if (ClientBuild.differs(commit, latest)) ServerMessage.CLIENTS_LINE_OUTDATED
             else ServerMessage.CLIENTS_LINE
             message.sendTo(sender, name, version, build)
         }
+    }
+
+    /** The build clients should run: `[clients] latest_build`, else this plugin's own build (empty when unknown). */
+    fun expectedBuild(): String =
+        ClientBuild.expected(PaperServer.config.settings.clients.latest_build, com.dreamdisplays.util.BuildInfo.commit)
+
+    /**
+     * [playerId]'s build label only when it is not the [expectedBuild] (`older` for jars without one), else null; also
+     * null for players without the mod.
+     */
+    fun mismatchLabel(playerId: java.util.UUID): String? {
+        val hello = V2PlayerTracker.helloOf(playerId) ?: return null
+        if (!ClientBuild.differs(hello.buildCommit, expectedBuild())) return null
+        return ClientBuild.of(hello.buildCommit) ?: OLDER
     }
 
     /** Short build label for [playerId] (`1a2b3c4d`, or `older` for jars without one), or null without the mod. */

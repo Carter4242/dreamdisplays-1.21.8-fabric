@@ -338,8 +338,8 @@
   "suggestErrors": "Recent client errors, playback hitches and display commands",
   "suggestDiag": "Show a player's client environment (OS, GPU, yt-dlp, FFmpeg)",
   "suggestDebug": "Show or set how much a player's client logs (quiet, normal, verbose, ultra)",
-  "clientsHeader": "&7D |&f Players with the mod: %s (latest build &e%s&f, &c%s&f on another build)",
+  "clientsHeader": "&7D |&f Players with the mod: %s (expected build &e%s&f, &c%s&f on another build)",
   "clientsLine": "&7D | &f%s &7%s &fbuild &a%s",
-  "clientsLineOutdated": "&7D | &f%s &7%s &fbuild &c%s &7(not latest)",
+  "clientsLineOutdated": "&7D | &f%s &7%s &fbuild &c%s &7(not the expected build)",
   "clientsNone": "&7D |&f No online player has the mod"
 }

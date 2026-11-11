@@ -20,10 +20,23 @@ object ClientBuild {
         return hex.take(8) + trimmed.removePrefix(hex)
     }
 
-    /** True when a latest build is configured and [buildCommit] is not it (older jars count as differing). */
-    fun differs(buildCommit: String?, latest: String): Boolean {
-        val want = normalizeLatest(latest)
-        if (want.isEmpty()) return false
-        return of(buildCommit) != want
+    /** The commit part of a build id (`1a2b3c4d` of `1a2b3c4d-dev-dirty`), or null when it has none (`unknown`). */
+    fun commitOf(build: String?): String? =
+        build?.trim()?.lowercase()?.takeWhile { it in 'a'..'f' || it in '0'..'9' }?.take(8)?.takeIf { it.length >= 7 }
+
+    /**
+     * The build clients are expected to run: `[clients] latest_build` when set, else the server plugin's own build
+     * [serverBuild] (both clients and server are built from the same commits); empty when neither is known.
+     */
+    fun expected(latest: String, serverBuild: String?): String =
+        normalizeLatest(latest).ifEmpty { serverBuild?.let(::of)?.takeIf { commitOf(it) != null }.orEmpty() }
+
+    /**
+     * True when an [expected] build is known and [buildCommit] is from another commit. The `-dev` / `-dirty` suffixes
+     * are ignored, so a local build of the same commit matches; jars without a build id always differ.
+     */
+    fun differs(buildCommit: String?, expected: String): Boolean {
+        val want = commitOf(normalizeLatest(expected)) ?: return false
+        return commitOf(of(buildCommit)) != want
     }
 }

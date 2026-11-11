@@ -60,6 +60,9 @@ class PaperServer : JavaPlugin() {
 
     /** Initializes scheduler, storage, listeners, channels, and metrics. Safe to call from a reload. */
     fun doEnable() {
+        org.slf4j.LoggerFactory.getLogger(PaperServer::class.java).info(
+            "Enabling DreamDisplays {} (build {})", pluginMeta.version, com.dreamdisplays.util.BuildInfo.commit,
+        )
         ServerCoroutines.warmUp()
         TelemetryMetrics.warmUp()
 

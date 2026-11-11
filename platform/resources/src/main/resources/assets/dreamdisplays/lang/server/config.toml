@@ -150,7 +150,8 @@ prepare_timeout_seconds = 600
 
 [clients]
 # Build id (commit, as in the "joined with Dream Displays" log line) of the current client jar.
-# /display clients marks players on any other build; unset = mark nobody.
+# /display clients and /display stats mark players on any other commit (-dev / -dirty suffixes ignored);
+# unset = expect this plugin's own build (logged at startup as "Enabling DreamDisplays ... (build ...)").
 # latest_build = "1a2b3c4d"
 
 # Ask clients to report display errors and playback hitches (op-only: /display errors, /display diag).

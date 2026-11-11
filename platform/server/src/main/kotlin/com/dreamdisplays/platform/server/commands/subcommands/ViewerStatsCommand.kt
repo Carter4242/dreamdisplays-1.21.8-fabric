@@ -81,9 +81,12 @@ object ViewerStatsCommand {
         return "${r.hitchesLastMinute.coerceAtMost(9_999)}/min ($cause, worst ${r.worstGapMs.coerceIn(0, 999_999)}ms)"
     }
 
-    /** The viewer's name with its client build (`Steve [1a2b3c4d]`, `[older]` for jars without one). */
+    /**
+     * The viewer's name, with its client build only when that is not the expected one (`Steve [1a2b3c4d-dev]`,
+     * `[older]` for jars without one).
+     */
     private fun withBuild(e: ViewerEntry): String =
-        ClientsCommand.buildLabel(e.playerId)?.let { "${e.playerName} [$it]" } ?: e.playerName
+        ClientsCommand.mismatchLabel(e.playerId)?.let { "${e.playerName} [$it]" } ?: e.playerName
 
     private fun summary(sender: CommandSender, s: ViewerSummary) {
         ServerMessage.VIEWER_STATS_SUMMARY.sendTo(
