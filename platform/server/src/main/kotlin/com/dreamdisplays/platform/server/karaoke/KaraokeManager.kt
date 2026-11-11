@@ -412,6 +412,7 @@ object KaraokeManager {
     fun tick() {
         if (states.isEmpty()) {
             if (stagesBySinger.isNotEmpty()) stagesBySinger = emptyMap()
+            voice?.retain(emptySet())
             syncTrackVolume()
             return
         }
@@ -478,6 +479,8 @@ object KaraokeManager {
         }
         leads = newLeads
         stagesBySinger = stages
+        // A voice frame in flight while a singer was removed can have made fresh voice state after it was dropped
+        voice?.retain(stages.keys)
         syncTrackVolume()
     }
 

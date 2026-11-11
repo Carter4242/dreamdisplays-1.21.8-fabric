@@ -91,6 +91,12 @@ interface KaraokeVoice {
     /** Drops [singerId]'s voice state (no longer singing). */
     fun forget(singerId: UUID)
 
+    /**
+     * Drops the voice state of everyone not in [singers] (who sing now). Catches state a voice frame still in flight
+     * made after [forget].
+     */
+    fun retain(singers: Set<UUID>)
+
     companion object {
         const val LATE_WINDOW_MS = 15_000L
     }

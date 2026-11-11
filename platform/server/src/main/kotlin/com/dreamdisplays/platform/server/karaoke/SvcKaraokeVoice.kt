@@ -106,6 +106,11 @@ class SvcKaraokeVoice : KaraokeVoice {
         toldPrivate.remove(singerId)
     }
 
+    override fun retain(singers: Set<UUID>) {
+        if (voices.keys.all { it in singers }) return
+        voices.keys.filter { it !in singers }.forEach(::forget)
+    }
+
     private inner class Addon : VoicechatPlugin {
         override fun getPluginId(): String = PLUGIN_ID
 
