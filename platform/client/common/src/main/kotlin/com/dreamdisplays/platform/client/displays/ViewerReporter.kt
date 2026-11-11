@@ -1,8 +1,10 @@
 package com.dreamdisplays.platform.client.displays
 
+import com.dreamdisplays.core.diagnostics.ReportScrubber
 import com.dreamdisplays.core.protocol.common.packets.ViewerReport
 import com.dreamdisplays.core.protocol.common.packets.ViewerState
 import com.dreamdisplays.platform.client.Initializer
+import com.dreamdisplays.platform.client.capabilities.ClientEnvironmentProbe
 import java.util.*
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -25,6 +27,14 @@ object ViewerReporter {
     }
 
     private val tracks = HashMap<UUID, Track>()
+    private val homes by lazy { ClientEnvironmentProbe.homes() }
+
+    /**
+     * An error as a viewer report carries it: scrubbed like detailed error reports (home folder, signed URLs, cookies)
+     * before it is cut, since these go to every server that asks for viewer stats.
+     */
+    internal fun errorMessage(raw: String?, homes: Collection<String>): String =
+        ReportScrubber.scrub(raw.orEmpty(), homes).take(MAX_MESSAGE)
 
     fun tick() {
         val interval = ServerOverrides.settings.reportIntervalMs
@@ -87,7 +97,7 @@ object ViewerReporter {
             positionMs = screen.currentTimeNanos / 1_000_000L,
             qualityHeight = runCatching { screen.playbackQuality.targetHeight ?: 0 }.getOrDefault(0),
             errorKind = error?.kind?.name ?: "",
-            errorMessage = (error?.message ?: "").take(MAX_MESSAGE),
+            errorMessage = errorMessage(error?.message, homes),
             hitchesLastMinute = hitches.count,
             hitchTopCause = hitches.topCause,
             worstGapMs = hitches.worstGapMs,
