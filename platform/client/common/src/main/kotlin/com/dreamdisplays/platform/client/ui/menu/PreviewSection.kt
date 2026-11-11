@@ -58,6 +58,10 @@ class PreviewSection(
     private val dropdown: PopoutDropdown,
     private val audioTrackDropdown: AudioTrackDropdown,
     private val subtitleDropdown: SubtitleDropdown,
+    /** "Skip to the next queued video", right of pause; laid out only while visible. */
+    private val skipButton: IconButton? = null,
+    /** Title of the next queued video, shown as a third overlay line; null hides the line. */
+    private val upNext: () -> String? = { null },
 ) {
     // Owned by DisplayScreen (not this section) so the last decoded frame — and its GPU texture —
     // survive closing and reopening the menu instead of needing a fresh push before showing anything.
@@ -87,7 +91,10 @@ class PreviewSection(
         val innerW = panel.w - UiTheme.PANEL_PADDING_X * 2
 
         val controlsRowY = panel.bottom - UiTheme.PANEL_PADDING_Y - btn
-        val controlsRight = innerX + innerW
+        // The queue's skip button takes the right-most slot; everything else shifts left by its width
+        val skipShown = skipButton?.visible == true
+        skipButton?.place(UiRect(innerX + innerW - btn, controlsRowY, btn, btn))
+        val controlsRight = innerX + innerW - if (skipShown) btn + 4 else 0
         val previewMaxH = controlsRowY - innerY - 6
 
         drawVideoArea(g, innerX, innerY, innerW, previewMaxH)
@@ -412,7 +419,8 @@ class PreviewSection(
         val textW = w - padX * 2
         var shown = UiText.trim(font, title, textW)
 
-        val boxH = font.lineHeight * 2 + padY * 3
+        val next = upNext()
+        val boxH = font.lineHeight * 2 + padY * 3 + if (next != null) font.lineHeight + padY else 0
         val boxY = y - boxH
         g.fill(x, boxY, x + w, y, UiTheme.OVERLAY_SCRIM)
 
@@ -481,6 +489,10 @@ class PreviewSection(
             font, UiText.trim(font, parts.toString(), metaW),
             metaX, metaY, UiTheme.TEXT_SECONDARY, false,
         )
+        if (next != null) {
+            val label = ClientMessage.QUEUE_NEXT.text(next)
+            g.drawText(font, UiText.trim(font, label, textW), x + padX, metaY + font.lineHeight + padY, UiTheme.ACCENT, false)
+        }
     }
 
     private fun formatCompactCount(v: Long): String = when {

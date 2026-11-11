@@ -18,7 +18,10 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * Server can resolve region membership (i.e. `WorldGuard` is installed), so the region access
      * level is a real choice.
      */
-    REGION_ACCESS("region_access");
+    REGION_ACCESS("region_access"),
+
+    /** Server runs per-display "Up next" queues (QueueState / QueueAction / QueuePreload). */
+    QUEUE("queue");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */

@@ -117,6 +117,21 @@ allowed_hosts = []
 # blocked_hosts = ["bad.example"]
 blocked_hosts = []
 
+[queue]
+# "Up next": players queue videos from the display menu and a synced / broadcast display moves on to the next
+# one, for everyone, when the current video ends. Whoever may change a display's video may queue and skip;
+# the owner / admins may also reorder, clear and loop. Players without the new client version just see the
+# video change when the queue advances.
+enabled = true
+
+# Most videos one display may have waiting, and per player (the display's owner is exempt). 0 = no limit
+max_items = 50
+max_per_player = 10
+
+# Start hold, in ms, for the next video when every nearby viewer that can preload reported it ready
+# (otherwise the normal 5 s start hold applies)
+ready_hold_ms = 300
+
 [fullscreen]
 # Default visual sub-mode when /display fullscreen start omits one: "STANDARD" or "IMMERSIVE"
 default_mode = "STANDARD"
@@ -172,6 +187,7 @@ name = "dreamdisplays.name"                                     # Default: every
 schedule = "dreamdisplays.schedule"                             # Default: everyone
 name_others = "dreamdisplays.name.others"                       # Default: operator
 schedule_others = "dreamdisplays.schedule.others"               # Default: operator
+queue = "dreamdisplays.queue"                                   # Default: operator (the /display queue command)
 delete_others = "dreamdisplays.delete.others"                   # Default: operator
 list = "dreamdisplays.list"                                     # Default: operator
 stats = "dreamdisplays.stats"                                   # Default: operator

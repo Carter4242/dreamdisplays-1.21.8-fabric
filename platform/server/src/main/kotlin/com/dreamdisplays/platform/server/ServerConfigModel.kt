@@ -27,6 +27,7 @@ data class SettingsSection(
     val display: DisplayConfig = DisplayConfig(),
     val fullscreen: FullscreenConfig = FullscreenConfig(),
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
+    val queue: QueueConfig = QueueConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
     val policy: DisplayPolicy = DisplayPolicy.EMPTY,
     val clients: ClientsConfig = ClientsConfig(),
@@ -91,6 +92,17 @@ data class SettingsSection(
     val fullscreenDefaultMode: FullscreenMode
         get() = runCatching { FullscreenMode.valueOf(fullscreen.default_mode.uppercase()) }
             .getOrDefault(FullscreenMode.STANDARD)
+
+    /**
+     * `[queue]` section: per-display "Up next" lists on synced / broadcast displays. Caps of 0 or less mean none;
+     * the owner of a display is exempt from [max_per_player] on it.
+     */
+    data class QueueConfig(
+        val enabled: Boolean = true,
+        val max_items: Int = 50,
+        val max_per_player: Int = 10,
+        val ready_hold_ms: Int = 300,
+    )
 
     /** Reports section. */
     data class ReportsConfig(
@@ -208,6 +220,7 @@ data class PermissionsSection(
     val nameOthers get() = permissions.name_others
     val schedule get() = permissions.schedule
     val scheduleOthers get() = permissions.schedule_others
+    val queue get() = permissions.queue
 
     data class PermissionsConfig(
         val create: String = "dreamdisplays.create",
@@ -238,6 +251,7 @@ data class PermissionsSection(
         val name_others: String = "dreamdisplays.name.others",
         val schedule: String = "dreamdisplays.schedule",
         val schedule_others: String = "dreamdisplays.schedule.others",
+        val queue: String = "dreamdisplays.queue",
     )
 }
 
@@ -299,6 +313,12 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             allowed_hosts = stringList(t, "custom_media.allowed_hosts"),
             blocked_hosts = stringList(t, "custom_media.blocked_hosts"),
         ),
+        queue = SettingsSection.QueueConfig(
+            enabled = t?.getBoolean("queue.enabled") ?: true,
+            max_items = t.numberOrNull("queue.max_items")?.toInt()?.coerceIn(0, 500) ?: 50,
+            max_per_player = t.numberOrNull("queue.max_per_player")?.toInt()?.coerceIn(0, 500) ?: 10,
+            ready_hold_ms = t.numberOrNull("queue.ready_hold_ms")?.toInt()?.coerceIn(0, 5_000) ?: 300,
+        ),
         policy = parsePolicy(t),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
@@ -352,6 +372,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             name_others = t?.getString("permissions.name_others") ?: "dreamdisplays.name.others",
             schedule = t?.getString("permissions.schedule") ?: "dreamdisplays.schedule",
             schedule_others = t?.getString("permissions.schedule_others") ?: "dreamdisplays.schedule.others",
+            queue = t?.getString("permissions.queue") ?: "dreamdisplays.queue",
         )
     ),
     proxy = ProxySection(

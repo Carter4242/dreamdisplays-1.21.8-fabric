@@ -16,6 +16,7 @@ import com.dreamdisplays.platform.server.registrar.CommandRegistrar
 import com.dreamdisplays.platform.server.registrar.ListenerRegistrar
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
+import com.dreamdisplays.platform.server.utils.net.QueueActions
 import io.github.arnodoelinger.platformweaver.PaperOnly
 //? if >=1.20.5 {
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
@@ -91,6 +92,10 @@ class PaperServer : JavaPlugin() {
         FullscreenBroadcastManager.restore()
         PipPinManager.init(PaperPlaybackTransport)
         PipPinManager.restore()
+        QueueManager.init(PaperPlaybackTransport)
+        QueueManager.settings = QueueActions::settings
+        QueueManager.applyVideo = QueueActions::applyVideo
+        QueueManager.restore()
         ScheduledPlaybackManager.init(PaperPlaybackTransport)
         ScheduledPlaybackManager.restoreOnStartup()
 
@@ -132,6 +137,7 @@ class PaperServer : JavaPlugin() {
         if (!::storage.isInitialized) return
         disableStep("stop addons") { PaperServerApi.stop() }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
+        disableStep("save queues") { QueueManager.flush() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }
         disableStep("close storage") { storage.disconnect() }
     }

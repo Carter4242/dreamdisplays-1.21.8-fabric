@@ -193,16 +193,32 @@ object TimelineManager {
         }
     }
 
-    /** Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused for [START_HOLD_MS]. */
-    fun onVideoChanged(display: DisplayData) {
+    /**
+     * Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused for [holdMs]
+     * ([START_HOLD_MS] unless the queue knows every viewer already has the video ready); 0 plays at once.
+     */
+    fun onVideoChanged(display: DisplayData, holdMs: Long = START_HOLD_MS) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
         val now = transport.nowMs()
+        if (holdMs <= 0L) {
+            startHolds.remove(display.id)
+            val playing = Timeline.start(now, paused = false, loop = true)
+            timelines[display.id] = playing
+            broadcast(display, playing)
+            return
+        }
         val fresh = Timeline.start(now, paused = true, loop = true)
         timelines[display.id] = fresh
-        startHolds[display.id] = now + START_HOLD_MS
+        startHolds[display.id] = now + holdMs
         broadcast(display, fresh)
     }
+
+    /** The authoritative timeline of [displayId], or null when it has none (`LOCAL`, watch party, unknown). */
+    fun timelineOf(displayId: UUID): Timeline? = timelines[displayId]
+
+    /** True while [displayId] sits in a start hold (paused, about to start by itself). */
+    fun isHolding(displayId: UUID): Boolean = startHolds.containsKey(displayId)
 
     /**
      * Applies a client-reported media duration for [display]'s current video.
