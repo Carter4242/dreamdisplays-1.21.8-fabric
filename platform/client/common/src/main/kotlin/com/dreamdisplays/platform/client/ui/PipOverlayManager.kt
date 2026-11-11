@@ -43,6 +43,22 @@ object PipOverlayManager : OverlayManager {
         return true
     }
 
+    /**
+     * Destroys [ds]'s overlays at once, with no close animation (which would keep showing their last frame while it
+     * fades): a screen share that ended. Render thread; queued there when called from another.
+     */
+    fun removeNow(ds: DisplayScreen) {
+        val mc = Minecraft.getInstance()
+        if (!mc.isSameThread) {
+            mc.execute { removeNow(ds) }
+            return
+        }
+        val gone = overlays.filter { it.displayScreen === ds }
+        if (gone.isEmpty()) return
+        gone.forEach { it.cleanup(mc) }
+        overlays.removeAll(gone)
+    }
+
     /** Starts the close animation for any overlay belonging to [ds]. */
     fun remove(ds: DisplayScreen) {
         overlays.filter { it.displayScreen === ds }.forEach { it.startClose() }

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.storage
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.display.model.settings.ClientDisplaySettings
 import com.dreamdisplays.api.display.model.settings.ClientSettingsStorage
@@ -38,6 +39,11 @@ object ClientSettingsStore : ClientSettingsStorage {
             jsonFiles.readVersioned(jsonFiles.file(FILE_NAME), settingsSerializer, SCHEMA_VERSION, logger) ?: return
         settings.clear()
         loaded.forEach { (key, value) ->
+            // Older files may hold a live relay URL override: dropped on load, gone from the file on the next save
+            if (!ScreenSharePrivacy.mayPersist(value.urlOverride)) {
+                value.urlOverride = null
+                value.langOverride = null
+            }
             runCatching { settings[UUID.fromString(key)] = value }
                 .onFailure { logger.error("Invalid UUID in client display settings: $key.") }
         }
@@ -84,8 +90,10 @@ object ClientSettingsStore : ClientSettingsStorage {
 
     override fun setUrlOverride(displayUuid: UUID, url: String?, lang: String?) {
         val s = getSettings(displayUuid)
-        s.urlOverride = url
-        s.langOverride = lang
+        // A screen share / live relay URL is never written to client-display-settings.json
+        val keep = url?.takeIf(ScreenSharePrivacy::mayPersist)
+        s.urlOverride = keep
+        s.langOverride = lang.takeIf { keep != null }
         save()
     }
 

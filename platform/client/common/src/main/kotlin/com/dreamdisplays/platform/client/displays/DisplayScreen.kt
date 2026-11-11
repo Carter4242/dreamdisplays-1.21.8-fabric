@@ -36,6 +36,8 @@ import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.watchparty.WatchPartySession
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.*
+import com.dreamdisplays.core.share.ScreenSharePrivacy
+import com.dreamdisplays.core.share.ScreenShareViewerRules
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.audio.ListenerPoseTracker
@@ -532,7 +534,39 @@ class DisplayScreen(
     private var lastPacketLang: String? = null
 
     /** True once the video is effectively playing: not awaiting the initial timeline and a frame has filled. */
-    val isVideoStarted: Boolean get() = !stillWaitingForInitialTimeline() && (hasEverRendered || mediaPlayer?.textureFilled() == true)
+    val isVideoStarted: Boolean
+        get() = !stillWaitingForInitialTimeline() && !privatePictureHidden() &&
+                (hasEverRendered || mediaPlayer?.textureFilled() == true)
+
+    /**
+     * True while this display plays a private (screen share / relay) stream whose picture must not be drawn: off the
+     * air, reconnecting or stalled. The "no video" look shows instead, never the held last frame.
+     */
+    private fun privatePictureHidden(): Boolean {
+        val mp = mediaPlayer ?: return false
+        return ScreenShareViewerRules.hidePicture(
+            videoUrl, mp.isRelayPictureStale(ScreenShareViewerRules.STALE_PICTURE_NANOS),
+        )
+    }
+
+    /** [privatePictureHidden] as of the last [tick], to drop the picture once when it goes stale. */
+    private var privatePictureWasHidden = false
+
+    /**
+     * Drops every copy of the current private stream's picture: the display texture (reallocated blank), the player's
+     * ready frame, the menu preview, and any popout window / PiP / fullscreen overlay of it (closed at once, no fade).
+     * The display shows the "no video" look until a new frame arrives.
+     */
+    internal fun dropPrivatePicture(reason: String) {
+        logger.info("Display {}: dropping the live picture ({}).", uuid, reason)
+        popoutManager.closeImmediately(mediaPlayer)
+        previewFrameCache?.clear()
+        mediaPlayer?.clearFrame()
+        hasEverRendered = false
+        firstFrameNanos = 0L
+        val mc = Minecraft.getInstance()
+        if (mc.isSameThread) createTexture() else mc.execute { createTexture() }
+    }
 
     private var publishedVideoStarted = false
 
@@ -621,7 +655,9 @@ class DisplayScreen(
     val mediaPlayerDurationNanos: Long get() = mediaPlayer?.getDuration() ?: 0L
 
     /** Raw stream URL for seek-bar scrub-preview frame extraction; null for live/unresolved. */
-    val scrubPreviewRawUrl: String? get() = mediaPlayer?.capturedStreamRawUrl()
+    val scrubPreviewRawUrl: String?
+        get() = if (!ScreenSharePrivacy.mayPreview(videoUrl)) null
+        else mediaPlayer?.capturedStreamRawUrl()?.takeIf(ScreenSharePrivacy::mayPreview)
 
     /** Whether scrub previews for this display must seek by decoding forward; see `MediaStream.seekByDecoding`. */
     val scrubPreviewSeeksByDecoding: Boolean get() = mediaPlayer?.capturedStreamSeeksByDecoding() == true
@@ -720,6 +756,15 @@ class DisplayScreen(
         pendingSubtitleLangRestore = savedSettings.subtitleTrackLang.takeIf { savedSettings.subtitlesEnabled }
     }
 
+    /** The media controller stopped the player with nothing next ([DisplayMediaController.unload]). */
+    internal fun onVideoCleared(lang: String) {
+        videoUrl = ""
+        this.lang = lang
+        waitingForInitialTimeline = false
+        waitingSinceNanos = 0L
+        privatePictureWasHidden = false
+    }
+
     /** True while the screen is holding back the picture until the server's first timeline arrives. */
     internal val isWaitingForInitialTimeline: Boolean get() = stillWaitingForInitialTimeline()
 
@@ -811,6 +856,15 @@ class DisplayScreen(
         if (videoUrl != packet.url || lastPacketLang != packet.lang) {
             val previousUrl = videoUrl
             lastPacketLang = packet.lang
+            // A screen share (any private relay stream) ended here: nothing of it stays up, not even until the next
+            // video's first frame, and with nothing next the player stops instead of holding its last picture
+            if (ScreenShareViewerRules.clearOnUrlChange(previousUrl, packet.url)) {
+                dropPrivatePicture("display URL changed")
+                if (ScreenShareViewerRules.stopPlayerOnUrlChange(previousUrl, packet.url)) {
+                    media.unload(packet.lang)
+                    return
+                }
+            }
             if (clientUrlOverride && canSetVideoHere) return
             if (clientUrlOverride) {
                 clientUrlOverride = false
@@ -1292,7 +1346,7 @@ class DisplayScreen(
 
     private fun captureReplayCache() {
         if (mode != PlaybackMode.LOCAL || watchParty != null || isLive) return
-        val url = videoUrl ?: return
+        val url = videoUrl?.takeIf(ScreenSharePrivacy::maySnapshot) ?: return
         val mp = mediaPlayer ?: return
         val position = currentTimeNanos
         val started = System.nanoTime()
@@ -1388,7 +1442,8 @@ class DisplayScreen(
     /** Whether this display can be parked warm when it leaves render distance (Local VOD on the
      *  in-process-libav decoder), rather than torn down and rebuilt from a snapshot on return. */
     fun canWarmPark(): Boolean =
-        mode == PlaybackMode.LOCAL && watchParty == null && !isLive && mediaPlayer?.canPark() == true
+        mode == PlaybackMode.LOCAL && watchParty == null && !isLive && ScreenSharePrivacy.maySnapshot(videoUrl) &&
+                mediaPlayer?.canPark() == true
 
     /** Parks the display warm: stops rendering/advancing but keeps the decoder + audio open and frozen. */
     fun goDormant() {
@@ -1442,6 +1497,14 @@ class DisplayScreen(
     /** Called every game tick to update distance-based volume attenuation from [pos]. */
     fun tick(pos: BlockPos) {
         recoverMediaErrorIfDue()
+        val hidden = privatePictureHidden()
+        // Once when the picture goes stale, if any copy of it is up (texture drawn, popout, menu preview)
+        if (hidden && !privatePictureWasHidden && ScreenSharePrivacy.isPrivateStream(videoUrl) &&
+            (hasEverRendered || isPopoutActive || previewFrameCache != null)
+        ) {
+            dropPrivatePicture("live stream not delivering")
+        }
+        privatePictureWasHidden = hidden
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
         tickPolicyGain()

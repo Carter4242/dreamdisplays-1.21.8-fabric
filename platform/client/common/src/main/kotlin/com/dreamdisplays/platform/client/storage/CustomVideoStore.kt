@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.storage
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.api.media.search.MediaSearchResult
 import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.CustomVideoRecord
@@ -22,7 +23,8 @@ object CustomVideoStore {
         val loaded = jsonFiles.readVersioned(jsonFiles.file(FILE_NAME), entriesSerializer, SCHEMA_VERSION, logger)
             ?: return
         entries.clear()
-        entries.addAll(loaded.sortedByDescending { it.lastUsedAtMs }.take(MAX_ENTRIES))
+        // Older files may hold live relay URLs: dropped on load, gone from the file on the next save
+        entries.addAll(loaded.filter { ScreenSharePrivacy.mayPersist(it.url) }.sortedByDescending { it.lastUsedAtMs }.take(MAX_ENTRIES))
     }
 
     /** The remembered links, most recently used first. */
@@ -37,7 +39,9 @@ object CustomVideoStore {
      * first paste).
      */
     fun remember(url: String, title: String? = null) {
-        val normalized = CustomMediaUrls.normalize(url) ?: return
+        // A screen share / live relay URL is never written to custom-videos.json
+        if (!ScreenSharePrivacy.mayPersist(url)) return
+        val normalized = CustomMediaUrls.normalize(url)?.takeIf(ScreenSharePrivacy::mayPersist) ?: return
         val existing = entries.firstOrNull { it.url == normalized }
         entries.remove(existing)
         entries.add(

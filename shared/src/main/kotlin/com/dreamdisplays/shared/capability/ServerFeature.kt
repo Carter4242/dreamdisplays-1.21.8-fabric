@@ -42,7 +42,13 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * This player may share their screen to a display (`ScreenShareRequest` / `ScreenShareState`): the server has a
      * relay configured and the player holds the share permission. Sent per player.
      */
-    SCREEN_SHARE("screen_share");
+    SCREEN_SHARE("screen_share"),
+
+    /**
+     * The server takes screen-share heartbeats (`ScreenShareRequest.heartbeat`) and ends a share whose sharer stops
+     * sending them. Sent together with [SCREEN_SHARE]; clients send no heartbeats otherwise.
+     */
+    SCREEN_SHARE_HEARTBEAT("screen_share_heartbeat");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */

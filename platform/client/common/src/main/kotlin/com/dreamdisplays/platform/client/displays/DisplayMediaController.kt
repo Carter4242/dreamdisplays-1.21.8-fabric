@@ -6,6 +6,7 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
+import com.dreamdisplays.core.share.ScreenShareViewerRules
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.core.DreamServices
@@ -51,7 +52,11 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         // A queue entry this client preloaded in the background becomes the player as is: already resolved,
         // buffered and parked warm on its first frame
         val taken = screen.queuePreloader.takeDetached(videoUrl, lang)
-        if (taken != null && screen.followsServerTimeline && player != null && videoStarted && !screen.isPaused) {
+        // Never a seamless hand-off away from a screen share: its last frame must not stay up until the next video's
+        // first one
+        if (taken != null && screen.followsServerTimeline && player != null && videoStarted && !screen.isPaused &&
+            ScreenShareViewerRules.maySwapSeamlessly(screen.videoUrl)
+        ) {
             // The server switches a moment before the current video ends and schedules the next one at its end
             // instant: this video plays on (or holds its last frame) until then, see onTimelineWhileSwitching
             pendingSwitch = PendingSwitch(videoUrl, lang, preservePausedState, taken).also {
@@ -61,6 +66,26 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         }
         taken?.adopt()
         swapIn(videoUrl, lang, preservePausedState, taken?.player, seamless = false)
+    }
+
+    /**
+     * The display has nothing to play any more after a private stream (a screen share ended on a display that had no
+     * video before): the current player stops and nothing replaces it. The caller has already dropped the picture.
+     */
+    fun unload(lang: String) {
+        cancelPendingSwitch()
+        generation.incrementAndGet()
+        val oldPlayer = player
+        player = null
+        videoStarted = false
+        screen.mediaError = null
+        screen.timelineFollower.reset()
+        oldPlayer?.setPopoutSink(null)
+        oldPlayer?.setPreviewSink(null)
+        oldPlayer?.stop()
+        screen.onVideoCleared(lang)
+        DisplayRegistry.recordScreen(screen)
+        Minecraft.getInstance().execute { screen.reloadTexture() }
     }
 
     /** A queue switch waiting for its scheduled start: the current player keeps playing until then. */

@@ -5,11 +5,15 @@ import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
 import com.dreamdisplays.core.protocol.common.packets.ResolveAttemptReport
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
+import com.dreamdisplays.core.share.ScreenShareCaptureRules
+import com.dreamdisplays.core.share.ScreenShareCaptureRules.StopReason
+import com.dreamdisplays.core.share.ScreenShareServerRules
 import com.dreamdisplays.media.player.process.FFmpegBinary
-import com.dreamdisplays.media.player.process.MediaProcess
 import com.dreamdisplays.media.player.process.ScreenCapture
+import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
+import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager
 import com.dreamdisplays.platform.client.ui.ClientMessage
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.drawText
@@ -22,8 +26,13 @@ import java.util.*
 
 /**
  * The built-in "Share screen": asks the server for a share on a display, then runs an `FFmpeg` capture of the picked
- * monitor publishing to the relay URL the server hands back (see [ScreenCapture]). Video only. Everything but [start]
- * may be called from any thread.
+ * monitor publishing to the relay URL the server hands back (see [ScreenCapture]). Video only.
+ *
+ * Privacy first: the capture is killed outright (`destroyForcibly` on its process tree, before the server is told) on
+ * Stop, on any lifecycle event that ends the share (see [ScreenShareCaptureRules.StopReason]) and on any capture
+ * error; a watchdog in [tick] kills any capture process still running that should not be, and a JVM shutdown hook
+ * (in [ScreenCaptureProcesses]) kills it when the game quits. A HUD badge shows while any capture runs. Everything but
+ * [start] and [tick] may be called from any thread.
  */
 object ScreenShare {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -31,6 +40,8 @@ object ScreenShare {
     private class Running(
         val displayId: UUID,
         val monitor: ScreenCapture.Monitor,
+        /** What the display showed when the share was asked for (see [ScreenShareCaptureRules.Observation]). */
+        val urlBeforeShare: String?,
         /** The server asked for x264 only. */
         val softwareOnly: Boolean = false,
         val settings: ScreenCapture.Settings = ScreenCapture.Settings(),
@@ -40,13 +51,20 @@ object ScreenShare {
 
         @Volatile
         var stopped = false
+
+        /** The share's URL as first seen on the display (see [ScreenShareCaptureRules.shareUrlAfter]). */
+        var shareUrl: String? = null
+
+        var lastHeartbeatMs = 0L
     }
+
+    private val lock = Any()
 
     @Volatile
     private var running: Running? = null
 
-    /** Monitor asked for per display, until the server answers. */
-    private val pending = Collections.synchronizedMap(HashMap<UUID, ScreenCapture.Monitor>())
+    /** Monitor asked for per display, and what the display showed then, until the server answers. */
+    private val pending = Collections.synchronizedMap(HashMap<UUID, Pair<ScreenCapture.Monitor, String?>>())
 
     /** True when this server lets this player share, and this OS has a capture source. */
     val available: Boolean
@@ -125,40 +143,108 @@ object ScreenShare {
     /** Asks the server to let this client share [monitor] to [displayId]; capture starts once it agrees. */
     fun start(displayId: UUID, monitor: ScreenCapture.Monitor) {
         if (!available) return
-        pending[displayId] = monitor
+        pending[displayId] = monitor to DisplayRegistry.screens[displayId]?.videoUrl
         Initializer.sendPacket(ScreenShareRequest(displayId, start = true))
     }
 
-    /** Stops sharing (encoder and server share both). */
+    /** Stops sharing: the capture is killed first, then the server ends the share. */
     fun stop() {
-        val r = running ?: return
-        stopCapture(r)
-        Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false))
+        pending.clear()
+        running?.let { stop(it, StopReason.USER_STOP) }
     }
 
-    /** The server's answer or a change it made (share replaced, display gone). */
+    /** The server's answer or a change it made (share ended, replaced, display gone). */
     fun onState(state: ScreenShareState) {
         if (state.active && state.publishUrl.isNotEmpty()) {
             val current = running
-            if (current != null && current.displayId == state.id) {
+            if (current != null && current.displayId == state.id && !current.stopped) {
                 pending.remove(state.id) // Already encoding to it
                 return
             }
-            val monitor = pending.remove(state.id) ?: return
-            current?.let(::stopCapture)
+            val asked = pending.remove(state.id)
+            if (asked == null) {
+                // A share nobody here asked for (any more): end it on the server instead of leaving it waiting
+                Initializer.sendPacket(ScreenShareRequest(state.id, start = false))
+                return
+            }
+            current?.let { stop(it, StopReason.SERVER_ENDED) }
             val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight)
-            launch(Running(state.id, monitor, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings), state.publishUrl)
+            launch(
+                Running(state.id, asked.first, asked.second, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings),
+                state.publishUrl,
+            )
             return
         }
         pending.remove(state.id)
-        running?.takeIf { it.displayId == state.id }?.let(::stopCapture)
+        running?.takeIf { it.displayId == state.id }?.let { stop(it, StopReason.SERVER_ENDED) }
         if (state.error.isNotEmpty()) notify(ClientMessage.SHARE_REFUSED.component(state.error).withStyle(ChatFormatting.RED))
     }
 
-    /** Disconnected or quitting: the server ends the share on its own. */
+    /** Disconnected or switched server: the capture dies now; the server ends the share on its own. */
     fun onServerLeft() {
         pending.clear()
-        running?.let(::stopCapture)
+        running?.let { stop(it, StopReason.SERVER_LEFT) }
+        ScreenCaptureProcesses.killAll()
+    }
+
+    /** The client world changed (dimension change, proxy server switch): the capture dies and the share ends. */
+    fun onLevelChanged() {
+        pending.clear()
+        running?.let { stop(it, StopReason.LEVEL_CHANGED) }
+    }
+
+    /** The game is quitting: kill every capture now (the JVM shutdown hook is the last resort behind this). */
+    fun onShutdown() {
+        pending.clear()
+        running?.let { stop(it, StopReason.SHUTDOWN) }
+        ScreenCaptureProcesses.killAll()
+    }
+
+    /**
+     * Once per client tick: the capture watchdog (kills any capture process that outlived its share), the
+     * display / dimension / range checks of [ScreenShareCaptureRules], and the heartbeat to the server.
+     */
+    fun tick(mc: Minecraft) {
+        runCatching { tickChecks(mc) }.onFailure { e ->
+            logger.warn("Screen share check failed: {}", e.toString())
+            // Fail closed: a share whose checks cannot run is ended
+            running?.let { stop(it, StopReason.CAPTURE_ERROR) }
+            runCatching { ScreenCaptureProcesses.reap(sharing = false, current = null) }
+        }
+    }
+
+    private fun tickChecks(mc: Minecraft) {
+        val r = running
+        ScreenCaptureProcesses.reap(sharing = r != null && !r.stopped, current = r?.process)
+        if (r == null || r.stopped) return
+
+        val screen = DisplayRegistry.screens[r.displayId]
+        val known = screen != null || DisplayRegistry.unloadedScreens.containsKey(r.displayId)
+        val dimension = screen?.dimensionKey?.takeIf { it.isNotEmpty() }
+            ?: DisplayRegistry.unloadedScreens[r.displayId]?.dimensionKey?.takeIf { it.isNotEmpty() }
+        val here = DisplayLifecycleManager.currentDimensionKey().takeIf { it.isNotEmpty() }
+        val playerPos = mc.player?.blockPosition()
+        val observation = ScreenShareCaptureRules.Observation(
+            displayKnown = known,
+            displayUrl = screen?.videoUrl,
+            shareUrl = r.shareUrl,
+            sameDimension = if (dimension != null && here != null) dimension == here else null,
+            distanceBlocks = if (screen != null && playerPos != null) screen.getDistanceToScreen(playerPos) else null,
+            urlBeforeShare = r.urlBeforeShare,
+        )
+        r.shareUrl = ScreenShareCaptureRules.shareUrlAfter(observation)
+        ScreenShareCaptureRules.check(observation.copy(shareUrl = r.shareUrl))?.let { reason ->
+            stop(r, reason)
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - r.lastHeartbeatMs >= ScreenShareServerRules.HEARTBEAT_INTERVAL_MS &&
+            ClientPacketManager.serverSnapshot.hasFeature(ServerFeature.SCREEN_SHARE_HEARTBEAT)
+        ) {
+            r.lastHeartbeatMs = now
+            Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false, heartbeat = true))
+        }
     }
 
     private fun launch(r: Running, publishUrl: String) {
@@ -224,13 +310,17 @@ object ScreenShare {
         announce: Boolean, onSettled: (() -> Unit)? = null,
     ): Ended? {
         val args = ScreenCapture.args(ffmpeg, plan.source, monitor, plan.encoder, publishUrl, r.settings)
-        val proc = runCatching { ProcessBuilder(args).redirectErrorStream(true).start() }.getOrElse {
-            fail(r, LiveStreamUrls.redactCredentials(it.message ?: "could not start FFmpeg"))
-            return null
-        }
-        r.process = proc
-        if (r.stopped) {
-            MediaProcess.gracefulDestroy(proc); return null
+        val proc = synchronized(lock) {
+            // Started and registered under the lock, so a stop racing this (first run or retry) either sees the
+            // process or makes this skip the start
+            if (r.stopped) return null
+            runCatching { ProcessBuilder(args).redirectErrorStream(true).start() }.getOrElse {
+                fail(r, LiveStreamUrls.redactCredentials(it.message ?: "could not start FFmpeg"))
+                return null
+            }.also { p ->
+                ScreenCaptureProcesses.register(p)
+                r.process = p
+            }
         }
         val started = System.currentTimeMillis()
         if (announce) notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
@@ -285,32 +375,37 @@ object ScreenShare {
         }.onFailure { logger.debug("Could not build a screen share report.", it) }
     }
 
-    /** Capture died on its own: tell the player and end the share on the server. */
+    /** Capture failed or died on its own: kill what is left, end the share on the server, tell the player. */
     private fun fail(r: Running, why: String) {
         if (r.stopped) return
-        stopCapture(r)
-        Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false))
+        stop(r, StopReason.CAPTURE_ERROR)
         notify(ClientMessage.SHARE_FAILED.component(why).withStyle(ChatFormatting.RED))
     }
 
-    private fun stopCapture(r: Running) {
-        r.stopped = true
-        if (running === r) running = null
-        val proc = r.process ?: return
-        thread("DreamDisplays-screen-share-stop") { quit(proc) }
-    }
-
     /**
-     * Asks `FFmpeg` to finish (`q` on stdin), so it closes the relay connection properly and viewers see the end at
-     * once rather than after the relay's idle timeout; killed if it does not exit within a second and a half.
+     * Ends [r] for [reason]: the capture process tree is force-killed first, on this thread, then the server is told
+     * (when [ScreenShareCaptureRules.tellServer]); a background thread confirms the processes are gone.
      */
-    private fun quit(proc: Process) {
-        runCatching {
-            proc.outputStream.write('q'.code)
-            proc.outputStream.flush()
+    private fun stop(r: Running, reason: StopReason) {
+        val proc = synchronized(lock) {
+            if (r.stopped) return
+            r.stopped = true
+            if (running === r) running = null
+            r.process
         }
-        val exited = runCatching { proc.waitFor(1_500, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
-        if (!exited) MediaProcess.gracefulDestroy(proc)
+        val handles = proc?.let(ScreenCaptureProcesses::kill)
+        if (ScreenShareCaptureRules.tellServer(reason)) {
+            runCatching { Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false)) }
+        }
+        logger.info("Screen share to display {} stopped ({}).", r.displayId, reason.name.lowercase(Locale.ROOT))
+        if (proc != null && handles != null && reason != StopReason.SHUTDOWN) {
+            thread("DreamDisplays-screen-share-stop") {
+                if (!ScreenCaptureProcesses.awaitGone(handles)) {
+                    logger.error("Screen capture process {} survived a forced kill; retrying.", proc.pid())
+                    ScreenCaptureProcesses.killAndVerify(proc)
+                }
+            }
+        }
     }
 
     private fun thread(name: String, body: () -> Unit) =
@@ -318,9 +413,12 @@ object ScreenShare {
 
     private fun notify(message: net.minecraft.network.chat.Component) = DisplayQueues.notifyLocal(message)
 
-    /** The "you are sharing your screen" pill at the top of the HUD, while a share runs. */
+    /**
+     * The "Sharing your screen" badge at the top of the HUD (and under any menu), while a share runs or any capture
+     * process this game started is still alive.
+     */
     fun renderIndicator(mc: Minecraft, g: GuiGraphicsCompat) {
-        if (running == null) return
+        if (running == null && ScreenCaptureProcesses.alive().isEmpty()) return
         val font = mc.font
         val text = "● " + ClientMessage.SHARE_INDICATOR.text()
         val w = font.width(text) + 8

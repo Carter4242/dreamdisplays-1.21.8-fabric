@@ -2,11 +2,14 @@ package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
+import com.dreamdisplays.core.share.ScreenShareServerRules
+import com.dreamdisplays.core.share.ScreenShareServerRules.EndReason
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
+import com.dreamdisplays.platform.server.utils.PlatformUtil
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -21,8 +24,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Built-in screen sharing: a player with the share permission points a display at a live relay stream that their own
  * client publishes (`[live]` relay URLs in the config). The display shows the relay's play URL while the share runs
- * and gets its previous video back when it ends: on request, when the sharer leaves, or when someone sets another
- * video by hand. The share URL is never saved, so a restart mid-share also comes back to the previous video.
+ * and gets its previous video back when it ends: on request, when the sharer leaves, changes world, walks out of
+ * range or stops heartbeating (see [ScreenShareServerRules]), or when an op runs `/display share stop`. Someone setting
+ * another video by hand ends it too (that video stays). The share URL is never saved, so a restart mid-share also comes
+ * back to the previous video.
  */
 @PaperOnly
 @NullMarked
@@ -38,7 +43,11 @@ object ScreenShareActions {
         val streamId: String,
         val previousUrl: String,
         val previousLang: String,
-    )
+    ) {
+        /** When the sharer's last heartbeat (or the start) arrived, epoch ms. */
+        @Volatile
+        var lastHeartbeatMs: Long = System.currentTimeMillis()
+    }
 
     /** Running shares by display. */
     private val byDisplay = ConcurrentHashMap<UUID, Share>()
@@ -51,7 +60,7 @@ object ScreenShareActions {
     fun onRequest(player: Player, displayId: UUID, start: Boolean) {
         if (!start) {
             val share = byDisplay[displayId]
-            if (share != null && (share.sharerId == player.uniqueId || isAdmin(player))) end(share, notifySharer = true)
+            if (share != null && (share.sharerId == player.uniqueId || isAdmin(player))) end(share, EndReason.REQUESTED)
             else reply(player, displayId, active = false)
             return
         }
@@ -63,8 +72,8 @@ object ScreenShareActions {
         // Only this player is ever sent the publish URL (it carries the relay's publish credentials); everyone sees the
         // play URL on the display
         // One share per player: starting on another display ends the old one first
-        byDisplay.values.filter { it.sharerId == player.uniqueId }.forEach { end(it, notifySharer = true) }
-        byDisplay[displayId]?.let { end(it, notifySharer = true) }
+        byDisplay.values.filter { it.sharerId == player.uniqueId }.forEach { end(it, EndReason.REPLACED) }
+        byDisplay[displayId]?.let { end(it, EndReason.REPLACED) }
 
         val live = PaperServer.config.settings.live
         val streamId = newStreamId()
@@ -94,36 +103,103 @@ object ScreenShareActions {
 
     /** Someone set a video by hand: a share on that display is over, and its previous video is not restored. */
     fun onVideoSetByHand(displayId: UUID) {
-        val share = byDisplay.remove(displayId) ?: return
-        Bukkit.getPlayer(share.sharerId)?.let { reply(it, displayId, active = false, error = "Your screen share was replaced.") }
+        val share = byDisplay[displayId] ?: return
+        end(share, EndReason.VIDEO_SET_BY_HAND, error = "Your screen share was replaced.")
     }
 
     /** The sharer left: their shares end and the displays get their previous videos back. */
     fun onPlayerQuit(playerId: UUID) {
-        byDisplay.values.filter { it.sharerId == playerId }.forEach { end(it, notifySharer = false) }
+        byDisplay.values.filter { it.sharerId == playerId }.forEach { end(it, EndReason.SHARER_QUIT) }
+    }
+
+    /** The sharer changed world: their shares end (a display lives in one world). */
+    fun onPlayerChangedWorld(playerId: UUID) {
+        byDisplay.values.filter { it.sharerId == playerId }.forEach { end(it, EndReason.SHARER_CHANGED_WORLD) }
     }
 
     /** The display was deleted: forget its share (the sharer's client stops encoding). */
     fun onDisplayRemoved(displayId: UUID) {
-        val share = byDisplay.remove(displayId) ?: return
-        Bukkit.getPlayer(share.sharerId)?.let { reply(it, displayId, active = false) }
+        val share = byDisplay[displayId] ?: return
+        end(share, EndReason.DISPLAY_REMOVED)
+    }
+
+    /**
+     * The sharing client is still capturing to [displayId]. A heartbeat for a share this server does not know (ended
+     * here, or never started) is answered with "inactive", so a client that missed the end stops capturing.
+     */
+    fun onHeartbeat(player: Player, displayId: UUID) {
+        val share = byDisplay[displayId]
+        if (share != null && share.sharerId == player.uniqueId) {
+            share.lastHeartbeatMs = System.currentTimeMillis()
+            return
+        }
+        reply(player, displayId, active = false)
+    }
+
+    /**
+     * `/display share stop`: ends the share on [displayId] at once (previous video restored, sharer's capture stopped).
+     * Returns the sharer's name, or null when nothing is shared there.
+     */
+    fun adminStop(displayId: UUID): String? {
+        val share = byDisplay[displayId] ?: return null
+        val name = Bukkit.getPlayer(share.sharerId)?.name ?: Bukkit.getOfflinePlayer(share.sharerId).name ?: share.sharerId.toString()
+        end(share, EndReason.ADMIN_STOP, error = "An operator stopped your screen share.")
+        return name
+    }
+
+    /** Displays with a share running now, for command suggestions. */
+    fun sharedDisplays(): Set<UUID> = byDisplay.keys.toSet()
+
+    /**
+     * Once a second (global tick): ends every share whose sharer is gone, in another world, out of range, or silent
+     * for longer than [ScreenShareServerRules.HEARTBEAT_TIMEOUT_MS].
+     */
+    fun tick() {
+        if (byDisplay.isEmpty()) return
+        val now = System.currentTimeMillis()
+        for (share in byDisplay.values.toList()) {
+            val display = DisplayManager.getDisplayData(share.displayId) as? PaperDisplayData
+            if (display == null) {
+                end(share, EndReason.DISPLAY_REMOVED)
+                continue
+            }
+            val sharer = Bukkit.getPlayer(share.sharerId)
+            val online = sharer != null && sharer.isOnline
+            // Folia's global thread may not read entity positions: its proximity index answers range there
+            val sameWorld = !online || PlatformUtil.isFolia || sharer!!.world == display.pos1.world
+            val inRange = !online || !sameWorld || if (PlatformUtil.isFolia) {
+                share.sharerId in DisplayManager.getTrackedNearbyPlayerIds(display)
+            } else {
+                DisplayManager.isPlayerInRange(sharer!!, display)
+            }
+            val reason = ScreenShareServerRules.endReason(
+                ScreenShareServerRules.SharerState(
+                    online = online, sameWorld = sameWorld, inRange = inRange, heartbeatExpected = true,
+                    lastHeartbeatMs = share.lastHeartbeatMs, nowMs = now,
+                ),
+            ) ?: continue
+            end(share, reason)
+        }
     }
 
     /** Ends every share (plugin disable), restoring each display before it is saved. */
     fun stopAll() {
-        byDisplay.values.toList().forEach { end(it, notifySharer = true) }
+        byDisplay.values.toList().forEach { end(it, EndReason.PLUGIN_DISABLE) }
     }
 
-    private fun end(share: Share, notifySharer: Boolean) {
+    private fun end(share: Share, reason: EndReason, error: String = "") {
         if (!byDisplay.remove(share.displayId, share)) return
         val display = DisplayManager.getDisplayData(share.displayId) as? PaperDisplayData
         val sharer = Bukkit.getPlayer(share.sharerId)
+        // Tell the sharer first, so their capture stops before (or as) the display changes back
+        if (ScreenShareServerRules.notifiesSharer(reason) && sharer != null) {
+            reply(sharer, share.displayId, active = false, error = error)
+        }
         // Only while the display still shows this share: anything else was set since and stays
-        if (display != null && display.url.contains(share.streamId)) {
+        if (ScreenShareServerRules.restoresPreviousVideo(reason) && display != null && display.url.contains(share.streamId)) {
             DisplayActions.applyVideo(display, share.previousUrl, share.previousLang, sharer, persist = false)
         }
-        if (notifySharer && sharer != null) reply(sharer, share.displayId, active = false)
-        logger.info("Screen share to display {} ended.", share.displayId)
+        logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }
 
     private fun reply(player: Player, displayId: UUID, active: Boolean, publishUrl: String = "", error: String = "") {

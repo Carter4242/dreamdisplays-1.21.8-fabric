@@ -185,6 +185,25 @@ class DisplayPopoutManager(
         closePipOverlay()
     }
 
+    /**
+     * Closes every popout of this display at once, with no closing animation (which would keep showing the last
+     * frame while it fades), and detaches the frame sink. For a screen share that ended: nothing of it may stay up.
+     */
+    fun closeImmediately(player: MediaPlayer?) {
+        player?.setPopoutSink(null)
+        currentPlayer?.setPopoutSink(null)
+        val hadOverlay = pipOverlay != null || fullscreenOverlay != null
+        popoutWindow?.let { if (it.isOpen) it.close() }
+        // The window holds its last frame in its buffers: a later popout gets a new window, never this one
+        popoutWindow = null
+        windowActive = false
+        PipOverlayManager.removeNow(displayScreen)
+        FullscreenOverlayManager.removeNow(displayScreen)
+        pipOverlay = null
+        fullscreenOverlay = null
+        if (hadOverlay) emit(PopoutEvent.Closed(displayScreen.uuid.toString()))
+    }
+
     /** Tears down all popout state when the display is unregistered. */
     fun unregister(player: MediaPlayer?) {
         player?.setPopoutSink(null)

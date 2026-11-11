@@ -16,6 +16,8 @@ class ScreenShareWireTest {
     fun `screen share packets round trip one way only`() {
         val request = ScreenShareRequest(id, start = true)
         assertEquals(request, PacketRegistry.decode(PacketRegistry.encode(request), PacketDirection.CLIENT_TO_SERVER))
+        val heartbeat = ScreenShareRequest(id, start = false, heartbeat = true)
+        assertEquals(heartbeat, PacketRegistry.decode(PacketRegistry.encode(heartbeat), PacketDirection.CLIENT_TO_SERVER))
         val state = ScreenShareState(id, active = true, publishUrl = "rtmp://u:p@relay.example:1935/abc")
         assertEquals(state, PacketRegistry.decode(PacketRegistry.encode(state), PacketDirection.SERVER_TO_CLIENT))
         assertFailsWith<IllegalArgumentException> {
@@ -40,6 +42,17 @@ class ScreenShareWireTest {
         assertEquals(80, PacketType.SCREEN_SHARE_REQUEST.id)
         assertEquals(81, PacketType.SCREEN_SHARE_STATE.id)
         assertEquals("screen_share", ServerFeature.SCREEN_SHARE.wire)
+        assertEquals("screen_share_heartbeat", ServerFeature.SCREEN_SHARE_HEARTBEAT.wire)
         assertEquals(PacketType.entries.size, PacketType.entries.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `a heartbeat is never a start request`() {
+        // A server without the heartbeat feature reads field 3 as unknown: it must see a stop, never a (re)start
+        val decoded = PacketRegistry.decode(
+            PacketRegistry.encode(ScreenShareRequest(id, heartbeat = true)), PacketDirection.CLIENT_TO_SERVER,
+        ) as ScreenShareRequest
+        assertEquals(false, decoded.start)
+        assertEquals(true, decoded.heartbeat)
     }
 }

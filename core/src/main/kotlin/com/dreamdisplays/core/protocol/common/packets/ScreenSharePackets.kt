@@ -12,11 +12,17 @@ import java.util.*
 /**
  * Client asks to start ([start] true) or stop sharing its screen to display [id]. Only sent to servers that advertise
  * `ServerFeature.SCREEN_SHARE`; the server answers with [ScreenShareState].
+ *
+ * [heartbeat] (with [start] false): the client is still capturing to [id]. Sent about once a second, only to servers
+ * that advertise `ServerFeature.SCREEN_SHARE_HEARTBEAT`; such a server ends a share whose heartbeats stop, and answers a
+ * heartbeat for a share it does not know with an inactive [ScreenShareState] (the client then stops capturing). A
+ * server without that feature would read it as a stop request, so it is never sent there.
  */
 @Serializable
 data class ScreenShareRequest(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
     @ProtoNumber(2) val start: Boolean = false,
+    @ProtoNumber(3) val heartbeat: Boolean = false,
 ) : DreamPacket
 
 /**

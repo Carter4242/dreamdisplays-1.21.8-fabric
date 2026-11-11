@@ -61,6 +61,7 @@ object CommandRegistrar {
             speedBranch()
             modeBranch()
             configBranch()
+            shareBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
             helpBranch()
@@ -239,6 +240,21 @@ object CommandRegistrar {
                     executesCommand { ctx ->
                         SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
                     }
+                }
+            }
+        }
+    }
+
+    /** `/display share stop <display>`: an op ends the screen share running on a display. */
+    private fun LiteralArgumentBuilder<CommandSourceStack>.shareBranch() {
+        literal("share") {
+            requires { ShareCommand.allowed(it.sender) }
+            literal("stop") {
+                argument("target", BareTokenArgumentType) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        (["this"] + ShareCommand.sharedDisplaySuggestions()).map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx -> ShareCommand.stop(ctx.source.sender, target(ctx)) }
                 }
             }
         }

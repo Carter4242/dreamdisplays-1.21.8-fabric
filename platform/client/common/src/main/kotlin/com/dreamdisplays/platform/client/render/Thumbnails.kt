@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.render
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.platform.client.utils.identifier
 //? if >=1.21.11 {
 import net.minecraft.resources.Identifier
@@ -124,6 +125,8 @@ object Thumbnails {
      * sources (like Twitch) whose thumbnail URL is already resolved, not just an id to derive one from.
      */
     fun request(key: String, directUrl: String) {
+        // A screen share / live relay stream has no thumbnail, and none is ever made (or cached on disk) from it
+        if (!ScreenSharePrivacy.mayPreview(key) || !ScreenSharePrivacy.mayPreview(directUrl)) return
         if (READY.getIfPresent(key) != null || FAILED.getIfPresent(key) != null) return
         if (IN_FLIGHT.asMap().putIfAbsent(key, true) != null) return
         DreamCoroutines.clientIo.launch { download(key, key, loadBytesAsync(key) { fetch(directUrl) }) }

@@ -28,6 +28,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent
 //?}
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.jspecify.annotations.NullMarked
@@ -66,6 +67,12 @@ class PlayerListener : Listener {
                 PlayerManager.setModRequiredNotified(player, true)
             }
         }
+    }
+
+    /** A player who changed world ends any screen share they run (a display lives in one world). */
+    @EventHandler
+    fun onPlayerChangedWorld(event: PlayerChangedWorldEvent) {
+        com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerChangedWorld(event.player.uniqueId)
     }
 
     /** Drops cached per-player state when a player disconnects. */

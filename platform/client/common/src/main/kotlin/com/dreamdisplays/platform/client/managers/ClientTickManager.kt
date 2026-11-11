@@ -9,6 +9,7 @@ import com.dreamdisplays.platform.client.core.ClientApplication
 import com.dreamdisplays.platform.client.core.ClientLifecycleEvent
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
+import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.displays.ViewerReporter
@@ -56,6 +57,8 @@ object ClientTickManager {
             ProtocolRouter.tickHelloRefresh(DisplayRegistry.getScreens().any { !it.virtual && !it.isDormant })
         }
         runCatching { com.dreamdisplays.platform.client.karaoke.KaraokeClient.tick() }
+        // Screen share: capture watchdog, display / range checks and heartbeat, every tick (in a world or not)
+        ScreenShare.tick(minecraft)
 
         val level = minecraft.level
         if (level != null && (minecraft.currentServer != null || minecraft.isLocalServer)) {
@@ -74,6 +77,8 @@ object ClientTickManager {
             }
             if (level !== lastLevel) {
                 lastLevel = level
+                // Another dimension or another backend: a running screen share ends here
+                ScreenShare.onLevelChanged()
                 if (newBackend) {
                     FullscreenPrepareController.reset()
                     DisplayWarmup.reset()
@@ -88,6 +93,7 @@ object ClientTickManager {
             val leftForGood = screen is TitleScreen || screen is JoinMultiplayerScreen
             if (wasInMultiplayer && leftForGood) {
                 wasInMultiplayer = false
+                ScreenShare.onServerLeft()
                 DisplayRegistry.unloadAll()
                 DreamServices.registry.getOrNull<OverlayManager>()?.closeAll()
                 FullscreenOverlayManager.closeAll()

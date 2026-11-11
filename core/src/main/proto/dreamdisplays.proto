@@ -676,6 +676,8 @@ message ScreenShareRequest {
   optional Uuid id = 1;
   // WARNING: a default value decoded when value is missing
   optional bool start = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool heartbeat = 3;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ScreenShareState'

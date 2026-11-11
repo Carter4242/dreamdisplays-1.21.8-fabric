@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.displays
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.player.PlaybackHost
@@ -123,6 +124,8 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         // Switching to the previous preload at its scheduled start: the next one waits for that
         if (screen.isQueueSwitchPending) return false
         if (head.url.isEmpty() || head.url == screen.videoUrl) return false
+        // A screen share / live relay stream is never opened ahead of time
+        if (!ScreenSharePrivacy.mayPreload(head.url)) return false
         if (!lookAhead) return true
         return queuePreloadStartsNow(
             started = screen.videoStarted, live = screen.isLive, holding = screen.isPaused || screen.isWarmingUp,

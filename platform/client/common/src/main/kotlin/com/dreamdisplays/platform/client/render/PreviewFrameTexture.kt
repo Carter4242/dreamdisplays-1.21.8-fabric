@@ -114,6 +114,19 @@ class PreviewFrameTexture(private val uuid: UUID) {
         uploadedVersion = version
     }
 
+    /**
+     * Forgets the held frame (both buffers) and releases the GPU texture on the render thread: nothing of the last
+     * picture can be shown again. Any thread. The next [updateFrame] starts over.
+     */
+    fun clear() {
+        frontBuf = EMPTY_DIRECT
+        backBuf = EMPTY_DIRECT
+        frameW = 0
+        frameH = 0
+        frameVersion++
+        closeAsync()
+    }
+
     /** Releases the GPU texture / uploader immediately. GL calls — render thread only. */
     fun close() {
         uploader?.close()

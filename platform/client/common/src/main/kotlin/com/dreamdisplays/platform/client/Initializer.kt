@@ -134,7 +134,11 @@ object Initializer {
         //?} else
         /*fun onRenderHud(mc: Minecraft, graphics: GuiGraphics, partialTick: Float) {*/
         if (mc.level == null || mc.player == null) return
-        if (MinecraftScreenUtil.currentScreen(mc) != null) return
+        // The "sharing your screen" badge stays up under every menu too, for as long as a capture runs
+        if (MinecraftScreenUtil.currentScreen(mc) != null) {
+            com.dreamdisplays.platform.client.displays.ScreenShare.renderIndicator(mc, graphics)
+            return
+        }
         //? if >=1.21.6 {
         graphics.nextStratum()
         //?}

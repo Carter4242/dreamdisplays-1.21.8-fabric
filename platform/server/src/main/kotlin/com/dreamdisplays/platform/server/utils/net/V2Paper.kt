@@ -54,7 +54,9 @@ object PaperV2Networking : PluginMessageListener {
         isAdmin = player.hasPermission(PaperServer.config.permissions.deleteOthers),
         isReportingEnabled = PaperServer.config.settings.webhookUrl.isNotEmpty(),
         allowedFeatures = serverFeatureWires().let { wires ->
-            if (ScreenShareActions.mayShare(player)) wires + listOf(ServerFeature.SCREEN_SHARE.wire) else wires
+            if (ScreenShareActions.mayShare(player)) {
+                wires + listOf(ServerFeature.SCREEN_SHARE.wire, ServerFeature.SCREEN_SHARE_HEARTBEAT.wire)
+            } else wires
         },
         defaultVolume = PaperServer.config.settings.defaultVolume,
         maxDisplays = maxDisplaysFor(player.hasPermission(PaperServer.config.permissions.createBypass)),
@@ -147,7 +149,11 @@ object PaperV2Networking : PluginMessageListener {
                 player.uniqueId, packet.prepareId, packet.displayId, FullscreenPrepareState.fromWire(packet.state),
             )
 
-            is ScreenShareRequest -> ScreenShareActions.onRequest(player, packet.id, packet.start)
+            is ScreenShareRequest -> if (packet.heartbeat) {
+                ScreenShareActions.onHeartbeat(player, packet.id)
+            } else {
+                ScreenShareActions.onRequest(player, packet.id, packet.start)
+            }
 
             is PipPin -> if (packet.pinned) {
                 PipPinManager.pin(player.uniqueId, packet.id)

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.render
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.platform.client.utils.identifier
 //? if >=1.21.11 {
 import net.minecraft.resources.Identifier
@@ -73,6 +74,8 @@ object ScrubPreview {
 
     /** Schedules background generation of scrub-preview frames for [key] if not already generated or in flight. */
     fun request(key: String, rawUrl: String, durationNanos: Long, seekByDecoding: Boolean = false) {
+        // Never for a screen share / live relay stream: no frame of it is ever extracted or kept
+        if (!ScreenSharePrivacy.mayPreview(key) || !ScreenSharePrivacy.mayPreview(rawUrl)) return
         if (durationNanos <= 0 || FRAMES.getIfPresent(key) != null) return
         if (IN_FLIGHT.asMap().putIfAbsent(key, true) != null) return
 

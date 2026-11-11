@@ -52,6 +52,8 @@ permissions:
     default: op
   dreamdisplays.share:
     default: op
+  dreamdisplays.share.admin:
+    default: op
   dreamdisplays.lock:
     default: op
   dreamdisplays.delete:

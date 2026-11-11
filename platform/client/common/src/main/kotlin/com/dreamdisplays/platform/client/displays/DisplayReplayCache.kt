@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.displays
 
+import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.media.player.preparation.PreparedMedia
 import com.dreamdisplays.platform.client.managers.WarmParkPolicy
@@ -28,6 +29,8 @@ internal object DisplayReplayCache {
     /** Stores [snapshot] (plus optional resolved [prepared] streams) for [uuid]. */
     fun put(uuid: UUID, url: String, positionNanos: Long, snapshot: ByteArray, prepared: PreparedMedia?) {
         if (snapshot.isEmpty() || maxBytes <= 0L) return
+        // Never a frame of a screen share / live relay stream
+        if (!ScreenSharePrivacy.maySnapshot(url)) return
         entries.put(uuid, Entry(url, positionNanos, snapshot, prepared))
         entries.cleanUp()
     }
@@ -36,7 +39,7 @@ internal object DisplayReplayCache {
     fun take(uuid: UUID, url: String, positionNanos: Long): MediaPlayer.ReplayBootstrap? {
         val entry = entries.getIfPresent(uuid) ?: return null
         entries.invalidate(uuid)
-        if (entry.url != url || abs(entry.positionNanos - positionNanos) > POSITION_TOLERANCE_NS) {
+        if (!ScreenSharePrivacy.maySnapshot(entry.url) || entry.url != url || abs(entry.positionNanos - positionNanos) > POSITION_TOLERANCE_NS) {
             return null
         }
         return MediaPlayer.ReplayBootstrap(entry.snapshot, entry.positionNanos)
