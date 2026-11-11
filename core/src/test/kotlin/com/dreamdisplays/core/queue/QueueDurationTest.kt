@@ -71,4 +71,19 @@ class QueueDurationTest {
         assertTrue(longer.loop)
         assertEquals(400_150L, longer.durationMs)
     }
+
+    @Test
+    fun `a length learned before a scheduled start keeps the start where it was`() {
+        // A queue switch scheduled for wall 10 300; a viewer reports the new video's length at 10 100
+        val scheduled = Timeline(0, 10_300, paused = false, durationMs = 0, loop = true)
+        val updated = QueueTiming.withLength(scheduled, 120_150, nowMs = 10_100)
+        assertEquals(10_300L, updated.serverTimeMs)
+        assertEquals(0L, updated.positionMs)
+        assertEquals(120_150L, updated.durationMs)
+        assertTrue(updated.loop)
+        // Once started, a length update re-anchors where the clock is
+        val started = QueueTiming.withLength(scheduled, 120_150, nowMs = 11_300)
+        assertEquals(11_300L, started.serverTimeMs)
+        assertEquals(1_000L, started.positionMs)
+    }
 }
