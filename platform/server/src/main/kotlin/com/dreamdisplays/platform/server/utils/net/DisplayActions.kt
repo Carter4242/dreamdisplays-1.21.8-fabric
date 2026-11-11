@@ -124,11 +124,17 @@ object DisplayActions {
         DisplayManager.broadcastUpdate(displayData)
     }
 
-    /** Switches a display's persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`) and re-anchors its clock. */
+    /** A client's request to switch a display's persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`). */
     fun setMode(player: Player, displayId: UUID, mode: PlaybackMode, positionMs: Long) {
         if (!PlaybackMode.isBaseMode(mode)) return
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!PlaybackPermissions.canSetMode(context(displayData, player))) return
+        // Local takes a display off the shared clock for everyone. The menu no longer offers a mode switch
+        // (`/display mode` does it), so only an op's client may still ask for Local.
+        if (mode == PlaybackMode.LOCAL && !player.isOp) {
+            logger.info("Refused a switch to Local for display ${displayData.id} from ${player.name} (not op)")
+            return
+        }
 
         // Check mode-specific permissions
         if (!canAccessMode(player, mode)) {
@@ -137,6 +143,11 @@ object DisplayActions {
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
 
+        applyMode(displayData, mode, positionMs)
+    }
+
+    /** Stores [mode] as the display's base mode, tells its viewers and re-anchors its clock at [positionMs]. */
+    fun applyMode(displayData: PaperDisplayData, mode: PlaybackMode, positionMs: Long) {
         displayData.mode = mode
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
