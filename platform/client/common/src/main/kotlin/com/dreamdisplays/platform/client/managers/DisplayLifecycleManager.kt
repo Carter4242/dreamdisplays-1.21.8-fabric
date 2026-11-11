@@ -39,15 +39,21 @@ object DisplayLifecycleManager {
 
     /** Creates or updates a display from a server [DisplayInfo] packet, honoring render distance and size limits. */
     fun handleInfoPacket(packet: DisplayInfo) {
+        // A description this client can't show is dropped before its media generation is recorded: recorded, a later
+        // sync of the same generation would no longer ask for a description, and the display would never appear
+        if (packet.facing !in FacingUtil.entries.indices) {
+            logger.warn("Ignoring display ${packet.id}: unknown facing ${packet.facing}.")
+            return
+        }
+        if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
+            logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
+            return
+        }
         // Known even while displays are off: its timelines must not look like ones for a display never described
         // A display that got a new video: what this client said about the old one is void on the server
         val newMedia = ServerMediaGens.onInfo(packet)
         if (newMedia) DisplayWarmup.reReport(packet.id)
         if (!ClientStateManager.displaysEnabled) return
-        if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
-            logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
-            return
-        }
 
         val policy = DisplayPolicyCache.update(packet.id, acceptedCustomData(packet))
         lastInfo[packet.id] = packet
