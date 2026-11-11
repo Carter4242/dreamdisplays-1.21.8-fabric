@@ -441,6 +441,19 @@ object FullscreenBroadcastManager {
     }
 
     /**
+     * Real display [displayId]'s picture went away under its fullscreen viewers (a screen share on it ended and its
+     * previous video came back): their clients closed the overlay without telling the server. Each is told the session
+     * is off (so a client that kept its last state does not take the same state as a repeat) and gets it again.
+     */
+    fun redeliver(displayId: UUID) {
+        val session = sessions.values.firstOrNull { !it.virtual && it.display.id == displayId } ?: return
+        for (playerId in session.shownTo.toList()) {
+            transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = displayId, active = false))
+            deliverTo(session, playerId)
+        }
+    }
+
+    /**
      * Plugin disable: transient sessions are not saved, so the next plugin instance could never end them; their viewers
      * are told they are over now. Saved sessions carry on after the reload.
      */

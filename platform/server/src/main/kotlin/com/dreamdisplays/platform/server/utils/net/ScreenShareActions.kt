@@ -13,6 +13,7 @@ import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.StoredVideo
 import com.dreamdisplays.platform.server.meta.Scheduler
+import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
@@ -369,6 +370,8 @@ object ScreenShareActions {
                 restore = share.previousPlayback ?: SavedPlayback(0L, PlaybackSpeed.NORMAL),
             )
             QueueManager.resumePlayingEntry(display, share.previousEntry)
+            // Viewers' clients closed their fullscreen of this display when the share's picture went away: open it again
+            FullscreenBroadcastManager.redeliver(display.id)
         }
         logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }
