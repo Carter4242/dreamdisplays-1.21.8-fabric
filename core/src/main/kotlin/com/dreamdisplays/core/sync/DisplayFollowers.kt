@@ -27,4 +27,14 @@ object DisplayFollowers {
         val near = nearby.toSet()
         return (fullscreen.asSequence() + pinners.asSequence()).filter { it !in near }.distinct().toList()
     }
+
+    /**
+     * Whether [playerId]'s duration report counts for a display: a viewer in range or any far follower; they play it
+     * too, and when they are its only audience (a broadcast nobody stands near) nobody else can report its length.
+     */
+    fun mayReportDuration(playerId: UUID, nearby: Collection<UUID>, fullscreen: Collection<UUID>, pinners: Collection<UUID>): Boolean =
+        playerId in nearby || playerId in fullscreen || playerId in pinners
+
+    /** Whether a display counts as watched for auto-pause: anyone in range, or a fullscreen follower (pins don't count). */
+    fun watched(nearby: Collection<UUID>, fullscreen: Collection<UUID>): Boolean = nearby.isNotEmpty() || fullscreen.isNotEmpty()
 }

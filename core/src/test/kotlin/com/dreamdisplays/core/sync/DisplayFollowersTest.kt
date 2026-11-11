@@ -3,6 +3,8 @@ package com.dreamdisplays.core.sync
 import java.util.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DisplayFollowersTest {
     private val near = UUID(0, 1)
@@ -36,5 +38,21 @@ class DisplayFollowersTest {
     fun `nobody far means nothing extra is sent`() {
         assertEquals(emptyMap(), DisplayFollowers.infoTargets(listOf(near), emptyList(), emptyList()))
         assertEquals(emptyList(), DisplayFollowers.farReceivers(listOf(near), emptyList(), emptyList()))
+    }
+
+    @Test
+    fun `far followers' duration reports count, strangers' don't`() {
+        val stranger = UUID(0, 9)
+        assertTrue(DisplayFollowers.mayReportDuration(near, listOf(near), emptyList(), emptyList()))
+        assertTrue(DisplayFollowers.mayReportDuration(fullscreen, emptyList(), listOf(fullscreen), emptyList()))
+        assertTrue(DisplayFollowers.mayReportDuration(pinner, emptyList(), emptyList(), listOf(pinner)))
+        assertFalse(DisplayFollowers.mayReportDuration(stranger, listOf(near), listOf(fullscreen), listOf(pinner)))
+    }
+
+    @Test
+    fun `a broadcast nobody stands near is still watched, a pin alone does not keep it running`() {
+        assertTrue(DisplayFollowers.watched(nearby = emptyList(), fullscreen = listOf(fullscreen)))
+        assertTrue(DisplayFollowers.watched(nearby = listOf(near), fullscreen = emptyList()))
+        assertFalse(DisplayFollowers.watched(nearby = emptyList(), fullscreen = emptyList()))
     }
 }

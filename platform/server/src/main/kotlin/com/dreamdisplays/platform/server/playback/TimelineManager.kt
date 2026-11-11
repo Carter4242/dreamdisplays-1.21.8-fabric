@@ -457,7 +457,7 @@ object TimelineManager {
 
     /**
      * Applies a media duration [senderId]'s client measured for [display]'s video [url] (empty from older clients).
-     * Only a nearby viewer's report on the display's current video counts.
+     * Only a report on the display's current video counts, from a viewer in range or a far follower (fullscreen, PiP).
      *
      * [QueueTiming.mediaDurationMs] settles on the largest report (bounded by the playing queue entry's duration, never
      * below it, never shrinking); the timeline runs [QueueTiming.scheduledDurationMs] of it, so its end (and the
@@ -468,7 +468,8 @@ object TimelineManager {
         if (!shared && display.mode != PlaybackMode.LOCAL) return
         val sinceChange = videoChangedAt[display.id]?.let { transport.nowMs() - it } ?: Long.MAX_VALUE
         if (!DurationReports.accepts(durationMs, url, mediaGen, display.url, display.mediaGen, sinceChange)) return
-        if (senderId !in transport.nearbyPlayerIds(display)) return
+        val nearby = transport.nearbyPlayerIds(display)
+        if (!DisplayFollowers.mayReportDuration(senderId, nearby, extraReceivers(display.id), pinReceivers(display.id))) return
         // Report cooldowns start afresh with each video ([VideoDurations])
         val mediaMs = durations.report(
             display.id, display.url, senderId, durationMs, QueueManager.playingEntryDurationMs(display), transport.nowMs(),
@@ -556,9 +557,9 @@ object TimelineManager {
     }
 
     /**
-     * Pauses (server timeline) a playing `SYNCED` display once no player has been in its range for
-     * [autoPauseWhenEmptyMs], so a forgotten movie does not run on with nobody watching. It is not resumed
-     * automatically; the next viewer presses play.
+     * Pauses (server timeline) a playing `SYNCED` display once no player has been in its range (and nobody watched it
+     * in fullscreen from afar) for [autoPauseWhenEmptyMs], so a forgotten movie does not run on with nobody watching. It
+     * is not resumed automatically; the next viewer presses play.
      */
     private fun autoPauseEmpty(now: Long) {
         val limit = autoPauseWhenEmptyMs()
@@ -573,7 +574,7 @@ object TimelineManager {
             }
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(displayId) ||
-                transport.nearbyPlayerIds(display).isNotEmpty()
+                DisplayFollowers.watched(transport.nearbyPlayerIds(display), extraReceivers(displayId))
             ) {
                 emptySince.remove(displayId)
                 continue
