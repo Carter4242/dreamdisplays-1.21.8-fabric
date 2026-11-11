@@ -291,11 +291,21 @@ object ScreenCapture {
     // ---- Which screen is which ----
 
     /**
-     * True when [a] and [b] are the same physical screen: the same Windows screen name (when known) showing the same
-     * monitors, or the same macOS display / Linux output. A screen known by neither cannot be told apart from another.
+     * True when [a] and [b] are the same physical screen: the same Windows screen name (when known) still showing at
+     * least one of the same monitors, or the same macOS display / Linux output. A mirrored ("Duplicate") Windows screen
+     * stays itself while a monitor joins or leaves the mirror (a projector unplugged), but a name handed to other
+     * monitors entirely is another screen. A screen known by neither cannot be told apart from another.
      */
     fun sameScreen(a: Monitor, b: Monitor): Boolean =
-        identifiable(a) && a.deviceName == b.deviceName && a.key == b.key
+        identifiable(a) && a.deviceName == b.deviceName && keysShareMonitor(a.key, b.key)
+
+    /** True when [Monitor.key]s [a] and [b] are equal or name a monitor in common (`|`-joined sets, see [monitorKey]). */
+    internal fun keysShareMonitor(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (a.isEmpty() || b.isEmpty()) return false
+        val ours = a.split('|').toSet()
+        return b.split('|').any { it in ours }
+    }
 
     /** True when [monitor] carries something that names its screen (see [sameScreen]). */
     fun identifiable(monitor: Monitor): Boolean = monitor.deviceName.isNotEmpty() || monitor.key.isNotEmpty()

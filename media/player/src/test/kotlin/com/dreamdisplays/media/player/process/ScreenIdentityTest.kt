@@ -41,6 +41,21 @@ class ScreenIdentityTest {
     }
 
     @Test
+    fun `a mirrored screen stays itself while a monitor joins or leaves the mirror`() {
+        val tv = "\\\\?\\display#sam0f9a#5&2a1b&0&uid4400#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}"
+        val mirrored = ScreenCapture.monitorKey(listOf(dell, tv))
+        val picked = win(0, "\\\\.\\DISPLAY1", mirrored, 0)
+        // The TV was unplugged: DISPLAY1 shows the Dell alone
+        assertTrue(ScreenCapture.locate(picked, listOf(win(0, "\\\\.\\DISPLAY1", dell, 0))) is Located.Here)
+        // Picked alone, then a projector joined the mirror
+        assertTrue(ScreenCapture.sameScreen(win(0, "\\\\.\\DISPLAY1", dell, 0), picked))
+        // The name went to other monitors entirely
+        assertEquals(Located.Gone, ScreenCapture.locate(picked, listOf(win(0, "\\\\.\\DISPLAY1", lg, 0))))
+        assertFalse(ScreenCapture.keysShareMonitor(mirrored, ""))
+        assertTrue(ScreenCapture.keysShareMonitor("", ""))
+    }
+
+    @Test
     fun `the picked screen is found at its new index and place, under the picked label`() {
         val picked = win(2, "\\\\.\\DISPLAY2", dell, 5120).copy(name = "Screen 3 (right)")
         val now = listOf(win(0, "\\\\.\\DISPLAY1", "a", 0), win(1, "\\\\.\\DISPLAY2", dell, 2560))
