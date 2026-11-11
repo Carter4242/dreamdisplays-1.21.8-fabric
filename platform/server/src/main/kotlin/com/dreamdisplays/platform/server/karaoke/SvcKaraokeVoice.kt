@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.karaoke
 
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import com.dreamdisplays.core.karaoke.BurstAnchor
+import com.dreamdisplays.core.karaoke.KaraokeCodecOrder
 import com.dreamdisplays.core.karaoke.KaraokeCoSinger
 import com.dreamdisplays.core.karaoke.KaraokeRoute
 import com.dreamdisplays.core.karaoke.KaraokeRouting
@@ -181,6 +182,12 @@ class SvcKaraokeVoice : KaraokeVoice {
         val singing = stage.singers.keys
         val voice = voices.computeIfAbsent(singerId) { SingerVoice() }
         val stop = mic.opusEncodedData.isEmpty()
+        val seq = mic.locationalSoundPacketBuilder().position(api.createPosition(0.0, 0.0, 0.0)).build().sequenceNumber
+        // For the singer's capture -> arrival time (matched with their client's capture markers)
+        KaraokeMeasurements.onFrame(singerId, seq, now)
+        // Its burst, so every re-encoding stream below takes the frames in order ([KaraokeCodecOrder])
+        val burst = voice.onFrame(now, seq, stop)
+        if (burst < 0) return
 
         // Other singers: at once and from the singer, like normal voice chat, each at a volume faded by whether
         // they sing themselves right now
@@ -196,7 +203,7 @@ class SvcKaraokeVoice : KaraokeVoice {
             if (route != KaraokeRoute.NORMAL) continue
             val volume = KaraokeCoSinger.target(stage.songPlaying, lastVoice[otherId], now, stage.coSinger)
             val stream = voice.coSinger(otherId)
-            val data = stream.faded(api, mic.opusEncodedData, volume, now, stage.coSinger) ?: continue
+            val data = stream.faded(api, burst, seq, mic.opusEncodedData, volume, now, stage.coSinger) ?: continue
             val packet = entityPacket(mic, KaraokeVoiceSend.toCoSinger(singerId, mic.isWhispering, proximity), data)
             if (voice.startStream(otherId) && stage.debug) {
                 logger.info(
@@ -207,11 +214,6 @@ class SvcKaraokeVoice : KaraokeVoice {
             api.sendEntitySoundPacketTo(other, packet)
         }
 
-        val seq = mic.locationalSoundPacketBuilder().position(api.createPosition(0.0, 0.0, 0.0)).build().sequenceNumber
-        // For the singer's capture -> arrival time (matched with their client's capture markers)
-        KaraokeMeasurements.onFrame(singerId, seq, now)
-        val burst = voice.onFrame(now, seq, stop)
-        if (burst < 0) return
         // Listeners' copies at singer_volume: decoded, boosted (soft-limited) and re-encoded once per frame, in order
         var listenerData: ByteArray? = null
         for (listener in stage.listeners) {
@@ -225,8 +227,8 @@ class SvcKaraokeVoice : KaraokeVoice {
             val delayMs = KaraokeTiming.emitDelayMs(
                 singer.leadMs, singer.pingMs, singer.latency, listener.pingMs, listener.latency, singer.trimMs, stage.latency,
             )
-            val data = listenerData ?: voice.listeners.scaled(api, mic.opusEncodedData, stage.singerVolume)
-                .also { listenerData = it }
+            val data = listenerData ?: (voice.listeners.scaled(api, burst, seq, mic.opusEncodedData, stage.singerVolume)
+                ?: return).also { listenerData = it }
             val shift = voice.shiftFor(burst, listener.playerId, delayMs * 1_000_000L)
             val provisional = voice.estimate(burst, seq, lock = false) ?: return
             if (voice.startStream(listener.playerId) && stage.debug) {
@@ -335,24 +337,35 @@ class SvcKaraokeVoice : KaraokeVoice {
         return builder.build()
     }
 
-    /** One stream of a singer's frames at a volume: decode -> [KaraokeVoiceGain] -> encode. Thread-safe. */
+    /**
+     * One stream of a singer's frames at a volume: decode -> [KaraokeVoiceGain] -> encode, frames taken in order per
+     * [KaraokeCodecOrder]. Thread-safe.
+     */
     private open class GainCodec {
         private var decoder: OpusDecoder? = null
         private var encoder: OpusEncoder? = null
+        private val order = KaraokeCodecOrder()
 
         /** Closed for good: a frame still in flight passes through rather than opening codecs nobody closes. */
         private var closed = false
 
-        /** [data] at [volume]; passes through at 1.0, and the empty end-of-burst frame passes and resets the codecs. */
-        fun scaled(api: VoicechatServerApi, data: ByteArray, volume: Double): ByteArray =
-            ramped(api, data, volume, volume)
+        /**
+         * Frame [seq] of burst [burst] ([data]) at [volume]; passes through at 1.0, and the empty end-of-burst frame
+         * passes and resets the codecs. Null when the frame came too late for this stream's codecs (not sent).
+         */
+        fun scaled(api: VoicechatServerApi, burst: Int, seq: Long, data: ByteArray, volume: Double): ByteArray? =
+            ramped(api, burst, seq, data, volume, volume)
 
         /** [data] at a gain moving from [from] to [to] across the frame; see [scaled]. */
         @Synchronized
-        fun ramped(api: VoicechatServerApi, data: ByteArray, from: Double, to: Double): ByteArray {
+        fun ramped(api: VoicechatServerApi, burst: Int, seq: Long, data: ByteArray, from: Double, to: Double): ByteArray? {
+            when (order.admit(burst, seq)) {
+                KaraokeCodecOrder.Admit.DROP -> return null
+                KaraokeCodecOrder.Admit.NEW_BURST -> resetCodecs()
+                KaraokeCodecOrder.Admit.TAKE -> {}
+            }
             if (data.isEmpty()) {
-                decoder?.resetState()
-                encoder?.resetState()
+                resetCodecs()
                 return data
             }
             if (closed || KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
@@ -361,6 +374,11 @@ class SvcKaraokeVoice : KaraokeVoice {
             val pcm = dec.decode(data)
             KaraokeVoiceGain.applyRamp(pcm, from, to)
             return enc.encode(pcm)
+        }
+
+        private fun resetCodecs() {
+            decoder?.resetState()
+            encoder?.resetState()
         }
 
         @Synchronized
@@ -380,12 +398,13 @@ class SvcKaraokeVoice : KaraokeVoice {
         /** [data] faded toward [volume]; null when it would be silent anyway (not sent). */
         @Synchronized
         fun faded(
-            api: VoicechatServerApi, data: ByteArray, volume: Double, nowNanos: Long, levels: KaraokeCoSinger.Levels,
+            api: VoicechatServerApi, burst: Int, seq: Long, data: ByteArray, volume: Double, nowNanos: Long,
+            levels: KaraokeCoSinger.Levels,
         ): ByteArray? {
-            if (data.isEmpty()) return ramped(api, data, volume, volume)
+            if (data.isEmpty()) return ramped(api, burst, seq, data, volume, volume)
             val (from, to) = ramp.next(volume, nowNanos, levels)
             if (from <= 0.0 && to <= 0.0) return null
-            return ramped(api, data, from, to)
+            return ramped(api, burst, seq, data, from, to)
         }
     }
 
