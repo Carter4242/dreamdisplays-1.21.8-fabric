@@ -30,3 +30,28 @@ data class FullscreenAck(
     @ProtoNumber(1) val sessionId: String = "",
     @ProtoNumber(2) val action: Int = 0,
 ) : DreamPacket
+
+/**
+ * Server asks the client to load [displayId] ahead of a fullscreen broadcast and hold it hidden, muted and ready to
+ * play at once, until a [FullscreenState] for the display starts the broadcast or the server cancels ([active] =
+ * false). Sent only to clients whose [ClientHello.supportsFullscreenPrepare] is set; a client that does not know this
+ * packet type drops it.
+ */
+@Serializable
+data class FullscreenPrepare(
+    @ProtoNumber(1) val prepareId: String = "",
+    @ProtoNumber(2) val displayId: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
+    @ProtoNumber(3) val active: Boolean = false,
+    /** Quality the broadcast will use, so the warm player already opens at it; empty = the viewer's own. */
+    @ProtoNumber(4) val quality: String = "",
+    /** How long the client may hold the display ready without hearing back, in ms; 0 = until cancelled. */
+    @ProtoNumber(5) val ttlMs: Long = 0,
+) : DreamPacket
+
+/** Client progress on a [FullscreenPrepare]; [state] is a `FullscreenPrepareState` wire value. */
+@Serializable
+data class FullscreenPrepareStatus(
+    @ProtoNumber(1) val prepareId: String = "",
+    @ProtoNumber(2) val displayId: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
+    @ProtoNumber(3) val state: Int = 0,
+) : DreamPacket

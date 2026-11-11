@@ -40,6 +40,8 @@ data class ClientHello(
     @ProtoNumber(25) val nativeUnavailableReason: String = "",
     @ProtoNumber(26) val lavUnavailableReason: String = "",
     @ProtoNumber(27) val timeZoneOffsetMinutes: Int = 0,
+    /** True when the client handles [FullscreenPrepare]; older clients leave it false and never get one. */
+    @ProtoNumber(28) val supportsFullscreenPrepare: Boolean = false,
 ) : DreamPacket
 
 /** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */

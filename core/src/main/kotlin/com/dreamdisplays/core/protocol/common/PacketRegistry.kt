@@ -10,6 +10,8 @@ import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
+import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
+import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
@@ -89,6 +91,10 @@ object PacketRegistry {
         Entry(PacketType.REMOTE_PLAYBACK_TOGGLE, RemotePlaybackToggle::class, RemotePlaybackToggle.serializer()),
         Entry(PacketType.SERVER_POLICY, ServerPolicy::class, ServerPolicy.serializer()),
         Entry(PacketType.VIEWER_REPORT, ViewerReport::class, ViewerReport.serializer()),
+        Entry(PacketType.FULLSCREEN_PREPARE, FullscreenPrepare::class, FullscreenPrepare.serializer()),
+        Entry(
+            PacketType.FULLSCREEN_PREPARE_STATUS, FullscreenPrepareStatus::class, FullscreenPrepareStatus.serializer(),
+        ),
     ]
 
     private val byId = entries.associateBy { it.id }
