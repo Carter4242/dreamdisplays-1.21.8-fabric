@@ -61,7 +61,7 @@ class ReadinessWireTest {
     @Test
     fun `a client that does not know the wait reads a start from the frame now`() {
         val bytes = proto.encodeToByteArray(DisplaySync.serializer(), DisplaySync(id, currentTimeMs = 10_000, serverTimeMs = 1_000, startInMs = 120))
-        // Field 9 is all that is new: dropping it leaves an ordinary "playing from 10 s" sync
+        // Field 10 is all that is new: dropping it leaves an ordinary "playing from 10 s" sync
         val withoutWait = proto.encodeToByteArray(DisplaySync.serializer(), DisplaySync(id, currentTimeMs = 10_000, serverTimeMs = 1_000))
         assertTrue(bytes.size > withoutWait.size)
         assertTrue(bytes.copyOfRange(0, withoutWait.size).contentEquals(withoutWait))

@@ -74,6 +74,12 @@ internal class PlaybackSessionManager(
         /** How many silent-source verdicts to remember; well past any one player's stream ladder. */
         const val SILENT_MEMO_LIMIT = 64
 
+        /**
+         * Fastest speed the in-process decoder serves. It decodes and converts every frame, so past this the
+         * session uses the FFmpeg process, which thins frames out before converting them ([MediaProcess.speedFps]).
+         */
+        const val LAV_MAX_TEMPO = 2.0
+
         /** Audio URLs proven to carry no audio track (process-wide, insertion-bounded). */
         val SILENT_SOURCES: MutableSet<String> = Collections.newSetFromMap(
             object : LinkedHashMap<String, Boolean>(16, 0.75f, false) {
@@ -120,14 +126,17 @@ internal class PlaybackSessionManager(
         fun launch(
             ffmpeg: String, streamSet: ActiveStreams, w: Int, h: Int, offsetNanos: Long,
             hwAccel: HwAccelBackend, onFirstFrame: () -> Unit, onEos: (String, Boolean) -> Unit,
-            getAudioClock: () -> Long = ::pacingClockNanos, parkFlag: AtomicBoolean? = null,
+            getAudioClock: () -> Long = pacingClock, parkFlag: AtomicBoolean? = null,
             presentPreview: Boolean = true, tolerateLateness: Boolean = true,
         ) {
             // SSRF guard for the in-process libav path, which bypasses MediaProcess.baseCommand
             val safeUrl = MediaHostGuard.resolveSafeUrl(streamSet.currentVideo.url)
             // One sanitized rate for both FFmpeg's -r and the pipe's timestamp arithmetic, so the
             // two can never disagree (see MediaProcess.outputFps).
-            val fps = MediaProcess.outputFps(streamSet.currentVideo.fps)
+            val sourceFps = MediaProcess.outputFps(streamSet.currentVideo.fps)
+            // A sped-up process session keeps fewer frames per content second (FFmpeg drops the rest)
+            val fps = MediaProcess.speedFps(sourceFps, tempo)
+            val dropToFps = fps < sourceFps
             // The in-process decoder seeks through the same libav demuxer that gets this container
             // wrong, and unlike the process path it has no way to fall back to decoding forward.
             val seekByDecoding = streamSet.currentVideo.seekByDecoding
@@ -144,11 +153,11 @@ internal class PlaybackSessionManager(
                 process = vp; thread = vt; return
             }
             val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding &&
-                !GoogleVideoRangeProxy.needsProxy(safeUrl)
+                !GoogleVideoRangeProxy.needsProxy(safeUrl) && lavServes(tempo)
             ) {
                 nativePipe.startInProcess(
                     url = safeUrl, w = w, h = h, seekOffsetNanos = offsetNanos,
-                    sourceFps = fps, hwAccel = hwAccel, stopFlag = stop, terminated = terminated,
+                    sourceFps = sourceFps, hwAccel = hwAccel, stopFlag = stop, terminated = terminated,
                     getAudioClock = getAudioClock, onFirstFrame = onFirstFrame,
                     getBrightness = getBrightness, onEos = onEos, parkFlag = parkFlag,
                     presentPreview = presentPreview, tolerateLateness = tolerateLateness,
@@ -160,7 +169,7 @@ internal class PlaybackSessionManager(
             if (nativePipe != null) {
                 val args = MediaProcess.videoArgs(
                     ffmpeg, safeUrl, w, h, offsetNanos, hwAccel, MediaProcess.VideoTransport.RAW_NV12, fps,
-                    alreadyResolved = true, seekByDecoding = seekByDecoding,
+                    alreadyResolved = true, seekByDecoding = seekByDecoding, dropToFps = dropToFps,
                 )
                 val vt = nativePipe.start(
                     args = args, w = w, h = h, seekOffsetNanos = offsetNanos, sourceFps = fps,
@@ -172,7 +181,7 @@ internal class PlaybackSessionManager(
             }
             val vp = MediaProcess.buildVideo(
                 ffmpeg, safeUrl, w, h, offsetNanos, hwAccel, fps,
-                alreadyResolved = true, seekByDecoding = seekByDecoding,
+                alreadyResolved = true, seekByDecoding = seekByDecoding, dropToFps = dropToFps,
             )
             val vt = jvmPipe!!.start(
                 proc = vp, w = w, h = h, seekOffsetNanos = offsetNanos, sourceFps = fps,
@@ -208,9 +217,37 @@ internal class PlaybackSessionManager(
     @Volatile
     private var audioFeeder: HlsAudioFeeder? = null
 
+    /**
+     * Playback speed of this session's processes (content time per real time). Pitch-preserving: the audio
+     * process time-stretches ([MediaProcess.tempoFilter]) and every clock reports content time, so the picture,
+     * paced against those clocks, follows at the same speed. Change it through [setTempo].
+     */
+    @Volatile
+    var tempo: Double = 1.0
+        private set
+
+    /**
+     * Sets the speed the next started session (start, seek, restart) plays at; the running processes keep theirs,
+     * so the caller restarts them at the current position.
+     */
+    fun setTempo(value: Double) {
+        if (value == tempo) return
+        tempo = value
+        clock.setRate(value)
+        // Pre-warmed tracks were spawned at the old speed
+        audioWarmPool.invalidateAll()
+    }
+
+    /** True when the in-process decoder may serve a session at [tempo] (see [LAV_MAX_TEMPO]). */
+    private fun lavServes(tempo: Double): Boolean = tempo <= LAV_MAX_TEMPO
+
+    /** [pacingClockNanos] as the pipes see it, carrying the playback speed for their sleeps. */
+    private val pacingClock = RatedClock(::pacingClockNanos) { tempo }
+
     @Throws(IOException::class)
     private fun buildAudioProcess(
         ffmpeg: String, streamSet: ActiveStreams, offsetNanos: Long, stopFlag: AtomicBoolean,
+        tempo: Double = 1.0,
     ): Process? {
         val url = streamSet.currentAudio.url
         if (url in SILENT_SOURCES) {
@@ -231,7 +268,7 @@ internal class PlaybackSessionManager(
         audioFeeder = null
         return MediaProcess.buildAudio(
             ffmpeg, url, offsetNanos, AudioSink.SAMPLE_RATE,
-            seekByDecoding = streamSet.currentAudio.seekByDecoding,
+            seekByDecoding = streamSet.currentAudio.seekByDecoding, tempo = tempo,
         )
     }
 
@@ -256,7 +293,7 @@ internal class PlaybackSessionManager(
         debugLabel = debugLabel,
         terminated = terminated,
         positionNanos = { clock.currentTime() },
-        eligible = { isPlaying && !terminated.get() && !parkFlag.get() && audioOriginKnown() },
+        eligible = { isPlaying && !terminated.get() && !parkFlag.get() && audioOriginKnown() && tempo == 1.0 },
     )
 
     /** Declares the audio tracks to keep pre-warmed; the one currently playing must not be among them. */
@@ -405,6 +442,7 @@ internal class PlaybackSessionManager(
         stop()
         if (terminated.get()) return
         liveSession = live
+        if (live) setTempo(1.0) // A live edge cannot be played faster or slower
         silentSession = false
 
         val ffmpeg = FFmpegBinary.getPath() ?: run {
@@ -417,10 +455,11 @@ internal class PlaybackSessionManager(
         val alpha = alphaPlan(ffmpeg, streamSet)
         val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
         val channel = VideoChannel(alpha)
+        val tempo = this.tempo
         try {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
-            val ap = buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop)
+            val ap = buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop, tempo)
             try {
                 channel.launch(ffmpeg, streamSet, w, h, offsetNanos, hwAccel, onFirstFrame = {
                     clock.markFirstFrame()
@@ -440,7 +479,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure,
+                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
                     ),
                     aStop,
                 )
@@ -465,12 +504,15 @@ internal class PlaybackSessionManager(
         val alpha = alphaPlan(ffmpeg, streamSet)
         val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
         val seekStartedNanos = System.nanoTime()
+        val tempo = this.tempo
 
-        if (alpha == null && old.inProcess && old.nativePipe?.expectedW == w && old.nativePipe.expectedH == h) {
+        if (alpha == null && old.inProcess && old.nativePipe?.expectedW == w && old.nativePipe.expectedH == h &&
+            lavServes(tempo)
+        ) {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
             val ap = try {
-                buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop)
+                buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop, tempo)
             } catch (e: IOException) {
                 logger.error("$debugLabel Failed to start seek audio session.", e)
                 return false
@@ -498,7 +540,7 @@ internal class PlaybackSessionManager(
                         audio.start(
                             it, terminated, aStop,
                             contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                            startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure,
+                            startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
                         ),
                         aStop,
                     )
@@ -532,7 +574,7 @@ internal class PlaybackSessionManager(
         try {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
-            val ap = buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop)
+            val ap = buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop, tempo)
             try {
                 channel.launch(ffmpeg, streamSet, w, h, offsetNanos, hwAccel, onFirstFrame = {
                     clock.markFirstFrame()
@@ -552,7 +594,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure,
+                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
                     ),
                     aStop,
                 )
@@ -577,7 +619,7 @@ internal class PlaybackSessionManager(
         private set
 
     /** True while the live channel decodes in-process, the precondition for an in-place seek. */
-    val seeksInPlace: Boolean get() = active?.inProcess == true && !parkFlag.get()
+    val seeksInPlace: Boolean get() = active?.inProcess == true && !parkFlag.get() && !outputAlpha && lavServes(tempo)
 
     private fun logSeekDone(offsetNanos: Long, startedNanos: Long, how: String) {
         if (how == "in-place") lastInPlaceSeekMs = (System.nanoTime() - startedNanos) / 1_000_000
@@ -598,8 +640,9 @@ internal class PlaybackSessionManager(
         oldAudio?.stop?.set(true)
         audio.stop()
         val aStop = AtomicBoolean()
+        val tempo = this.tempo
         val ap = try {
-            buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop)
+            buildAudioProcess(ffmpeg, streamSet, offsetNanos, aStop, tempo)
         } catch (e: IOException) {
             logger.error("$debugLabel Failed to start replacement audio process.", e)
             discardHalvesAsync(null, oldAudio)
@@ -616,7 +659,8 @@ internal class PlaybackSessionManager(
             ap, terminated, aStop,
             contentStartNanos = offsetNanos, originKnown = originKnown,
             startGate = null, onUnexpectedEnd = onAudioFailure,
-            catchUp = if (originKnown) AudioSink.CatchUp(offsetNanos) { clock.currentTime() } else null,
+            catchUp = if (originKnown) AudioSink.CatchUp(offsetNanos, { clock.currentTime() }, tempo) else null,
+            tempo = tempo,
         )
         audioHalf = AudioHalf(ap, at, aStop)
         logger.debug("$debugLabel Audio half restarted in place at ${offsetNanos / 1_000_000} ms.")
@@ -644,6 +688,7 @@ internal class PlaybackSessionManager(
         val process: Process,
         val stop: AtomicBoolean,
         val contentStartNanos: Long,
+        val tempo: Double = 1.0,
     )
 
     /**
@@ -653,7 +698,7 @@ internal class PlaybackSessionManager(
      * ([audioOriginKnown]); a live join anchors on its own PES PTS and must always start fresh.
      */
     private fun takeWarmAudioLine(streamSet: ActiveStreams): PreparedAudioLine? {
-        if (!audioOriginKnown()) return null
+        if (!audioOriginKnown() || tempo != 1.0) return null
         val w = audioWarmPool.take(streamSet.currentAudio.url) ?: return null
         logger.debug(
             "$debugLabel Audio-track switch served from the warm pool " +
@@ -667,8 +712,9 @@ internal class PlaybackSessionManager(
     ): PreparedAudioLine? {
         val seekNanos = clock.currentTime().coerceAtLeast(0L)
         val aStop = AtomicBoolean()
+        val tempo = this.tempo
         val ap = try {
-            buildAudioProcess(ffmpeg, streamSet, seekNanos, aStop)
+            buildAudioProcess(ffmpeg, streamSet, seekNanos, aStop, tempo)
         } catch (e: IOException) {
             logger.error("$debugLabel Failed to start replacement audio-track process.", e)
             return null
@@ -701,7 +747,7 @@ internal class PlaybackSessionManager(
             }
             return null
         }
-        return PreparedAudioLine(ap, aStop, seekNanos)
+        return PreparedAudioLine(ap, aStop, seekNanos, tempo)
     }
 
     private fun runAudioTrackSwitch(ffmpeg: String, streamSet: ActiveStreams, generation: Long) {
@@ -723,7 +769,7 @@ internal class PlaybackSessionManager(
         // drops the span the new track fell behind the live clock so it joins already lip-synced. The
         // HLS-feeder path (live) carries its own exact PES-PTS anchor instead, so no byte skip there.
         val originKnown = audioOriginKnown()
-        val catchUp = if (originKnown) AudioSink.CatchUp(seekNanos) { clock.currentTime() } else null
+        val catchUp = if (originKnown) AudioSink.CatchUp(seekNanos, { clock.currentTime() }, line.tempo) else null
         val oldAudio = audioHalf
         audio.startSwitch(
             ap, terminated, aStop,
@@ -752,6 +798,7 @@ internal class PlaybackSessionManager(
                 onAudioTrackSwitchSettled()
             },
             onUnexpectedEnd = onAudioFailure,
+            tempo = line.tempo,
         )
     }
 
@@ -789,7 +836,7 @@ internal class PlaybackSessionManager(
         outputAlpha = false
         val vt = pipe.startReplay(
             snapshot = snapshot, w = w, h = h, resumeNanos = resumeNanos, sourceFps = REPLAY_FPS,
-            stopFlag = channel.stop, terminated = terminated, getAudioClock = ::pacingClockNanos,
+            stopFlag = channel.stop, terminated = terminated, getAudioClock = pacingClock,
             onFirstFrame = { clock.markFirstFrame() },
             getBrightness = getBrightness,
             onEos = { _, normalEos ->
@@ -863,7 +910,7 @@ internal class PlaybackSessionManager(
                 if (audioUrl in SILENT_SOURCES) null
                 else MediaProcess.buildAudio(
                     ffmpeg, audioUrl, liveOffsetNanos, AudioSink.SAMPLE_RATE,
-                    seekByDecoding = streamSet.currentAudio.seekByDecoding,
+                    seekByDecoding = streamSet.currentAudio.seekByDecoding, tempo = tempo,
                 )
             // This path builds its process directly rather than through buildAudioProcess, so the
             // previous session's feeder would otherwise linger and be consulted for A / V anchoring.
@@ -875,7 +922,7 @@ internal class PlaybackSessionManager(
                 val at = audio.start(
                     ap, terminated, aStop,
                     contentStartNanos = liveOffsetNanos, originKnown = true,
-                    startGate = firstLiveFrame, onUnexpectedEnd = onAudioFailure,
+                    startGate = firstLiveFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
                 )
                 AudioHalf(ap, at, aStop)
             }
@@ -958,7 +1005,7 @@ internal class PlaybackSessionManager(
     fun parkedPositionNanos(): Long? =
         (phase.get() as? Phase.Parked)?.frozenNanos?.takeIf { parkFlag.get() && it >= 0 }
 
-    private val masterClock = AudioMasterClock(debugLabel, requestAudioResync = audio::requestResync)
+    private val masterClock = AudioMasterClock(debugLabel, requestAudioResync = audio::requestResync, rate = { tempo })
 
     private fun pacingClockNanos(): Long {
         // While a replay -> live bridge is active the wall clock is clamped to the live edge so it never

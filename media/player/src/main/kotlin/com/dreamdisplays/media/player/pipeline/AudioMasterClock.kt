@@ -12,6 +12,9 @@ internal class AudioMasterClock(
     private val nowNanos: () -> Long = System::nanoTime,
 
     private val requestAudioResync: (gapNanos: Long) -> Unit = {},
+
+    /** Content time per wall time (the playback speed); scales the wall-time steps this clock fills in. */
+    private val rate: () -> Double = { 1.0 },
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -73,8 +76,8 @@ internal class AudioMasterClock(
             val reach = minOf(stepNanos * 3 / 2, MAX_INTERPOLATION_NANOS)
             val sinceStep = if (suspended) 0L else (now - lastRawChangeNanos).coerceIn(0L, reach)
             val candidate =
-                if (takeover) takeoverAnchorOut + (now - takeoverAnchorWall)
-                else sample.nanos + bias + sinceStep
+                if (takeover) takeoverAnchorOut + content(now - takeoverAnchorWall)
+                else sample.nanos + bias + content(sinceStep)
 
             when {
                 candidate > lastOut -> {
@@ -104,7 +107,7 @@ internal class AudioMasterClock(
     }
 
     private fun reconcileTakeover(sample: AudioSink.ClockSample, now: Long) {
-        val ramp = takeoverAnchorOut + (now - takeoverAnchorWall)
+        val ramp = takeoverAnchorOut + content(now - takeoverAnchorWall)
         val behind = ramp - (sample.nanos + bias)
         if (behind <= MIN_RESYNC_NANOS) {
             takeover = false
@@ -123,6 +126,9 @@ internal class AudioMasterClock(
         )
         requestAudioResync(behind)
     }
+
+    /** Content nanos that pass in [wallNanos] at the current playback speed. */
+    private fun content(wallNanos: Long): Long = rate().let { if (it == 1.0) wallNanos else (wallNanos * it).toLong() }
 
     /** Forgets all session state; call when the whole playback session is torn down. */
     fun reset() {

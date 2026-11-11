@@ -57,4 +57,10 @@ interface PlaybackService {
 
     /** Re-resolves and reloads the current video for [displayId] after a load failure (local recovery). */
     fun retry(displayId: DisplayId)
+
+    /**
+     * Requests playback at [rate] x (pitch kept; clamped to `PlaybackSpeed.MIN`..`MAX`). Local displays change for
+     * this viewer only; Synced ones ask the server, which changes it for everyone watching.
+     */
+    fun setSpeed(displayId: DisplayId, rate: Double) {}
 }

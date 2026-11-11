@@ -90,6 +90,20 @@ internal class LastFrameCache {
     }
 }
 
+/**
+ * A pacing clock (content nanos, as the pipes expect) that also says how fast it runs against wall time, so a
+ * pipe can turn a content-time wait into a sleep at any playback speed.
+ */
+internal class RatedClock(private val read: () -> Long, val rate: () -> Double) : () -> Long {
+    override fun invoke(): Long = read()
+
+    companion object {
+        /** Content time per wall time of [clock]: its [rate] when it is a [RatedClock], 1 otherwise. */
+        fun rateOf(clock: () -> Long): Double =
+            (clock as? RatedClock)?.rate?.invoke()?.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+    }
+}
+
 /** A / V pacing shared by both frame pipes: sleep until a frame is due, drop when too late. */
 internal object FramePacing {
     private const val SPIN_THRESHOLD_NS = 300L * 1_000L
@@ -109,6 +123,8 @@ internal object FramePacing {
      * [dropWhenBehind] is consulted only for a frame that ended up behind the clock: dropping one pays off when a
      * fresher frame is already decoded, and is pure loss when it is the newest picture there is (the decoder is behind,
      * and dropping freezes the screen without helping it catch up).
+     *
+     * [rate] is the clock's content time per wall time (the playback speed): waits are content time divided by it.
      */
     fun pace(
         videoPts: Long,
@@ -117,9 +133,13 @@ internal object FramePacing {
         dropStaleTimeline: Boolean = true,
         dropWhenBehind: () -> Boolean = { true },
         leadNs: Long = 0L,
+        rate: Double = 1.0,
     ): Boolean {
         val started = System.nanoTime()
         val due = videoPts - leadNs
+        // A slowed-down clock legitimately takes longer per frame, so the frozen-clock watchdog waits that much more
+        val maxWaitNs = if (rate >= 1.0) MAX_PACING_WAIT_NS else (MAX_PACING_WAIT_NS / rate).toLong()
+        fun wall(contentNs: Long): Long = if (rate == 1.0) contentNs else (contentNs / rate).toLong()
         while (true) {
             if (abort()) return true
             val clock = audioClock()
@@ -137,17 +157,17 @@ internal object FramePacing {
                 }
                 return true
             }
-            if (System.nanoTime() - started >= MAX_PACING_WAIT_NS) {
+            if (System.nanoTime() - started >= maxWaitNs) {
                 if (diff <= GIVE_UP_PRESENT_THRESHOLD_NS) {
                     logger.warn(
-                        "Pacing wait hit ${MAX_PACING_WAIT_NS / 1_000_000} ms with nearly-due frame " +
+                        "Pacing wait hit ${maxWaitNs / 1_000_000} ms with nearly-due frame " +
                                 "(videoPts=${videoPts / 1_000_000} ms, audioClock=${clock / 1_000_000} ms); " +
                                 "clock appears frozen, presenting instead of dropping."
                     )
                     break
                 }
                 logger.warn(
-                    "Gave up pacing after ${MAX_PACING_WAIT_NS / 1_000_000} ms " +
+                    "Gave up pacing after ${maxWaitNs / 1_000_000} ms " +
                             "(videoPts=${videoPts / 1_000_000} ms, audioClock=${clock / 1_000_000} ms); " +
                             "dropping the frame."
                 )
@@ -163,15 +183,16 @@ internal object FramePacing {
                     )
                 }
             }
-            if (diff > SPIN_THRESHOLD_NS) {
-                LockSupport.parkNanos(minOf(diff - SPIN_THRESHOLD_NS, ABORT_POLL_NS))
+            val wallDiff = wall(diff)
+            if (wallDiff > SPIN_THRESHOLD_NS) {
+                LockSupport.parkNanos(minOf(wallDiff - SPIN_THRESHOLD_NS, ABORT_POLL_NS))
                 if (Thread.interrupted()) {
                     Thread.currentThread().interrupt()
                     break
                 }
                 continue
             }
-            val deadline = System.nanoTime() + diff
+            val deadline = System.nanoTime() + wallDiff
             while (System.nanoTime() < deadline) {
                 if (abort()) return true
                 Thread.onSpinWait()

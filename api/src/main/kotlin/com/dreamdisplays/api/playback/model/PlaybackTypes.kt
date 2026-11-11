@@ -113,7 +113,10 @@ enum class WatchPartySessionState {
 
 /** A playback intent a client sends to a server-authoritative timeline (`PlaybackCommand`). */
 enum class PlaybackAction {
-    PLAY, PAUSE, SEEK, RESTART;
+    PLAY, PAUSE, SEEK, RESTART,
+
+    /** Change the playback speed to `PlaybackCommand.rate` (servers older than 1.10.x ignore it). */
+    SPEED;
 
     /** The append-only wire value for this action. */
     val wire: Int get() = ordinal

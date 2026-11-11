@@ -59,6 +59,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             screen.takeReplayBootstrap(videoUrl), audioStage,
         )
         player = newPlayer
+        // Before the stream opens, so the first session already plays at the display's speed
+        screen.syncPlaybackSpeed()
         screen.timelineFollower.onPlayerCreated()
         // Set the effective volume (incl. distance) now, before the bridge prelude (which starts at
         // construction) becomes audible — otherwise its first moment plays at the un-attenuated level.

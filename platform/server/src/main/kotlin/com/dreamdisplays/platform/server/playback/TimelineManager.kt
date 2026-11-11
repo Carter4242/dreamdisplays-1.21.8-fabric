@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.protocol.common.toSync
@@ -59,9 +60,12 @@ object TimelineManager {
 
     /**
      * Applies a client playback intent to a `SYNCED` display. Returns true when it was permitted, applied, and rebroadcast;
-     * false otherwise.
+     * false otherwise. [rate] is the requested speed of a [PlaybackAction.SPEED] intent.
      */
-    fun onCommand(display: DisplayData, senderId: UUID, action: PlaybackAction, positionMs: Long): Boolean {
+    fun onCommand(
+        display: DisplayData, senderId: UUID, action: PlaybackAction, positionMs: Long,
+        rate: Double = PlaybackSpeed.NORMAL,
+    ): Boolean {
         if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(display.id)) return false
         val ctx = PlaybackContexts.of(
             display, senderId, transport.isAdmin(senderId),
@@ -70,6 +74,7 @@ object TimelineManager {
         if (!PlaybackPermissions.canPlayPause(ctx)) return false
         if (!commandThrottle.tryAcquire(senderId, COMMAND_COOLDOWN_MS)) return false
         if (senderId !in transport.nearbyPlayerIds(display)) return false
+        if (action == PlaybackAction.SPEED) return PlaybackPermissions.canChangeSpeed(ctx) && setSpeed(display, rate)
 
         val now = transport.nowMs()
         startHolds.remove(display.id)
@@ -78,7 +83,8 @@ object TimelineManager {
             PlaybackAction.PLAY -> current.withPaused(false, now)
             PlaybackAction.PAUSE -> current.withPaused(true, now)
             PlaybackAction.SEEK -> current.seekedTo(clampSeek(positionMs, display), now)
-            PlaybackAction.RESTART -> Timeline.start(now)
+            PlaybackAction.RESTART -> Timeline.start(now, rate = current.rate)
+            PlaybackAction.SPEED -> return false // Handled above
         }
         // A resume, seek or restart parks every viewer paused at the new position for a moment, so they all
         // snap onto it and then start together instead of each correcting its own offset afterwards.
@@ -209,6 +215,36 @@ object TimelineManager {
     fun isPaused(display: DisplayData): Boolean =
         startHolds.containsKey(display.id) || timelines[display.id]?.paused == true
 
+    /**
+     * Sets the playback speed of a `SYNCED` / `BROADCAST` display's timeline to [rate] (clamped to
+     * [PlaybackSpeed.MIN]..[PlaybackSpeed.MAX]) without moving its position; permission checks are the caller's.
+     * A playing timeline is held at the current position like a seek: every viewer restarts its player at the new
+     * speed there, and all start together once they are ready ([startWhenReady]), after [seekHoldMs] at the latest. Returns false when the display has no
+     * shared timeline.
+     */
+    fun setSpeed(display: DisplayData, rate: Double): Boolean {
+        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
+        val current = ensureTimeline(display) ?: return false
+        val speed = PlaybackSpeed.clamp(rate)
+        if (speed == current.rate) return true
+        val now = transport.nowMs()
+        val updated = current.withRate(speed, now)
+        // Clients held ready at the old speed restart their streams at the new one: wait for them afresh
+        ReadinessTracker.forgetDisplay(display.id)
+        // A paused timeline (including one in a start hold) just takes the new speed and keeps its hold
+        if (current.paused) {
+            timelines[display.id] = updated
+            broadcast(display, updated)
+            return true
+        }
+        startHolds.remove(display.id)
+        holdThenRelease(display, updated, now, playAfter = true, holdMs = seekHoldMs())
+        return true
+    }
+
+    /** The playback speed of [display]'s shared timeline (1 when it has none). */
+    fun speedOf(display: DisplayData): Double = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
+
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */
     fun sendCurrent(display: DisplayData, playerId: UUID) {
         val timeline = ensureTimeline(display) ?: return
@@ -241,7 +277,9 @@ object TimelineManager {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
         val now = transport.nowMs()
-        val fresh = Timeline.start(now, paused = true, loop = true)
+        // The display keeps its speed across videos
+        val speed = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
+        val fresh = Timeline.start(now, paused = true, loop = true, rate = speed)
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
         ReadinessTracker.forgetDisplay(display.id)

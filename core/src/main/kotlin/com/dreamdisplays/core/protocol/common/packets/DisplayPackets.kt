@@ -48,7 +48,10 @@ data class DisplayDelete(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
 ) : DreamPacket
 
-/** Authoritative playback timeline for a display, pushed by server; [currentTimeMs] is position anchor. */
+/**
+ * Authoritative playback timeline for a display, pushed by server; [currentTimeMs] is position anchor, advancing at
+ * [rate] content ms per server ms while playing.
+ */
 @Serializable
 data class DisplaySync(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
@@ -59,11 +62,13 @@ data class DisplaySync(
     @ProtoNumber(6) val serverTimeMs: Long = 0,
     @ProtoNumber(7) val loop: Boolean = false,
     @ProtoNumber(8) val mode: Int = 0,
+    /** Playback speed (content ms per server ms); 1 when absent (older servers). */
+    @ProtoNumber(9) val rate: Double = 1.0,
     /**
      * A start scheduled slightly ahead: playback begins at [currentTimeMs] this many ms after [serverTimeMs], so every
      * viewer can begin on the same frame. Only with [isPaused] false; clients that do not know the field just start now.
      */
-    @ProtoNumber(9) val startInMs: Int = 0,
+    @ProtoNumber(10) val startInMs: Int = 0,
 ) : DreamPacket
 
 /**

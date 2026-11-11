@@ -107,7 +107,7 @@ object PaperV2Networking : PluginMessageListener {
             )
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
-                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs)
+                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
             }
 
             is WatchPartyStart -> DisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)

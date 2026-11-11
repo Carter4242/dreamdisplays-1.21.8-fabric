@@ -2,6 +2,7 @@ package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
@@ -25,6 +26,7 @@ fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: Playbac
             serverTimeMs = nowMs,
             loop = loop,
             mode = mode.wire,
+            rate = rate,
             startInMs = (serverTimeMs - nowMs).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         )
     }
@@ -38,6 +40,7 @@ fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: Playbac
         serverTimeMs = anchored.serverTimeMs,
         loop = anchored.loop,
         mode = mode.wire,
+        rate = anchored.rate,
     )
 }
 
@@ -48,4 +51,5 @@ fun DisplaySync.toTimeline(): Timeline = Timeline(
     paused = isPaused,
     durationMs = durationMs,
     loop = loop,
+    rate = PlaybackSpeed.clamp(rate),
 )

@@ -1,8 +1,8 @@
 package com.dreamdisplays.media.player.pipeline
 
 /**
- * Playback position as a seek origin plus the wall time elapsed since the first frame. Thread-safe for reads;
- * writes assume a single control thread.
+ * Playback position as a seek origin plus the wall time elapsed since the first frame, times the playback [rate].
+ * Thread-safe for reads; writes assume a single control thread.
  */
 internal class PlaybackClock {
     companion object {
@@ -15,6 +15,22 @@ internal class PlaybackClock {
     @Volatile
     private var startWallNanos = NOT_STARTED
 
+    @Volatile
+    private var rateValue = 1.0
+
+    /** Content time per wall time (the playback speed). */
+    val rate: Double get() = rateValue
+
+    /**
+     * Changes the playback speed. A running clock is rebased first, so the position stays continuous and only
+     * its pace changes.
+     */
+    fun setRate(rate: Double) {
+        if (rate == rateValue) return
+        if (isRunning) rebaseTo(currentTime())
+        rateValue = rate
+    }
+
     /** The seek origin — the position [currentTime] reports while the clock is not running. */
     val originNanos: Long get() = originNanosValue
 
@@ -23,8 +39,10 @@ internal class PlaybackClock {
     /** Returns the current playback position in nanos, based on the seek origin and elapsed wall time. */
     fun currentTime(): Long {
         val start = startWallNanos
-        return if (start == NOT_STARTED) originNanosValue
-        else originNanosValue + (System.nanoTime() - start)
+        if (start == NOT_STARTED) return originNanosValue
+        val elapsed = System.nanoTime() - start
+        val r = rateValue
+        return originNanosValue + if (r == 1.0) elapsed else (elapsed * r).toLong()
     }
 
     /** Called once by the video thread when the first frame arrives. */

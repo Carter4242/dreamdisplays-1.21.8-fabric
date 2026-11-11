@@ -58,6 +58,17 @@ internal class AudioSink(private val debugLabel: String) {
 
         /** Converts a byte count of stereo 16-bit PCM into nanos of content. */
         fun bytesToNanos(bytes: Long): Long = framesToNanos(bytes / BYTES_PER_FRAME)
+
+        /**
+         * Content nanos carried by [pcmNanos] of PCM from a process time-stretched to [tempo] x (each PCM second
+         * holds [tempo] seconds of the video).
+         */
+        fun pcmToContentNanos(pcmNanos: Long, tempo: Double): Long =
+            if (tempo == 1.0) pcmNanos else (pcmNanos * tempo).toLong()
+
+        /** PCM nanos that carry [contentNanos] of content at [tempo] x. */
+        fun contentToPcmNanos(contentNanos: Long, tempo: Double): Long =
+            if (tempo == 1.0) contentNanos else (contentNanos / tempo).toLong()
     }
 
     /**
@@ -78,6 +89,8 @@ internal class AudioSink(private val debugLabel: String) {
         @JvmField val epoch: Int,
         @JvmField val originKnown: Boolean,
         @Volatile @JvmField var contentStartNanos: Long,
+        /** Playback speed the process was started with (`atempo`); PCM time times this is content time. */
+        @JvmField val tempo: Double = 1.0,
     ) {
 
         @Volatile
@@ -102,9 +115,10 @@ internal class AudioSink(private val debugLabel: String) {
     private class OpenedLine(val line: SourceDataLine, val output: PcmLineOutput)
 
     /**
-     * Content catch-up spec for session starting during playback (discard leading PCM).
+     * Content catch-up spec for session starting during playback (discard leading PCM). [tempo] is the speed the
+     * process plays at, so the content a skipped PCM span stood for is known.
      */
-    class CatchUp(val contentStartNanos: Long, val playbackClock: () -> Long)
+    class CatchUp(val contentStartNanos: Long, val playbackClock: () -> Long, val tempo: Double = 1.0)
 
     /** Current volume multiplier applied to each audio chunk. */
     @Volatile
@@ -140,7 +154,9 @@ internal class AudioSink(private val debugLabel: String) {
         // another sample rate
         val position = ln.longFramePosition
         val contentFrames = s.output?.frameMap?.contentAt(position) ?: position
-        return ClockSample(s.contentStartNanos + framesToNanos(contentFrames), s.epoch, s.originKnown)
+        return ClockSample(
+            s.contentStartNanos + pcmToContentNanos(framesToNanos(contentFrames), s.tempo), s.epoch, s.originKnown,
+        )
     }
 
     @Volatile
@@ -179,7 +195,7 @@ internal class AudioSink(private val debugLabel: String) {
         val target = pendingResyncNanos.getAndSet(0L)
         if (target <= 0L || !owns(session)) return false
         val scratch = ByteArray(CHUNK_BYTES)
-        var toSkip = target * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
+        var toSkip = contentToPcmNanos(target, session.tempo) * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
         var skipped = 0L
         while (toSkip > 0 && !terminated.get() && !stopFlag.get()) {
             val n = MediaUtil.readFull(input, scratch, minOf(CHUNK_BYTES.toLong(), toSkip).toInt())
@@ -188,14 +204,15 @@ internal class AudioSink(private val debugLabel: String) {
             toSkip -= n
         }
         if (skipped <= 0L) return false
-        session.contentStartNanos += bytesToNanos(skipped)
-        logger.debug("$debugLabel [audio] re-synced by skipping ${bytesToNanos(skipped) / 1_000_000} ms of PCM.")
+        val skippedContent = pcmToContentNanos(bytesToNanos(skipped), session.tempo)
+        session.contentStartNanos += skippedContent
+        logger.debug("$debugLabel [audio] re-synced by skipping ${skippedContent / 1_000_000} ms of PCM.")
         return true
     }
 
-    private fun beginSession(contentStartNanos: Long, originKnown: Boolean): LineSession {
+    private fun beginSession(contentStartNanos: Long, originKnown: Boolean, tempo: Double): LineSession {
         val session = synchronized(sessionLock) {
-            LineSession(++epochCounter, originKnown, contentStartNanos).also { current = it }
+            LineSession(++epochCounter, originKnown, contentStartNanos, tempo).also { current = it }
         }
         pendingResyncNanos.set(0L) // A skip owed by the previous line means nothing to a fresh one
         dspStage?.reset()
@@ -232,8 +249,9 @@ internal class AudioSink(private val debugLabel: String) {
         startGate: CountDownLatch? = null,
         onUnexpectedEnd: (String) -> Unit = {},
         catchUp: CatchUp? = null,
+        tempo: Double = 1.0,
     ): Thread {
-        val session = beginSession(contentStartNanos, originKnown)
+        val session = beginSession(contentStartNanos, originKnown, tempo)
         val stderrBuf = drainStderr(proc, stopFlag)
         return daemon(
             { run(session, proc, terminated, stopFlag, startGate, stderrBuf, onUnexpectedEnd, catchUp) },
@@ -255,6 +273,7 @@ internal class AudioSink(private val debugLabel: String) {
         onPromoted: () -> Unit,
         onAborted: () -> Unit = {},
         onUnexpectedEnd: (String) -> Unit = {},
+        tempo: Double = 1.0,
     ): Thread {
         val stderrBuf = drainStderr(proc, stopFlag)
         return daemon(
@@ -270,7 +289,8 @@ internal class AudioSink(private val debugLabel: String) {
                     onPromoted,
                     onAborted,
                     stderrBuf,
-                    onUnexpectedEnd
+                    onUnexpectedEnd,
+                    tempo,
                 )
             },
             "MediaPlayer-audio-switch-line",
@@ -280,7 +300,7 @@ internal class AudioSink(private val debugLabel: String) {
     private fun runSwitch(
         proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean, contentStartNanos: Long,
         originKnown: Boolean, catchUp: CatchUp?, shouldPromote: () -> Boolean, onPromoted: () -> Unit,
-        onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit,
+        onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit, tempo: Double,
     ) {
         var newLine: SourceDataLine? = null
         var session: LineSession? = null
@@ -310,7 +330,7 @@ internal class AudioSink(private val debugLabel: String) {
                     runCatching { stop() }
                     runCatching { flush() }
                 }
-                val s = beginSession(contentStartNanos + skippedNanos, originKnown)
+                val s = beginSession(contentStartNanos + skippedNanos, originKnown, tempo)
                 s.output = opened.output
                 session = s
                 publishLine(s, newLine)
@@ -446,28 +466,30 @@ internal class AudioSink(private val debugLabel: String) {
     ): Long {
         val scratch = ByteArray(CHUNK_BYTES)
         var skippedBytes = 0L
+        // Content skipped so far: PCM played at catchUp.tempo carries that many times its own length of video
+        fun skippedContent() = pcmToContentNanos(bytesToNanos(skippedBytes), catchUp.tempo)
         repeat(CATCHUP_MAX_PASSES) {
-            val contentNow = catchUp.contentStartNanos + bytesToNanos(skippedBytes)
+            val contentNow = catchUp.contentStartNanos + skippedContent()
             val gapNanos = catchUp.playbackClock() - contentNow
-            if (gapNanos < CATCHUP_MIN_NANOS) {
+            if (contentToPcmNanos(gapNanos, catchUp.tempo) < CATCHUP_MIN_NANOS) {
                 if (skippedBytes > 0L) {
                     logger.debug(
-                        "$debugLabel [audio] catch-up skipped ${bytesToNanos(skippedBytes) / 1_000_000} ms " +
+                        "$debugLabel [audio] catch-up skipped ${skippedContent() / 1_000_000} ms " +
                                 "of PCM to join in sync."
                     )
                 }
-                return bytesToNanos(skippedBytes)
+                return skippedContent()
             }
-            var toSkip = gapNanos * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
+            var toSkip = contentToPcmNanos(gapNanos, catchUp.tempo) * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
             while (toSkip > 0 && !terminated.get() && !stopFlag.get()) {
                 val n = MediaUtil.readFull(input, scratch, minOf(CHUNK_BYTES.toLong(), toSkip).toInt())
-                if (n <= 0) return bytesToNanos(skippedBytes) // EOF mid-skip: pump loop will report it
+                if (n <= 0) return skippedContent() // EOF mid-skip: pump loop will report it
                 skippedBytes += n
                 toSkip -= n
             }
-            if (terminated.get() || stopFlag.get()) return bytesToNanos(skippedBytes)
+            if (terminated.get() || stopFlag.get()) return skippedContent()
         }
-        return bytesToNanos(skippedBytes)
+        return skippedContent()
     }
 
     private fun pumpLive(
