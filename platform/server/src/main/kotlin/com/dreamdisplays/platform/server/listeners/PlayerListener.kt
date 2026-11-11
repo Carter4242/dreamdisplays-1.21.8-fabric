@@ -71,18 +71,26 @@ class PlayerListener : Listener {
     /** Drops cached per-player state when a player disconnects. */
     @EventHandler
     fun onPlayerLeave(event: PlayerQuitEvent) {
-        PlayerManager.removeVersion(event.player)
-        V2PlayerTracker.clear(event.player.uniqueId)
-        WatchPartyManager.onPlayerQuit(event.player.uniqueId)
-        com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerQuit(event.player.uniqueId)
-        FullscreenBroadcastManager.onPlayerQuit(event.player.uniqueId)
-        ReadinessTracker.forgetPlayer(event.player.uniqueId)
-        SelectionManager.resetSelection(event.player.uniqueId)
-        DisplayManager.forgetNearbyPlayer(event.player.uniqueId)
-        com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(event.player.uniqueId)
-        com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(event.player.uniqueId)
-        com.dreamdisplays.platform.server.karaoke.KaraokeManager.onQuit(event.player.uniqueId)
-        Scheduler.untrackPlayer(event.player)
+        val id = event.player.uniqueId
+        // Each step on its own: one failing must not leave the rest of the player's state behind
+        quitStep("version") { PlayerManager.removeVersion(event.player) }
+        quitStep("handshake") { V2PlayerTracker.clear(id) }
+        quitStep("watch party") { WatchPartyManager.onPlayerQuit(id) }
+        quitStep("screen share") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerQuit(id) }
+        quitStep("fullscreen") { FullscreenBroadcastManager.onPlayerQuit(id) }
+        quitStep("readiness") { ReadinessTracker.forgetPlayer(id) }
+        quitStep("selection") { SelectionManager.resetSelection(id) }
+        quitStep("nearby") { DisplayManager.forgetNearbyPlayer(id) }
+        quitStep("diagnostics") { com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(id) }
+        quitStep("error reports") { com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(id) }
+        quitStep("karaoke") { com.dreamdisplays.platform.server.karaoke.KaraokeManager.onQuit(id) }
+        quitStep("scheduler") { Scheduler.untrackPlayer(event.player) }
+    }
+
+    private fun quitStep(what: String, step: () -> Unit) {
+        runCatching(step).onFailure {
+            org.slf4j.LoggerFactory.getLogger(PlayerListener::class.java).warn("Player quit cleanup failed: {}.", what, it)
+        }
     }
 }
 

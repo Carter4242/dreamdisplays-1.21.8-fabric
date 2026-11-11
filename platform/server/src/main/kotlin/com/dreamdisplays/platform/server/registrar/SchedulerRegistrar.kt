@@ -32,22 +32,25 @@ object SchedulerRegistrar {
             DISPLAY_UPDATE_INTERVAL_TICKS,
             DISPLAY_UPDATE_INTERVAL_TICKS
         ) {
-            if (PlatformUtil.isFolia) {
-                DisplayManager.updateAllDisplaysForTrackedPlayers()
-            } else {
-                DisplayManager.updateAllDisplays()
+            // Each on its own: one throwing every tick must not starve the others
+            step("display update") {
+                if (PlatformUtil.isFolia) {
+                    DisplayManager.updateAllDisplaysForTrackedPlayers()
+                } else {
+                    DisplayManager.updateAllDisplays()
+                }
             }
-            TimelineManager.tick()
-            WatchPartyManager.tick()
-            FullscreenBroadcastManager.tick()
-            ProxyBridge.tick()
-            ClientDiagnostics.tick()
+            step("timeline tick") { TimelineManager.tick() }
+            step("watch party tick") { WatchPartyManager.tick() }
+            step("fullscreen tick") { FullscreenBroadcastManager.tick() }
+            step("proxy tick") { ProxyBridge.tick() }
+            step("diagnostics tick") { ClientDiagnostics.tick() }
         }
         // Queue advances land within a tenth of a second of a video's end; a no-op while nothing is queued
         runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) {
-            QueueManager.tick()
+            step("queue tick") { QueueManager.tick() }
             // Karaoke stages (who hears a singer, their pings) stay at most a tenth of a second old
-            KaraokeManager.tick()
+            step("karaoke tick") { KaraokeManager.tick() }
         }
         val settings = PaperServer.config.settings
         if (settings.updatesEnabled) {
@@ -60,6 +63,24 @@ object SchedulerRegistrar {
                     settings.repoOwner,
                     settings.repoName
                 )
+            }
+        }
+    }
+
+    private val logger = org.slf4j.LoggerFactory.getLogger(javaClass)
+    private const val STEP_ERROR_LOG_MS = 60_000L
+    private val stepErrorLoggedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Runs [task]; a failure is logged (once a minute per step) instead of skipping the steps after it. */
+    private fun step(name: String, task: () -> Unit) {
+        try {
+            task()
+        } catch (e: Exception) {
+            val now = System.currentTimeMillis()
+            val last = stepErrorLoggedAt[name]
+            if (last == null || now - last >= STEP_ERROR_LOG_MS) {
+                stepErrorLoggedAt[name] = now
+                logger.error("Scheduled {} failed (logged at most once a minute).", name, e)
             }
         }
     }
