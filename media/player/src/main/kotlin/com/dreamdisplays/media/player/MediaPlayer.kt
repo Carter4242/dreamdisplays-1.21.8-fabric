@@ -14,11 +14,13 @@ import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.managers.AudioFaultBudget
+import com.dreamdisplays.media.player.managers.AudioFaultRoute
 import com.dreamdisplays.media.player.managers.AudioStallDetector
 import com.dreamdisplays.media.player.managers.PlaybackSessionManager
 import com.dreamdisplays.media.player.managers.StatsReporter
 import com.dreamdisplays.media.player.managers.StreamWatchdog
 import com.dreamdisplays.media.player.managers.WarmTrack
+import com.dreamdisplays.media.player.pipeline.AudioSink
 import com.dreamdisplays.media.player.pipeline.PlaybackClock
 import com.dreamdisplays.media.player.policy.FailureStages
 import com.dreamdisplays.media.player.policy.LoadFailures
@@ -1445,11 +1447,21 @@ class MediaPlayer(
         if (terminated.get() || !isCurrent()) return@onControl
         val ss = streams ?: return@onControl
         val nearEnd = durationHintNanos > 0L && durationHintNanos - clock.currentTime() <= AUDIO_EOS_NEAR_END_GUARD_NS
-        if (liveStream || nearEnd || MediaProcess.indicatesNoAudioStream(stderr) ||
-            !audioFaults.allowRestart(System.nanoTime())
-        ) {
-            handleAudioFailure(stderr)
-            return@onControl
+        val route = AudioFaultRoute.of(
+            deviceChanged = reason.startsWith(AudioSink.DEVICE_CHANGED_REASON), live = liveStream, nearEnd = nearEnd,
+            noAudioStream = MediaProcess.indicatesNoAudioStream(stderr),
+            budgetAllows = { audioFaults.allowRestart(System.nanoTime()) },
+        )
+        when (route) {
+            AudioFaultRoute.Route.FAILURE_PATH -> {
+                handleAudioFailure(stderr)
+                return@onControl
+            }
+            AudioFaultRoute.Route.RESTART_LIVE -> {
+                restartAudioOrStall()
+                return@onControl
+            }
+            AudioFaultRoute.Route.RESTART_IN_PLACE -> {}
         }
         val at = getCurrentTime()
         volume.reapply()

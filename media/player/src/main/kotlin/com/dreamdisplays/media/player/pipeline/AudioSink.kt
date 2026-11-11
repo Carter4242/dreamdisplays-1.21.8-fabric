@@ -42,6 +42,9 @@ internal class AudioSink(private val debugLabel: String) {
         /** How long to wait for FFmpeg to exit after its PCM ended, to read its exit code. */
         private const val EXIT_WAIT_MS = 500L
 
+        /** Start of the fault reason of a line that ended because the game's sound device changed (not a failure). */
+        const val DEVICE_CHANGED_REASON = "sound device changed"
+
         /** How often a playing line checks that the game still uses the output device it was opened on. */
         private const val DEVICE_CHECK_NANOS = 1_000_000_000L
 
@@ -504,8 +507,11 @@ internal class AudioSink(private val debugLabel: String) {
             null -> {}
             EndKind.ENDED -> onUnexpectedEnd(stderr, hadPcm)
             EndKind.FAULT -> {
-                val reason = failure?.let { "audio pipeline failed ($it)" }
-                    ?: "FFmpeg audio process exited with code $exitCode"
+                val reason = when (failure) {
+                    is OutputDeviceChanged -> "$DEVICE_CHANGED_REASON (${failure.message})"
+                    null -> "FFmpeg audio process exited with code $exitCode"
+                    else -> "audio pipeline failed ($failure)"
+                }
                 if (onFault == null) {
                     if (failure != null) logger.warn("$debugLabel [audio] $reason.", failure)
                     if (pumped) onUnexpectedEnd(stderr, hadPcm)
