@@ -7,7 +7,7 @@ package com.dreamdisplays.core.karaoke
  */
 object KaraokeCoSinger {
     data class Levels(
-        val singing: Double = 0.15,
+        val singing: Double = 0.03,
         val idle: Double = 0.075,
         val idleAfterMs: Long = 3_000L,
         val fadeDownMs: Long = 200L,
