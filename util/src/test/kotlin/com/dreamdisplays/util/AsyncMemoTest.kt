@@ -25,6 +25,28 @@ class AsyncMemoTest {
     }
 
     @Test
+    fun cancelStopsTheLoadInFlightAndCachesNothing() = runBlocking {
+        val scope = testScope()
+        try {
+            val memo = AsyncMemo<String, String>(maxSize = 10, ttlMs = 60_000, scope = scope, tag = "test")
+            val stopped = CompletableDeferred<Unit>()
+            val first = memo.load("video") {
+                try {
+                    awaitCancellation()
+                } finally {
+                    stopped.complete(Unit)
+                }
+            }
+            memo.cancel("video")
+            withTimeout(2_000) { stopped.await() }
+            assertEquals(true, first.isCancelled)
+            assertEquals("fresh", memo.getBlocking("video") { "fresh" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun disabledCacheStillDeduplicatesInFlightLoads() = runBlocking {
         val scope = testScope()
         try {

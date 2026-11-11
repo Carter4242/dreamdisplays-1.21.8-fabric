@@ -7,14 +7,17 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
 import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
+import com.dreamdisplays.media.source.RaceAware
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Subprocess-backed [MediaResolverService] wrapping the [YtDlp] orchestrator. This is the slow, robust
  * fallback behind [NewPipeResolver]: a lower [priority] means [MediaResolverRegistry]
  * only reaches it after the in-process fast path has declined or failed.
  */
-object YtDlpResolver : MediaResolverService {
+object YtDlpResolver : MediaResolverService, RaceAware {
     override val priority: Int = 0
 
     /** Everything except a live relay stream, which only `FFmpeg` itself can open (see [CustomMediaKind.LIVE]). */
@@ -27,15 +30,26 @@ object YtDlpResolver : MediaResolverService {
         return true
     }
 
+    /** [resolve] calls in progress per URL: they share one fetch, which [cancel] stops only for a lone caller. */
+    private val resolving = ConcurrentHashMap<String, AtomicInteger>()
+
+    override fun cancel(source: MediaSource) {
+        val url = source.toResolvableUrl() ?: return
+        if (resolving[url]?.get() == 1) YtDlp.cancelFetch(url)
+    }
+
     override fun resolve(source: MediaSource): ResolvedMedia {
         val url = source.toResolvableUrl()
             ?: throw UnsupportedOperationException("$source has no resolvable URL.")
         // The format cache wraps every failure in an IOException; unwrap a typed one so its message and fatality reach
         // the player instead of a generic "fetch failed"
+        resolving.computeIfAbsent(url) { AtomicInteger() }.incrementAndGet()
         val streams = try {
             YtDlp.fetch(url)
         } catch (e: IOException) {
             throw (e.cause as? DreamMediaException) ?: e
+        } finally {
+            resolving.computeIfPresent(url) { _, n -> if (n.decrementAndGet() <= 0) null else n }
         }
         check(streams.isNotEmpty()) { "yt-dlp returned no playable streams for $url." }
 

@@ -75,8 +75,28 @@ class DefaultMediaResolverRegistry(
             throw DreamMediaException.Unknown("No resolver registered for source: $source", isFatal = true)
         }
         if (candidates.size == 1) return traced(source, candidates[0])
+        // The first resolver owns this link (a media file for the direct resolver): the rest only if it fails
+        val first = candidates[0]
+        if (first is RaceAware && first.claims(source)) {
+            val claimError = try {
+                return traced(source, first)
+            } catch (e: Throwable) {
+                if (e is CancellationException || e is InterruptedException) throw e
+                e
+            }
+            val rest = candidates.drop(1)
+            return runCatching { if (rest.size == 1) traced(source, rest[0]) else runBlocking { raceResolvers(source, rest) } }
+                .getOrElse { e ->
+                    if (e is CancellationException || e is InterruptedException) throw e
+                    throw conclusive([claimError, e]) ?: e
+                }
+        }
         return runBlocking { raceResolvers(source, candidates) }
     }
+
+    /** A typed failure says why; otherwise the last resolver is the final fallback and its error is the conclusive one. */
+    private fun conclusive(errors: List<Throwable?>): Throwable? =
+        errors.filterNotNull().let { all -> all.firstOrNull { it is DreamMediaException } ?: all.lastOrNull() }
 
     /** Runs [resolver] and records how it went in the link's [ResolveTrail] (for client error reports). */
     private fun traced(source: MediaSource, resolver: MediaResolverService): ResolvedMedia {
@@ -101,15 +121,21 @@ class DefaultMediaResolverRegistry(
         val winner = CompletableDeferred<ResolvedMedia>()
         val errors = arrayOfNulls<Throwable>(candidates.size)
         val remaining = AtomicInteger(candidates.size)
+        // Started and not yet finished; a resolver that lost while running is told to stop (see below)
+        val running = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
         // Once a winner lands, candidates still waiting out their head start are canceled so they never
-        // spawn work. One already resolving is left to finish (not interrupted): an interrupted extract can
-        // surface as "unresolvable" and poison a resolver's negative cache, while a finished one warms it.
+        // spawn work. One already resolving in-process is left to finish (not interrupted): an interrupted extract
+        // can surface as "unresolvable" and poison a resolver's negative cache, while a finished one warms it. One
+        // running subprocesses ([RaceAware.cancel], yt-dlp) has them killed: they cost seconds of CPU per client.
         val jobs = candidates.mapIndexed { index, resolver ->
             DreamCoroutines.clientIo.launch {
                 if (index > 0) delay(RACE_HEAD_START * index)
                 if (!winner.isCompleted) {
-                    runCatching { traced(source, resolver) }
+                    running += index
+                    val result = runCatching { traced(source, resolver) }
+                    running -= index
+                    result
                         .onSuccess { winner.complete(it) }
                         .onFailure { e ->
                             if (e is CancellationException) throw e
@@ -118,10 +144,8 @@ class DefaultMediaResolverRegistry(
                 }
                 if (remaining.decrementAndGet() == 0 && !winner.isCompleted) {
                     winner.completeExceptionally(
-                        // A typed failure says why; otherwise the last resolver is the final fallback and its error is
-                        // the conclusive one (earlier ones are often just "deferring to the next resolver")
-                        errors.filterNotNull().let { all -> all.firstOrNull { it is DreamMediaException } ?: all.lastOrNull() }
-                            ?: DreamMediaException.Unknown("All resolvers failed for source: $source")
+                        // Earlier errors are often just "deferring to the next resolver"
+                        conclusive(errors.asList()) ?: DreamMediaException.Unknown("All resolvers failed for source: $source")
                     )
                 }
             }
@@ -130,6 +154,7 @@ class DefaultMediaResolverRegistry(
             return winner.await()
         } finally {
             jobs.forEach(Job::cancel)
+            running.forEach { index -> (candidates[index] as? RaceAware)?.let { runCatching { it.cancel(source) } } }
         }
     }
 

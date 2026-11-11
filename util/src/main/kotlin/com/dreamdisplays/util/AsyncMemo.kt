@@ -39,6 +39,11 @@ class AsyncMemo<K : Any, V : Any>(
         inFlight.remove(key)
     }
 
+    /** Cancels a load of [key] still in flight (nothing is cached for it); a later call starts afresh. */
+    fun cancel(key: K) {
+        inFlight.remove(key)?.cancel()
+    }
+
     /**
      * Starts (or joins) a background load of [key] via [loader] and returns its [Deferred]. The result
      * is cached on success; the in-flight slot is cleared when the load settles. Use for prefetching.

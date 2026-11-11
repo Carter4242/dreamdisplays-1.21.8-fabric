@@ -57,6 +57,9 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
         }
     }
 
+    /** Stops a resolve of [videoUrl] still in flight (killing its `yt-dlp` processes); cached results stay. */
+    fun cancel(videoUrl: String) = formatMemo.cancel(videoUrl)
+
     /** Removes [videoUrl] from the in-memory format cache, in-flight map, and disk cache. */
     fun invalidate(videoUrl: String) {
         invalidatedAtMs.put(videoUrl, System.currentTimeMillis())

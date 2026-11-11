@@ -13,6 +13,7 @@ import com.dreamdisplays.api.media.stream.MediaStreamType
 import com.dreamdisplays.shared.policy.MediaHosts
 import com.dreamdisplays.media.player.readahead.ReadAhead
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
+import com.dreamdisplays.media.source.RaceAware
 import com.dreamdisplays.util.net.DreamHttpClient
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit
  * Plays a URL that already is the media: a video file, an HLS playlist, a DASH manifest, or a live relay stream
  * (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`).
  */
-object DirectStreamResolver : MediaResolverService {
+object DirectStreamResolver : MediaResolverService, RaceAware {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override val priority: Int = 20
@@ -51,6 +52,12 @@ object DirectStreamResolver : MediaResolverService {
         source is MediaSource.DirectStream || source is MediaSource.Remote
 
     override fun prefetch(source: MediaSource): Boolean = runCatching { resolve(source) }.isSuccess
+
+    /**
+     * A link that names a media file, playlist or manifest (`.mp4`, `.m3u8`...) is played directly: `yt-dlp` (and
+     * NewPipe inside it) starts only if this fails. A page link ([MediaSource.Remote]) is only probed, so it still races.
+     */
+    override fun claims(source: MediaSource): Boolean = source is MediaSource.DirectStream && source.kind.isDirect
 
     override fun resolve(source: MediaSource): ResolvedMedia {
         val url = source.toResolvableUrl()

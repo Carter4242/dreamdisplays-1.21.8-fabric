@@ -150,4 +150,116 @@ class DefaultMediaResolverRegistryTest {
         val e = assertFailsWith<DreamMediaException.GeoBlocked> { registry.resolve(source) }
         assertTrue(e.isFatal)
     }
+
+    private val file = MediaSource.from("https://1.1.1.1/movies/film.mp4") // an IP literal: no DNS lookup in the host check
+    private fun media() = ResolvedMedia([], MediaMetadata.UNKNOWN, isLive = false, isSeekable = false)
+
+    /** Takes every source; [claim] makes it own them, [work] runs inside resolve, and cancels are counted. */
+    private class RacingResolver(
+        override val priority: Int,
+        private val claim: Boolean = false,
+        private val work: () -> ResolvedMedia,
+    ) : MediaResolverService, RaceAware {
+        val started = AtomicInteger()
+        val cancels = AtomicInteger()
+        override fun canResolve(source: MediaSource): Boolean = true
+        override fun claims(source: MediaSource): Boolean = claim
+        override fun cancel(source: MediaSource) {
+            cancels.incrementAndGet()
+        }
+
+        override fun resolve(source: MediaSource): ResolvedMedia {
+            started.incrementAndGet()
+            return work()
+        }
+    }
+
+    @Test
+    fun `a media file link is the direct resolver's alone while it succeeds`() {
+        assertTrue(file is MediaSource.DirectStream)
+        // Slower than the 400 ms head start yt-dlp used to get: it must still never start
+        val direct = RacingResolver(20, claim = true) { Thread.sleep(700); media() }
+        val ytDlp = RacingResolver(0) { media() }
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(ytDlp)
+            register(direct)
+        }
+        registry.resolve(file)
+        Thread.sleep(100)
+        assertEquals(1, direct.started.get())
+        assertEquals(0, ytDlp.started.get(), "yt-dlp must not start for a file the direct resolver plays")
+    }
+
+    @Test
+    fun `only the direct resolver claims, and only links that name media`() {
+        assertTrue(com.dreamdisplays.media.source.direct.DirectStreamResolver.claims(file))
+        assertTrue(!com.dreamdisplays.media.source.direct.DirectStreamResolver.claims(MediaSource.Remote("https://1.1.1.1/watch?v=1")))
+        assertTrue(!com.dreamdisplays.media.source.youtube.YtDlpResolver.claims(file))
+    }
+
+    @Test
+    fun `the rest run when the claiming resolver fails`() {
+        val direct = RacingResolver(20, claim = true) { throw DreamMediaException.Network("unreachable") }
+        val ytDlp = RacingResolver(0) { media() }
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(direct)
+            register(ytDlp)
+        }
+        registry.resolve(file)
+        assertEquals(1, ytDlp.started.get())
+
+        val both = DefaultMediaResolverRegistry().apply {
+            register(direct)
+            register(RacingResolver(0) { error("yt-dlp failed") })
+        }
+        assertEquals("unreachable", assertFailsWith<DreamMediaException.Network> { both.resolve(file) }.message)
+    }
+
+    @Test
+    fun `a page link still races the direct probe against the fallbacks`() {
+        val gate = CountDownLatch(1)
+        val direct = RacingResolver(20, claim = true) { gate.await(3, TimeUnit.SECONDS); error("not media") }
+        val ytDlp = RacingResolver(0) { media() }
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(direct)
+            register(ytDlp)
+        }
+        // A claim is the resolver's own call: one that claims nothing races as before
+        val notClaimed = RacingResolver(20, claim = false) { gate.await(3, TimeUnit.SECONDS); error("not media") }
+        val racing = DefaultMediaResolverRegistry().apply {
+            register(notClaimed)
+            register(ytDlp)
+        }
+        val t0 = System.nanoTime()
+        racing.resolve(source)
+        assertTrue((System.nanoTime() - t0) / 1_000_000 < 2_000, "the fallback wins without waiting for the probe")
+        gate.countDown()
+        registry.resolve(file) // claimed: completes once the probe fails
+        assertEquals(2, ytDlp.started.get())
+    }
+
+    @Test
+    fun `losers still running are told to stop once a winner is chosen, not-started ones are not`() {
+        val release = CountDownLatch(1)
+        val winner = RacingResolver(20) { Thread.sleep(600); media() }
+        val running = RacingResolver(10) { release.await(3, TimeUnit.SECONDS); error("killed") }
+        val neverStarted = RacingResolver(0) { media() }
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(winner)
+            register(running)
+            register(neverStarted)
+        }
+        try {
+            // running starts at 400 ms, neverStarted would at 800 ms; winner lands at 600 ms
+            registry.resolve(source)
+            assertEquals(1, running.started.get())
+            assertEquals(1, running.cancels.get(), "a loser still resolving must be canceled")
+            assertEquals(0, winner.cancels.get())
+            Thread.sleep(400)
+            assertEquals(0, neverStarted.started.get())
+            assertEquals(0, neverStarted.cancels.get())
+        } finally {
+            release.countDown()
+        }
+    }
 }

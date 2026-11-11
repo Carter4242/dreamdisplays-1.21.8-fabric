@@ -18,7 +18,11 @@ import com.dreamdisplays.media.source.youtube.search.YtDlpSearchCache
 import com.dreamdisplays.util.DreamCoroutines
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
@@ -118,6 +122,19 @@ object YtDlp {
         canonicalUrl(videoUrl)?.takeIf { it != videoUrl }?.let(formatCache::invalidate)
     }
 
+    /**
+     * Stops the resolve of [videoUrl] in flight, if any, and kills its `yt-dlp` processes: another resolver already
+     * played it. Nothing is cached for it, so a later fetch starts afresh.
+     */
+    fun cancelFetch(videoUrl: String) {
+        formatCache.cancel(videoUrl)
+        // A canceled coroutine only stops at its next suspension, and NewPipe / the first client block: kill now
+        abandoners.remove(videoUrl)?.invoke()
+    }
+
+    /** Kills the `yt-dlp` work of each fetch in flight, by URL, for [cancelFetch]. */
+    private val abandoners = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
+
     /** The URL the resolvers cache [videoUrl] under, or null when it has none. */
     internal fun canonicalUrl(videoUrl: String): String? =
         runCatching { MediaSource.from(videoUrl).toResolvableUrl() }.getOrNull()
@@ -139,13 +156,32 @@ object YtDlp {
             } ?: []
         }
 
-        // Aborts the parallel yt-dlp branch and reaps any subprocess it managed to spawn
+        // Aborts the parallel yt-dlp branch and reaps any subprocess it managed to spawn (canceled first, so a client
+        // killed here counts as abandoned rather than failed)
         fun abandonYtDlp() {
             abandoned.abandon()
-            ytProcesses.forEach { runCatching { Processes.destroyTree(it) } }
             ytdlp.cancel()
+            ytProcesses.forEach { runCatching { Processes.destroyTree(it) } }
         }
+        val abandon: () -> Unit = ::abandonYtDlp
+        abandoners[videoUrl] = abandon
+        return try {
+            fetchRaced(videoUrl, ytdlp, abandon)
+        } catch (e: CancellationException) {
+            // The fetch itself was canceled (another resolver won): its yt-dlp branch runs in another scope
+            abandonYtDlp()
+            throw e
+        } finally {
+            abandoners.remove(videoUrl, abandon)
+        }
+    }
 
+    @Throws(IOException::class)
+    private suspend fun fetchRaced(
+        videoUrl: String,
+        ytdlp: Deferred<List<YtStream>>,
+        abandonYtDlp: () -> Unit,
+    ): List<YtStream> {
         // The server took NewPipe out (`client.disabledResolvers`): yt-dlp alone
         val viaNewPipe = if (!ResolverConfig.newPipeInsideYtDlp) [] else runCatching { NewPipeResolver.fetch(videoUrl) }
             .onFailure { e ->
@@ -170,11 +206,13 @@ object YtDlp {
             )
         }
 
+        currentCoroutineContext().ensureActive()
         val viaYtDlp = runCatching {
             withTimeoutOrNull((YtDlpClientRace.FETCH_TIMEOUT_SECONDS + 15).seconds) { ytdlp.await() }
                 ?: emptyList<YtStream>().also { abandonYtDlp() }
         }.onFailure { e ->
             abandonYtDlp()
+            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
             logger.debug("yt-dlp resolve did not settle for {}: {}.", videoUrl, e.message?.take(200))
         }.getOrElse { [] }
 
@@ -207,13 +245,24 @@ object YtDlp {
             videoUrl, YtStreamRefusals.count(videoUrl), listOfNotNull(plan.primaryClient).plus(plan.fallbackClients),
         )
         val processes = CopyOnWriteArrayList<Process>()
-        val viaYtDlp = try {
-            withTimeoutOrNull((YtDlpClientRace.FETCH_TIMEOUT_SECONDS * 2 + 15).seconds) {
-                clientRace.resolve(videoUrl, plan) { processes.add(it) }
-            }.orEmpty()
-        } finally {
+        val abandoned = AbandonFlag()
+        val abandon: () -> Unit = {
+            abandoned.abandon()
             processes.forEach { runCatching { Processes.destroyTree(it) } }
         }
+        abandoners[videoUrl] = abandon
+        val viaYtDlp = try {
+            withTimeoutOrNull((YtDlpClientRace.FETCH_TIMEOUT_SECONDS * 2 + 15).seconds) {
+                clientRace.resolve(videoUrl, plan) {
+                    processes.add(it)
+                    if (abandoned.isAbandoned) Processes.destroyTree(it)
+                }
+            }.orEmpty()
+        } finally {
+            abandoners.remove(videoUrl, abandon)
+            processes.forEach { runCatching { Processes.destroyTree(it) } }
+        }
+        currentCoroutineContext().ensureActive()
         if (YtStreams.usable(viaYtDlp)) return viaYtDlp
         val lastError = clientRace.takeLastError(videoUrl)
         if (!ResolverConfig.newPipeInsideYtDlp) {
