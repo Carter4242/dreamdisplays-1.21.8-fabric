@@ -65,11 +65,13 @@ object ScreenShareActions {
     private val byDisplay = ConcurrentHashMap<UUID, Share>()
 
     /**
-     * What [displayId]'s row stores while a share runs there: the video it had before, never the relay URL (every save
-     * of the display, by any path, goes through this). Null when nothing is shared there.
+     * What [displayId]'s row stores while it shows ([url]) a share: the video it had before, never the relay URL (every
+     * save of the display, by any path, goes through this). Null when it shows anything else, even with the share not
+     * ended yet (a video set by a command, an addon or the queue is saved before [tick] ends the share).
      */
-    fun storedVideo(displayId: UUID): StoredVideo? =
-        byDisplay[displayId]?.let { StoredVideo(it.previousUrl, it.previousLang, it.previousDuration) }
+    fun storedVideo(displayId: UUID, url: String): StoredVideo? =
+        byDisplay[displayId]?.takeIf { ScreenShareServerRules.stillShown(url, it.streamId) }
+            ?.let { StoredVideo(it.previousUrl, it.previousLang, it.previousDuration) }
 
     /** True when [player] may share at all: a relay is configured and they hold the share permission. */
     fun mayShare(player: Player): Boolean =

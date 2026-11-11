@@ -119,12 +119,12 @@ class DisplaysTable(prefix: String = "") : Table("${prefix}displays") {
 data class StoredVideo(val url: String, val lang: String, val duration: Long?)
 
 /**
- * The video to store for a display instead of the one it shows (a screen share's relay URL must never be saved: a
- * crash mid-share would bring the display back on a dead stream). Set by the platform; null keeps what it shows.
+ * The video to store for a display showing `url` instead of that one (a screen share's relay URL must never be saved:
+ * a crash mid-share would bring the display back on a dead stream). Set by the platform; null keeps what it shows.
  */
 object StoredVideos {
     @Volatile
-    var override: (displayId: java.util.UUID) -> StoredVideo? = { null }
+    var override: (displayId: java.util.UUID, url: String) -> StoredVideo? = { _, _ -> null }
 }
 
 /**
@@ -268,7 +268,7 @@ class StorageManager(
 
     private fun upsert(data: DisplayData, worldName: String, p1: Long, p2: Long, facingOrd: Int) {
         // A share running there: the video it had before, never the relay URL
-        val stored = StoredVideos.override(data.id)
+        val stored = StoredVideos.override(data.id, data.url)
         transaction(db) {
             table.replace {
                 it[id] = data.id.toBytes()
