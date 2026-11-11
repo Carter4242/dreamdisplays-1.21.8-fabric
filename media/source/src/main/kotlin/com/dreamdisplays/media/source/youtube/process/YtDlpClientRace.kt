@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.youtube.process
 
+import com.dreamdisplays.media.runtime.diagnostics.ResolveTrail
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
 import com.dreamdisplays.media.source.youtube.binary.YtDlpOutputParser
@@ -54,12 +55,22 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         // A process killed because another source already won is not a failure worth a warning
         if (abandoned) return
         logFailure(videoUrl, client, e)
+        ResolveTrail.record(videoUrl, YtDlpBinary.label(), client ?: "cookies", ok = false, error = e.message ?: e.javaClass.simpleName)
+        e.message?.let { ResolveTrail.recordStderr(videoUrl, it) }
         val message = e.message ?: return
         if (lastErrors.size >= MAX_REMEMBERED_ERRORS) lastErrors.clear()
         // Keep an error that explains the failure over a later, vaguer one from another client
         lastErrors.merge(videoUrl, message) { old, new ->
             if (YtDlpErrors.classify(old) != null && YtDlpErrors.classify(new) == null) old else new
         }
+    }
+
+    private fun recordSuccess(videoUrl: String, client: String?, streams: List<YtStream>) {
+        val usable = YtStreams.usable(streams)
+        ResolveTrail.record(
+            videoUrl, YtDlpBinary.label(), client ?: "cookies", ok = usable,
+            error = if (usable) null else "no usable streams (${streams.size} formats)",
+        )
     }
 
     /** Logs a client failure: the first one per video at WARN (so a broken `yt-dlp` shows up in any log), later ones at DEBUG. */
@@ -97,6 +108,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
     private suspend fun runCatchingClient(videoUrl: String, client: String?, onProcess: (Process) -> Unit): List<YtStream>? {
         val result = runCatching { runClientFetch(videoUrl, client, onStarted = onProcess) }
         result.exceptionOrNull()?.let { e -> rememberError(videoUrl, client, e, abandoned = !currentCoroutineContext().isActive) }
+        result.getOrNull()?.let { recordSuccess(videoUrl, client, it) }
         return result.getOrNull()
     }
 
@@ -121,6 +133,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                                 onProcess(proc)
                                 if (winner.isCompleted) Processes.destroyTree(proc)
                             }
+                            recordSuccess(videoUrl, client, streams)
                             if (YtStreams.usable(streams)) results.add(streams)
                             if (YtStreams.usable(streams) && YtStreams.offersQualityLadder(streams)) {
                                 winner.complete(streams)
@@ -221,6 +234,8 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
             if (!retriedOnBinary && YtDlpBinary.isZipapp(base) && YtDlpBinary.looksLikeInterpreterFailure(output) &&
                 YtDlpBinary.abandonZipapp(base, output)
             ) {
+                ResolveTrail.record(videoUrl, "yt-dlp zipapp", client ?: "cookies", ok = false, error = "${base[0]}: $output")
+                ResolveTrail.recordStderr(videoUrl, output)
                 return runClientFetch(videoUrl, client, retriedOnBinary = true, onStarted = onStarted)
             }
             throw IOException("Exited with code ${process.exitValue()}: $output.")

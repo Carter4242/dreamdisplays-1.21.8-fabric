@@ -69,6 +69,7 @@ object ClientPacketManager {
         ClientStateManager.isPremium = packet.isPremium
         ClientStateManager.isAdmin = packet.isAdmin
         ClientStateManager.isReportingEnabled = packet.isReportingEnabled
+        com.dreamdisplays.platform.client.displays.ClientErrorReporter.onServerHello(packet)
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()
             ?.onServerCapabilities(packet)
         Initializer.sendPacket(SetDisplaysEnabled(ClientStateManager.displaysEnabled))
@@ -102,6 +103,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
+        com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()
         FullscreenController.reset()
         FullscreenPrepareController.reset()
     }

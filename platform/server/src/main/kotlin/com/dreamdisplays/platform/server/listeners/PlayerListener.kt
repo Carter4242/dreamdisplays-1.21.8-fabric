@@ -77,6 +77,7 @@ class PlayerListener : Listener {
         SelectionManager.resetSelection(event.player.uniqueId)
         DisplayManager.forgetNearbyPlayer(event.player.uniqueId)
         com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(event.player.uniqueId)
+        com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(event.player.uniqueId)
         Scheduler.untrackPlayer(event.player)
     }
 }

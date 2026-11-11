@@ -18,7 +18,10 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * Server can resolve region membership (i.e. `WorldGuard` is installed), so the region access
      * level is a real choice.
      */
-    REGION_ACCESS("region_access");
+    REGION_ACCESS("region_access"),
+
+    /** Server takes `ClientErrorReport` / `ClientEnvironment` packets (op-only diagnostics); clients send none otherwise. */
+    CLIENT_ERROR_REPORTS("client_error_reports");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */

@@ -135,6 +135,13 @@ prepare_timeout_seconds = 600
 # /display clients marks players on any other build; unset = mark nobody.
 # latest_build = "1a2b3c4d"
 
+# Ask clients to report display errors and playback hitches (op-only: /display errors, /display diag).
+# Reports, plus who paused / resumed / seeked / changed video or mode, go to error_log in this folder
+# as JSON lines (rotated at 5 MB, one old file kept)
+error_reports = true
+error_log = "client-errors.log"
+command_log = true
+
 [reports]
 # Report settings
 # webhook_url is a discord webhook URL for sending reports

@@ -20,6 +20,42 @@ object FFmpegBinary {
     @Volatile
     private var cachedPath: String? = null
 
+    /** Where [getPath] found the binary: `bundled`, `system`, or `missing`; empty before it ran. */
+    @Volatile
+    var source: String = ""
+        private set
+
+    @Volatile
+    private var versionProbe: Pair<String, String>? = null
+
+    /** What `FFmpeg` runs here, for client diagnostics. The path is raw (the reporter scrubs it). */
+    data class Info(
+        val source: String,
+        val path: String,
+        val version: String,
+        val decoders: List<String>,
+        val filters: List<String>,
+    )
+
+    /** Describes the resolved binary without resolving one; blocks for a `-version` run once (call off-thread). */
+    fun describe(): Info {
+        val path = cachedPath ?: return Info(source.ifEmpty { "not probed" }, "", "", emptyList(), emptyList())
+        val version = versionProbe?.takeIf { it.first == path }?.second ?: runCatching {
+            val p = ProcessBuilder(path, "-hide_banner", "-version").redirectErrorStream(true).start()
+            runCatching { p.outputStream.close() }
+            val firstLine = p.inputStream.bufferedReader().use { r -> r.readLine().orEmpty() }
+            if (!p.waitFor(5, TimeUnit.SECONDS)) p.destroyForcibly()
+            firstLine.removePrefix("ffmpeg version ").substringBefore(" Copyright").trim().take(120)
+        }.getOrElse { e -> "failed: ${e.message}" }.also { versionProbe = path to it }
+        return Info(
+            source = source,
+            path = path,
+            version = version,
+            decoders = FFmpegCapabilities.optionalDecoders(path).sorted(),
+            filters = FFmpegCapabilities.optionalFilters(path).sorted(),
+        )
+    }
+
     /** Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call. */
     fun getPath(): String? {
         cachedPath?.let { return it }
@@ -56,6 +92,7 @@ object FFmpegBinary {
         val binary = File(cacheDir, p.binaryName)
         if (binary.isFile && binary.length() > 0 && binary.canExecute()) {
             logger.info("Using binary: ${binary.absolutePath}.")
+            source = "bundled"
             return binary.absolutePath
         }
         return runCatching {
@@ -65,6 +102,7 @@ object FFmpegBinary {
             if (!binary.isFile || binary.length() == 0L) throw IOException("Extracted binary is missing or empty.")
             SourceLoader.makeExecutable(binary.toPath())
             deleteStaleBuilds(p.key)
+            source = "bundled"
             binary.absolutePath
         }.getOrElse { e ->
             logger.error("Download failed, falling back to system ffmpeg", e)
@@ -90,12 +128,14 @@ object FFmpegBinary {
                     .start()
                 if (p.waitFor(3, TimeUnit.SECONDS) && p.exitValue() == 0) {
                     logger.info("Using system ffmpeg: $candidate...")
+                    source = "system"
                     return candidate
                 }
                 p.destroyForcibly()
             }
         }
         logger.error("FFmpeg not found (no download succeeded, no system binary).")
+        source = "missing"
         return null
     }
 

@@ -2,6 +2,8 @@ package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.protocol.PacketDirection
 import com.dreamdisplays.core.protocol.common.packets.ClearCache
+import com.dreamdisplays.core.protocol.common.packets.ClientEnvironment
+import com.dreamdisplays.core.protocol.common.packets.ClientErrorReport
 import com.dreamdisplays.core.protocol.common.packets.ClientHello
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
@@ -67,7 +69,11 @@ enum class PacketType(
 
     // Fullscreen preparation; only sent to clients that advertise ClientHello.supportsFullscreenPrepare
     FULLSCREEN_PREPARE(42, FullscreenPrepare::class, PacketDirection.SERVER_TO_CLIENT),
-    FULLSCREEN_PREPARE_STATUS(43, FullscreenPrepareStatus::class, PacketDirection.CLIENT_TO_SERVER);
+    FULLSCREEN_PREPARE_STATUS(43, FullscreenPrepareStatus::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Client error reporting; only sent to servers that advertise ServerFeature.CLIENT_ERROR_REPORTS
+    CLIENT_ERROR_REPORT(60, ClientErrorReport::class, PacketDirection.CLIENT_TO_SERVER),
+    CLIENT_ENVIRONMENT(61, ClientEnvironment::class, PacketDirection.CLIENT_TO_SERVER);
 
     companion object {
         private val byId = entries.associateBy { it.id }

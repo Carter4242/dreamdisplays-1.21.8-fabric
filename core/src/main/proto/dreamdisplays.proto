@@ -422,9 +422,121 @@ message FullscreenPrepareStatus {
   optional int32 state = 3;
 }
 
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ClientErrorReport'
+message ClientErrorReport {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string url = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string kind = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string message = 4;
+  // WARNING: a default value decoded when value is missing
+  optional string stage = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int32 httpStatus = 6;
+  // WARNING: a default value decoded when value is missing
+  repeated ResolveAttemptReport attempts = 7;
+  // WARNING: a default value decoded when value is missing
+  optional string stderr = 8;
+  // WARNING: a default value decoded when value is missing
+  optional int32 retry = 9;
+  // WARNING: a default value decoded when value is missing
+  optional int32 maxRetries = 10;
+  // WARNING: a default value decoded when value is missing
+  optional bool final = 11;
+  // WARNING: a default value decoded when value is missing
+  optional bool fatal = 12;
+  // WARNING: a default value decoded when value is missing
+  optional int64 timestampMs = 13;
+  // WARNING: a default value decoded when value is missing
+  optional int32 suppressed = 14;
+  // WARNING: a default value decoded when value is missing
+  optional string type = 15;
+  // WARNING: a default value decoded when value is missing
+  optional int32 durationMs = 16;
+  // WARNING: a default value decoded when value is missing
+  optional int64 positionMs = 17;
+  // WARNING: a default value decoded when value is missing
+  optional string action = 18;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ClientEnvironment'
+message ClientEnvironment {
+  // WARNING: a default value decoded when value is missing
+  optional string osName = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string osVersion = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string osArch = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string javaVersion = 4;
+  // WARNING: a default value decoded when value is missing
+  optional string javaVendor = 5;
+  // WARNING: a default value decoded when value is missing
+  optional string gpuVendor = 6;
+  // WARNING: a default value decoded when value is missing
+  optional string gpuRenderer = 7;
+  // WARNING: a default value decoded when value is missing
+  optional string glVersion = 8;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpMode = 9;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpVersion = 10;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpPython = 11;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpPythonVersion = 12;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpNote = 13;
+  // WARNING: a default value decoded when value is missing
+  optional string ffmpegSource = 14;
+  // WARNING: a default value decoded when value is missing
+  optional string ffmpegVersion = 15;
+  // WARNING: a default value decoded when value is missing
+  repeated string ffmpegDecoders = 16;
+  // WARNING: a default value decoded when value is missing
+  repeated string ffmpegFilters = 17;
+  // WARNING: a default value decoded when value is missing
+  optional string hwAccel = 18;
+  // WARNING: a default value decoded when value is missing
+  optional bool nativeLoaded = 19;
+  // WARNING: a default value decoded when value is missing
+  optional string nativeUnavailableReason = 20;
+  // WARNING: a default value decoded when value is missing
+  optional bool lavLoaded = 21;
+  // WARNING: a default value decoded when value is missing
+  optional string lavUnavailableReason = 22;
+  // WARNING: a default value decoded when value is missing
+  optional string audioLine = 23;
+  // WARNING: a default value decoded when value is missing
+  optional string shaderPack = 24;
+  // WARNING: a default value decoded when value is missing
+  optional string ytDlpPath = 25;
+  // WARNING: a default value decoded when value is missing
+  optional string ffmpegPath = 26;
+}
+
 message Uuid {
   // WARNING: a default value decoded when value is missing
   optional fixed64 msb = 1;
   // WARNING: a default value decoded when value is missing
   optional fixed64 lsb = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ResolveAttemptReport'
+message ResolveAttemptReport {
+  // WARNING: a default value decoded when value is missing
+  optional string source = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string client = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool ok = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string error = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int32 elapsedMs = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int32 agoMs = 6;
 }

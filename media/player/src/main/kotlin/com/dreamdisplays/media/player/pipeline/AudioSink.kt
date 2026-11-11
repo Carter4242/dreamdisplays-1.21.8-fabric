@@ -719,6 +719,8 @@ internal class AudioSink(private val debugLabel: String) {
         // Every unusual line (converted / OpenAL) is logged; the normal one only when it changes
         if (why != null || !format.isContent || lastLineChoice != message) logger.info("$debugLabel $message")
         lastLineChoice = message
+        com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics.audioLine =
+            message.removePrefix("Display audio line: ").removeSuffix(".")
     }
 
     private fun drainStderr(proc: Process, stopFlag: AtomicBoolean): StringBuilder {

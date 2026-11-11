@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.api.playback.model.DisplayAccess
@@ -100,8 +101,13 @@ object DisplayActions {
             return
         }
 
+        val previousUrl = displayData.url
         displayData.url = url
         displayData.lang = sanitizedLang
+        ClientErrorReports.logCommand(
+            player, displayId, "video", null,
+            mapOf("mode" to displayData.mode.name.lowercase(), "url" to url, "previousUrl" to previousUrl),
+        )
 
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
@@ -135,7 +141,12 @@ object DisplayActions {
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
 
+        val previousMode = displayData.mode
         displayData.mode = mode
+        ClientErrorReports.logCommand(
+            player, displayId, "mode", positionMs,
+            mapOf("mode" to mode.name.lowercase(), "previousMode" to previousMode.name.lowercase()),
+        )
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onModeChanged(displayData, positionMs)
@@ -144,7 +155,22 @@ object DisplayActions {
     /** Applies a playback intent (play / pause / seek / restart) to a `SYNCED` display's server clock. */
     fun playbackCommand(player: Player, displayId: UUID, action: PlaybackAction, positionMs: Long) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
-        TimelineManager.onCommand(displayData, player.uniqueId, action, positionMs)
+        val before = TimelineManager.timelineOf(displayData.id)
+        val atMs = System.currentTimeMillis()
+        if (!TimelineManager.onCommand(displayData, player.uniqueId, action, positionMs)) return
+        val name = when (action) {
+            PlaybackAction.PLAY -> "resume"
+            PlaybackAction.PAUSE -> "pause"
+            PlaybackAction.SEEK -> "seek"
+            PlaybackAction.RESTART -> "restart"
+        }
+        // Where the shared timeline was when the command landed; a seek also says where it went
+        val details = buildMap {
+            put("mode", displayData.mode.name.lowercase())
+            if (before != null) put("wasPaused", before.paused.toString())
+            if (action == PlaybackAction.SEEK) put("seekToMs", positionMs.toString())
+        }
+        ClientErrorReports.logCommand(player, displayId, name, before?.positionAt(atMs) ?: positionMs, details)
     }
 
     /** Starts a watch-party session with [player] as host. */

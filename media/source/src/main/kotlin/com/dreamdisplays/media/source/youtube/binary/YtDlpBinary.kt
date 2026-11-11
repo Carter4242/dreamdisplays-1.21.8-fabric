@@ -71,6 +71,66 @@ object YtDlpBinary {
     private var pythonProbe: String? = null
     private val zipappUpdateChecked = atomic(false)
 
+    /** `python --version` of the interpreter picked for the zipapp. */
+    @Volatile
+    private var pythonVersionText: String = ""
+
+    /** Interpreters found but too old for `yt-dlp` (`python3 3.9.6`), for diagnostics. */
+    private val skippedPythons = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    /** Why the zipapp fast path is not in use, for diagnostics. */
+    @Volatile
+    private var zipappNote: String = ""
+
+    @Volatile
+    private var versionProbe: Pair<List<String>, String>? = null
+
+    /** What runs `yt-dlp` here, for client diagnostics. Paths are raw (the reporter scrubs them). */
+    data class Info(
+        val mode: String,
+        val version: String,
+        val path: String,
+        val python: String,
+        val pythonVersion: String,
+        val note: String,
+    )
+
+    /** Step label for resolve reports: `yt-dlp zipapp`, `yt-dlp binary`, or `yt-dlp` before the command is known. */
+    fun label(): String = resolvedCommand?.let { if (isZipapp(it)) "yt-dlp zipapp" else "yt-dlp binary" } ?: "yt-dlp"
+
+    /**
+     * Describes the `yt-dlp` in use without provisioning one: blocks for a `--version` run the first time (call it off
+     * the client thread). Before the first fetch the mode is `not probed`.
+     */
+    fun describe(): Info {
+        val command = resolvedCommand
+        val note = buildList {
+            if (zipappNote.isNotEmpty()) add(zipappNote)
+            if (skippedPythons.isNotEmpty()) add("too old for yt-dlp: ${skippedPythons.joinToString(", ")}")
+        }.joinToString("; ")
+        if (command == null) return Info("not probed", "", "", "", "", note)
+        val zipapp = isZipapp(command)
+        val mode = when {
+            override() != null -> "override"
+            zipapp -> "zipapp"
+            else -> "binary"
+        }
+        val version = versionProbe?.takeIf { it.first == command }?.second ?: runCatching {
+            val (exit, out) = run(command + "--version", 20)
+            val text = if (exit == 0) out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty()
+            else "failed (exit ${exit ?: "timeout"}): ${out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.take(120)}"
+            text.take(160)
+        }.getOrElse { e -> "failed: ${e.message}" }.also { versionProbe = command to it }
+        return Info(
+            mode = mode,
+            version = version,
+            path = if (zipapp) command[1] else command[0],
+            python = if (zipapp) command[0] else "",
+            pythonVersion = if (zipapp) pythonVersionText.removePrefix("Python ").trim() else "",
+            note = note,
+        )
+    }
+
     /**
      * Returns the path to a usable `yt-dlp` binary, checking the `dreamdisplays.ytdlp` override, well-known system paths,
      * then falling back to the bundled copy.
@@ -135,10 +195,9 @@ object YtDlpBinary {
     fun abandonZipapp(failed: List<String>, output: String): Boolean {
         synchronized(this) {
             if (resolvedCommand != failed) return resolvedCommand != null
-            logger.warn(
-                "yt-dlp zipapp can't run on {} ({}); using the standalone yt-dlp binary instead.",
-                failed[0], output.lineSequence().lastOrNull { it.isNotBlank() }?.trim()?.take(200),
-            )
+            val reason = output.lineSequence().lastOrNull { it.isNotBlank() }?.trim()?.take(200)
+            logger.warn("yt-dlp zipapp can't run on {} ({}); using the standalone yt-dlp binary instead.", failed[0], reason)
+            zipappNote = "zipapp failed on ${failed[0]} ($reason); switched to the binary"
             resolvedCommand = runCatching { [resolve()] }.onFailure { e ->
                 logger.warn("Standalone yt-dlp binary unavailable: ${e.message}.")
             }.getOrNull() ?: return false
@@ -147,8 +206,14 @@ object YtDlpBinary {
     }
 
     private fun zipappCommand(): List<String>? {
-        val python = usablePython() ?: return null
-        val pyz = provisionZipapp() ?: return null
+        val python = usablePython() ?: run {
+            zipappNote = "no Python 3.$MIN_PYTHON_MINOR+ found for the zipapp"
+            return null
+        }
+        val pyz = provisionZipapp() ?: run {
+            zipappNote = "zipapp download failed"
+            return null
+        }
         // A new enough interpreter can still fail to run it (a newer yt-dlp raising its floor, a broken install)
         if (!zipappRuns(python, pyz)) return null
         logger.info("yt-dlp fast path active: {} {}.", python, pyz.fileName)
@@ -159,7 +224,12 @@ object YtDlpBinary {
         val (exit, output) = runCatching { run([python, pyz.toString(), "--version"], 20) }.getOrElse { e ->
             null to (e.message ?: e.javaClass.simpleName)
         }
-        if (exit == 0) return true
+        if (exit == 0) {
+            versionProbe = [python, pyz.toString()] to output.trim().lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty()
+            return true
+        }
+        zipappNote = "zipapp does not run on $python (exit ${exit ?: "timeout"}: " +
+            "${output.trim().lineSequence().lastOrNull { it.isNotBlank() }?.take(160)})"
         logger.warn(
             "yt-dlp zipapp doesn't run on {} (exit {}: {}); using the standalone yt-dlp binary.",
             python, exit ?: "timeout", output.trim().lineSequence().lastOrNull { it.isNotBlank() }?.take(200),
@@ -198,7 +268,13 @@ object YtDlpBinary {
             val (exit, out) = run([exe, "--version"], 10)
             if (exit != 0) return false
             val ok = pythonVersionSupported(out)
-            if (!ok) logger.debug("Skipping {} for the yt-dlp zipapp: {}", exe, out.trim().take(80))
+            if (ok) {
+                pythonVersionText = out.trim().take(40)
+            } else {
+                logger.debug("Skipping {} for the yt-dlp zipapp: {}", exe, out.trim().take(80))
+                val entry = "$exe ${out.trim().removePrefix("Python ").take(20)}"
+                if (entry !in skippedPythons && skippedPythons.size < 8) skippedPythons.add(entry)
+            }
             ok
         }.getOrDefault(false)
     }

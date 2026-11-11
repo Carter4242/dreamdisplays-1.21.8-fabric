@@ -16,6 +16,7 @@ import com.dreamdisplays.media.player.managers.StatsReporter
 import com.dreamdisplays.media.player.managers.StreamWatchdog
 import com.dreamdisplays.media.player.managers.WarmTrack
 import com.dreamdisplays.media.player.pipeline.PlaybackClock
+import com.dreamdisplays.media.player.policy.FailureStages
 import com.dreamdisplays.media.player.policy.LoadFailures
 import com.dreamdisplays.media.player.policy.LoadRetrySchedule
 import com.dreamdisplays.media.player.policy.RetryPolicy
@@ -30,6 +31,10 @@ import com.dreamdisplays.media.player.subtitle.SubtitleController
 import com.dreamdisplays.media.player.util.MediaUtil
 import com.dreamdisplays.media.player.util.MediaUtil.ms
 import com.dreamdisplays.media.player.util.daemon
+import com.dreamdisplays.media.runtime.diagnostics.HitchCause
+import com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
+import com.dreamdisplays.media.runtime.diagnostics.PlaybackFailure
+import com.dreamdisplays.media.runtime.diagnostics.ResolveTrail
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
@@ -96,6 +101,10 @@ class MediaPlayer(
     private var audioRestartAttempts = 0
     private var lastAudioFailureNanos = 0L
 
+    /** The current session produced its first frame (a failure before that is a failure to open the stream). */
+    @Volatile
+    private var sessionFirstFrame = false
+
     private var preparedBootstrap: PreparedMedia? = replayBootstrap?.prepared
 
     private val state: PlayerState get() = if (terminated.get()) PlayerState.Stopped else lifecycle
@@ -106,7 +115,11 @@ class MediaPlayer(
     private var primedStartPositionNanos = -1L
 
     private val events = PlayerEvents(
-        onError = { e -> onControl { lifecycle = PlayerState.Error }; reportError(e) },
+        onError = { e ->
+            onControl { lifecycle = PlayerState.Error }
+            reportFailure(FailureStages.OPEN_STREAM, e.kind.name, e.message.orEmpty(), final = true, fatal = e.isFatal, cause = e)
+            reportError(e)
+        },
         onSeek = { host.afterSeek() },
     )
 
@@ -252,6 +265,7 @@ class MediaPlayer(
         }
         if (sessionManager.isPlaying) return@safeExecute
         val ss = streams ?: return@safeExecute
+        noteHitch(FailureStages.RESUME, if (liveStream) "re_resolve" else "cold_restart", "resumed without a warm session")
         if (liveStream) {
             logger.debug("$debugLabel Live resume from cold pause; re-resolving playlist URLs.")
             env.cacheInvalidator.invalidate(url)
@@ -727,9 +741,14 @@ class MediaPlayer(
             // A passing failure (timeout, dropped connection, 429 / 5xx) is retried quietly: the
             // display keeps showing "loading" instead of an error, and the init callbacks stay queued
             // so the retry that works starts playback exactly like a first load would.
-            if (scheduleLoadRetry(e)) return
+            val failedTry = loadRetry.retries
+            if (scheduleLoadRetry(e)) {
+                reportLoadFailure(e, failedTry, final = false)
+                return
+            }
             logger.error("$debugLabel Initialization failed: ${e.message}.")
             onControl { lifecycle = PlayerState.Error }
+            reportLoadFailure(e, failedTry, final = true)
             reportError(finalLoadError(e))
             drainInitCallbacks(run = false)
         }
@@ -763,6 +782,56 @@ class MediaPlayer(
         else DreamMediaException.Unknown(message, e)
     }
 
+    private fun reportLoadFailure(e: Throwable, failedTry: Int, final: Boolean) {
+        val error = finalLoadError(e)
+        reportFailure(
+            FailureStages.RESOLVE, error.kind.name, e.message ?: e.javaClass.simpleName,
+            stderr = ResolveTrail.stderr(url), retry = failedTry, maxRetries = LoadFailures.maxAttempts(source) - 1,
+            final = final, fatal = error.isFatal, cause = e,
+        )
+    }
+
+    /**
+     * Hands a failure of this display to [PlaybackDiagnostics] (the client reports it to servers that take error
+     * reports), with the resolver steps tried for this link. A replaced player reports nothing.
+     */
+    private fun reportFailure(
+        stage: String,
+        kind: String,
+        message: String,
+        stderr: String = "",
+        retry: Int = 0,
+        maxRetries: Int = 0,
+        final: Boolean,
+        fatal: Boolean = false,
+        cause: Throwable? = null,
+    ) {
+        if (!PlaybackDiagnostics.enabled || terminated.get()) return
+        PlaybackDiagnostics.emit(
+            PlaybackFailure(
+                displayId = host.uuid,
+                url = url,
+                kind = kind,
+                message = message,
+                stage = stage,
+                httpStatus = FailureStages.httpStatus(stderr, message, FailureStages.messages(cause)),
+                steps = ResolveTrail.steps(url),
+                stderr = stderr,
+                retry = retry,
+                maxRetries = maxRetries,
+                final = final,
+                fatal = fatal,
+                positionMs = runCatching { clock.currentTime() / 1_000_000L }.getOrDefault(0L).coerceAtLeast(0L),
+            )
+        )
+    }
+
+    /** Notes why the picture is about to stop, for the client's hitch report of the freeze that follows. */
+    private fun noteHitch(stage: String, action: String, message: String, stderr: String = "", frozenBeforeMs: Long = 0L) {
+        if (!PlaybackDiagnostics.enabled) return
+        PlaybackDiagnostics.noteHitchCause(host.uuid, HitchCause(stage, action, message, stderr, frozenBeforeMs))
+    }
+
     /** Surfaces [e] on the display, unless this player was already replaced (a stale error must not paint the new one). */
     private fun reportError(e: DreamMediaException) {
         if (!terminated.get()) host.mediaError = e
@@ -789,6 +858,7 @@ class MediaPlayer(
         host.cancelQualityHandoff()
         sessionStartNanos = System.nanoTime()
         sessionStartOffsetNanos = offsetNanos
+        sessionFirstFrame = false
         audioRestartAttempts = 0
         lastAudioFailureNanos = 0L
         sessionManager.start(
@@ -809,6 +879,7 @@ class MediaPlayer(
 
     /** Called on the pipeline thread when a session's playout begins. */
     private fun onSessionFirstFrame() {
+        sessionFirstFrame = true
         retryPolicy.reset()
         if (warmingUp) safeExecute(::finishWarmUp)
     }
@@ -904,6 +975,7 @@ class MediaPlayer(
             && System.nanoTime() - sessionStartNanos < HWACCEL_FAIL_WINDOW_NS
             && HwAccelBackend.looksLikeHwAccelFailure(stderr)
         ) {
+            val backend = currentHwAccel().name.lowercase()
             hwAccelDisabled = true
             logger.warn(
                 "$debugLabel Hardware decode failed for this stream. Falling back to software. Stderr: ${
@@ -912,6 +984,11 @@ class MediaPlayer(
                     )
                 }."
             )
+            reportFailure(
+                FailureStages.DECODE, "DECODE", "Hardware decoding ($backend) failed; retrying in software",
+                stderr = stderr, final = false,
+            )
+            noteHitch(FailureStages.DECODE, "software_fallback", "hardware decoding ($backend) failed", stderr)
             val ss = streams
             val offset = if (liveStream) 0L else sessionStartOffsetNanos
             if (ss != null) startStreams(ss, offset)
@@ -920,6 +997,20 @@ class MediaPlayer(
 
         val decision = retryPolicy.evaluate(stderr, normalEos, liveStream)
         if (decision != null) {
+            // A live stream reaching its end is routine (its playlist rolled over), not a failure worth reporting
+            if (!normalEos) {
+                val stage = FailureStages.streamStage(stderr, sessionFirstFrame)
+                val what = when {
+                    decision.refused -> "Stream refused (403)"
+                    RetryPolicy.isNotFound(stderr) -> "Stream not found (404)"
+                    else -> "Transient stream error"
+                }
+                reportFailure(
+                    stage, "NETWORK", what, stderr = stderr, retry = retryPolicy.retries,
+                    maxRetries = MAX_FETCH_RETRIES, final = false,
+                )
+                noteHitch(stage, "retry", what, stderr)
+            }
             scheduleRetry(decision)
             return@onControl
         }
@@ -945,6 +1036,10 @@ class MediaPlayer(
         }
         // Nothing is decoding any more: stop the session, or the watchdog would restart it behind the error,
         // leaving a player that plays while reporting an error (and so is never seekable or resynced).
+        reportFailure(
+            FailureStages.streamStage(stderr, sessionFirstFrame), error.kind.name, error.message.orEmpty(),
+            stderr = stderr, retry = retryPolicy.retries, maxRetries = MAX_FETCH_RETRIES, final = true, fatal = error.isFatal,
+        )
         stopSession()
         lifecycle = PlayerState.Error
         reportError(error)
@@ -1013,6 +1108,10 @@ class MediaPlayer(
         }
         lastAudioFailureNanos = now
         val attempt = ++audioRestartAttempts
+        reportFailure(
+            FailureStages.AUDIO, "NETWORK", "Audio ended", stderr = stderr, retry = attempt,
+            maxRetries = if (liveStream) MAX_AUDIO_RESTARTS else 0, final = false,
+        )
         if (liveStream && sessionManager.isPlaying && attempt <= MAX_AUDIO_RESTARTS) {
             logger.warn(
                 "$debugLabel Live audio ended (${MediaUtil.truncate(stderr)}); " +
@@ -1045,6 +1144,10 @@ class MediaPlayer(
             val attempt = ++stallReResolves
             if (attempt > MAX_STALL_RERESOLVES) {
                 logger.error("$debugLabel $kind ($reason); giving up after $MAX_STALL_RERESOLVES re-resolves.")
+                reportFailure(
+                    FailureStages.STALL, "NETWORK", "Stream keeps stalling: $reason", stderr = reason,
+                    retry = MAX_STALL_RERESOLVES, maxRetries = MAX_STALL_RERESOLVES, final = true,
+                )
                 lifecycle = PlayerState.Error
                 // Almost always the connection rather than the file: non-fatal, so the display may
                 // try again later on its own.
@@ -1052,6 +1155,11 @@ class MediaPlayer(
                 return@onControl
             }
             val delayMs = STALL_RERESOLVE_BACKOFF_MS[(attempt - 1).coerceAtMost(STALL_RERESOLVE_BACKOFF_MS.lastIndex)]
+            reportFailure(
+                FailureStages.STALL, "NETWORK", "$kind: $reason", stderr = reason, retry = attempt,
+                maxRetries = MAX_STALL_RERESOLVES, final = false,
+            )
+            noteHitch(FailureStages.STALL, "re_resolve", "$kind: $reason", reason, frozenSinceLastFrameMs())
             logger.warn(
                 "$debugLabel $kind ($reason); invalidating cached URLs and re-resolving " +
                         "($attempt/$MAX_STALL_RERESOLVES, in $delayMs ms)."
@@ -1064,6 +1172,7 @@ class MediaPlayer(
             else RETRY_SCHEDULER.schedule({ dispatchInitialize() }, delayMs, TimeUnit.MILLISECONDS)
         } else {
             logger.warn("$debugLabel Stream stalled ($reason); restarting.")
+            noteHitch(FailureStages.STALL, "restart", "stream stalled: $reason", reason, frozenSinceLastFrameMs())
             val pos = if (liveStream) 0L else clock.currentTime()
             if (sessionManager.beginSeek(ss, pos, lastQuality, currentHwAccel())) {
                 watchdog.start()
@@ -1071,6 +1180,12 @@ class MediaPlayer(
                 startStreams(ss, pos)
             }
         }
+    }
+
+    /** How long the picture has not changed, in ms (0 when unknown). */
+    private fun frozenSinceLastFrameMs(): Long {
+        val last = sessionManager.lastFrameNanos.get()
+        return if (last <= 0L) 0L else ((System.nanoTime() - last) / 1_000_000L).coerceIn(0L, 600_000L)
     }
 
     private fun forgetResolvedStreamUrls() {
@@ -1104,8 +1219,11 @@ class MediaPlayer(
             warmUpStartedNanos = System.nanoTime()
             startStreams(ss, nanos)
         } else if (sessionManager.isPlaying && !sessionManager.isParked()) {
-            if (!sessionManager.beginSeek(ss, nanos, lastQuality, currentHwAccel())) {
+            if (sessionManager.beginSeek(ss, nanos, lastQuality, currentHwAccel())) {
+                noteHitch(FailureStages.SEEK, "in_place_seek", "seek to ${nanos / 1_000_000} ms")
+            } else {
                 logger.warn("$debugLabel Seek to ${nanos / 1_000_000} ms fell back to a full stream restart.")
+                noteHitch(FailureStages.SEEK, "restart", "seek to ${nanos / 1_000_000} ms fell back to a stream restart")
                 startStreams(ss, nanos)
             }
         }

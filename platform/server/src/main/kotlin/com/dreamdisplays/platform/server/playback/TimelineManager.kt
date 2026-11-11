@@ -60,6 +60,9 @@ object TimelineManager {
      * Applies a client playback intent to a `SYNCED` display. Returns true when it was permitted, applied, and rebroadcast;
      * false otherwise.
      */
+    /** The display's current server timeline (for the command log), or null when it has none. */
+    fun timelineOf(displayId: UUID): Timeline? = timelines[displayId]
+
     fun onCommand(display: DisplayData, senderId: UUID, action: PlaybackAction, positionMs: Long): Boolean {
         if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(display.id)) return false
         val ctx = PlaybackContexts.of(

@@ -24,6 +24,12 @@ internal object FFmpegCapabilities {
     /** True when [ffmpeg] has decoder [name]; only the optional ones in [PROBED_DECODERS] are probed. */
     fun hasDecoder(ffmpeg: String, name: String): Boolean = probedDecoders(ffmpeg).contains(name)
 
+    /** The optional decoders [ffmpeg] has (probed once). */
+    fun optionalDecoders(ffmpeg: String): Set<String> = probedDecoders(ffmpeg)
+
+    /** The optional filters [ffmpeg] has (probed once). */
+    fun optionalFilters(ffmpeg: String): Set<String> = probedFilters(ffmpeg)
+
     private fun probedDecoders(ffmpeg: String): Set<String> =
         decoderCache.computeIfAbsent(ffmpeg) { bin ->
             val output = listing(bin, "-decoders") ?: return@computeIfAbsent emptySet()

@@ -166,6 +166,7 @@ object ClientTickManager {
         }
 
         ViewerReporter.tick()
+        com.dreamdisplays.platform.client.displays.ClientErrorReporter.tick()
 
         // The sneak + use menu shortcut itself fires from the UseItemMenu mixin, which also cancels the use.
         DisplayMenuInputHandler.tickUseKey(minecraft)

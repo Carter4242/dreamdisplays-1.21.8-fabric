@@ -4,6 +4,8 @@ package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.protocol.PacketDirection
 import com.dreamdisplays.core.protocol.common.packets.ClearCache
+import com.dreamdisplays.core.protocol.common.packets.ClientEnvironment
+import com.dreamdisplays.core.protocol.common.packets.ClientErrorReport
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.protocol.common.packets.ClientHello
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
@@ -95,6 +97,8 @@ object PacketRegistry {
         Entry(
             PacketType.FULLSCREEN_PREPARE_STATUS, FullscreenPrepareStatus::class, FullscreenPrepareStatus.serializer(),
         ),
+        Entry(PacketType.CLIENT_ERROR_REPORT, ClientErrorReport::class, ClientErrorReport.serializer()),
+        Entry(PacketType.CLIENT_ENVIRONMENT, ClientEnvironment::class, ClientEnvironment.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }

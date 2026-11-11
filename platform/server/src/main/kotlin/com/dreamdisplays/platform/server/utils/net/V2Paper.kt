@@ -71,12 +71,11 @@ object PaperV2Networking : PluginMessageListener {
         logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
     }
 
-    private fun serverFeatureWires(): List<String> =
-        if (WorldGuardRegions.isAvailable()) {
-            ServerFeature.playbackFeatureWires + ServerFeature.REGION_ACCESS.wire
-        } else {
-            ServerFeature.playbackFeatureWires
-        }
+    private fun serverFeatureWires(): List<String> = buildList {
+        addAll(ServerFeature.playbackFeatureWires)
+        if (WorldGuardRegions.isAvailable()) add(ServerFeature.REGION_ACCESS.wire)
+        if (PaperServer.config.settings.clients.error_reports) add(ServerFeature.CLIENT_ERROR_REPORTS.wire)
+    }
 
     private fun maxDisplaysFor(hasBypass: Boolean): Int {
         val cap = PaperServer.config.settings.maxDisplaysPerPlayer
@@ -94,6 +93,8 @@ object PaperV2Networking : PluginMessageListener {
             is RequestSync -> DisplayActions.requestSync(player, packet.id)
             is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs)
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
+            is ClientErrorReport -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onReport(player, packet)
+            is ClientEnvironment -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onEnvironment(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)
             is ReportDisplay -> DisplayManager.report(packet.id, player)
             is SetVideo -> DisplayActions.setVideo(player, packet.id, packet.url, packet.lang)

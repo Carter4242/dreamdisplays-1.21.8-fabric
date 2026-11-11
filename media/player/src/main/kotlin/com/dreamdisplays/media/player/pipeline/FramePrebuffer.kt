@@ -311,6 +311,26 @@ internal class FramePrebuffer(
     private var statWorstLateNs = 0L
     private var statWindowStartNs = System.nanoTime()
 
+    /** Reports a window with too many late frames to the server as a hitch (the client throttles them). */
+    private fun reportAvLag(total: Long, windowSeconds: Long) {
+        val diagnostics = com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
+        if (!diagnostics.enabled) return
+        val id = diagnostics.displayIdOf(debugLabel) ?: return
+        diagnostics.emit(
+            com.dreamdisplays.media.runtime.diagnostics.PlaybackFailure(
+                displayId = id,
+                url = "",
+                kind = "DECODE",
+                message = "$statDroppedLate of $total frames dropped and $statPresentedLate shown behind the audio " +
+                    "clock in ${windowSeconds}s",
+                stage = "av_sync",
+                hitch = true,
+                durationMs = statWorstLateNs / 1_000_000,
+                action = "drop_frames",
+            )
+        )
+    }
+
     private fun recordFrame(lateNs: Long, presentedIt: Boolean) {
         if (presentedIt) {
             statPresented++
@@ -330,6 +350,7 @@ internal class FramePrebuffer(
                         "(worst lateness ${statWorstLateNs / 1_000_000} ms); decode or upload is not " +
                         "keeping the source's cadence."
             )
+            reportAvLag(total, (now - statWindowStartNs) / 1_000_000_000L)
         } else if (MediaPlayer.DEBUG && total > 0) {
             logger.debug(
                 "$debugLabel A / V health: presented=$statPresented (late=$statPresentedLate) " +

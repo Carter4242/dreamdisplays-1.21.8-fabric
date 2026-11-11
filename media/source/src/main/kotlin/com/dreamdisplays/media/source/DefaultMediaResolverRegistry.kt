@@ -5,7 +5,9 @@ import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
+import com.dreamdisplays.media.runtime.diagnostics.ResolveTrail
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
+import com.dreamdisplays.media.source.platform.Platform
 import com.dreamdisplays.util.DreamCoroutines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -68,8 +70,27 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
         if (candidates.isEmpty()) {
             throw DreamMediaException.Unknown("No resolver registered for source: $source", isFatal = true)
         }
-        if (candidates.size == 1) return candidates[0].resolve(source)
+        if (candidates.size == 1) return traced(source, candidates[0])
         return runBlocking { raceResolvers(source, candidates) }
+    }
+
+    /** Runs [resolver] and records how it went in the link's [ResolveTrail] (for client error reports). */
+    private fun traced(source: MediaSource, resolver: MediaResolverService): ResolvedMedia {
+        val started = System.currentTimeMillis()
+        val key = source.toResolvableUrl() ?: source.toString()
+        return try {
+            resolver.resolve(source).also {
+                ResolveTrail.record(key, sourceName(resolver), ok = true, elapsedMs = System.currentTimeMillis() - started)
+            }
+        } catch (e: Throwable) {
+            if (e !is CancellationException && e !is InterruptedException) {
+                ResolveTrail.record(
+                    key, sourceName(resolver), ok = false, error = e.message ?: e.javaClass.simpleName,
+                    elapsedMs = System.currentTimeMillis() - started,
+                )
+            }
+            throw e
+        }
     }
 
     private suspend fun raceResolvers(source: MediaSource, candidates: List<MediaResolverService>): ResolvedMedia {
@@ -84,7 +105,7 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
             DreamCoroutines.clientIo.launch {
                 if (index > 0) delay(RACE_HEAD_START * index)
                 if (!winner.isCompleted) {
-                    runCatching { resolver.resolve(source) }
+                    runCatching { traced(source, resolver) }
                         .onSuccess { winner.complete(it) }
                         .onFailure { e ->
                             if (e is CancellationException) throw e
@@ -121,6 +142,17 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
     }
 
     private companion object {
+        /** Short resolver name for reports: `newpipe`, `yt-dlp`, `direct`, or the platform's own name. */
+        fun sourceName(resolver: MediaResolverService): String = when (resolver) {
+            is Platform<*, *> -> resolver.name.lowercase()
+            else -> when (val name = resolver.javaClass.simpleName.removeSuffix("Resolver")) {
+                "NewPipe" -> "newpipe"
+                "YtDlp" -> "yt-dlp"
+                "DirectStream" -> "direct"
+                else -> name.lowercase()
+            }
+        }
+
         /**
          * Hints warmed at once. Enough to cover a room of screens, few enough not to flood the
          * network (or the `yt-dlp` subprocess budget) with speculative work.

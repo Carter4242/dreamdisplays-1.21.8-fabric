@@ -34,7 +34,10 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
     /** Returns stream list for videoUrl (in-memory -> disk -> [resolve]). */
     @Throws(IOException::class)
     fun fetch(videoUrl: String): List<YtStream> {
-        var streams = loadFromDisk(videoUrl) ?: formatMemo.getBlocking(videoUrl) { fetchAndPersist(it) }
+        val cached = loadFromDisk(videoUrl)
+        // Reports say when the stream URLs came from an earlier resolve (an expired one is a common 403)
+        if (cached != null) com.dreamdisplays.media.runtime.diagnostics.ResolveTrail.record(videoUrl, "format-cache", ok = true)
+        var streams = cached ?: formatMemo.getBlocking(videoUrl) { fetchAndPersist(it) }
         if (isStaleLive(videoUrl, streams) || isStalePartial(videoUrl, streams)) {
             invalidate(videoUrl)
             streams = formatMemo.getBlocking(videoUrl) { fetchAndPersist(it) }

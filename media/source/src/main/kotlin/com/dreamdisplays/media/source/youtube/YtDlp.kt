@@ -216,6 +216,10 @@ object YtDlp {
         val viaNewPipe = runCatching { NewPipeResolver.fetch(videoUrl) }
             .onFailure { e -> if (e is CancellationException) throw e }
             .getOrElse { [] }
+        com.dreamdisplays.media.runtime.diagnostics.ResolveTrail.record(
+            videoUrl, "newpipe (fallback)", ok = viaNewPipe.isNotEmpty(),
+            error = if (viaNewPipe.isEmpty()) "no streams" else null,
+        )
         if (viaNewPipe.isNotEmpty()) {
             logger.warn("yt-dlp could not resolve {}; falling back to NewPipe's stream URLs.", videoUrl)
             return viaNewPipe

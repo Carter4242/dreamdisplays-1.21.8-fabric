@@ -306,6 +306,8 @@
   "viewerStatsAllHeader": "&7D |&f Displays with viewer reports: %s",
   "viewerStatsAllLine": "&7D | &e%s&f: %s viewers, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring",
   "suggestClients": "List online players with the mod and their client build",
+  "suggestErrors": "Recent client errors, playback hitches and display commands",
+  "suggestDiag": "Show a player's client environment (OS, GPU, yt-dlp, FFmpeg)",
   "clientsHeader": "&7D |&f Players with the mod: %s (latest build &e%s&f, &c%s&f on another build)",
   "clientsLine": "&7D | &f%s &7%s &fbuild &a%s",
   "clientsLineOutdated": "&7D | &f%s &7%s &fbuild &c%s &7(not latest)",

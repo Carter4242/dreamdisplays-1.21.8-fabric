@@ -48,6 +48,8 @@ object ConfigCommand {
         Key("clients.latest_build", PolicyPaths.Kind.Text(ClientBuild.LATEST_PATTERN, "<commit, e.g. 1a2b3c4d>")) {
             it.clients.latest_build.ifEmpty { null }
         },
+        Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
+        Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }

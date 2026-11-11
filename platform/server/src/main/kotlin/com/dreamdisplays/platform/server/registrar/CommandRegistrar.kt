@@ -12,6 +12,7 @@ import com.dreamdisplays.platform.server.commands.suggest.Tooltips
 import com.dreamdisplays.platform.server.commands.suggest.startingWith
 import com.dreamdisplays.platform.server.commands.suggest.suggesting
 import com.dreamdisplays.platform.server.commands.tree.FullscreenFlags
+import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ScheduleTimeUtil
 import com.mojang.brigadier.Command
@@ -50,6 +51,8 @@ object CommandRegistrar {
             fullscreenBranch()
             statsBranch()
             clientsBranch()
+            errorsBranch()
+            diagBranch()
             reloadBranch()
             policyBranch()
             configBranch()
@@ -110,6 +113,50 @@ object CommandRegistrar {
         literal("clients", tip("suggestClients")) {
             requires { PolicyCommand.allowed(it.sender) }
             executesCommand { ctx -> ClientsCommand.execute(ctx.source.sender) }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.errorsBranch() {
+        fun arg(ctx: CommandContext<CommandSourceStack>, name: String): String? =
+            tryArg(ctx, name, String::class.java)
+
+        fun run(ctx: CommandContext<CommandSourceStack>) =
+            ErrorsCommand.execute(ctx.source.sender, listOfNotNull(arg(ctx, "a"), arg(ctx, "b"), arg(ctx, "c")))
+
+        literal("errors", tip("suggestErrors")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            executesCommand { ctx -> run(ctx) }
+            argument("a", BareTokenArgumentType) {
+                suggests(suggesting(tips) { _, _, typed ->
+                    ErrorsCommand.targetSuggestions().map { Suggestion(it) }.startingWith(typed)
+                })
+                executesCommand { ctx -> run(ctx) }
+                argument("b", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx -> run(ctx) }
+                    argument("c", StringArgumentType.word()) {
+                        suggests(suggesting(tips) { _, _, typed ->
+                            ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
+                        })
+                        executesCommand { ctx -> run(ctx) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.diagBranch() {
+        literal("diag", tip("suggestDiag")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            argument("player", StringArgumentType.word()) {
+                suggests(suggesting(tips) { _, _, typed ->
+                    (PaperFullscreenCommand.onlinePlayerNames() + ClientErrorReports.knownPlayerNames()).distinct()
+                        .map { Suggestion(it) }.startingWith(typed)
+                })
+                executesCommand { ctx -> ErrorsCommand.diag(ctx.source.sender, StringArgumentType.getString(ctx, "player")) }
+            }
         }
     }
 

@@ -137,9 +137,16 @@ data class SettingsSection(
         val blocked_hosts: List<String> = [],
     )
 
-    /** Clients section: [latest_build] is the build id `/display clients` compares players against (empty = none). */
+    /**
+     * Clients section: [latest_build] is the build id `/display clients` compares players against (empty = none);
+     * [error_reports] asks clients for error / hitch reports, which go to [error_log] (in the plugin folder) along with
+     * display commands when [command_log] is on.
+     */
     data class ClientsConfig(
         val latest_build: String = "",
+        val error_reports: Boolean = true,
+        val error_log: String = "client-errors.log",
+        val command_log: Boolean = true,
     )
 
     /** Fullscreen broadcast section. */
@@ -308,6 +315,9 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
         ),
         clients = SettingsSection.ClientsConfig(
             latest_build = (t?.get("clients.latest_build") as? String)?.trim() ?: "",
+            error_reports = t.boolOrNull("clients.error_reports") ?: true,
+            error_log = (t?.get("clients.error_log") as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: "client-errors.log",
+            command_log = t.boolOrNull("clients.command_log") ?: true,
         ),
     ),
     storage = StorageSection(
