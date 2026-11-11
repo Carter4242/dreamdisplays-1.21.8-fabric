@@ -34,6 +34,8 @@ import com.dreamdisplays.platform.client.ui.kit.UiRect
 import com.dreamdisplays.platform.client.ui.kit.UiScreenBase
 import com.dreamdisplays.platform.client.ui.kit.UiText
 import com.dreamdisplays.platform.client.ui.kit.UiTheme
+import com.dreamdisplays.platform.client.ui.kit.claimClick
+import com.dreamdisplays.platform.client.ui.kit.claimScroll
 import com.dreamdisplays.platform.client.ui.kit.drawPanel
 import com.dreamdisplays.platform.client.ui.menu.*
 import com.dreamdisplays.platform.client.ui.widgets.*
@@ -627,50 +629,56 @@ class DisplayMenu private constructor(
         return true
     }
 
-    override fun onMouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean =
-        audioTrackDropdown.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollY) ||
-                subtitleDropdown.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollY)
-
-    //? if >=1.21.11 {
-    override fun onMouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        val mx = event.x().toInt()
-        val my = event.y().toInt()
-        val onPopoutButton = popoutButton.isMouseOver(mx.toDouble(), my.toDouble())
-        if (dropdown.visible && MouseButtons.isLeft(event.button()) && !onPopoutButton && dropdown.handleClick(mx, my)) return true
-        val onAudioTrackButton = audioTrackButton.isMouseOver(mx.toDouble(), my.toDouble())
-        if (audioTrackDropdown.visible && MouseButtons.isLeft(event.button()) && !onAudioTrackButton && audioTrackDropdown.handleClick(
-                mx,
-                my
-            )
-        ) return true
-        val onSubtitleButton = subtitleButton.isMouseOver(mx.toDouble(), my.toDouble())
-        if (subtitleDropdown.visible && MouseButtons.isLeft(event.button()) && !onSubtitleButton && subtitleDropdown.handleClick(mx, my)) return true
-        return modLabel.handleClick(mx, my)
-    }
-
-    override fun onMouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean =
-        audioTrackDropdown.handleDrag(event.y().toInt()) || subtitleDropdown.handleDrag(event.y().toInt())
-
-    override fun onMouseReleased(event: MouseButtonEvent): Boolean =
-        audioTrackDropdown.handleRelease() || subtitleDropdown.handleRelease() || progress.commitDragIfActive()
-    //?} else
-    /*override fun onMouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+    override fun onMouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
-        val onPopoutButton = popoutButton.isMouseOver(mouseX, mouseY)
-        if (dropdown.visible && button == 0 && !onPopoutButton && dropdown.handleClick(mx, my)) return true
-        val onAudioTrackButton = audioTrackButton.isMouseOver(mouseX, mouseY)
-        if (audioTrackDropdown.visible && button == 0 && !onAudioTrackButton && audioTrackDropdown.handleClick(mx, my)) return true
-        val onSubtitleButton = subtitleButton.isMouseOver(mouseX, mouseY)
-        if (subtitleDropdown.visible && button == 0 && !onSubtitleButton && subtitleDropdown.handleClick(mx, my)) return true
-        return modLabel.handleClick(mx, my)
+        // An open popup swallows scrolls over it even when it has nothing to scroll, so the list beneath stays put.
+        return audioTrackDropdown.handleScroll(mx, my, scrollY) ||
+                subtitleDropdown.handleScroll(mx, my, scrollY) ||
+                dropdown.claimScroll(mx, my) ||
+                audioTrackDropdown.claimScroll(mx, my) ||
+                subtitleDropdown.claimScroll(mx, my) ||
+                (::suggestions.isInitialized && suggestions.claimPopupScroll(mx, my))
     }
 
-    override fun onMouseDragged(mouseX: Double, mouseY: Double, button: Int, dragX: Double, dragY: Double): Boolean =
-        audioTrackDropdown.handleDrag(mouseY.toInt()) || subtitleDropdown.handleDrag(mouseY.toInt())
+    // Open popups get first claim on every button, ahead of the widgets they cover (see claimClick).
+    private fun claimPopupClick(mx: Int, my: Int, button: Int): Boolean {
+        if (!::popoutButton.isInitialized) return false
+        val x = mx.toDouble()
+        val y = my.toDouble()
+        return dropdown.claimClick(mx, my, button, onToggle = popoutButton.isMouseOver(x, y)) ||
+                audioTrackDropdown.claimClick(mx, my, button, onToggle = audioTrackButton.isMouseOver(x, y)) ||
+                subtitleDropdown.claimClick(mx, my, button, onToggle = subtitleButton.isMouseOver(x, y)) ||
+                suggestions.claimPopupClick(mx, my, button)
+    }
 
-    override fun onMouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean =
-        audioTrackDropdown.handleRelease() || subtitleDropdown.handleRelease() || progress.commitDragIfActive()*/
+    private fun handleClick(mx: Int, my: Int, button: Int): Boolean =
+        claimPopupClick(mx, my, button) || (MouseButtons.isLeft(button) && modLabel.handleClick(mx, my))
+
+    // Scrollbar drags and seek commits belong to the left button only.
+    private fun handleDrag(my: Int, button: Int): Boolean =
+        MouseButtons.isLeft(button) && (audioTrackDropdown.handleDrag(my) || subtitleDropdown.handleDrag(my))
+
+    private fun handleRelease(button: Int): Boolean =
+        MouseButtons.isLeft(button) &&
+                (audioTrackDropdown.handleRelease() || subtitleDropdown.handleRelease() || progress.commitDragIfActive())
+
+    //? if >=1.21.11 {
+    override fun onMouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean =
+        handleClick(event.x().toInt(), event.y().toInt(), event.button())
+
+    override fun onMouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean =
+        handleDrag(event.y().toInt(), event.button())
+
+    override fun onMouseReleased(event: MouseButtonEvent): Boolean = handleRelease(event.button())
+    //?} else
+    /*override fun onMouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean =
+        handleClick(mouseX.toInt(), mouseY.toInt(), button)
+
+    override fun onMouseDragged(mouseX: Double, mouseY: Double, button: Int, dragX: Double, dragY: Double): Boolean =
+        handleDrag(mouseY.toInt(), button)
+
+    override fun onMouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean = handleRelease(button)*/
 
     override fun isPauseScreen(): Boolean = false
 

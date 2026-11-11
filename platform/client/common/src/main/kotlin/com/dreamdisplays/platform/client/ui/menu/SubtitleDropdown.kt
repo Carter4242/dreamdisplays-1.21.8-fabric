@@ -29,8 +29,8 @@ class SubtitleDropdown(
     private val getTracks: () -> List<SubtitleTrack>,
     private val currentLang: () -> String?,
     private val onSelect: (SubtitleTrack?) -> Unit,
-) {
-    var visible: Boolean = false
+) : PopupLayer {
+    override var visible: Boolean = false
 
     private var items: List<SubtitleTrack?> = [null]
     private var scrollIndex = 0
@@ -56,7 +56,7 @@ class SubtitleDropdown(
         scrollPx = scrollIndex * ITEM_H.toFloat()
     }
 
-    fun hide() {
+    override fun hide() {
         visible = false
         draggingScrollbar = false
     }
@@ -181,9 +181,15 @@ class SubtitleDropdown(
         g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, scaleAlpha(UiTheme.SCROLLBAR_THUMB, alpha))
     }
 
-    fun handleClick(mx: Int, my: Int): Boolean {
+    override fun contains(mx: Int, my: Int): Boolean =
+        (mx in rect.x..rect.right && my in rect.y..rect.bottom) || overScrollbar(mx, my)
+
+    private fun overScrollbar(mx: Int, my: Int): Boolean =
+        sbPaged && mx in (sbColLeft - SB_GRAB)..(sbColRight + 1) && my in sbTrackTop..sbTrackBottom
+
+    override fun handleClick(mx: Int, my: Int): Boolean {
         if (!visible) return false
-        if (sbPaged && mx in (sbColLeft - SB_GRAB)..(sbColRight + 1) && my in sbTrackTop..sbTrackBottom) {
+        if (overScrollbar(mx, my)) {
             draggingScrollbar = true
             scrollToY(my)
             return true

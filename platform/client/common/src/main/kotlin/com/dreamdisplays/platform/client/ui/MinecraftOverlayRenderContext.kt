@@ -29,10 +29,14 @@ class MinecraftOverlayRenderContext(
     /*val graphics: GuiGraphics,*/
     val mouseX: Int,
     val mouseY: Int,
-    val leftPressed: Boolean,
     override val partialTick: Float,
 ) : OverlayRenderContext {
     override val screenWidth: Int get() = mc.window.guiScaledWidth
     override val screenHeight: Int get() = mc.window.guiScaledHeight
     override val scaleFactor: Double get() = mc.window.guiScale.toDouble()
+
+    companion object {
+        /** Mouse coordinate for frames where the cursor is grabbed by gameplay: nothing is hovered. */
+        const val NO_POINTER: Int = Int.MIN_VALUE / 2
+    }
 }

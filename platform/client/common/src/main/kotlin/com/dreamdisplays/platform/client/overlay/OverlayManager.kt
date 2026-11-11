@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.client.overlay
 
 import com.dreamdisplays.api.display.model.property.DisplayId
+import com.dreamdisplays.core.input.PointerTarget
 
 /**
  * Manages overlays for displays. This is the main interface for interacting with overlays, allowing you to open, close,
@@ -33,4 +34,7 @@ interface OverlayManager {
 
     /** True when no overlays are currently open; lets render hooks skip work cheaply. */
     val isEmpty: Boolean
+
+    /** The overlays as mouse-input targets, top-most (last drawn) first. */
+    val pointerTargets: List<PointerTarget>
 }

@@ -566,6 +566,16 @@ class SuggestionsPanel(
         /*g.blit(id, x, y, 0f, 0f, w, h, w, h)*/
     }
 
+    /**
+     * Gives the open sort dropdown first claim on a click anywhere on the screen (it can hang past this panel),
+     * see [claimClick]. The owning screen calls this before dispatching to its widgets.
+     */
+    fun claimPopupClick(mx: Int, my: Int, button: Int): Boolean =
+        sortDropdown.claimClick(mx, my, button, onToggle = sortButton.isMouseOver(mx.toDouble(), my.toDouble()))
+
+    /** True when a scroll lands on the open sort dropdown, which swallows it so the cards beneath don't scroll. */
+    fun claimPopupScroll(mx: Int, my: Int): Boolean = sortDropdown.claimScroll(mx, my)
+
     //? if >=1.20.2 {
     override fun mouseScrolled(mouseX: Double, mouseY: Double, dx: Double, dy: Double): Boolean {
         //?} else
@@ -573,6 +583,7 @@ class SuggestionsPanel(
             mouseScrolled(mouseX, mouseY, 0.0, delta)
 
         fun mouseScrolled(mouseX: Double, mouseY: Double, dx: Double, dy: Double): Boolean {*/
+        if (claimPopupScroll(mouseX.toInt(), mouseY.toInt())) return true
         if (!available()) return false
         if (!isMouseOver(mouseX, mouseY)) return false
         val stripTop = stripTop()
@@ -601,11 +612,7 @@ class SuggestionsPanel(
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
-        if (sortDropdown.visible && MouseButtons.isLeft(event.button()) && !onSortButton && sortDropdown.handleClick(
-                mx,
-                my
-            )
-        ) return true
+        if (claimPopupClick(mx, my, event.button())) return true
         if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(event, dbl)
         if (onSortButton) return sortButton.mouseClicked(event, dbl)
         if (searchButton.isMouseOver(mouseX, mouseY)) return searchButton.mouseClicked(event, dbl)
@@ -663,7 +670,7 @@ class SuggestionsPanel(
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
-        if (sortDropdown.visible && button == 0 && !onSortButton && sortDropdown.handleClick(mx, my)) return true
+        if (claimPopupClick(mx, my, button)) return true
         if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(mouseX, mouseY, button)
         if (onSortButton) return sortButton.mouseClicked(mouseX, mouseY, button)
         if (searchButton.isMouseOver(mouseX, mouseY)) return searchButton.mouseClicked(mouseX, mouseY, button)

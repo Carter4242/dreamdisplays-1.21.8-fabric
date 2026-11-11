@@ -14,6 +14,10 @@ import com.mojang.blaze3d.platform.InputConstants
 /**
  * Opens the display menu on sneak + menu-key click while the crosshair targets a display.
  * Consumes the click and emits [DisplayInteraction.RightClicked] for other subscribers.
+ *
+ * The click comes from vanilla's use-item action (the `UseItemMenu` mixin) rather than a raw button poll,
+ * so opening the menu cancels the use: the held item is not used, and nothing in the world is interacted
+ * with, even when the display is past block reach.
  */
 class DisplayMenuInputHandler : InputHandler {
     override fun handle(action: InputAction): Boolean {
@@ -39,9 +43,33 @@ class DisplayMenuInputHandler : InputHandler {
             description = "Open the display menu (sneak + click on a display)",
         )
 
+        // False from the first use of a press until the use key is up again, so holding it never re-triggers.
+        private var useArmed = true
+
+        /** Per client tick: re-arms the shortcut once the use key has been let go. */
+        fun tickUseKey(mc: Minecraft) {
+            if (!mc.options.keyUse.isDown) useArmed = true
+        }
+
         /**
-         * Opens the display menu when sneaking and looking at a display. Used from the tick poll and
-         * from the client use-block callback.
+         * Called at the head of vanilla's use-item action. On the first use of a press, routes the menu
+         * click through the [InputHandler] chain; returns true when it was consumed (cancel the use).
+         */
+        fun onUseItem(): Boolean {
+            val fresh = useArmed
+            useArmed = false
+            if (!fresh) return false
+            val menuButton = DreamServices.registry.getOrNull<KeyBindingRegistry>()
+                ?.findById(OPEN_MENU_BINDING_ID)?.defaultKey ?: OPEN_MENU_BINDING.defaultKey
+            val mouse = Minecraft.getInstance().mouseHandler
+            return DreamServices.registry.getOrNull<InputHandler>()
+                ?.handle(InputAction.MouseClicked(mouse.xpos(), mouse.ypos(), menuButton))
+                ?: tryOpenFromWorld()
+        }
+
+        /**
+         * Opens the display menu when sneaking and looking at a display. Used from the use-item hook and
+         * the loaders' use-block callbacks.
          */
         fun tryOpenFromWorld(): Boolean {
             val mc = Minecraft.getInstance()

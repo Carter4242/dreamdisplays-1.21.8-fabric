@@ -22,19 +22,12 @@ object MouseButtons {
         //?} else
         /*button == 1*/
 
-    /** Hardware left-button state. */
-    fun hardwareLeftDown(): Boolean =
+    /** Hardware state of [button] (an index as delivered by the game's mouse callback). */
+    fun isDown(button: Int): Boolean =
         //? if >=26.3 {
-        (sdlButtonMask() and SDLMouse.SDL_BUTTON_LMASK) != 0
+        button in 1..32 && (sdlButtonMask() and (1 shl (button - 1))) != 0
         //?} else
-        /*glfwDown(GLFW.GLFW_MOUSE_BUTTON_LEFT)*/
-
-    /** Hardware right-button state. See [hardwareLeftDown]. */
-    fun hardwareRightDown(): Boolean =
-        //? if >=26.3 {
-        (sdlButtonMask() and SDLMouse.SDL_BUTTON_RMASK) != 0
-        //?} else
-        /*glfwDown(GLFW.GLFW_MOUSE_BUTTON_RIGHT)*/
+        /*button >= 0 && glfwDown(button)*/
 
     //? if >=26.3 {
     private fun sdlButtonMask(): Int = MemoryStack.stackPush().use { stack ->

@@ -30,7 +30,6 @@ import java.util.*
  */
 object ClientTickManager {
     private const val DORMANT_HYSTERESIS_BLOCKS = 4
-    private var wasPressed = false
     private var wasInMultiplayer = false
 
     @Volatile
@@ -164,24 +163,8 @@ object ClientTickManager {
 
         ViewerReporter.tick()
 
-        // The menu-open button comes from the KeyBindingRegistry; the click itself is routed
-        // through the InputHandler chain (DisplayMenuInputHandler consumes sneak + click-on-display).
-        // 26.3 only updates isRightPressed while no screen is open, so ignore the shortcut (and
-        // freeze wasPressed) whenever a GUI is showing.
-        if (MinecraftScreenUtil.currentScreen(minecraft) != null) {
-            wasPressed = MouseButtons.hardwareRightDown()
-        } else {
-            val menuButton = DreamServices.registry.getOrNull<KeyBindingRegistry>()
-                ?.findById(DisplayMenuInputHandler.OPEN_MENU_BINDING_ID)?.defaultKey
-                ?: DisplayMenuInputHandler.OPEN_MENU_BINDING.defaultKey
-            val pressed = MouseButtons.hardwareRightDown()
-            if (pressed && !wasPressed) {
-                DreamServices.registry.getOrNull<InputHandler>()?.handle(
-                    InputAction.MouseClicked(minecraft.mouseHandler.xpos(), minecraft.mouseHandler.ypos(), menuButton)
-                )
-            }
-            wasPressed = pressed
-        }
+        // The sneak + use menu shortcut itself fires from the UseItemMenu mixin, which also cancels the use.
+        DisplayMenuInputHandler.tickUseKey(minecraft)
     }
 
     private fun compressDormant(displayScreen: DisplayScreen) {
