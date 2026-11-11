@@ -548,7 +548,15 @@ class DisplayScreen(
     /** Audio track / language of the current video, or `null` when idle. */
     var lang: String? = null; private set
 
+    /**
+     * The server's own [DisplayInfo.lang] as of the last packet, tracked apart from [lang] (which may be the viewer's
+     * saved audio track). Null until this screen has seen a packet: a screen restored from the distance cache adopts
+     * the next packet's value instead of reloading for it (see [DisplayInfoReload]).
+     */
     private var lastPacketLang: String? = null
+
+    /** True once a [DisplayInfo] has been applied to this screen. */
+    private var infoApplied = false
 
     /** True once the video is effectively playing: not awaiting the initial timeline and a frame has filled. */
     val isVideoStarted: Boolean
@@ -841,8 +849,22 @@ class DisplayScreen(
     internal fun subtitleOverlayTexture(): SubtitleOverlayTexture =
         subtitleOverlayCache ?: SubtitleOverlayTexture().also { subtitleOverlayCache = it }
 
-    /** Updates position, dimensions, and video URL from an incoming [DisplayInfo] packet. */
+    /**
+     * Updates position, dimensions, and video URL from an incoming [DisplayInfo] packet. Also the first load of a
+     * screen created from a packet, so policy, lock, access and schedule are in place before its player starts.
+     */
     fun updateData(packet: DisplayInfo) {
+        applyInfoFields(packet)
+        val previousUrl = videoUrl
+        val firstLoad = !infoApplied && previousUrl == null
+        infoApplied = true
+        val reload = DisplayInfoReload.needsReload(previousUrl, lastPacketLang, packet.url, packet.lang)
+        lastPacketLang = packet.lang
+        if (reload) applyInfoUrl(packet, previousUrl, firstLoad)
+    }
+
+    /** Everything a [DisplayInfo] carries except its video: placement, mode, policy, lock, access and schedule. */
+    internal fun applyInfoFields(packet: DisplayInfo) {
         virtual = packet.virtual
         if (packet.world.isNotEmpty()) dimensionKey = packet.world
         customData = acceptedCustomData(packet)
@@ -873,44 +895,46 @@ class DisplayScreen(
         scheduledStartEpochMillis = packet.scheduledStartEpochMillis
         scheduledAction = packet.scheduledAction
         owner = Minecraft.getInstance().player?.gameProfile?.id?.toString() == packet.ownerId.toString()
+    }
 
-        if (videoUrl != packet.url || lastPacketLang != packet.lang) {
-            val previousUrl = videoUrl
-            lastPacketLang = packet.lang
-            // A screen share (any private relay stream) ended here: nothing of it stays up, not even until the next
-            // video's first frame, and with nothing next the player stops instead of holding its last picture
-            if (ScreenShareViewerRules.clearOnUrlChange(previousUrl, packet.url)) {
-                dropPrivatePicture("display URL changed")
-                if (ScreenShareViewerRules.stopPlayerOnUrlChange(previousUrl, packet.url)) {
-                    media.unload(packet.lang)
-                    return
-                }
-            }
-            if (clientUrlOverride && canSetVideoHere) return
-            if (clientUrlOverride) {
-                clientUrlOverride = false
-                ClientSettingsStore.setUrlOverride(uuid, null, null)
-            }
-
-            val ds = ClientSettingsStore.getSettings(uuid)
-            val override = ds.urlOverride
-
-            if (!override.isNullOrEmpty() && canSetVideoHere) {
-                clientUrlOverride = true
-                val overrideLang = ds.langOverride ?: packet.lang
-                paused = false
-                if (override != previousUrl) savedTimeNanos = 0L
-                loadVideo(override, overrideLang)
+    private fun applyInfoUrl(packet: DisplayInfo, previousUrl: String?, firstLoad: Boolean) {
+        // A screen share (any private relay stream) ended here: nothing of it stays up, not even until the next
+        // video's first frame, and with nothing next the player stops instead of holding its last picture
+        if (ScreenShareViewerRules.clearOnUrlChange(previousUrl, packet.url)) {
+            dropPrivatePicture("display URL changed")
+            if (ScreenShareViewerRules.stopPlayerOnUrlChange(previousUrl, packet.url)) {
+                media.unload(packet.lang)
                 return
-            } else if (!override.isNullOrEmpty()) {
-                ClientSettingsStore.setUrlOverride(uuid, null, null)
             }
+        }
+        if (clientUrlOverride && canSetVideoHere) return
+        if (clientUrlOverride) {
+            clientUrlOverride = false
+            ClientSettingsStore.setUrlOverride(uuid, null, null)
+        }
 
+        val ds = ClientSettingsStore.getSettings(uuid)
+        val override = ds.urlOverride
+
+        if (!override.isNullOrEmpty() && canSetVideoHere) {
+            clientUrlOverride = true
+            val overrideLang = ds.langOverride ?: packet.lang
+            paused = false
+            if (override != previousUrl) savedTimeNanos = 0L
+            loadVideo(override, overrideLang)
+            return
+        } else if (!override.isNullOrEmpty()) {
+            ClientSettingsStore.setUrlOverride(uuid, null, null)
+        }
+
+        // A first load keeps the viewer's saved pause state and resume position (registerScreen restored them); the
+        // constructor already asked for the timeline
+        if (!firstLoad) {
             paused = false
             if (packet.url != previousUrl) savedTimeNanos = 0L
-            loadVideo(packet.url, loadLang(packet.lang))
-            sendRequestSyncPacket()
         }
+        loadVideo(packet.url, loadLang(packet.lang))
+        if (!firstLoad) sendRequestSyncPacket()
     }
 
     /** The audio language a server-set video loads with: the viewer's saved track language here, else [serverLang]. */

@@ -49,6 +49,7 @@ object DisplayLifecycleManager {
         }
 
         val policy = DisplayPolicyCache.update(packet.id, acceptedCustomData(packet))
+        lastInfo[packet.id] = packet
         // First sight of a display seeds the player's volume for it from the server's audio.startVolume
         ClientSettingsStore.getSettings(packet.id, DisplayScreen.defaultVolume(policy))
 
@@ -95,13 +96,23 @@ object DisplayLifecycleManager {
             packet.id, packet.ownerId, Vector3i(packet.x, packet.y, packet.z), facing,
             packet.width, packet.height, packet.url, packet.lang,
             mode, packet.qualityCap, DisplayRotation.fromQuarterTurns(packet.rotation),
-            worldOf(packet), packet.depth, packet.conforming,
+            worldOf(packet), packet.depth, packet.conforming, info = packet,
         )
-        DisplayRegistry.screens[packet.id]?.let {
-            it.virtual = packet.virtual
-            it.customData = acceptedCustomData(packet)
-        }
     }
+
+    /**
+     * The last description the server sent per display, so a display restored from the distance cache starts with its
+     * policy, lock, access and schedule instead of the client defaults. Cleared per server.
+     */
+    private val lastInfo = java.util.concurrent.ConcurrentHashMap<UUID, DisplayInfo>()
+
+    /** Forgets [displayId]'s last description (deleted or evicted). */
+    fun forgetInfo(displayId: UUID) {
+        lastInfo.remove(displayId)
+    }
+
+    /** Forgets every display description (leaving a server). */
+    fun clearInfo() = lastInfo.clear()
 
     private fun cacheUnloadedDisplay(
         packet: DisplayInfo, facing: FacingUtil, mode: PlaybackMode, dimensionKey: String,
@@ -130,6 +141,7 @@ object DisplayLifecycleManager {
         mode: PlaybackMode, qualityCap: Int, rotation: DisplayRotation = DisplayRotation.NONE,
         dimensionKey: String = currentDimensionKey(),
         depth: Int = 1, conforming: Boolean = false,
+        info: DisplayInfo? = null,
     ) {
         val displayScreen = DisplayScreen(
             uuid, ownerUuid, pos.x(), pos.y(), pos.z(), facingUtil.toDisplayFacing(),
@@ -139,7 +151,10 @@ object DisplayLifecycleManager {
 
         displayScreen.createTexture()
         DisplayRegistry.registerScreen(displayScreen)
-        if (code != "") displayScreen.loadVideo(code, lang)
+        // From a server description: applied whole (policy, lock, access...) before the video loads, and it records
+        // the packet language, so the next periodic description does not restart the video
+        if (info != null) displayScreen.updateData(info)
+        else if (code != "") displayScreen.loadVideo(code, lang)
 
         // Not for a display only loaded ahead of a broadcast: that one stays out of sight until the broadcast
         if (ClientSettingsStore.getSettings(uuid, DisplayScreen.defaultVolume()).pipOpen &&
@@ -228,6 +243,9 @@ object DisplayLifecycleManager {
         displayScreen.quality = VideoQuality.parse(data.quality)
         displayScreen.brightness = data.brightness
         displayScreen.muted = data.muted
+
+        // The policy, lock, access and schedule the server last described, before the player starts
+        lastInfo[data.uuid]?.let(displayScreen::applyInfoFields)
 
         displayScreen.createTexture()
         DisplayRegistry.screens[displayScreen.uuid] = displayScreen

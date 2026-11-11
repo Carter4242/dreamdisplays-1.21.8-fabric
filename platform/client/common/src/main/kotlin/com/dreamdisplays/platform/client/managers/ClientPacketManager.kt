@@ -105,6 +105,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(packet.id)
         DisplayRegistry.screens[packet.id]?.let { DisplayRegistry.unregisterScreen(it) }
         DisplayRegistry.unloadedScreens.remove(packet.id)
+        DisplayLifecycleManager.forgetInfo(packet.id)
         DisplayStorage.removeDisplay(packet.id)
         logger.info("Display deleted and removed from saved data: ${packet.id}.")
     }
@@ -114,6 +115,7 @@ object ClientPacketManager {
             com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(uuid)
             DisplayRegistry.screens[uuid]?.let { DisplayRegistry.unregisterScreen(it) }
             DisplayRegistry.unloadedScreens.remove(uuid)
+            DisplayLifecycleManager.forgetInfo(uuid)
             DreamServices.registry.getOrNull<DisplaySystem>()?.removeDisplay(DisplayId(uuid))
             DisplayStorage.removeDisplay(uuid)
         }
@@ -125,6 +127,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.ServerMediaGens.reset()
         com.dreamdisplays.platform.client.displays.ReportRequests.reset()
+        DisplayLifecycleManager.clearInfo()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()
