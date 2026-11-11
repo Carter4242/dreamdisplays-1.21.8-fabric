@@ -30,7 +30,6 @@ import java.util.*
  */
 object ClientTickManager {
     private const val DORMANT_HYSTERESIS_BLOCKS = 4
-    private var wasPressed = false
     private var wasInMultiplayer = false
 
     @Volatile
@@ -50,6 +49,7 @@ object ClientTickManager {
 
         FullscreenOverlayManager.onClientTick(minecraft)
         FullscreenController.onClientTick()
+        FullscreenPrepareController.onClientTick()
         DisplayRegistry.tickReconfirm()
         if (minecraft.level != null) {
             ProtocolRouter.tickHelloRefresh(DisplayRegistry.getScreens().any { !it.virtual && !it.isDormant })
@@ -63,6 +63,7 @@ object ClientTickManager {
             if (lastLevel == null) {
                 lastLevel = level
                 if (newBackend) {
+                    FullscreenPrepareController.reset()
                     DisplayRegistry.unloadAllForServerSwitch(newBackend = true)
                     hoveredDisplayScreen = null
                 }
@@ -70,6 +71,7 @@ object ClientTickManager {
             }
             if (level !== lastLevel) {
                 lastLevel = level
+                if (newBackend) FullscreenPrepareController.reset()
                 DisplayRegistry.unloadAllForServerSwitch(newBackend)
                 hoveredDisplayScreen = null
                 checkVersionAndSendPacket()
@@ -125,8 +127,9 @@ object ClientTickManager {
             val outOfRange = threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
             // Switched off by the server: everything goes, popouts and virtual displays included
             val serverDisabled = !ServerOverrides.displayEnabled(displayScreen.policy)
+            // A display held for a fullscreen broadcast stays loaded at any distance until the broadcast takes it
             val shouldUnload = serverDisabled || ((outOfRange || !ClientStateManager.displaysEnabled) &&
-                    !displayScreen.isPopoutActive && !displayScreen.virtual)
+                    !displayScreen.isPopoutActive && !displayScreen.virtual && !displayScreen.isPrepared)
 
             // Already parked warm: wake it when back in range, or tear it down once it has been dormant
             // past the pool TTL (freeing its decoder + texture; the snapshot cache then bridges a return).
@@ -164,24 +167,8 @@ object ClientTickManager {
 
         ViewerReporter.tick()
 
-        // The menu-open button comes from the KeyBindingRegistry; the click itself is routed
-        // through the InputHandler chain (DisplayMenuInputHandler consumes sneak + click-on-display).
-        // 26.3 only updates isRightPressed while no screen is open, so ignore the shortcut (and
-        // freeze wasPressed) whenever a GUI is showing.
-        if (MinecraftScreenUtil.currentScreen(minecraft) != null) {
-            wasPressed = MouseButtons.hardwareRightDown()
-        } else {
-            val menuButton = DreamServices.registry.getOrNull<KeyBindingRegistry>()
-                ?.findById(DisplayMenuInputHandler.OPEN_MENU_BINDING_ID)?.defaultKey
-                ?: DisplayMenuInputHandler.OPEN_MENU_BINDING.defaultKey
-            val pressed = MouseButtons.hardwareRightDown()
-            if (pressed && !wasPressed) {
-                DreamServices.registry.getOrNull<InputHandler>()?.handle(
-                    InputAction.MouseClicked(minecraft.mouseHandler.xpos(), minecraft.mouseHandler.ypos(), menuButton)
-                )
-            }
-            wasPressed = pressed
-        }
+        // The sneak + use menu shortcut itself fires from the UseItemMenu mixin, which also cancels the use.
+        DisplayMenuInputHandler.tickUseKey(minecraft)
     }
 
     private fun compressDormant(displayScreen: DisplayScreen) {

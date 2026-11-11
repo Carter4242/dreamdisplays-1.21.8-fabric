@@ -5,10 +5,10 @@ import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.player.PlaybackHost
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
-import com.dreamdisplays.core.protocol.common.packets.QueuePreloadState
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.player.platform.DisplayPlaybackHost
 import com.dreamdisplays.platform.client.player.platform.DreamPlaybackEnvironment
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import net.minecraft.client.Minecraft
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -18,10 +18,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * Loads a synced display's next queue entry in the background shortly before the current video ends, so the switch
  * the server makes at the end starts at once instead of resolving and buffering first.
  *
- * The preloaded [MediaPlayer] is muted, never drawn (nothing uploads its frames) and parked warm on its first frame.
- * When the server switches the display to that URL, [take] hands the player to [DisplayMediaController], which adopts
- * it instead of building a new one. The server hears READY through a `QueuePreload` packet and shortens its start
- * hold once every nearby preloading client is ready.
+ * The preloaded [MediaPlayer] is created paused, muted and never drawn (nothing uploads its frames), then held ready
+ * at 0 with the player's hold-ready mode ([MediaPlayer.warmUpPaused], the same one fullscreen preparation uses). When
+ * the server switches the display to that URL, [take] hands the player to [DisplayMediaController], which adopts it
+ * instead of building a new one. Progress goes to the server as [FullscreenPrepareState] in a `QueuePreload` packet;
+ * it shortens the start hold once every nearby client is READY.
+ *
+ * The small surface the shared warm-up mechanism needs: [tick] ("warm the next item URL on this display"), the READY
+ * report ("is ready") and [take] ("switch now").
  *
  * Bounded: one preload per display, [MAX_ACTIVE] per client, dropped as soon as the queue head changes.
  */
@@ -31,7 +35,10 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
     private class Preload(val item: QueueItemWire, val lang: String, val player: MediaPlayer, val host: PreloadHost) {
         var phase = Phase.LOADING
         val startedNanos = System.nanoTime()
-        var reported: QueuePreloadState? = null
+        var reported: FullscreenPrepareState? = null
+        @Volatile
+        var initialized = false
+        var lastWarmAttemptNanos = 0L
         var orphanedSinceNanos = 0L
 
         /** Still holds a slot of [ACTIVE] (a failed preload gives its slot back at once). */
@@ -94,8 +101,9 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         preload = null
         current.release()
         current.player.stop()
-        if (current.reported == QueuePreloadState.READY) {
-            DisplayQueues.reportPreload(screen.uuid, current.item.itemId, QueuePreloadState.DROPPED)
+        // No longer ready: the server must not count this client in for a short start hold
+        if (current.reported == FullscreenPrepareState.READY) {
+            DisplayQueues.reportPreload(screen.uuid, current.item.itemId, FullscreenPrepareState.LOADING)
         }
     }
 
@@ -124,30 +132,60 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         val distance = Minecraft.getInstance().player?.blockPosition()?.let(screen::getDistanceToScreen) ?: 0.0
         player.primeVolume(0f, distance, 1.0, 0.0, true)
         player.setVolume(0f)
-        preload = Preload(item, lang, player, host)
+        // Paused before it initialises: it resolves, then waits for warmUpPaused instead of starting playback
+        player.pause()
+        val p = Preload(item, lang, player, host)
+        player.whenInitialized { p.initialized = true }
+        preload = p
         ACTIVE.incrementAndGet()
         logger.info("Display {}: preloading the next queue video.", shortId())
     }
 
     private fun step(p: Preload) {
-        if (p.host.mediaError != null && p.phase != Phase.FAILED) return fail(p, "load error")
+        if (p.phase == Phase.FAILED) return
+        if (p.host.mediaError != null) return fail(p, "load error")
+        val now = System.nanoTime()
         when (p.phase) {
             Phase.LOADING -> {
-                if (p.player.hasDecodedFrame() && p.player.isClockRunning()) {
-                    // First frame is in: park it warm right here, a few frames in
-                    p.player.pause()
-                    p.phase = Phase.WARMING
-                } else if (System.nanoTime() - p.startedNanos > LOAD_TIMEOUT_NANOS) {
-                    fail(p, "timed out")
+                if (!p.initialized) {
+                    if (now - p.startedNanos > LOAD_TIMEOUT_NANOS) fail(p, "timed out")
+                    return
+                }
+                // A live stream or an unseekable file cannot be held any closer than resolved
+                if (p.player.isLive() || !p.player.canSeek()) {
+                    p.phase = Phase.READY
+                    return report(p, FullscreenPrepareState.READY)
+                }
+                p.lastWarmAttemptNanos = now
+                p.player.warmUpPaused(0L)
+                p.phase = Phase.WARMING
+                report(p, FullscreenPrepareState.LOADING)
+            }
+
+            Phase.WARMING -> when {
+                p.player.isHeldReady() -> {
+                    p.phase = Phase.READY
+                    report(p, FullscreenPrepareState.READY)
+                }
+
+                p.player.isWarmingUp() -> {}
+                now - p.startedNanos > LOAD_TIMEOUT_NANOS -> fail(p, "never held ready")
+                now - p.lastWarmAttemptNanos > WARM_RETRY_NANOS -> {
+                    p.lastWarmAttemptNanos = now
+                    p.player.warmUpPaused(0L)
                 }
             }
 
-            Phase.WARMING -> {
-                p.phase = Phase.READY
-                report(p, QueuePreloadState.READY)
+            Phase.READY -> if (!p.player.isLive() && p.player.canSeek() && !p.player.isHeldReady() &&
+                !p.player.isWarmingUp()
+            ) {
+                // The held session was dropped (it went stale): open it again
+                p.phase = Phase.WARMING
+                p.lastWarmAttemptNanos = now
+                p.player.warmUpPaused(0L)
             }
 
-            Phase.READY, Phase.FAILED -> {}
+            Phase.FAILED -> {}
         }
     }
 
@@ -156,10 +194,10 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         p.phase = Phase.FAILED
         p.player.stop()
         p.release()
-        report(p, QueuePreloadState.FAILED)
+        report(p, FullscreenPrepareState.FAILED)
     }
 
-    private fun report(p: Preload, state: QueuePreloadState) {
+    private fun report(p: Preload, state: FullscreenPrepareState) {
         if (p.reported == state) return
         p.reported = state
         DisplayQueues.reportPreload(screen.uuid, p.item.itemId, state)
@@ -176,6 +214,7 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         /** Give up on a preload that has not produced a frame in this long. */
         private const val LOAD_TIMEOUT_NANOS = 30_000_000_000L
         private const val ORPHAN_GRACE_NANOS = 1_500_000_000L
+        private const val WARM_RETRY_NANOS = 3_000_000_000L
 
         /** Preloaded players alive at once on this client, across all displays. */
         private const val MAX_ACTIVE = 2
@@ -207,7 +246,7 @@ internal class PreloadHost(private val screen: DisplayScreen) : PlaybackHost {
 
     override val textureHeight: Int get() = display.textureHeight
 
-    override val isPaused: Boolean get() = if (adopted) display.isPaused else false
+    override val isPaused: Boolean get() = if (adopted) display.isPaused else true
 
     override val effectiveMode: PlaybackMode get() = display.effectiveMode
 

@@ -6,7 +6,7 @@ import com.dreamdisplays.core.services.keys.PlatformServices
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.input.DisplayMenuInputHandler
-import com.dreamdisplays.platform.client.input.MouseButtons
+import com.dreamdisplays.platform.client.input.PointerInput
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.net.compat.CompatPayloads
 import com.dreamdisplays.platform.client.net.compat.CustomPacketPayload
@@ -26,6 +26,7 @@ import net.minecraft.world.InteractionResult
 import net.minecraftforge.client.ConfigGuiHandler
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent
 import net.minecraftforge.client.event.DrawSelectionEvent
+import net.minecraftforge.client.event.InputEvent
 import net.minecraftforge.client.event.RenderGameOverlayEvent
 import net.minecraftforge.client.event.RenderLevelStageEvent
 import net.minecraftforge.client.event.ScreenEvent
@@ -103,6 +104,25 @@ object Client : Mod {
     private fun isDisplayBlock(pos: BlockPos): Boolean =
         DisplayRegistry.getScreens().any { it.isInScreen(pos) }
 
+    // Forge ships no mixins here, so these events stand in for the MouseInput / UseItemMenu mixins.
+    @SubscribeEvent
+    fun onMouseButton(event: InputEvent.RawMouseEvent) {
+        if (PointerInput.onButton(event.button, event.action)) event.isCanceled = true
+    }
+
+    @SubscribeEvent
+    fun onScreenScroll(event: ScreenEvent.MouseScrollEvent.Pre) {
+        if (PointerInput.onScroll()) event.isCanceled = true
+    }
+
+    @SubscribeEvent
+    fun onClickInput(event: InputEvent.ClickInputEvent) {
+        if (event.isUseItem && DisplayMenuInputHandler.onUseItem()) {
+            event.setSwingHand(false)
+            event.isCanceled = true
+        }
+    }
+
     @SubscribeEvent
     fun onClientTick(event: TickEvent.ClientTickEvent) {
         if (event.phase == TickEvent.Phase.END) Initializer.onEndTick(Minecraft.getInstance())
@@ -151,7 +171,7 @@ object Client : Mod {
         if (overlays.isEmpty) return
         overlays.renderAll(
             MinecraftOverlayRenderContext(
-                mc, graphics, event.mouseX, event.mouseY, MouseButtons.hardwareLeftDown(), event.partialTicks,
+                mc, graphics, event.mouseX, event.mouseY, event.partialTicks,
             )
         )
     }

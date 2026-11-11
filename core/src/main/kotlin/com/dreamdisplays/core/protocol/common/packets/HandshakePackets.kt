@@ -40,6 +40,8 @@ data class ClientHello(
     @ProtoNumber(25) val nativeUnavailableReason: String = "",
     @ProtoNumber(26) val lavUnavailableReason: String = "",
     @ProtoNumber(27) val timeZoneOffsetMinutes: Int = 0,
+    /** True when the client handles [FullscreenPrepare]; older clients leave it false and never get one. */
+    @ProtoNumber(28) val supportsFullscreenPrepare: Boolean = false,
     /** True when the client shows the "Up next" queue and preloads its next item; older clients never get QueueState. */
     @ProtoNumber(30) val supportsQueue: Boolean = false,
 ) : DreamPacket

@@ -1,6 +1,5 @@
 package com.dreamdisplays.platform.server.playback
 
-import com.dreamdisplays.core.protocol.common.packets.QueuePreloadState
 import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.core.queue.DisplayQueue
 import com.dreamdisplays.core.queue.QueueAddResult
@@ -14,6 +13,8 @@ import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.storage.DisplayQueueStore
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
+import com.dreamdisplays.shared.playback.FullscreenPrepareRoster
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.shared.playback.PlaybackContext
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import kotlinx.coroutines.delay
@@ -30,9 +31,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * of its video and something is queued, the display switches to the next entry through the platform's normal video
  * change ([applyVideo]), so every client, old ones included, just sees the video change.
  *
- * Clients that advertise `ClientHello.supportsQueue` get the queue ([QueueState]) and preload its head shortly before
- * the end; once every such client nearby reported READY the next video starts after [Settings.readyHoldMs] instead of
- * the normal start hold. All queue edits run under the queue's own lock.
+ * Clients get the queue ([QueueState]) and preload its head shortly before the end, reporting progress per player in a
+ * [FullscreenPrepareRoster] keyed by the head's item id (the bookkeeping fullscreen preparation uses). Once every
+ * nearby client is READY the next video starts after [Settings.readyHoldMs] instead of the normal start hold. A
+ * client without the queue (`ClientHello.supportsQueue` unset) gets no queue packets and just sees the video change.
+ * All queue edits run under the queue's own lock.
  */
 object QueueManager {
     /** Server-wide knobs, `[queue]` in the config. */
@@ -71,17 +74,12 @@ object QueueManager {
     var applyVideo: (display: DisplayData, item: QueueItem, holdMs: Long?) -> Boolean = { _, _, _ -> false }
 
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
-    private val ready = ConcurrentHashMap<UUID, ReadySet>()
+    private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
     private val addThrottle = ActionThrottle()
     private val editThrottle = ActionThrottle()
     private val preloadThrottle = ActionThrottle()
     private val persistMutex = Mutex()
     private val persistScheduled = AtomicBoolean(false)
-
-    /** Players that reported item [itemId] of one display ready to start. */
-    private class ReadySet(val itemId: String) {
-        val players: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
-    }
 
     fun init(transport: PlaybackTransport) {
         this.transport = transport
@@ -90,7 +88,7 @@ object QueueManager {
     /** Loads the persisted queues; call once at startup, after the displays are registered. */
     fun restore() {
         queues.clear()
-        ready.clear()
+        rosters.clear()
         val loaded = DisplayQueueStore.load()
         var entries = 0
         for ((displayId, queue) in loaded) {
@@ -203,15 +201,16 @@ object QueueManager {
     }
 
     /** A client's preload progress for the head entry of [display]. */
-    fun onPreload(display: DisplayData, playerId: UUID, itemId: String, state: QueuePreloadState) {
+    fun onPreload(display: DisplayData, playerId: UUID, itemId: String, state: FullscreenPrepareState) {
         if (!preloadThrottle.tryAcquire(playerId to display.id, PRELOAD_COOLDOWN_MS)) return
         val queue = queues[display.id] ?: return
         val head = synchronized(queue) { queue.head() } ?: return
         if (head.itemId != itemId) return
-        val set = ready.compute(display.id) { _, existing ->
-            if (existing?.itemId == itemId) existing else ReadySet(itemId)
+        val roster = rosters.compute(display.id) { _, existing ->
+            if (existing?.prepareId == itemId) existing else FullscreenPrepareRoster(itemId, Long.MAX_VALUE)
         } ?: return
-        if (state == QueuePreloadState.READY) set.players.add(playerId) else set.players.remove(playerId)
+        roster.onDelivered(playerId, transport.nowMs())
+        roster.onStatus(playerId, itemId, state)
     }
 
     /** The display's video was set by hand (menu, command, API): it no longer plays a queue entry. */
@@ -227,7 +226,7 @@ object QueueManager {
 
     /** Forgets a deleted display's queue. */
     fun onDisplayRemoved(displayId: UUID) {
-        ready.remove(displayId)
+        rosters.remove(displayId)
         if (queues.remove(displayId) != null) schedulePersist()
     }
 
@@ -271,7 +270,7 @@ object QueueManager {
                 return null
             }
             val hold = holdFor(display, next)
-            ready.remove(display.id)
+            rosters.remove(display.id)
             val applied = runCatching { applyVideo(display, next, hold) }
                 .onFailure { logger.warn("Could not switch display {} to its next queued video.", display.id, it) }
                 .getOrDefault(false)
@@ -288,12 +287,17 @@ object QueueManager {
         return null
     }
 
-    /** The short hold when every nearby preloading client has [next] ready, else null (the normal start hold). */
+    /**
+     * The short hold when every nearby queue client reported [next] READY, else null (the normal start hold). A nearby
+     * client that never reported counts as still loading; one that walked away no longer counts.
+     */
     private fun holdFor(display: DisplayData, next: QueueItem): Long? {
-        val capable = transport.nearbyPlayerIds(display).filter(::isCapable)
-        val readyPlayers = ready[display.id]?.takeIf { it.itemId == next.itemId }?.players ?: emptySet<UUID>()
-        val hold = QueueTiming.holdMs(capable, readyPlayers, settings().readyHoldMs, -1L)
-        return hold.takeIf { it >= 0L }
+        val roster = rosters[display.id]?.takeIf { it.prepareId == next.itemId } ?: return null
+        val nearby = transport.nearbyPlayerIds(display).filter(::isCapable).toSet()
+        roster.delivered.filter { it !in nearby }.forEach(roster::forget)
+        val now = transport.nowMs()
+        nearby.forEach { roster.onDelivered(it, now) }
+        return if (roster.tally().allReady) settings().readyHoldMs else null
     }
 
     private fun changed(display: DisplayData) {

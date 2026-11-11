@@ -7,7 +7,7 @@ import com.dreamdisplays.core.protocol.common.packets.QueueAction
 import com.dreamdisplays.core.protocol.common.packets.QueueActionType
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
 import com.dreamdisplays.core.protocol.common.packets.QueuePreload
-import com.dreamdisplays.core.protocol.common.packets.QueuePreloadState
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.shared.protocol.PacketDirection
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -43,7 +43,7 @@ class QueueWireTest {
         assertEquals(add, PacketRegistry.decode(PacketRegistry.encode(add)))
         val move = QueueAction(id, QueueActionType.MOVE.wire, itemId = "i2", toIndex = 0)
         assertEquals(move, PacketRegistry.decode(PacketRegistry.encode(move)))
-        val preload = QueuePreload(id, "i1", QueuePreloadState.READY.wire)
+        val preload = QueuePreload(id, "i1", FullscreenPrepareState.READY.wire)
         assertEquals(preload, PacketRegistry.decode(PacketRegistry.encode(preload)))
     }
 

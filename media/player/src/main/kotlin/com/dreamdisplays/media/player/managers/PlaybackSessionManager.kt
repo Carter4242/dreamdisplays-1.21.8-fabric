@@ -10,7 +10,9 @@ import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
 import com.dreamdisplays.media.player.pipeline.*
+import com.dreamdisplays.media.player.process.AlphaVideo
 import com.dreamdisplays.media.player.process.FFmpegBinary
+import com.dreamdisplays.media.player.process.FFmpegCapabilities
 import com.dreamdisplays.media.player.process.GoogleVideoRangeProxy
 import com.dreamdisplays.media.player.process.HlsAudioFeeder
 import com.dreamdisplays.media.player.process.HwAccelBackend
@@ -59,6 +61,9 @@ internal class PlaybackSessionManager(
 
     /** Optional per-display acoustics DSP stage; null keeps the legacy distance-gain-only pipeline. */
     audioStage: AudioDspStage? = null,
+
+    /** Whether a video with an alpha channel may play with transparency; read whenever a channel launches. */
+    private val transparencyAllowed: () -> Boolean = { true },
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -80,11 +85,19 @@ internal class PlaybackSessionManager(
 
     private class AudioHalf(val process: Process?, val thread: Thread, val stop: AtomicBoolean)
 
-    private inner class VideoChannel {
+    /**
+     * One decode channel. With an [alpha] plan it always runs an `FFmpeg` process into the JVM pipe as straight-alpha
+     * RGBA, since the native and in-process decoders all drop the alpha channel; otherwise the usual pipe is picked.
+     */
+    private inner class VideoChannel(val alpha: AlphaVideo.Plan? = null) {
         val nativePipe: NativeVideoFramePipe? =
-            if (NativeMedia.isAvailable) NativeVideoFramePipe(debugLabel, uploaderFactory, gpuYuvActive) else null
-        private val jvmPipe: VideoFramePipe? =
-            if (nativePipe == null) VideoFramePipe(debugLabel, uploaderFactory) else null
+            if (alpha == null && NativeMedia.isAvailable) NativeVideoFramePipe(debugLabel, uploaderFactory, gpuYuvActive)
+            else null
+        private val jvmPipe: VideoFramePipe? = when {
+            nativePipe != null -> null
+            alpha != null -> VideoFramePipe(debugLabel, uploaderFactory, MediaProcess.VideoTransport.RAW_RGBA)
+            else -> VideoFramePipe(debugLabel, uploaderFactory)
+        }
         val pipe: FramePipe = nativePipe ?: jvmPipe!!
 
         @Volatile
@@ -118,6 +131,18 @@ internal class PlaybackSessionManager(
             // The in-process decoder seeks through the same libav demuxer that gets this container
             // wrong, and unlike the process path it has no way to fall back to decoding forward.
             val seekByDecoding = streamSet.currentVideo.seekByDecoding
+            if (alpha != null) {
+                val vp = MediaProcess.buildAlphaVideo(
+                    ffmpeg, safeUrl, w, h, offsetNanos, alpha.decoder, fps, seekByDecoding = seekByDecoding,
+                )
+                val vt = jvmPipe!!.start(
+                    proc = vp, w = w, h = h, seekOffsetNanos = offsetNanos, sourceFps = fps,
+                    stopFlag = stop, terminated = terminated, getAudioClock = getAudioClock,
+                    onFirstFrame = onFirstFrame, getBrightness = getBrightness, onEos = onEos,
+                    parkFlag = parkFlag, presentPreview = presentPreview, tolerateLateness = tolerateLateness,
+                )
+                process = vp; thread = vt; return
+            }
             val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding &&
                 !GoogleVideoRangeProxy.needsProxy(safeUrl)
             ) {
@@ -278,6 +303,33 @@ internal class PlaybackSessionManager(
     private val bridgeCeilingNanos: Long
         get() = (phase.get() as? Phase.Bridging)?.liveEdgeNanos ?: Long.MAX_VALUE
 
+    /**
+     * True when the live channel decodes straight-alpha RGBA frames, so the display has to draw them with an RGBA
+     * texture and a blending render type. Kept across [stop] (and reset by the next launch) so the texture does not
+     * flip back and forth between a session and its restart.
+     */
+    @Volatile
+    var outputAlpha = false
+        private set
+
+    private val opaqueAlphaLogged = AtomicBoolean()
+
+    /** The alpha decode plan for [streamSet]'s video, or null to play it on the ordinary opaque path. */
+    private fun alphaPlan(ffmpeg: String, streamSet: ActiveStreams): AlphaVideo.Plan? {
+        val video = streamSet.currentVideo
+        if (!video.hasAlpha) return null
+        val allowed = transparencyAllowed()
+        val plan = AlphaVideo.plan(video, allowed) { FFmpegCapabilities.hasDecoder(ffmpeg, it) }
+        if (plan == null && opaqueAlphaLogged.compareAndSet(false, true)) {
+            logger.info(
+                "$debugLabel Video has an alpha channel but plays opaque ({}).",
+                if (!allowed) "transparency is off here" else "this FFmpeg has no ${AlphaVideo.alphaDecoder(video.codec)
+                    ?: "alpha-capable"} decoder for codec ${video.codec}",
+            )
+        }
+        return plan
+    }
+
     /** True once the first decoded frame of the live channel is ready for GPU upload. */
     fun textureFilled(): Boolean = active?.pipe?.textureFilled() == true
 
@@ -365,8 +417,9 @@ internal class PlaybackSessionManager(
         clock.reset(offsetNanos)
 
         parkFlag.set(false)
-        val (w, h) = targetDims(streamSet, lastQuality)
-        val channel = VideoChannel()
+        val alpha = alphaPlan(ffmpeg, streamSet)
+        val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
+        val channel = VideoChannel(alpha)
         try {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
@@ -383,6 +436,7 @@ internal class PlaybackSessionManager(
                 throw e
             }
             active = channel
+            outputAlpha = alpha != null
             audioHalf = ap?.let {
                 AudioHalf(
                     it,
@@ -411,10 +465,11 @@ internal class PlaybackSessionManager(
         synchronized(switchLock) { if (incoming != null) return false }
         val old = active ?: return false
         val ffmpeg = FFmpegBinary.getPath() ?: return false
-        val (w, h) = targetDims(streamSet, lastQuality)
+        val alpha = alphaPlan(ffmpeg, streamSet)
+        val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
         val seekStartedNanos = System.nanoTime()
 
-        if (old.inProcess && old.nativePipe?.expectedW == w && old.nativePipe.expectedH == h) {
+        if (alpha == null && old.inProcess && old.nativePipe?.expectedW == w && old.nativePipe.expectedH == h) {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
             val ap = try {
@@ -476,7 +531,7 @@ internal class PlaybackSessionManager(
         audio.stop()
         clock.reset(offsetNanos)
 
-        val channel = VideoChannel()
+        val channel = VideoChannel(alpha)
         try {
             val firstVideoFrame = CountDownLatch(1)
             val aStop = AtomicBoolean()
@@ -493,6 +548,7 @@ internal class PlaybackSessionManager(
                 throw e
             }
             synchronized(switchLock) { active = channel }
+            outputAlpha = alpha != null
             audioHalf = ap?.let {
                 AudioHalf(
                     it,
@@ -723,6 +779,8 @@ internal class PlaybackSessionManager(
         val (w, h) = targetDims(null)
         val channel = VideoChannel()
         val pipe = channel.nativePipe ?: run { phase.set(Phase.Stopped); return false }
+        // Replay snapshots only ever come from the in-process decoder, which has no alpha
+        outputAlpha = false
         val vt = pipe.startReplay(
             snapshot = snapshot, w = w, h = h, resumeNanos = resumeNanos, sourceFps = REPLAY_FPS,
             stopFlag = channel.stop, terminated = terminated, getAudioClock = ::pacingClockNanos,
@@ -749,9 +807,10 @@ internal class PlaybackSessionManager(
         if (active == null || !isPlaying || terminated.get()) return false
         val ffmpeg = FFmpegBinary.getPath() ?: return false
         liveSession = false
-        val (w, h) = targetDims(streamSet, lastQuality)
+        val alpha = alphaPlan(ffmpeg, streamSet)
+        val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
 
-        val channel = VideoChannel()
+        val channel = VideoChannel(alpha)
         var generation = 0L
         val previous = synchronized(switchLock) {
             generation = incomingGeneration + 1
@@ -919,7 +978,12 @@ internal class PlaybackSessionManager(
         return a0 + videoBias
     }
 
-    private fun targetDims(streamSet: ActiveStreams?, lastQuality: Int = 0): Pair<Int, Int> {
+    private fun targetDims(streamSet: ActiveStreams?, lastQuality: Int = 0, alpha: Boolean = false): Pair<Int, Int> {
+        val dims = targetDimsUncapped(streamSet, lastQuality)
+        return if (alpha) AlphaVideo.capDims(dims.first, dims.second) else dims
+    }
+
+    private fun targetDimsUncapped(streamSet: ActiveStreams?, lastQuality: Int): Pair<Int, Int> {
         val (tw, th) = getTextureSize()
         if (tw > 0 && th > 0) return tw to th
         val q = when {
@@ -946,7 +1010,8 @@ internal class PlaybackSessionManager(
         val ffmpeg = FFmpegBinary.getPath() ?: run { onQualitySwitchAborted(false); return }
 
         // Supersede any in-flight switch (rapid quality changes)
-        val channel = VideoChannel()
+        val alpha = alphaPlan(ffmpeg, streamSet)
+        val channel = VideoChannel(alpha)
         var generation = 0L
         val previous = synchronized(switchLock) {
             generation = incomingGeneration + 1
@@ -965,7 +1030,7 @@ internal class PlaybackSessionManager(
             return
         }
 
-        val (w, h) = targetDims(streamSet, lastQuality)
+        val (w, h) = targetDims(streamSet, lastQuality, alpha != null)
         try {
             // No latch / audio gate: the clock is already running. EOS aborts only this handoff
             if (MediaPlayer.DEBUG) {
@@ -1038,6 +1103,7 @@ internal class PlaybackSessionManager(
             incoming = null
             old = active
             active = inc
+            outputAlpha = inc.alpha != null
         }
         if (MediaPlayer.DEBUG) logger.debug("$debugLabel Promoted incoming video handoff #$generation.")
         updateRawFrameSink() // Re-attach popout / preview to the new live channel

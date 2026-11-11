@@ -6,11 +6,11 @@ import com.dreamdisplays.core.protocol.common.packets.QueueAction
 import com.dreamdisplays.core.protocol.common.packets.QueueActionType
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
 import com.dreamdisplays.core.protocol.common.packets.QueuePreload
-import com.dreamdisplays.core.protocol.common.packets.QueuePreloadState
 import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
 import com.dreamdisplays.shared.capability.ServerFeature
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import net.minecraft.client.Minecraft
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -89,7 +89,7 @@ object DisplayQueues {
     fun setLoop(displayId: UUID, enabled: Boolean) = send(QueueAction(displayId, QueueActionType.LOOP.wire, flag = enabled))
 
     /** Tells the server how far this client got preloading [itemId]. */
-    fun reportPreload(displayId: UUID, itemId: String, state: QueuePreloadState) {
+    fun reportPreload(displayId: UUID, itemId: String, state: FullscreenPrepareState) {
         if (!supported) return
         Initializer.sendPacket(QueuePreload(displayId, itemId, state.wire))
     }

@@ -6,12 +6,16 @@ import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.shared.playback.FullscreenSession
+import com.dreamdisplays.shared.playback.FullscreenPrepareRoster
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
+import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.storage.FullscreenSessionStore
+import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -26,8 +30,38 @@ object FullscreenBroadcastManager {
     private const val TIMELINE_RESEND_MS = 5_000L
     private const val REDELIVER_UNCONFIRMED_MS = 1_500L
     private const val DELIVERY_CONFIRM_WINDOW_MS = 20_000L
+    private const val PREPARE_REDELIVER_MS = 5_000L
+    private const val PREPARE_FIRST_REPORT_MS = 10_000L
+    private const val PREPARE_LAST_REPORT_MS = 60_000L
     private lateinit var transport: PlaybackTransport
     private val sessions = ConcurrentHashMap<String, Session>()
+
+    /** Live preparations by display id; a display holds at most one. */
+    private val preparations = ConcurrentHashMap<UUID, Preparation>()
+
+    /** How long a preparation lives before it lets go; the platform points this at `fullscreen.prepare_timeout_seconds`. */
+    var prepareTimeoutMs: () -> Long = { 600_000L }
+
+    /**
+     * A `/display fullscreen prepare`: the targeted clients load [display] ahead of the broadcast and hold it hidden
+     * and ready, so `start` on the same display (or URL) shows it at once. [timeline] backs a URL-only (virtual)
+     * display, paused at its start; a real display keeps following its own [TimelineManager] timeline.
+     */
+    private class Preparation(
+        val roster: FullscreenPrepareRoster,
+        val display: DisplayData,
+        val virtual: Boolean,
+        val quality: String,
+        val namedTargets: Set<UUID>?,
+        val radius: FullscreenRadiusTarget?,
+        val timeline: Timeline?,
+        val createdAtMs: Long,
+        var reporter: ((FullscreenPrepareInfo) -> Unit)?,
+        var reportedOnce: Boolean = false,
+        var lastTimelineResend: Long = 0,
+    ) {
+        val prepareId: String get() = roster.prepareId
+    }
 
     private class Session(
         val sessionId: String,
@@ -57,6 +91,16 @@ object FullscreenBroadcastManager {
     /** Wires the platform transport. */
     fun init(transport: PlaybackTransport) {
         this.transport = transport
+        TimelineManager.extraReceivers = ::timelineFollowers
+    }
+
+    /** Far-away players who follow [displayId]'s timeline anyway: its fullscreen viewers and prepared clients. */
+    private fun timelineFollowers(displayId: UUID): Collection<UUID> {
+        val prepared = preparations[displayId]?.roster?.delivered
+        val shown = sessions.values.firstOrNull { !it.virtual && it.display.id == displayId }?.shownTo
+        if (prepared.isNullOrEmpty()) return shown?.toSet() ?: emptySet()
+        if (shown.isNullOrEmpty()) return prepared
+        return prepared + shown
     }
 
     /** True if a session with [sessionId] is currently live. */
@@ -74,8 +118,13 @@ object FullscreenBroadcastManager {
     ): Pair<DisplayData, Boolean>? {
         resolveDisplayByIdOrPrefix(idOrUrl)?.let { return it to false }
         if (!looksLikeUrl(idOrUrl)) return null
+        val url = MediaSource.from(idOrUrl).toResolvableUrl() ?: idOrUrl
+        // A URL prepared earlier: reuse its display, which the prepared clients already hold under that id
+        if (virtualDisplayId == null) {
+            preparations.values.firstOrNull { it.virtual && it.display.url == url }?.let { return it.display to true }
+        }
         val virtual = transport.createVirtualDisplay(virtualDisplayId ?: UUID.randomUUID(), ownerId) ?: return null
-        virtual.url = MediaSource.from(idOrUrl).toResolvableUrl() ?: idOrUrl
+        virtual.url = url
         return virtual to true
     }
 
@@ -100,8 +149,13 @@ object FullscreenBroadcastManager {
 
     /** Sends the current timeline to a player if a live session owns the display. */
     fun sendCurrentTo(displayId: UUID, playerId: UUID): Boolean {
-        val session = sessions.values.firstOrNull { it.display.id == displayId } ?: return false
-        sendTimeline(session, playerId, transport.nowMs())
+        val session = sessions.values.firstOrNull { it.display.id == displayId }
+        if (session != null) {
+            sendTimeline(session, playerId, transport.nowMs())
+            return true
+        }
+        val preparation = preparations[displayId]?.takeIf { it.roster.isDelivered(playerId) } ?: return false
+        sendPrepareTimeline(preparation, playerId, transport.nowMs())
         return true
     }
 
@@ -130,6 +184,10 @@ object FullscreenBroadcastManager {
         if (sessions.containsKey(sessionId)) return null
         if (!virtual && sessionIdForDisplay(display.id) != null) return null
 
+        // Clients holding this display ready play it the moment the session reaches them
+        val preparation = preparations.remove(display.id)
+        if (preparation != null && !virtual) TimelineManager.playNow(display)
+
         val now = transport.nowMs()
         val session = Session(
             sessionId = sessionId,
@@ -149,6 +207,17 @@ object FullscreenBroadcastManager {
         )
         sessions[sessionId] = session
         deliverToAll(session)
+        if (preparation != null) {
+            // Prepared players the broadcast does not reach let go of the display
+            for (playerId in preparation.roster.delivered) {
+                if (playerId !in session.shownTo) withdrawPrepare(preparation, playerId)
+            }
+            val tally = preparation.roster.tally()
+            logger.info(
+                "Fullscreen session $sessionId took over preparation ${preparation.prepareId} " +
+                        "(${tally.ready}/${tally.delivered} ready).",
+            )
+        }
         persist()
         return sessionId
     }
@@ -213,6 +282,7 @@ object FullscreenBroadcastManager {
             forget(it, playerId)
             it.dismissedBy.remove(playerId)
         }
+        preparations.values.forEach { it.roster.forget(playerId) }
     }
 
     private fun forget(session: Session, playerId: UUID) {
@@ -226,6 +296,10 @@ object FullscreenBroadcastManager {
     fun onPlayerJoin(playerId: UUID) {
         for (session in sessions.values) {
             if (isTargeted(session, playerId)) deliverTo(session, playerId)
+        }
+        val now = transport.nowMs()
+        for (preparation in preparations.values) {
+            if (isTargeted(preparation, playerId) && supportsPrepare(playerId)) deliverPrepare(preparation, playerId, now)
         }
     }
 
@@ -247,19 +321,196 @@ object FullscreenBroadcastManager {
         sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach {
             sessions.remove(it)
         }
+        preparations.remove(displayId)?.let { preparation ->
+            // Far prepared clients hold the display outside the deletion broadcast's range
+            for (playerId in preparation.roster.delivered) {
+                withdrawPrepare(preparation, playerId)
+                transport.sendTo(playerId, DisplayDelete(displayId))
+            }
+        }
         persist()
     }
 
     /** Re-evaluates radius membership and refreshes drifting clients. Called once per second. */
     fun tick() {
-        if (sessions.isEmpty()) return
+        if (sessions.isEmpty() && preparations.isEmpty()) return
         val now = transport.nowMs()
         for (session in sessions.values) {
             if (now - session.lastTick < TICK_MS) continue
             session.lastTick = now
             reconcileTargets(session, now)
         }
+        for (preparation in preparations.values) reconcilePreparation(preparation, now)
     }
+
+    /**
+     * Starts preparing [display] for a broadcast: every targeted client that supports it loads the display, keeps it
+     * hidden, muted and loaded at any distance, and holds it ready to play at once. [rewind] first pauses a real
+     * display at the start of its video (a URL is always held at its start). A previous preparation of the same
+     * display is replaced in place: it keeps its id, so clients that stay targeted keep what they loaded. [reporter]
+     * hears once when every client settled, or after a few seconds, whichever is first, and again when a partial first
+     * report later settles.
+     *
+     * Returns null when [display] already hosts a running broadcast.
+     */
+    fun prepare(
+        prepareId: String,
+        display: DisplayData,
+        virtual: Boolean,
+        quality: String,
+        namedTargets: Set<UUID>?,
+        radius: FullscreenRadiusTarget?,
+        rewind: Boolean,
+        reporter: ((FullscreenPrepareInfo) -> Unit)?,
+    ): FullscreenPrepareInfo? {
+        if (!virtual && sessionIdForDisplay(display.id) != null) return null
+        val previous = preparations.remove(display.id)
+        if (rewind && !virtual) TimelineManager.parkAtStart(display)
+        val now = transport.nowMs()
+        val preparation = Preparation(
+            roster = FullscreenPrepareRoster(
+                previous?.prepareId ?: prepareId, now + prepareTimeoutMs().coerceAtLeast(10_000L),
+            ),
+            display = display,
+            virtual = virtual,
+            quality = quality,
+            namedTargets = namedTargets,
+            radius = radius,
+            timeline = if (virtual) Timeline.start(now, paused = true, loop = true) else null,
+            createdAtMs = now,
+            reporter = reporter,
+        )
+        preparations[display.id] = preparation
+        reconcilePreparation(preparation, now)
+        previous?.roster?.delivered?.forEach { if (!preparation.roster.isDelivered(it)) withdrawPrepare(previous, it) }
+        logger.info("Preparing display ${display.id} for a fullscreen broadcast (${preparation.prepareId}).")
+        return infoOf(preparation, now)
+    }
+
+    /** The quality [displayId] is prepared at, so a start that names none keeps the streams the clients hold open. */
+    fun preparedQuality(displayId: UUID): String? = preparations[displayId]?.quality
+
+    /** Cancels the preparation with [prepareId] or of the display [displayId]; false when there is none. */
+    fun cancelPreparation(prepareId: String, displayId: UUID? = null): Boolean {
+        val preparation = preparations.values.firstOrNull { it.prepareId == prepareId }
+            ?: displayId?.let { preparations[it] }
+            ?: return false
+        cancelPreparation(preparation)
+        return true
+    }
+
+    /** Live preparations for the `list` subcommand. */
+    fun listPreparations(): List<FullscreenPrepareInfo> {
+        val now = transport.nowMs()
+        return preparations.values.map { infoOf(it, now) }
+    }
+
+    /** Applies a client's progress report on a preparation. */
+    fun onPrepareStatus(playerId: UUID, prepareId: String, displayId: UUID, state: FullscreenPrepareState) {
+        val preparation = preparations[displayId] ?: return
+        if (!preparation.roster.onStatus(playerId, prepareId, state)) return
+        if (state == FullscreenPrepareState.FAILED) {
+            logger.info("Player $playerId could not load display $displayId for preparation $prepareId.")
+        }
+    }
+
+    private fun cancelPreparation(preparation: Preparation) {
+        if (!preparations.remove(preparation.display.id, preparation)) return
+        for (playerId in preparation.roster.delivered) withdrawPrepare(preparation, playerId)
+        logger.info("Cancelled fullscreen preparation ${preparation.prepareId}.")
+    }
+
+    private fun reconcilePreparation(preparation: Preparation, now: Long) {
+        if (preparation.roster.isExpired(now)) {
+            logger.info("Fullscreen preparation ${preparation.prepareId} expired.")
+            cancelPreparation(preparation)
+            return
+        }
+        val roster = preparation.roster
+        for (playerId in transport.onlinePlayerIds()) {
+            val targeted = isTargeted(preparation, playerId)
+            when {
+                targeted && supportsPrepare(playerId) -> if (!roster.isDelivered(playerId)) {
+                    deliverPrepare(preparation, playerId, now)
+                }
+
+                targeted -> if (V2PlayerTracker.isV2(playerId)) roster.onUnsupported(playerId)
+                roster.isDelivered(playerId) -> withdrawPrepare(preparation, playerId)
+                else -> roster.forget(playerId)
+            }
+        }
+        for (playerId in roster.dueForRedelivery(now, PREPARE_REDELIVER_MS)) deliverPrepare(preparation, playerId, now)
+        if (preparation.virtual && now - preparation.lastTimelineResend >= TIMELINE_RESEND_MS) {
+            preparation.lastTimelineResend = now
+            for (playerId in roster.delivered) sendPrepareTimeline(preparation, playerId, now)
+        }
+        reportIfDue(preparation, now)
+    }
+
+    private fun reportIfDue(preparation: Preparation, now: Long) {
+        val reporter = preparation.reporter ?: return
+        val age = now - preparation.createdAtMs
+        val tally = preparation.roster.tally()
+        val settled = tally.settled && tally.delivered > 0
+        val due = if (!preparation.reportedOnce) settled || age >= PREPARE_FIRST_REPORT_MS
+        else settled || age >= PREPARE_LAST_REPORT_MS
+        if (!due) return
+        if (settled || preparation.reportedOnce) preparation.reporter = null
+        preparation.reportedOnce = true
+        runCatching { reporter(infoOf(preparation, now)) }.onFailure { logger.debug("Prepare report failed.", it) }
+    }
+
+    private fun deliverPrepare(preparation: Preparation, playerId: UUID, now: Long) {
+        val display = preparation.display
+        transport.sendTo(
+            playerId,
+            FullscreenPrepare(
+                prepareId = preparation.prepareId,
+                displayId = display.id,
+                active = true,
+                quality = preparation.quality,
+                ttlMs = (preparation.roster.expiresAtMs - now).coerceAtLeast(1L),
+            ),
+        )
+        transport.sendDisplayInfo(playerId, display, forced = true)
+        sendPrepareTimeline(preparation, playerId, now)
+        preparation.roster.onDelivered(playerId, now)
+    }
+
+    private fun withdrawPrepare(preparation: Preparation, playerId: UUID) {
+        transport.sendTo(playerId, FullscreenPrepare(preparation.prepareId, preparation.display.id, active = false))
+        if (preparation.virtual) transport.sendTo(playerId, DisplayDelete(preparation.display.id))
+        preparation.roster.forget(playerId)
+    }
+
+    private fun sendPrepareTimeline(preparation: Preparation, playerId: UUID, now: Long) {
+        val timeline = preparation.timeline
+        if (timeline != null) {
+            transport.sendTo(playerId, timeline.toSync(preparation.display.id, PlaybackMode.BROADCAST, now))
+        } else {
+            TimelineManager.sendCurrent(preparation.display, playerId)
+        }
+    }
+
+    private fun isTargeted(preparation: Preparation, playerId: UUID): Boolean {
+        // A world display is only prepared for players in its world; others load it the usual way on start
+        if (!preparation.virtual && !transport.isInDisplayWorld(playerId, preparation.display)) return false
+        if (preparation.namedTargets?.contains(playerId) == true) return true
+        val radius = preparation.radius ?: return false
+        val distSq = transport.playerDistanceSq(playerId, radius.world, radius.x, radius.y, radius.z) ?: return false
+        return distSq <= radius.blocks * radius.blocks
+    }
+
+    private fun supportsPrepare(playerId: UUID): Boolean =
+        V2PlayerTracker.helloOf(playerId)?.supportsFullscreenPrepare == true
+
+    private fun infoOf(preparation: Preparation, now: Long): FullscreenPrepareInfo = FullscreenPrepareInfo(
+        prepareId = preparation.prepareId,
+        displayId = preparation.display.id,
+        virtual = preparation.virtual,
+        tally = preparation.roster.tally(),
+        expiresInMs = (preparation.roster.expiresAtMs - now).coerceAtLeast(0L),
+    )
 
     /** Restores persisted (non-transient) sessions from disk; call once worlds/displays are loaded. */
     fun restore() {
@@ -409,6 +660,15 @@ object FullscreenBroadcastManager {
         logger.info("Stopped fullscreen session ${session.sessionId} (reached ${session.shownTo.size} player(s)) at $now.")
     }
 }
+
+/** Snapshot of a live fullscreen preparation for the `list` subcommand and the prepare reply. */
+data class FullscreenPrepareInfo(
+    val prepareId: String,
+    val displayId: UUID,
+    val virtual: Boolean,
+    val tally: FullscreenPrepareRoster.Tally,
+    val expiresInMs: Long,
+)
 
 /** Snapshot of a live fullscreen session for the `list` subcommand. */
 data class FullscreenSessionInfo(

@@ -35,7 +35,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private var lastSnapNanos = 0L
     private var coldAfterSnap = false
 
-    /** The player is a preloaded queue item parked warm a few frames in: tolerate that offset while paused. */
+    /** The player is a preloaded queue item held ready on its first frame: tolerate a small paused offset. */
     private var warmAdopted = false
 
     private var appliedRatio = 1.0
@@ -80,9 +80,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     }
 
     /**
-     * The new player is a preloaded queue item parked warm a fraction of a second in. While the server holds the
-     * start, snapping it exactly onto 0 would cost the warm session (a seek restarts the stream), so a paused offset
-     * up to [WARM_ADOPT_BAND_MS] is left alone; playback rate takes it out after the start.
+     * The new player is a preloaded queue item held ready on its first frame (see `QueuePreloader`). Like a display
+     * prepared for a broadcast, it tolerates a small paused offset instead of snapping and dropping its warm stream.
      */
     fun onWarmAdopted() {
         synchronized(lock) { warmAdopted = true }
@@ -145,6 +144,24 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         }
     }
 
+    /** Where the server holds this display paused, in ns of media time, or null when it is not paused (or unknown). */
+    fun pausedTargetNanos(): Long? {
+        synchronized(lock) {
+            if (!estimator.hasTimeline || !estimator.paused) return null
+            val durationMs = screen.mediaPlayerDurationNanos / 1_000_000L
+            val target = estimator.targetMs(System.nanoTime() / NANOS_PER_MS).roundToLong()
+            return clampSeek(target, loop, durationMs) * 1_000_000L
+        }
+    }
+
+    /**
+     * The paused player is being re-opened warm at the server position ([DisplayScreen.holdReadyForBroadcast]), so an
+     * earlier paused snap no longer means the next resume starts cold.
+     */
+    fun onHeldReady() {
+        synchronized(lock) { coldAfterSnap = false }
+    }
+
     /** Called every client tick for a loaded display: measures drift and corrects it. */
     fun tick() {
         synchronized(lock) {
@@ -178,8 +195,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             controller.resetMeasurement()
             landing = null
             if (!screen.isPaused) return // The pause itself is still being applied
-            val band = if (warmAdopted) maxOf(settings.deadBandMs.toLong(), WARM_ADOPT_BAND_MS) else settings.deadBandMs.toLong()
-            if (abs(drift) > band && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
+            // Being opened warm at the server position for a broadcast: a snap now would only close it again
+            if (screen.isWarmingUp) return
+            // A display held ready for a broadcast tolerates a little offset rather than drop its warm stream
+            val tolerance = if (screen.isPrepared || warmAdopted) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
+            if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
                 screen.seekVideoTo(target * 1_000_000L)
                 lastSnapNanos = now
                 coldAfterSnap = true
@@ -301,6 +321,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     private fun logIfDue(now: Long) {
         if (!estimator.hasTimeline || estimator.paused || screen.isLive || !screen.videoStarted) return
+        // No measurement is taken while the player can't seek (errored, re-resolving); the last drift would be stale
+        if (!screen.canSeek()) return
         // The server can change the interval or turn these lines off (0)
         val intervalNanos = ServerOverrides.settings.syncLogIntervalMs * 1_000_000L
         if (intervalNanos <= 0L || now - lastLogNanos < intervalNanos) return
@@ -357,13 +379,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private const val NANOS_PER_MS = 1_000_000.0
         private const val END_MARGIN_MS = 500L
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
+        private const val PREPARED_SNAP_TOLERANCE_MS = 250
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L
         private const val RATIO_REFRESH_NANOS = 1_000_000_000L
         private const val MAX_LEAD_MS = 8_000L
         private const val MAX_RTT_MS = 2_000
         private const val LEAD_GAIN = 0.7
         private const val MAX_LEAD_STEP_MS = 500L
-        private const val WARM_ADOPT_BAND_MS = 600L
 
         /** Learned restart time of a seek while playing; shared by every display (it is this machine's cost). */
         @Volatile

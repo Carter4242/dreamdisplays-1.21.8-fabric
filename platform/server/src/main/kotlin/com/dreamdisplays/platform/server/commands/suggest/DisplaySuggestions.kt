@@ -131,7 +131,14 @@ internal object DisplaySuggestions {
     /** Live fullscreen sessions, then `all`. */
     fun fullscreenStops(typed: String): List<Suggestion> =
         FullscreenCommand.stopSuggestions()
-            .map { Suggestion(it, if (it == "all") "suggestStopAll" else "suggestStopSession") }
+            .map {
+                val tooltip = when {
+                    it == "all" -> "suggestStopAll"
+                    FullscreenCommand.isPreparation(it) -> "suggestStopPrepare"
+                    else -> "suggestStopSession"
+                }
+                Suggestion(it, tooltip)
+            }
             .startingWith(typed)
 
     /** Quality caps for a fullscreen broadcast. */

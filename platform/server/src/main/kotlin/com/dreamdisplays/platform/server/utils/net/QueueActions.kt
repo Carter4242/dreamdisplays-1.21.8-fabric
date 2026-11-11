@@ -3,7 +3,6 @@ package com.dreamdisplays.platform.server.utils.net
 import com.dreamdisplays.core.protocol.common.packets.QueueAction
 import com.dreamdisplays.core.protocol.common.packets.QueueActionType
 import com.dreamdisplays.core.protocol.common.packets.QueuePreload
-import com.dreamdisplays.core.protocol.common.packets.QueuePreloadState
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.api.ServerApiHost
@@ -16,6 +15,7 @@ import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.bukkit.entity.Player
@@ -65,7 +65,7 @@ object QueueActions {
     /** A client's preload progress for a display's next entry. */
     fun onPreload(player: Player, packet: QueuePreload) {
         val display = DisplayManager.getDisplayData(packet.id) ?: return
-        val state = QueuePreloadState.fromWire(packet.state) ?: return
+        val state = FullscreenPrepareState.fromWire(packet.state)
         QueueManager.onPreload(display, player.uniqueId, packet.itemId, state)
     }
 

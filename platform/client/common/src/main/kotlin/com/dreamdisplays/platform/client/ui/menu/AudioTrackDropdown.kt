@@ -26,8 +26,8 @@ class AudioTrackDropdown(
     private val getTracks: () -> List<MediaStream>,
     private val currentUrl: () -> String,
     private val onSelect: (MediaStream) -> Unit,
-) {
-    var visible: Boolean = false
+) : PopupLayer {
+    override var visible: Boolean = false
 
     private var items: List<MediaStream> = []
     private var scrollIndex = 0
@@ -55,7 +55,7 @@ class AudioTrackDropdown(
     }
 
     /** Hides the dropdown. */
-    fun hide() {
+    override fun hide() {
         visible = false
         draggingScrollbar = false
     }
@@ -192,14 +192,20 @@ class AudioTrackDropdown(
         g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, scaleAlpha(UiTheme.SCROLLBAR_THUMB, alpha))
     }
 
+    override fun contains(mx: Int, my: Int): Boolean =
+        (mx in rect.x..rect.right && my in rect.y..rect.bottom) || overScrollbar(mx, my)
+
+    private fun overScrollbar(mx: Int, my: Int): Boolean =
+        sbPaged && mx in (sbColLeft - SB_GRAB)..(sbColRight + 1) && my in sbTrackTop..sbTrackBottom
+
     /**
      * Handles a left click while visible: picks a track if the click is inside, always hides.
      * Returns true if a track was picked (the click is consumed).
      */
-    fun handleClick(mx: Int, my: Int): Boolean {
+    override fun handleClick(mx: Int, my: Int): Boolean {
         if (!visible) return false
         // Scrollbar thumb / track: begin a drag rather than selecting a row or closing the menu.
-        if (sbPaged && mx in (sbColLeft - SB_GRAB)..(sbColRight + 1) && my in sbTrackTop..sbTrackBottom) {
+        if (overScrollbar(mx, my)) {
             draggingScrollbar = true
             scrollToY(my)
             return true

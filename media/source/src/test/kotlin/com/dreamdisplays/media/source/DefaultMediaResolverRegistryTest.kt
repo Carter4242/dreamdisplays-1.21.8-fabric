@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source
 
+import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.source.MediaMetadata
 import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.MediaSource
@@ -9,6 +10,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class DefaultMediaResolverRegistryTest {
@@ -110,5 +112,32 @@ class DefaultMediaResolverRegistryTest {
             register(working)
         }
         assertEquals(0, registry.resolve(source).streams.size)
+    }
+
+    private fun failing(priority: Int, error: Throwable) = object : MediaResolverService {
+        override val priority: Int = priority
+        override fun canResolve(source: MediaSource): Boolean = true
+        override fun resolve(source: MediaSource): ResolvedMedia = throw error
+    }
+
+    @Test
+    fun `total failure reports the fallback resolver's error, not the first one's`() {
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(failing(10, IllegalStateException("deferring to the fallback")))
+            register(failing(0, IllegalStateException("fallback failed")))
+        }
+        assertEquals("fallback failed", assertFailsWith<IllegalStateException> { registry.resolve(source) }.message)
+    }
+
+    @Test
+    fun `total failure prefers a typed error over a plain one`() {
+        val typed = DreamMediaException.Unknown("needs sign-in", isFatal = true)
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(failing(10, typed))
+            register(failing(0, IllegalStateException("fallback failed")))
+        }
+        val e = assertFailsWith<DreamMediaException> { registry.resolve(source) }
+        assertEquals("needs sign-in", e.message)
+        assertTrue(e.isFatal)
     }
 }

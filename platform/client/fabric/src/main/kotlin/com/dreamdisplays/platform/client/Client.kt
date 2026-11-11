@@ -41,7 +41,6 @@ import net.minecraft.world.InteractionResult
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
 //? if <1.19.4 {
 import com.dreamdisplays.core.runtime.getOrNull
-import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.ui.MinecraftOverlayRenderContext
@@ -224,7 +223,7 @@ class Client : ClientModInitializer, Mod {
                 val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return@register
                 if (overlays.isEmpty) return@register
                 overlays.renderAll(
-                    MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, MouseButtons.hardwareLeftDown(), tickDelta)
+                    MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, tickDelta)
                 )
             }
         }

@@ -5,7 +5,6 @@ import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.ui.MinecraftOverlayRenderContext
-import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.utils.MinecraftScreenUtil
 import net.minecraft.client.Minecraft
 //? if >=26 {
@@ -115,10 +114,9 @@ open class ScreenOverlay {
         }
         val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return
         if (overlays.isEmpty) return
-        val leftPressed = MouseButtons.hardwareLeftDown()
         //? if >=1.21.6 {
         graphics.nextStratum()
         //?}
-        overlays.renderAll(MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, leftPressed, partialTick))
+        overlays.renderAll(MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, partialTick))
     }
 }

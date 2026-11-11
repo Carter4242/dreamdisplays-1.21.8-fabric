@@ -15,8 +15,8 @@ import com.mojang.brigadier.context.CommandContext
 import com.mojang.brigadier.tree.CommandNode
 
 /**
- * The flags of `/display fullscreen start`, any subset of them accepted but only in [ORDER]:
- * each flag's subtree offers just the flags that follow it.
+ * The flags of `/display fullscreen start` (or `prepare`), any subset of them accepted but only in [order]
+ * ([START_ORDER] / [PREPARE_ORDER]): each flag's subtree offers just the flags that follow it.
  */
 internal class FullscreenFlags<S>(
     private val run: (CommandContext<S>) -> Int,
@@ -24,11 +24,12 @@ internal class FullscreenFlags<S>(
     private val players: (CommandContext<S>) -> List<String>,
     private val position: (S) -> Triple<Double, Double, Double>?,
     private val tooltips: Tooltips<S>,
+    private val order: List<String> = START_ORDER,
 ) {
     /** Every flag node, each already carrying the flags allowed after it. */
     fun nodes(): List<CommandNode<S>> {
         var following = emptyList<CommandNode<S>>()
-        for (name in ORDER.asReversed()) {
+        for (name in order.asReversed()) {
             following = [flag(name, following)] + following
         }
         return following
@@ -71,6 +72,7 @@ internal class FullscreenFlags<S>(
         ).build()
 
         "looped" -> end(literal(name, "suggestFlagLooped"), next)
+        "rewind" -> end(literal(name, "suggestFlagRewind"), next)
         "quality" -> literal(name, "suggestFlagQuality").then(
             end(argument("quality", StringArgumentType.word())
                 .suggests(suggesting(tooltips) { _, _, typed -> DisplaySuggestions.qualities(typed) }), next)
@@ -96,7 +98,11 @@ internal class FullscreenFlags<S>(
     private fun <T> argument(name: String, type: ArgumentType<T>) =
         RequiredArgumentBuilder.argument<S, T>(name, type)
 
-    private companion object {
-        val ORDER = ["server", "target", "radius", "mode", "forced", "transient", "volume", "looped", "quality"]
+    companion object {
+        /** `/display fullscreen start`. */
+        val START_ORDER = ["server", "target", "radius", "mode", "forced", "transient", "volume", "looped", "quality"]
+
+        /** `/display fullscreen prepare`: who to prepare, at which quality, and whether to rewind the display first. */
+        val PREPARE_ORDER = ["target", "radius", "quality", "rewind"]
     }
 }

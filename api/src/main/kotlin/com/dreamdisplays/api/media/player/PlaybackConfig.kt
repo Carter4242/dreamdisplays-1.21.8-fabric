@@ -17,4 +17,12 @@ interface PlaybackConfig {
 
     /** Whether the GPU-side YUV (planar I420) render path is active; selects the planar decode output. */
     val gpuYuvActive: Boolean
+
+    /**
+     * Whether a video with an alpha channel may be decoded and drawn with transparency. When false such a video plays
+     * on the ordinary opaque path.
+     *
+     * @since 1.10.x
+     */
+    val transparentVideoAllowed: Boolean get() = true
 }

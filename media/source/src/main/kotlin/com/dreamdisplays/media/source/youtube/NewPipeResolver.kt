@@ -61,7 +61,15 @@ object NewPipeResolver : MediaResolverService {
 
     override val priority: Int = 10
 
-    override fun canResolve(source: MediaSource): Boolean = source is MediaSource.YouTube
+    /**
+     * YouTube links, except a video whose stream URLs YouTube refused more than once: those go to `yt-dlp` with other
+     * clients (see [YtStreamRefusals]), which keeps NewPipe's URLs only as a last resort.
+     */
+    override fun canResolve(source: MediaSource): Boolean {
+        if (source !is MediaSource.YouTube) return false
+        val url = source.toResolvableUrl() ?: return true
+        return !YtStreamRefusals.plan(url).escalated
+    }
 
     override fun resolve(source: MediaSource): ResolvedMedia {
         ensureInitialized()

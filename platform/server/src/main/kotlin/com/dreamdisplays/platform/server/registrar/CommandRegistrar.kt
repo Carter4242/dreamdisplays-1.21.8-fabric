@@ -338,6 +338,14 @@ object CommandRegistrar {
             position = { source -> source.location.let { Triple(it.x, it.y, it.z) } },
             tooltips = tips,
         ).nodes()
+        val prepareFlags = FullscreenFlags<CommandSourceStack>(
+            run = { ctx -> runFullscreenPrepare(ctx); Command.SINGLE_SUCCESS },
+            network = { false },
+            players = { PaperFullscreenCommand.onlinePlayerNames() },
+            position = { source -> source.location.let { Triple(it.x, it.y, it.z) } },
+            tooltips = tips,
+            order = FullscreenFlags.PREPARE_ORDER,
+        ).nodes()
 
         literal("fullscreen", tip("suggestFullscreen")) {
             executesCommand { ctx ->
@@ -351,10 +359,21 @@ object CommandRegistrar {
             literal("start", tip("suggestFullscreenStart")) {
                 requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
                 literal("id", tip("suggestFullscreenId")) {
-                    fullscreenSource(flags) { ctx, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) }
+                    fullscreenSource(flags, ::runFullscreenStart) { ctx, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) }
                 }
                 literal("url", tip("suggestFullscreenUrl")) {
-                    fullscreenSource(flags) { _, typed -> DisplaySuggestions.links(typed) }
+                    fullscreenSource(flags, ::runFullscreenStart) { _, typed -> DisplaySuggestions.links(typed) }
+                }
+            }
+            literal("prepare", tip("suggestFullscreenPrepare")) {
+                requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
+                literal("id", tip("suggestFullscreenId")) {
+                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                        DisplaySuggestions.targets(typed, remote(ctx.source))
+                    }
+                }
+                literal("url", tip("suggestFullscreenUrl")) {
+                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { _, typed -> DisplaySuggestions.links(typed) }
                 }
             }
             literal("stop", tip("suggestFullscreenStop")) {
@@ -375,11 +394,12 @@ object CommandRegistrar {
 
     private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenSource(
         flags: List<CommandNode<CommandSourceStack>>,
+        run: (CommandContext<CommandSourceStack>) -> Unit,
         items: (CommandContext<CommandSourceStack>, String) -> List<Suggestion>,
     ) {
         argument("id", BareTokenArgumentType) {
             suggests(suggesting(tips) { ctx, _, typed -> items(ctx, typed) })
-            executesCommand { ctx -> runFullscreenStart(ctx) }
+            executesCommand { ctx -> run(ctx) }
             flags.forEach { then(it) }
         }
     }
@@ -414,6 +434,24 @@ object CommandRegistrar {
 
     private fun <T : Any> tryArg(ctx: CommandContext<CommandSourceStack>, name: String, type: Class<T>): T? =
         runCatching { ctx.getArgument(name, type) }.getOrNull()
+
+    private fun runFullscreenPrepare(ctx: CommandContext<CommandSourceStack>) {
+        val nodeNames = ctx.nodes.map { it.node.name }
+        PaperFullscreenCommand.prepare(
+            ctx.source.sender,
+            origin = ctx.source.location,
+            id = StringArgumentType.getString(ctx, "id"),
+            options = FullscreenPrepareOptions(
+                players = tryArg(ctx, "players", String::class.java),
+                radiusBlocks = tryArg(ctx, "blocks", Double::class.javaObjectType),
+                radiusX = tryArg(ctx, "x", Double::class.javaObjectType),
+                radiusY = tryArg(ctx, "y", Double::class.javaObjectType),
+                radiusZ = tryArg(ctx, "z", Double::class.javaObjectType),
+                quality = tryArg(ctx, "quality", String::class.java),
+                rewind = "rewind" in nodeNames,
+            ),
+        )
+    }
 
     private fun runFullscreenStart(ctx: CommandContext<CommandSourceStack>) {
         val nodeNames = ctx.nodes.map { it.node.name }

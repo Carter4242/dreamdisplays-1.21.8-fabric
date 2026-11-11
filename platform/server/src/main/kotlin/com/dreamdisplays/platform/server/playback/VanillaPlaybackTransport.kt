@@ -71,6 +71,13 @@ object VanillaPlaybackTransport : PlaybackTransport {
         return dx * dx + dy * dy + dz * dz
     }
 
+    override fun isInDisplayWorld(playerId: UUID, display: DisplayData): Boolean {
+        if (display.virtual) return true
+        val vanilla = display as? VanillaDisplayData ?: return false
+        val player = server?.playerList?.getPlayer(playerId) ?: return false
+        return RegionUtil.getPlayerLevelKey(player) == vanilla.worldKey
+    }
+
     override fun sendDisplayInfo(playerId: UUID, display: DisplayData, forced: Boolean) {
         val vanilla = display as? VanillaDisplayData ?: return
         val player = server?.playerList?.getPlayer(playerId) ?: return

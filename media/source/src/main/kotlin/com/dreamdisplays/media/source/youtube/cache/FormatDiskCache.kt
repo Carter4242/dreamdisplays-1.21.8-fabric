@@ -40,8 +40,11 @@ object FormatDiskCache {
     private const val SCHEMA_VERSION = 4
     private val writeMutex = Mutex()
 
-    /** Reads the cached streams for [videoUrl] from disk; returns null if absent, expired, or schema-mismatched. */
-    fun load(videoUrl: String, maxAgeMs: Long): List<YtStream>? {
+    /**
+     * Reads the cached streams for [videoUrl] from disk; returns null if absent, expired, schema-mismatched, or
+     * written before [notBeforeMs] (an invalidation whose delete may not have landed yet).
+     */
+    fun load(videoUrl: String, maxAgeMs: Long, notBeforeMs: Long = 0L): List<YtStream>? {
         val f = fileFor(videoUrl)
         if (!f.isFile) return null
         // A transient read failure is treated as a miss and left on disk to retry; only a corrupt or
@@ -62,7 +65,7 @@ object FormatDiskCache {
                 !YtStreams.offersQualityLadder(entry.streams) -> minOf(maxAgeMs, PARTIAL_TTL_MS)
                 else -> maxAgeMs
             }
-            if (System.currentTimeMillis() - entry.ts > effectiveMaxAge) {
+            if (System.currentTimeMillis() - entry.ts > effectiveMaxAge || entry.ts <= notBeforeMs) {
                 f.delete()
                 return null
             }

@@ -42,6 +42,12 @@ object TimelineManager {
     var autoPauseWhenEmptyMs: () -> Long = { 0L }
 
     private val emptySince = ConcurrentHashMap<UUID, Long>()
+
+    /**
+     * Players outside a display's range who still follow its timeline (fullscreen viewers, clients holding it ready
+     * for a broadcast); every timeline change reaches them at once, not only through the periodic resend.
+     */
+    var extraReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
@@ -124,6 +130,44 @@ object TimelineManager {
         broadcast(display, updated)
         return true
     }
+
+    /**
+     * Plays [display] from where its timeline stands, at once: no resume hold, and any pending start hold is released
+     * now. Used when a broadcast starts on clients already holding the display ready, where a hold would only add
+     * delay. Returns true if the timeline was paused or held and now plays.
+     */
+    fun playNow(display: DisplayData): Boolean {
+        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
+        if (WatchPartyManager.hasSession(display.id)) return false
+        val now = transport.nowMs()
+        val held = startHolds.remove(display.id) != null
+        val current = timelines[display.id] ?: return false
+        if (!current.paused && !held) return false
+        val playing = current.withPaused(false, now)
+        timelines[display.id] = playing
+        broadcast(display, playing)
+        return true
+    }
+
+    /**
+     * Pauses [display] at the start of its video (cancelling any start hold), so clients can load and hold it on its
+     * first frame ahead of a broadcast. Returns false for displays without a server timeline.
+     */
+    fun parkAtStart(display: DisplayData): Boolean {
+        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
+        if (WatchPartyManager.hasSession(display.id)) return false
+        val now = transport.nowMs()
+        startHolds.remove(display.id)
+        val current = ensureTimeline(display) ?: return false
+        val parked = current.seekedTo(0L, now).withPaused(true, now)
+        timelines[display.id] = parked
+        broadcast(display, parked)
+        return true
+    }
+
+    /** True when [display]'s server timeline is paused (or held before starting). */
+    fun isPaused(display: DisplayData): Boolean =
+        startHolds.containsKey(display.id) || timelines[display.id]?.paused == true
 
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */
     fun sendCurrent(display: DisplayData, playerId: UUID) {
@@ -294,6 +338,11 @@ object TimelineManager {
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()
         lastBroadcast[display.id] = now
-        transport.broadcast(display, timeline.toSync(display.id, display.mode, now))
+        val sync = timeline.toSync(display.id, display.mode, now)
+        transport.broadcast(display, sync)
+        val extra = extraReceivers(display.id)
+        if (extra.isEmpty()) return
+        val nearby = transport.nearbyPlayerIds(display).toSet()
+        for (playerId in extra) if (playerId !in nearby) transport.sendTo(playerId, sync)
     }
 }

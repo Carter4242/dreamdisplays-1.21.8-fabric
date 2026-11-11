@@ -1,8 +1,10 @@
 package com.dreamdisplays.platform.client.ui
 
 import com.dreamdisplays.api.display.model.property.DisplayId
+import com.dreamdisplays.core.input.PointerTarget
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.input.PointerInput
 import com.dreamdisplays.platform.client.overlay.Overlay
 import com.dreamdisplays.platform.client.overlay.OverlayEvent
 import com.dreamdisplays.platform.client.overlay.OverlayManager
@@ -50,22 +52,27 @@ object PipOverlayManager : OverlayManager {
     fun canUseAnchor(ds: PipOverlay, anchor: PipAnchor): Boolean =
         overlays.none { it !== ds && it.anchor == anchor && !it.isDragging }
 
-    /** Renders all overlays and forwards mouse state for in-overlay input handling. */
+    /**
+     * Renders all overlays. [mouseX] / [mouseY] drive hover and drags; pass
+     * [MinecraftOverlayRenderContext.NO_POINTER] when the cursor is grabbed by gameplay. Clicks arrive
+     * separately through [PointerInput].
+     */
     //? if >=26 {
     fun renderAll(
         mc: Minecraft, graphics: GuiGraphicsExtractor,
-        mouseX: Int, mouseY: Int, leftPressed: Boolean, partialTick: Float,
+        mouseX: Int, mouseY: Int, partialTick: Float,
     ) {
         //?} else
         /*fun renderAll(
             mc: Minecraft, graphics: GuiGraphics,
-            mouseX: Int, mouseY: Int, leftPressed: Boolean, partialTick: Float,
+            mouseX: Int, mouseY: Int, partialTick: Float,
         ) {*/
+        PointerInput.reconcile()
         val iter = overlays.iterator()
         while (iter.hasNext()) {
             val overlay = iter.next()
             overlay.uploadFrame()
-            if (!overlay.render(mc, graphics, mouseX, mouseY, leftPressed, partialTick)) iter.remove()
+            if (!overlay.render(mc, graphics, mouseX, mouseY, partialTick)) iter.remove()
         }
     }
 
@@ -77,6 +84,9 @@ object PipOverlayManager : OverlayManager {
     }
 
     override val isEmpty: Boolean get() = overlays.isEmpty()
+
+    // Drawn in list order, so the last overlay is on top.
+    override val pointerTargets: List<PointerTarget> get() = overlays.asReversed().toList()
 
     override fun openPip(displayId: DisplayId): Overlay? {
         getOverlay(displayId)?.let { return it }
@@ -96,7 +106,7 @@ object PipOverlayManager : OverlayManager {
 
     override fun renderAll(context: OverlayRenderContext) {
         val ctx = context as? MinecraftOverlayRenderContext ?: return
-        renderAll(ctx.mc, ctx.graphics, ctx.mouseX, ctx.mouseY, ctx.leftPressed, ctx.partialTick)
+        renderAll(ctx.mc, ctx.graphics, ctx.mouseX, ctx.mouseY, ctx.partialTick)
     }
 
     override fun dispatchEvent(event: OverlayEvent, atX: Float, atY: Float): Boolean {

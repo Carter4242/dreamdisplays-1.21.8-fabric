@@ -67,6 +67,8 @@ message ClientHello {
   // WARNING: a default value decoded when value is missing
   optional int32 timeZoneOffsetMinutes = 27;
   // WARNING: a default value decoded when value is missing
+  optional bool supportsFullscreenPrepare = 28;
+  // WARNING: a default value decoded when value is missing
   optional bool supportsQueue = 30;
 }
 
@@ -392,6 +394,30 @@ message ViewerReport {
   optional string errorKind = 13;
   // WARNING: a default value decoded when value is missing
   optional string errorMessage = 14;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare'
+message FullscreenPrepare {
+  // WARNING: a default value decoded when value is missing
+  optional string prepareId = 1;
+  // WARNING: a default value decoded when value is missing
+  optional Uuid displayId = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool active = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string quality = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int64 ttlMs = 5;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus'
+message FullscreenPrepareStatus {
+  // WARNING: a default value decoded when value is missing
+  optional string prepareId = 1;
+  // WARNING: a default value decoded when value is missing
+  optional Uuid displayId = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 state = 3;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.QueueState'

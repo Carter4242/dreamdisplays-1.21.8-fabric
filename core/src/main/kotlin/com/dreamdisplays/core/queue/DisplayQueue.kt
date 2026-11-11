@@ -207,7 +207,7 @@ object QueueText {
     )
 }
 
-/** When a playing timeline reaches the end of its video, and how long the start hold of the next one should be. */
+/** When a playing timeline reaches the end of its video. */
 object QueueTiming {
     /**
      * Milliseconds until the current play-through of [timeline] ends at [nowMs], or null when that is unknown
@@ -231,12 +231,4 @@ object QueueTiming {
         val raw = timeline.positionMs + (nowMs - timeline.serverTimeMs)
         return raw >= timeline.durationMs && timeline.durationMs - untilEnd <= lateGraceMs
     }
-
-    /**
-     * Start hold for the next entry: [readyHoldMs] when at least one nearby client preloads and every such client
-     * reported READY for it, else [defaultHoldMs]. Clients that cannot preload never count; they catch up through
-     * the normal sync path.
-     */
-    fun holdMs(preloadCapable: Collection<UUID>, ready: Set<UUID>, readyHoldMs: Long, defaultHoldMs: Long): Long =
-        if (preloadCapable.isNotEmpty() && preloadCapable.all { it in ready }) readyHoldMs else defaultHoldMs
 }

@@ -135,7 +135,10 @@ object DisplayLifecycleManager {
         DisplayRegistry.registerScreen(displayScreen)
         if (code != "") displayScreen.loadVideo(code, lang)
 
-        if (ClientSettingsStore.getSettings(uuid, DisplayScreen.defaultVolume()).pipOpen) {
+        // Not for a display only loaded ahead of a broadcast: that one stays out of sight until the broadcast
+        if (ClientSettingsStore.getSettings(uuid, DisplayScreen.defaultVolume()).pipOpen &&
+            !FullscreenPrepareController.isPrepared(uuid)
+        ) {
             displayScreen.activatePipMode()
         }
     }
@@ -160,12 +163,12 @@ object DisplayLifecycleManager {
      * The displays past the viewer's "max playing displays" setting: everything but the nearest ones.
      *
      * A display already playing keeps its place against one a few blocks nearer, so two at about the
-     * same distance do not keep swapping. Popped-out and virtual displays are not counted.
+     * same distance do not keep swapping. Popped-out, virtual and broadcast-prepared displays are not counted.
      */
     fun overBudget(playerPos: BlockPos): Set<DisplayScreen> {
         val max = ServerOverrides.maxActiveDisplays
         if (max <= 0) return emptySet()
-        val counted = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual }
+        val counted = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual && !it.isPrepared }
         if (counted.size <= max) return emptySet()
         return counted
             .sortedBy { it.getDistanceToScreen(playerPos) + if (it.isDormant) BUDGET_HYSTERESIS_BLOCKS else 0 }
@@ -177,7 +180,7 @@ object DisplayLifecycleManager {
         val max = ServerOverrides.maxActiveDisplays
         if (max <= 0) return true
         val playing = DisplayRegistry.getScreens()
-            .filter { !it.isPopoutActive && !it.virtual && !it.isDormant }
+            .filter { !it.isPopoutActive && !it.virtual && !it.isDormant && !it.isPrepared }
             .map { it.getDistanceToScreen(playerPos) }
         return playing.size < max || distance + BUDGET_HYSTERESIS_BLOCKS < playing.max()
     }

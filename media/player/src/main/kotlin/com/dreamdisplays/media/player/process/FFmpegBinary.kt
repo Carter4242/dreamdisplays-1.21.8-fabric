@@ -32,14 +32,17 @@ object FFmpegBinary {
 
     /**
      * Resolves the `FFmpeg` binary in the background to minimize latency on first use, and probes
-     * its optional filters while it is there — otherwise that probe spawns its own `ffmpeg -filters`
+     * its optional filters and decoders while it is there — otherwise that probe spawns its own `ffmpeg -filters`
      * synchronously inside the first playback launch, right where latency is most visible.
      */
     fun prewarmAsync() {
         daemon({
             runCatching {
                 val path = getPath()
-                if (path != null) FFmpegCapabilities.hasFilter(path, "scale_vt")
+                if (path != null) {
+                    FFmpegCapabilities.hasFilter(path, "scale_vt")
+                    FFmpegCapabilities.hasDecoder(path, "libvpx-vp9")
+                }
             }.onFailure { e -> logger.warn("Prewarm failed", e) }
         }, "FFmpeg-prewarm").start()
     }

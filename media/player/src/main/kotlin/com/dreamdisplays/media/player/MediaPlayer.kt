@@ -69,6 +69,23 @@ class MediaPlayer(
     private var audioTrackSwitching = false
 
     private var pauseRequested = false
+
+    /** A [warmUpPaused] stream is opening and parks on its first frame. Set and cleared on the control thread. */
+    @Volatile
+    private var warmingUp = false
+
+    /** When the current [warmUpPaused] stream started opening; one that never reaches its first frame goes stale. */
+    @Volatile
+    private var warmUpStartedNanos = 0L
+
+    /** A [warmUpPaused] call has not reached the control thread yet. */
+    @Volatile
+    private var warmUpPending = false
+
+    /** Parked by [warmUpPaused] on a decoded start-up cushion; the next [play] continues at once. */
+    @Volatile
+    private var heldReady = false
+
     private var restartPending = false
     private var hwAccelDisabled = false
     private var lastRequestedQuality = 0
@@ -132,7 +149,14 @@ class MediaPlayer(
         uploaderFactory = env.uploaderFactory,
         gpuYuvActive = env.config.gpuYuvActive,
         audioStage = audioStage,
+        transparencyAllowed = { env.config.transparentVideoAllowed },
     )
+
+    /**
+     * True when the live video is decoded with its alpha channel (straight-alpha RGBA frames): the host must then draw
+     * it from an RGBA texture with blending. Changes only when a new video channel starts.
+     */
+    val videoHasAlpha: Boolean get() = sessionManager.outputAlpha
 
     @Volatile
     private var controlThread: Thread? = null
@@ -183,6 +207,7 @@ class MediaPlayer(
         internal val framesDropped = AtomicLong()
 
         private const val MAX_FETCH_RETRIES = 3
+        private const val WARM_UP_STALE_NANOS = 20_000_000_000L
         private const val MAX_AUDIO_RESTARTS = 3
         private const val AUDIO_RESTART_BUDGET_RESET_NS = 120_000_000_000L
         private const val HWACCEL_FAIL_WINDOW_NS = 5_000_000_000L
@@ -216,6 +241,9 @@ class MediaPlayer(
     fun play() = safeExecute {
         if (!isReady || terminated.get()) return@safeExecute
         pauseRequested = false
+        // Mid warm-up the stream is already opening at the paused position: let it simply play on
+        warmingUp = false
+        heldReady = false
         if (isPausedWarm()) {
             sessionManager.resume()
             lifecycle = PlayerState.Playing
@@ -240,7 +268,8 @@ class MediaPlayer(
     /** Pauses playback, capturing the current position for later resume. */
     fun pause() = safeExecute {
         pauseRequested = true
-        // Already parked warm: a second pause must not tear the warm session down into a cold stop
+        warmingUp = false
+        // Already parked warm: pausing again must not throw the open session away
         if (isPausedWarm()) return@safeExecute
         if (!sessionManager.isPlaying) return@safeExecute
         if (!liveStream) {
@@ -268,9 +297,6 @@ class MediaPlayer(
      * Read from any thread.
      */
     fun canPark(): Boolean = isReady && sessionManager.canPark()
-
-    /** True once the current session has received at least one decoded video frame. Read from any thread. */
-    fun hasDecodedFrame(): Boolean = sessionManager.lastFrameNanos.get() > 0L
 
     /**
      * Installs the acoustics stage on a player built without one: a queue item preloaded in the background gets its
@@ -359,6 +385,33 @@ class MediaPlayer(
 
     /** True when paused with the session kept open, so [play] resumes instantly from the frozen position. */
     fun resumesWarm(): Boolean = isPausedWarm()
+
+    /**
+     * Holds a paused, seekable player ready to play at once: opens the stream at [positionNanos], lets it decode its
+     * start-up cushion, and parks it on the first frame, so the next [play] continues without opening anything (a
+     * plain pause parks before the first frame, or not at all). Playout parks as soon as it would begin, so at most a
+     * few milliseconds of sound are released; callers mute the player while [isWarmingUp].
+     *
+     * Does nothing unless paused, seekable and not live.
+     */
+    fun warmUpPaused(positionNanos: Long) {
+        warmUpPending = true
+        safeExecute {
+            try {
+                startWarmUp(positionNanos.coerceAtLeast(0L))
+            } finally {
+                warmUpPending = false
+            }
+        }
+    }
+
+    /** True while a [warmUpPaused] stream is opening (or the call is still queued), until it goes stale. */
+    fun isWarmingUp(): Boolean = warmUpPending || (warmingUp && !warmUpStale())
+
+    private fun warmUpStale(): Boolean = System.nanoTime() - warmUpStartedNanos > WARM_UP_STALE_NANOS
+
+    /** True while parked by [warmUpPaused] on its start-up cushion: [play] continues at once. */
+    fun isHeldReady(): Boolean = heldReady && isPausedWarm()
 
     /** Stream duration in nanos, or 0 for live streams. */
     fun getDuration(): Long = if (liveStream) 0L else durationHintNanos
@@ -750,7 +803,7 @@ class MediaPlayer(
             lastQuality,
             currentHwAccel(),
             live = liveStream,
-            onFirstFrame = retryPolicy::reset
+            onFirstFrame = ::onSessionFirstFrame,
         )
         if (sessionManager.isPlaying) {
             lifecycle = PlayerState.Playing
@@ -758,6 +811,58 @@ class MediaPlayer(
             refreshWarmAudioTracks()
             qualitySwitch = qualitySwitch?.silenced()
         }
+    }
+
+    /** Called on the pipeline thread when a session's playout begins. */
+    private fun onSessionFirstFrame() {
+        retryPolicy.reset()
+        if (warmingUp) safeExecute(::finishWarmUp)
+    }
+
+    private fun startWarmUp(positionNanos: Long) {
+        if (!isReady || terminated.get() || liveStream || !seekable) return
+        if (warmingUp) {
+            if (!warmUpStale()) return
+            // Never reached its first frame: drop it and open again
+            logger.debug("$debugLabel Warm-up never reached its first frame; reopening.")
+            warmingUp = false
+            stopSession()
+            lifecycle = PlayerState.Paused
+        }
+        if (lifecycle != PlayerState.Paused) return
+        val ss = streams ?: return
+        heldReady = false
+        // A session parked before its first frame (or none at all) would open and buffer on resume: do that now
+        if (sessionManager.isPlaying) stopSession()
+        clock.reset(positionNanos)
+        warmingUp = true
+        warmUpStartedNanos = System.nanoTime()
+        pauseRequested = false
+        startStreams(ss, positionNanos)
+        if (!sessionManager.isPlaying) {
+            warmingUp = false
+            pauseRequested = true
+            lifecycle = PlayerState.Paused
+        }
+    }
+
+    /** Parks a [warmUpPaused] session the moment its playout begins: decoded cushion, connection and audio all open. */
+    private fun finishWarmUp() {
+        if (!warmingUp || terminated.get()) return
+        warmingUp = false
+        pauseRequested = true
+        watchdog.stop()
+        if (sessionManager.isPlaying && sessionManager.suspend(allowExternalProcess = true, retainBuffered = true)) {
+            lifecycle = PlayerState.Paused
+            heldReady = true
+            logger.debug("$debugLabel Held ready at ${ms(clock.originNanos)}ms.")
+            return
+        }
+        // Could not hold the session open: fall back to an ordinary cold pause where it got to
+        val heard = sessionManager.currentPacingNanos()
+        clock.reset(if (heard >= 0L) heard else clock.currentTime())
+        lifecycle = PlayerState.Paused
+        stopSession()
     }
 
     private fun startReplayBootstrapVideo(boot: ReplayBootstrap) {
@@ -821,7 +926,7 @@ class MediaPlayer(
 
         val decision = retryPolicy.evaluate(stderr, normalEos, liveStream)
         if (decision != null) {
-            scheduleRetry(decision.invalidateCache)
+            scheduleRetry(decision)
             return@onControl
         }
 
@@ -836,19 +941,19 @@ class MediaPlayer(
             return@onControl
         }
 
+        // Retries used up on a refused stream or a connection problem: still a passing failure, which the
+        // display may retry on its own later. Anything else is a verdict on the stream itself.
+        val error = RetryPolicy.exhaustedError(stderr, normalEos, source)
         if (stderr.isNotEmpty()) {
-            logger.error("$debugLabel Unrecoverable: ${MediaUtil.truncate(stderr)}.")
+            val detail = MediaUtil.truncate(stderr)
+            if (error.isFatal) logger.error("$debugLabel Unrecoverable: $detail.")
+            else logger.warn("$debugLabel Giving up on this stream for now (${error.message}): $detail.")
         }
+        // Nothing is decoding any more: stop the session, or the watchdog would restart it behind the error,
+        // leaving a player that plays while reporting an error (and so is never seekable or resynced).
+        stopSession()
         lifecycle = PlayerState.Error
-        // Retries used up on a connection problem: still a network failure, which the display may
-        // retry on its own later. Anything else is a verdict on the stream itself.
-        reportError(
-            if (!normalEos && LoadFailures.looksTransient(stderr)) {
-                DreamMediaException.Network("Lost the connection to the video.")
-            } else {
-                DreamMediaException.Decode("Unrecoverable stream failure", isFatal = true)
-            }
-        )
+        reportError(error)
     }
 
     private fun restartFromBeginning() {
@@ -871,11 +976,17 @@ class MediaPlayer(
         }
     }
 
-    private fun scheduleRetry(invalidateCache: Boolean) {
+    private fun scheduleRetry(decision: RetryPolicy.Decision) {
         val delayMs = retryPolicy.nextDelay()
-        logger.warn("$debugLabel ${if (invalidateCache) "Cache invalidated" else "Transient error"}. Retry ${retryPolicy.retries}/$MAX_FETCH_RETRIES in $delayMs ms.")
-        if (invalidateCache) {
-            env.cacheInvalidator.invalidate(url)
+        val what = when {
+            decision.refused -> "Stream refused (403); cache invalidated"
+            decision.invalidateCache -> "Cache invalidated"
+            else -> "Transient error"
+        }
+        logger.warn("$debugLabel $what. Retry ${retryPolicy.retries}/$MAX_FETCH_RETRIES in $delayMs ms.")
+        if (decision.invalidateCache) {
+            // A refusal is reported as such, so a repeated one is resolved from another source
+            if (decision.refused) env.cacheInvalidator.streamRefused(url) else env.cacheInvalidator.invalidate(url)
             forgetResolvedStreamUrls()
         }
         lifecycle = PlayerState.Restarting
@@ -928,7 +1039,8 @@ class MediaPlayer(
     }
 
     private fun handleSessionStall(reason: String): Unit = onControl {
-        if (terminated.get()) return@onControl
+        // An errored player waits for the display's retry; restarting it here would play behind the error
+        if (terminated.get() || lifecycle == PlayerState.Error) return@onControl
         val ss = streams ?: return@onControl
         val now = System.nanoTime()
         val repeated = lastStallNanos != 0L && now - lastStallNanos < REPEATED_STALL_WINDOW_NS
@@ -974,6 +1086,8 @@ class MediaPlayer(
     }
 
     private fun doStop() {
+        warmingUp = false
+        heldReady = false
         lifecycle = PlayerState.Stopped
         sessionManager.clearFrame()
         stats.stop()
@@ -988,9 +1102,14 @@ class MediaPlayer(
         if (!isReady || !seekable) return
         if (lifecycle == PlayerState.Ended) lifecycle = PlayerState.Paused
         if (isPausedWarm()) freezePausedWarmSession()
+        heldReady = false
         clock.reset(nanos)
         val ss = streams ?: return
-        if (sessionManager.isPlaying && !sessionManager.isParked()) {
+        if (warmingUp) {
+            // Still opening a paused stream to hold it ready: open it at the new position instead
+            warmUpStartedNanos = System.nanoTime()
+            startStreams(ss, nanos)
+        } else if (sessionManager.isPlaying && !sessionManager.isParked()) {
             if (!sessionManager.beginSeek(ss, nanos, lastQuality, currentHwAccel())) {
                 logger.warn("$debugLabel Seek to ${nanos / 1_000_000} ms fell back to a full stream restart.")
                 startStreams(ss, nanos)
@@ -1017,8 +1136,10 @@ class MediaPlayer(
             dispatchInitialize(coalesce = true)
             return
         }
-        if (isPausedWarm()) freezePausedWarmSession()
         val newSs = MediaStreamSelector.switchQuality(ss, target) ?: return
+        // Only now that there is a stream to switch to: a no-op request must not drop a warm pause
+        if (isPausedWarm()) freezePausedWarmSession()
+        heldReady = false
         val previousQuality = lastQuality
         media = media?.copy(streams = newSs, quality = MediaStreamSelector.parseQuality(newSs.currentVideo))
         host.videoContentAspect = newSs.currentVideo.contentAspect()

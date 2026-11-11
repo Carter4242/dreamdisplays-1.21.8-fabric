@@ -44,6 +44,7 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen.Companion.ENV_PR
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.managers.DisplayPopoutManager
+import com.dreamdisplays.platform.client.managers.FullscreenPrepareController
 import com.dreamdisplays.api.display.geometry.DisplayGeometry
 import com.dreamdisplays.platform.client.render.*
 import com.dreamdisplays.platform.client.storage.ClientSettingsStore
@@ -404,6 +405,22 @@ class DisplayScreen(
 
     private var focusMuted: Boolean = false
 
+    /** True while a fullscreen preparation keeps this display loaded for a broadcast that has not started yet. */
+    val isPrepared: Boolean get() = FullscreenPrepareController.isPrepared(uuid)
+
+    /**
+     * True while prepared and out of sight (a broadcast-only display, or one past render distance): kept loaded and
+     * on the timeline for the broadcast, but neither drawn in the world nor heard.
+     */
+    @Volatile
+    var isHiddenForBroadcast: Boolean = false; private set
+
+    /** Silenced by a preparation: hidden, or opening its paused stream to hold it ready. */
+    @Volatile
+    private var prepareMuted: Boolean = false
+
+    private var lastPrepareDistance: Double = Double.MAX_VALUE
+
     /** Distance in blocks past which the display is unloaded; mirrors the client's own render distance option. */
     val renderDistance: Int get() = DisplayPolicyCache.renderDistanceFor(policy)
 
@@ -607,6 +624,9 @@ class DisplayScreen(
         val url = videoUrl ?: return
         errorGate.markRetry()
         loadVideoInternal(url, lang ?: "", preservePausedState = true)
+        // The new player's follower starts without a timeline; ask for it, or a synced display would play from
+        // wherever it starts instead of rejoining the others
+        if (requiresServerTimeline()) sendRequestSyncPacket()
     }
 
     /** Called once a load got far enough to start playing: unattended retries get their full budget back. */
@@ -668,6 +688,8 @@ class DisplayScreen(
 
     /** Sizes the GPU texture buffers for the current dimensions and quality before the first frame. */
     internal fun prepareTextureDimensions() {
+        // A new player starts out opaque; it switches the texture over once it knows its video has alpha
+        textureResource.alphaMode = false
         textureResource.prepareDimensions(width, height, parseQualityOrDefault())
     }
 
@@ -886,7 +908,31 @@ class DisplayScreen(
     /** Uploads the latest decoded frame to the GPU texture(s). Called on the render thread once per frame. */
     fun fitTexture() {
         val mp = mediaPlayer ?: return
+        matchAlphaTexture(mp)
         frameUploader.upload(mp, textureResource, onRendered)
+    }
+
+    /** The player the live texture was last switched to alpha for. */
+    private var alphaTexturePlayer: MediaPlayer? = null
+
+    /**
+     * Reallocates the texture when the player's video output and the texture disagree about alpha: an alpha video is
+     * drawn from a capped RGBA texture whatever the render path, an opaque one from the usual texture. Render thread.
+     */
+    private fun matchAlphaTexture(mp: MediaPlayer) {
+        val alpha = mp.videoHasAlpha
+        if (alpha == textureResource.alphaMode && (!textureResource.hasTexture || alpha == textureResource.isAlpha)) return
+        val leavingAlpha = textureResource.isAlpha && !alpha
+        textureResource.alphaMode = alpha
+        createTexture()
+        if (alpha) {
+            alphaTexturePlayer = mp
+        } else if (leavingAlpha && alphaTexturePlayer === mp) {
+            // The same player went opaque (a new stream set): its decode is still sized for the capped alpha
+            // texture, so reopen it at the full size
+            alphaTexturePlayer = null
+            mp.restartVideoPipeline()
+        }
     }
 
     private val onRendered: () -> Unit = ::markRendered
@@ -934,7 +980,36 @@ class DisplayScreen(
 
     /** Applies effective volume (0 if muted/unfocused, else user volume). */
     internal fun applyEffectiveVolume() {
-        setVideoVolume(if (muted || focusMuted) 0f else volume)
+        setVideoVolume(if (muted || focusMuted || prepareMuted) 0f else volume)
+    }
+
+    /** True when paused and parked on a decoded start-up cushion by [holdReadyForBroadcast]: a resume plays at once. */
+    internal val isHeldReady: Boolean get() = mediaPlayer?.isHeldReady() == true
+
+    /** True while [holdReadyForBroadcast] is opening the paused stream. */
+    internal val isWarmingUp: Boolean get() = mediaPlayer?.isWarmingUp() == true
+
+    /**
+     * Opens the paused stream at the server's paused position and parks it on its decoded first frame, so the
+     * broadcast's resume plays at once instead of opening the stream then (see [MediaPlayer.warmUpPaused]).
+     */
+    internal fun holdReadyForBroadcast() {
+        val mp = mediaPlayer ?: return
+        val target = timelineFollower.pausedTargetNanos() ?: currentTimeNanos
+        timelineFollower.onHeldReady()
+        mp.warmUpPaused(target)
+        refreshPrepareState()
+    }
+
+    /** Re-evaluates the preparation's hiding and muting now (also done every tick). */
+    fun refreshPrepareState(distance: Double = lastPrepareDistance) {
+        lastPrepareDistance = distance
+        val prepared = isPrepared
+        isHiddenForBroadcast = prepared && !isPopoutActive && (virtual || distance > renderDistance)
+        val silenced = isHiddenForBroadcast || (prepared && !isPopoutActive && isWarmingUp)
+        if (silenced == prepareMuted) return
+        prepareMuted = silenced
+        applyEffectiveVolume()
     }
 
     /** Opens or focuses the `GLFW` window mode. Closes PiP if active. */
@@ -1180,7 +1255,7 @@ class DisplayScreen(
     internal fun primeNewPlayerVolume(mp: MediaPlayer) {
         val player = Minecraft.getInstance().player ?: return
         mp.primeVolume(
-            if (muted || focusMuted) 0f else capVolume(volume), getDistanceToScreen(player.blockPosition()),
+            if (muted || focusMuted || prepareMuted) 0f else capVolume(volume), getDistanceToScreen(player.blockPosition()),
             audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff(),
         )
     }
@@ -1243,13 +1318,15 @@ class DisplayScreen(
     fun tick(pos: BlockPos) {
         recoverMediaErrorIfDue()
         val distance = getDistanceToScreen(pos)
+        refreshPrepareState(distance)
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         timelineFollower.tick()
         queuePreloader.tick()
         restoreAudioTrackIfPending()
         restoreSubtitleTrackIfPending()
         publishStartedFlip()
-        if (isPopoutActive) {
+        // A prepared display opens at the quality the broadcast will show, not one stepped down for distance
+        if (isPopoutActive || isPrepared) {
             if (distanceQualitySteps != 0) {
                 distanceQualitySteps = 0
                 reloadQuality()
@@ -1270,7 +1347,7 @@ class DisplayScreen(
             SourceAcousticState(
                 plane = plane,
                 userVolume = volume,
-                muted = muted || focusMuted,
+                muted = muted || focusMuted || prepareMuted,
                 bypassSpatial = isPopoutActive,
                 acousticsEnabled = acousticsEnabled,
                 environment = probeEnvironment(plane, distance),

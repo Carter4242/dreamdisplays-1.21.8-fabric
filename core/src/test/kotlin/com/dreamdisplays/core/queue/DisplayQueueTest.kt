@@ -123,13 +123,6 @@ class DisplayQueueTest {
         // A brand-new video in its first seconds is not "just past a wrap"
         assertFalse(QueueTiming.advanceDue(t, start + 500, earlyMs = 250, lateGraceMs = 2_000))
     }
-
-    @Test
-    fun `start hold is short only when every preloading viewer is ready`() {
-        assertEquals(300L, QueueTiming.holdMs(listOf(alice, bob), setOf(alice, bob), 300, 5_000))
-        assertEquals(5_000L, QueueTiming.holdMs(listOf(alice, bob), setOf(alice), 300, 5_000))
-        assertEquals(5_000L, QueueTiming.holdMs(emptyList(), emptySet(), 300, 5_000), "nobody preloads: normal hold")
-    }
 }
 
 class QueueRecordsTest {

@@ -6,7 +6,6 @@ import com.dreamdisplays.platform.client.core.ClientApplication
 import com.dreamdisplays.platform.client.core.ClientLifecycleEvent
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
-import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.managers.*
 import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.platform.client.overlay.OverlayManager
@@ -134,20 +133,14 @@ object Initializer {
         graphics.nextStratum()
         //?}
         FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
-        val window = mc.window
-        val mouse = mc.mouseHandler
+        // No screen means gameplay owns the cursor: overlays show no hover and take no clicks.
         DreamServices.registry.getOrNull<OverlayManager>()
             ?.renderAll(
                 MinecraftOverlayRenderContext(
                     mc,
                     graphics,
-                    //? if >=1.21.11 {
-                    mouse.getScaledXPos(window).toInt(),
-                    mouse.getScaledYPos(window).toInt(),
-                    //?} else
-                    /*(mouse.xpos() * window.guiScaledWidth / window.screenWidth).toInt(),
-                    (mouse.ypos() * window.guiScaledHeight / window.screenHeight).toInt(),*/
-                    MouseButtons.hardwareLeftDown(),
+                    MinecraftOverlayRenderContext.NO_POINTER,
+                    MinecraftOverlayRenderContext.NO_POINTER,
                     partialTick,
                 )
             )

@@ -14,6 +14,7 @@ import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.FullscreenPrepareInfo
 import com.dreamdisplays.platform.server.playback.FullscreenRadiusTarget
 import com.dreamdisplays.platform.server.playback.FullscreenSessionInfo
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
@@ -62,6 +63,24 @@ data class FullscreenStartOptions(
     val fullscreenMode: FullscreenMode? get() = mode?.let { runCatching { FullscreenMode.valueOf(it.uppercase()) }.getOrNull() }
 }
 
+/** Outcome of a `/display fullscreen prepare` attempt. */
+sealed class FullscreenPrepareResult {
+    data class Prepared(val info: FullscreenPrepareInfo) : FullscreenPrepareResult()
+    data object NoTargets : FullscreenPrepareResult()
+    data object AlreadyRunning : FullscreenPrepareResult()
+}
+
+/** The `/display fullscreen prepare` flags as typed by the sender. */
+data class FullscreenPrepareOptions(
+    val players: String?,
+    val radiusBlocks: Double?,
+    val radiusX: Double?,
+    val radiusY: Double?,
+    val radiusZ: Double?,
+    val quality: String?,
+    val rewind: Boolean,
+)
+
 /** The server config's fullscreen limits. */
 data class FullscreenLimits(val defaultMode: FullscreenMode, val allowForced: Boolean, val qualityCap: Int)
 
@@ -88,14 +107,8 @@ object FullscreenCommand {
     ): FullscreenStartResult {
         if (options.forced && !limits.allowForced) return FullscreenStartResult.ForcedDisallowed
 
-        val namedTargets = options.players
-            ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-            ?.flatMap(resolveTarget)?.toSet()?.takeIf { it.isNotEmpty() }
-        val radius = options.radiusBlocks?.let { blocks ->
-            FullscreenRadiusTarget(
-                origin.world, options.radiusX ?: origin.x, options.radiusY ?: origin.y, options.radiusZ ?: origin.z, blocks,
-            )
-        }
+        val namedTargets = namedTargets(options.players, resolveTarget)
+        val radius = radiusTarget(origin, options.radiusBlocks, options.radiusX, options.radiusY, options.radiusZ)
         if (namedTargets == null && radius == null) return FullscreenStartResult.NoTargets
 
         val sessionId = FullscreenBroadcastManager.start(
@@ -108,7 +121,9 @@ object FullscreenCommand {
             forced = options.forced,
             volume = options.volume ?: -1f,
             loop = options.loop,
-            quality = clampQuality(options.quality, limits.qualityCap),
+            quality = options.quality?.let { clampQuality(it, limits.qualityCap) }
+                ?: FullscreenBroadcastManager.preparedQuality(display.id)
+                ?: clampQuality(null, limits.qualityCap),
             title = "",
             namedTargets = namedTargets,
             radius = radius,
@@ -118,30 +133,94 @@ object FullscreenCommand {
         return FullscreenStartResult.Started(sessionId, reach)
     }
 
+    /**
+     * Prepares a broadcast of [display] on the targeted clients, so a later `start` of the same display (or URL)
+     * plays at once. [reporter] hears how far the clients got once they settle or after a few seconds.
+     */
+    fun prepare(
+        display: DisplayData,
+        virtual: Boolean,
+        options: FullscreenPrepareOptions,
+        limits: FullscreenLimits,
+        origin: FullscreenOrigin,
+        resolveTarget: (String) -> Set<UUID>,
+        reporter: ((FullscreenPrepareInfo) -> Unit)?,
+    ): FullscreenPrepareResult {
+        val namedTargets = namedTargets(options.players, resolveTarget)
+        val radius = radiusTarget(origin, options.radiusBlocks, options.radiusX, options.radiusY, options.radiusZ)
+        if (namedTargets == null && radius == null) return FullscreenPrepareResult.NoTargets
+        val info = FullscreenBroadcastManager.prepare(
+            prepareId = UUID.randomUUID().toString().take(8),
+            display = display,
+            virtual = virtual,
+            quality = clampQuality(options.quality, limits.qualityCap),
+            namedTargets = namedTargets,
+            radius = radius,
+            rewind = options.rewind,
+            reporter = reporter,
+        ) ?: return FullscreenPrepareResult.AlreadyRunning
+        return FullscreenPrepareResult.Prepared(info)
+    }
+
+    private fun namedTargets(players: String?, resolveTarget: (String) -> Set<UUID>): Set<UUID>? =
+        players
+            ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+            ?.flatMap(resolveTarget)?.toSet()?.takeIf { it.isNotEmpty() }
+
+    private fun radiusTarget(
+        origin: FullscreenOrigin, blocks: Double?, x: Double?, y: Double?, z: Double?,
+    ): FullscreenRadiusTarget? =
+        blocks?.let { FullscreenRadiusTarget(origin.world, x ?: origin.x, y ?: origin.y, z ?: origin.z, it) }
+
+    /** The arguments of `fullscreenPrepareProgress` / `fullscreenListPrepareEntry` for [info], after its id and display. */
+    fun tallyArgs(info: FullscreenPrepareInfo): Array<String> = arrayOf(
+        info.tally.ready.toString(),
+        info.tally.delivered.toString(),
+        info.tally.loading.toString(),
+        info.tally.failed.toString(),
+        info.tally.disabled.toString(),
+        info.tally.unsupported.toString(),
+    )
+
     private fun clampQuality(requested: String?, qualityCap: Int): String {
         if (qualityCap <= 0) return requested ?: ""
         val height = VideoQuality.parse(requested).targetHeight
         return if (height == null || height > qualityCap) qualityCap.toString() else requested ?: ""
     }
 
-    /** Stops a session by its own id, by the id of the real display it's hosted on, or every session for `all`. Returns how many were stopped. */
+    /**
+     * Stops a session (or cancels a preparation) by its own id, by the id of the real display it's on, or every one
+     * of both for `all`. Returns how many were stopped.
+     */
     fun stop(idOrAll: String): Int {
         if (idOrAll.equals("all", ignoreCase = true)) {
             val ids = FullscreenBroadcastManager.list().map { it.sessionId }
             ids.forEach(FullscreenBroadcastManager::stop)
-            return ids.size
+            val prepared = FullscreenBroadcastManager.listPreparations().map { it.prepareId }
+            prepared.forEach { FullscreenBroadcastManager.cancelPreparation(it) }
+            return ids.size + prepared.size
         }
         if (FullscreenBroadcastManager.stop(idOrAll)) return 1
+        if (FullscreenBroadcastManager.cancelPreparation(idOrAll)) return 1
         val displayId = runCatching { UUID.fromString(idOrAll) }.getOrNull() ?: return 0
-        val sessionId = FullscreenBroadcastManager.sessionIdForDisplay(displayId) ?: return 0
-        return if (FullscreenBroadcastManager.stop(sessionId)) 1 else 0
+        val sessionId = FullscreenBroadcastManager.sessionIdForDisplay(displayId)
+        if (sessionId != null) return if (FullscreenBroadcastManager.stop(sessionId)) 1 else 0
+        return if (FullscreenBroadcastManager.cancelPreparation("", displayId)) 1 else 0
     }
 
     /** Live sessions for the `list` subcommand. */
     fun list(): List<FullscreenSessionInfo> = FullscreenBroadcastManager.list()
 
-    /** Suggestion tokens for `/display fullscreen stop`: every live session id, plus `all`. */
-    fun stopSuggestions(): List<String> = FullscreenBroadcastManager.list().map { it.sessionId } + "all"
+    /** Live preparations for the `list` subcommand. */
+    fun listPreparations(): List<FullscreenPrepareInfo> = FullscreenBroadcastManager.listPreparations()
+
+    /** Suggestion tokens for `/display fullscreen stop`: every live session and preparation id, plus `all`. */
+    fun stopSuggestions(): List<String> =
+        FullscreenBroadcastManager.list().map { it.sessionId } +
+                FullscreenBroadcastManager.listPreparations().map { it.prepareId } + "all"
+
+    /** True if [id] names a live preparation (for the stop suggestions' tooltips). */
+    fun isPreparation(id: String): Boolean = FullscreenBroadcastManager.listPreparations().any { it.prepareId == id }
 }
 
 /** Paper adapter: resolves Bukkit sender/player state and turns [FullscreenCommand] results into chat replies. */
@@ -158,20 +237,7 @@ object PaperFullscreenCommand {
         options: FullscreenStartOptions,
     ) {
         val player = sender as? Player
-        val id = if (id.equals("this", ignoreCase = true)) {
-            if (player == null) return ServerMessage.FULLSCREEN_PLAYER_ONLY.sendTo(sender)
-            val block = player.getTargetBlock(null, 32)
-            val data = DisplayManager.isContains(block.location)
-                ?: return MessageUtil.sendMessage(
-                    sender,
-                    if (PaperSurfaces.of(PaperServer.config.settings.baseMaterial).accepts(block.type.name)) {
-                        "noDisplay"
-                    } else {
-                        "displayVideoWrongTargetBlock"
-                    },
-                )
-            data.id.toString()
-        } else id
+        val id = resolveThis(sender, player, id) ?: return
         if (options.serverScope != null) {
             if (options.radiusBlocks != null) return ServerMessage.FULLSCREEN_NETWORK_RADIUS_UNSUPPORTED.sendTo(sender)
             if (!ProxyNetwork.isConnected()) return ServerMessage.FULLSCREEN_NETWORK_NO_PROXY.sendTo(sender)
@@ -226,6 +292,72 @@ object PaperFullscreenCommand {
         reply(sender, result)
     }
 
+    /**
+     * Handles `/display fullscreen prepare <id|url> [<flags>]`: the targeted clients load the display hidden and hold
+     * it ready, so `start` on it plays at once. Replies with the reach now and with the clients' progress once they
+     * settle.
+     */
+    fun prepare(sender: CommandSender, origin: Location, id: String, options: FullscreenPrepareOptions) {
+        val player = sender as? Player
+        val id = resolveThis(sender, player, id) ?: return
+        val ownerId = player?.uniqueId ?: FullscreenCommand.SERVER_OWNER
+        val (display, virtual) = FullscreenBroadcastManager.resolveOrCreateDisplay(id, ownerId)
+            ?: return ServerMessage.FULLSCREEN_NO_DISPLAY.sendTo(sender)
+        val config = PaperServer.config.settings
+        val result = FullscreenCommand.prepare(
+            display = display,
+            virtual = virtual,
+            options = options,
+            limits = FullscreenLimits(config.fullscreenDefaultMode, config.fullscreenAllowForced, config.fullscreenQualityCap),
+            origin = FullscreenOrigin(origin.world.name, origin.x, origin.y, origin.z),
+            resolveTarget = { token -> resolveTargetToken(player, origin, token) },
+            reporter = { info ->
+                MessageUtil.sendColoredMessage(
+                    sender,
+                    MessageUtil.formatIndexed(
+                        sender, ServerMessage.FULLSCREEN_PREPARE_PROGRESS, info.prepareId, *FullscreenCommand.tallyArgs(info),
+                    ),
+                )
+            },
+        )
+        when (result) {
+            is FullscreenPrepareResult.Prepared -> MessageUtil.sendColoredMessage(
+                sender,
+                MessageUtil.formatIndexed(
+                    sender, ServerMessage.FULLSCREEN_PREPARED, result.info.prepareId,
+                    result.info.tally.delivered.toString(), result.info.tally.unsupported.toString(),
+                    (result.info.expiresInMs / 1_000L).toString(),
+                ),
+            )
+
+            FullscreenPrepareResult.NoTargets -> ServerMessage.FULLSCREEN_NO_TARGETS.sendTo(sender)
+            FullscreenPrepareResult.AlreadyRunning -> ServerMessage.FULLSCREEN_ALREADY_RUNNING.sendTo(sender)
+        }
+    }
+
+    /** [id], or for `this` the id of the display the player looks at; null (after telling [sender] why) when there is none. */
+    private fun resolveThis(sender: CommandSender, player: Player?, id: String): String? {
+        if (!id.equals("this", ignoreCase = true)) return id
+        if (player == null) {
+            ServerMessage.FULLSCREEN_PLAYER_ONLY.sendTo(sender)
+            return null
+        }
+        val block = player.getTargetBlock(null, 32)
+        val data = DisplayManager.isContains(block.location)
+        if (data == null) {
+            MessageUtil.sendMessage(
+                sender,
+                if (PaperSurfaces.of(PaperServer.config.settings.baseMaterial).accepts(block.type.name)) {
+                    "noDisplay"
+                } else {
+                    "displayVideoWrongTargetBlock"
+                },
+            )
+            return null
+        }
+        return data.id.toString()
+    }
+
     private fun resolveTargetToken(sender: Player?, origin: Location, token: String): Set<UUID> = when {
         token.equals("@a", ignoreCase = true) || token.equals("@e", ignoreCase = true) ->
             Bukkit.getOnlinePlayers().map { it.uniqueId }.toSet()
@@ -276,9 +408,22 @@ object PaperFullscreenCommand {
     /** Handles `/display fullscreen list`: local sessions plus the last known network roster. */
     fun list(sender: CommandSender) {
         val local = FullscreenCommand.list()
+        val prepared = FullscreenCommand.listPreparations()
         val network = ProxyNetwork.networkSessions()
         if (sender is Player && ProxyNetwork.isConnected()) ProxyBridge.requestNetworkSessions(sender)
-        if (local.isEmpty() && network.isEmpty()) return ServerMessage.FULLSCREEN_LIST_EMPTY.sendTo(sender)
+        if (local.isEmpty() && prepared.isEmpty() && network.isEmpty()) {
+            return ServerMessage.FULLSCREEN_LIST_EMPTY.sendTo(sender)
+        }
+        prepared.forEach { p ->
+            MessageUtil.sendColoredMessage(
+                sender,
+                MessageUtil.formatIndexed(
+                    sender, "fullscreenListPrepareEntry",
+                    p.prepareId, p.displayId.toString(), *FullscreenCommand.tallyArgs(p),
+                    (p.expiresInMs / 1_000L).toString(),
+                ),
+            )
+        }
         local.forEach { s ->
             MessageUtil.sendColoredMessage(
                 sender,
@@ -333,15 +478,7 @@ object VanillaFullscreenCommand {
         options: FullscreenStartOptions,
     ): Int {
         val player = ctx.source.entity as? ServerPlayer
-        val id = if (id.equals("this", ignoreCase = true)) {
-            if (player == null) return tell(ctx, null, ServerMessage.FULLSCREEN_PLAYER_ONLY).let { 0 }
-            val targetPos = RegionUtil.getTargetedBlockPos(player)
-                ?: return ServerMessage.DISPLAY_VIDEO_WRONG_TARGET_BLOCK.sendTo(player).let { 0 }
-            val worldKey = RegionUtil.getPlayerLevelKey(player)
-            val data = DisplayManager.isContains(worldKey, targetPos)
-                ?: return ServerMessage.NO_DISPLAY.sendTo(player).let { 0 }
-            data.id.toString()
-        } else id
+        val id = resolveThis(ctx, player, id) ?: return 0
         if (options.serverScope != null) {
             if (options.radiusBlocks != null) {
                 tell(ctx, player, ServerMessage.FULLSCREEN_NETWORK_RADIUS_UNSUPPORTED)
@@ -403,6 +540,62 @@ object VanillaFullscreenCommand {
         )
         reply(ctx, player, result)
         return 1
+    }
+
+    /** Handles `/display fullscreen prepare <id|url> [<flags>]`; see `PaperFullscreenCommand.prepare`. */
+    fun prepare(ctx: CommandContext<CommandSourceStack>, id: String, options: FullscreenPrepareOptions): Int {
+        val player = ctx.source.entity as? ServerPlayer
+        val id = resolveThis(ctx, player, id) ?: return 0
+        val ownerId = player?.uuid ?: FullscreenCommand.SERVER_OWNER
+        val (display, virtual) = FullscreenBroadcastManager.resolveOrCreateDisplay(id, ownerId) ?: run {
+            tell(ctx, player, ServerMessage.FULLSCREEN_NO_DISPLAY)
+            return 0
+        }
+        val origin = ctx.source.position
+        val config = VanillaServerState.config.settings
+        val result = FullscreenCommand.prepare(
+            display = display,
+            virtual = virtual,
+            options = options,
+            limits = FullscreenLimits(config.fullscreenDefaultMode, config.fullscreenAllowForced, config.fullscreenQualityCap),
+            origin = FullscreenOrigin(RegionUtil.getLevelKey(ctx.source.level), origin.x, origin.y, origin.z),
+            resolveTarget = { token -> resolveTargetToken(ctx, player, token) },
+            reporter = { info ->
+                tell(ctx, player, ServerMessage.FULLSCREEN_PREPARE_PROGRESS, info.prepareId, *FullscreenCommand.tallyArgs(info))
+            },
+        )
+        return when (result) {
+            is FullscreenPrepareResult.Prepared -> {
+                tell(
+                    ctx, player, ServerMessage.FULLSCREEN_PREPARED, result.info.prepareId,
+                    result.info.tally.delivered.toString(), result.info.tally.unsupported.toString(),
+                    (result.info.expiresInMs / 1_000L).toString(),
+                )
+                1
+            }
+
+            FullscreenPrepareResult.NoTargets -> tell(ctx, player, ServerMessage.FULLSCREEN_NO_TARGETS).let { 0 }
+            FullscreenPrepareResult.AlreadyRunning -> tell(ctx, player, ServerMessage.FULLSCREEN_ALREADY_RUNNING).let { 0 }
+        }
+    }
+
+    /** [id], or for `this` the id of the display the player looks at; null (after telling them why) when there is none. */
+    private fun resolveThis(ctx: CommandContext<CommandSourceStack>, player: ServerPlayer?, id: String): String? {
+        if (!id.equals("this", ignoreCase = true)) return id
+        if (player == null) {
+            tell(ctx, null, ServerMessage.FULLSCREEN_PLAYER_ONLY)
+            return null
+        }
+        val targetPos = RegionUtil.getTargetedBlockPos(player) ?: run {
+            ServerMessage.DISPLAY_VIDEO_WRONG_TARGET_BLOCK.sendTo(player)
+            return null
+        }
+        val worldKey = RegionUtil.getPlayerLevelKey(player)
+        val data = DisplayManager.isContains(worldKey, targetPos) ?: run {
+            ServerMessage.NO_DISPLAY.sendTo(player)
+            return null
+        }
+        return data.id.toString()
     }
 
     private fun resolveTargetToken(
@@ -479,15 +672,26 @@ object VanillaFullscreenCommand {
     fun list(ctx: CommandContext<CommandSourceStack>): Int {
         val player = ctx.source.entity as? ServerPlayer
         val local = FullscreenCommand.list()
+        val prepared = FullscreenCommand.listPreparations()
         val network = ProxyNetwork.networkSessions()
         if (player != null && ProxyNetwork.isConnected()) VanillaProxyBridge.requestNetworkSessions(player)
-        if (local.isEmpty() && network.isEmpty()) {
+        if (local.isEmpty() && prepared.isEmpty() && network.isEmpty()) {
             val line = MessageUtil.messageFor(player, ServerMessage.FULLSCREEN_LIST_EMPTY)
             if (player != null) MessageUtil.sendColoredMessage(
                 player,
                 line
             ) else ctx.source.sendSystemMessage(literalText(line))
             return 0
+        }
+        prepared.forEach { p ->
+            val line = MessageUtil.formatIndexed(
+                player, "fullscreenListPrepareEntry",
+                p.prepareId, p.displayId.toString(), *FullscreenCommand.tallyArgs(p), (p.expiresInMs / 1_000L).toString(),
+            )
+            if (player != null) MessageUtil.sendColoredMessage(
+                player,
+                line
+            ) else ctx.source.sendSystemMessage(literalText(line))
         }
         local.forEach { s ->
             val line = MessageUtil.formatIndexed(
@@ -509,7 +713,7 @@ object VanillaFullscreenCommand {
                 line
             ) else ctx.source.sendSystemMessage(literalText(line))
         }
-        return local.size + network.size
+        return local.size + prepared.size + network.size
     }
 
     /** Online player names, for the `target` argument's suggestion list. */

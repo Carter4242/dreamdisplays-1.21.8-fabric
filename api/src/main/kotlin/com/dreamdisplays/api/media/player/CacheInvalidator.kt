@@ -7,4 +7,12 @@ package com.dreamdisplays.api.media.player
  */
 fun interface CacheInvalidator {
     fun invalidate(url: String)
+
+    /**
+     * The media host refused (HTTP 403) the stream URLs resolved for [url]. Purges them like [invalidate] and lets
+     * the resolvers remember the refusal, so a repeated one can be answered from a different source.
+     *
+     * @since 1.10.x
+     */
+    fun streamRefused(url: String) = invalidate(url)
 }

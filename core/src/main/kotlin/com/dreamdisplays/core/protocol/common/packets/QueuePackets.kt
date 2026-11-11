@@ -65,9 +65,9 @@ data class QueueAction(
 ) : DreamPacket
 
 /**
- * Client -> server: how far this client got preparing queue item [itemId] of display [id] ahead of time
- * ([QueuePreloadState] wire value). The server shortens the start hold when every nearby client that preloads is
- * READY for the item it advances to.
+ * Client -> server: how far this client got preparing queue item [itemId] of display [id] ahead of time, as a
+ * `FullscreenPrepareState` wire value (the same states a fullscreen preparation reports). The server shortens the
+ * start hold when every nearby client is READY for the item it advances to.
  */
 @Serializable
 data class QueuePreload(
@@ -88,22 +88,5 @@ enum class QueueActionType(val wire: Int) {
     companion object {
         /** Decodes [wire], or null for a value this build does not know. */
         fun fromWire(wire: Int): QueueActionType? = entries.firstOrNull { it.wire == wire }
-    }
-}
-
-/** [QueuePreload.state] values; append-only. */
-enum class QueuePreloadState(val wire: Int) {
-    /** The item is resolved and buffered, ready to start at once. */
-    READY(1),
-
-    /** Preparing failed; this client will load the item the normal way. */
-    FAILED(2),
-
-    /** The preload was dropped (queue changed, display unloaded). */
-    DROPPED(3);
-
-    companion object {
-        /** Decodes [wire], or null for a value this build does not know. */
-        fun fromWire(wire: Int): QueuePreloadState? = entries.firstOrNull { it.wire == wire }
     }
 }

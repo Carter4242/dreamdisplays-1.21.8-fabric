@@ -69,6 +69,7 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
             dedicatedVramMb = memory.dedicatedVramMb,
             warmDisplayLimit = WarmParkPolicy.maxFullWarmDisplays,
             timeZoneOffsetMinutes = safeInt { ZoneId.systemDefault().rules.getOffset(Instant.now()).totalSeconds / 60 },
+            supportsFullscreenPrepare = true,
             supportsQueue = true,
         )
     }
