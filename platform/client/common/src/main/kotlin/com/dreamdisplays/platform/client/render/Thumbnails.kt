@@ -269,6 +269,7 @@ object Thumbnails {
 
     @Throws(IOException::class)
     private fun decode(bytes: ByteArray): Decoded = ByteArrayInputStream(bytes).use { input ->
+        ThumbnailBounds.check(bytes)
         val src: BufferedImage = ImageIO.read(input) ?: run {
             val head = if (bytes.size >= 4)
                 String.format(
