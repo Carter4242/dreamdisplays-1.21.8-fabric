@@ -51,6 +51,11 @@ object ScreenCapture {
         /** PCI `vvvv:dddd` of [adapter] and its name, when known. */
         val adapterPciId: String = "", val adapterName: String = "",
         val key: String = "",
+        /**
+         * `FFmpeg`'s index for [adapter] when it differs from the game's (-1: the same): DXGI orders adapters per
+         * process, and a GPU preference set for the game (common on laptops) puts its GPU first only for the game.
+         */
+        val ffmpegAdapter: Int = -1,
     ) : Target
 
     /** H.264 encoders tried in order; the first that encodes a test picture here wins. */
@@ -279,7 +284,7 @@ object ScreenCapture {
         val sameWay = fresh.filter { sameScreen(m, it) && it.byVendor == m.byVendor && it.adapterPciId == m.adapterPciId }
         // Adapter indexes follow the primary screen's adapter: the same index first, else that GPU wherever it is now
         val now = sameWay.firstOrNull { it.adapter == m.adapter } ?: sameWay.firstOrNull() ?: return null
-        val rebound = now.copy(name = m.name)
+        val rebound = now.copy(name = m.name, ffmpegAdapter = m.ffmpegAdapter)
         return if (rebound == m) choice else choice.copy(monitor = rebound)
     }
 
@@ -361,6 +366,33 @@ object ScreenCapture {
         } == true
 
     /**
+     * [monitor] as `FFmpeg` reaches it now: itself when [confirm] says so, else on the adapter index `FFmpeg` gives
+     * its GPU now (the adapter order changed, e.g. the primary screen moved to the other GPU), confirmed; null when
+     * neither opens that screen. For Desktop Duplication by adapter index; off the render thread.
+     */
+    fun confirmed(ffmpeg: String, monitor: Monitor): Monitor? {
+        if (confirm(ffmpeg, monitor)) return monitor
+        if (monitor.adapterPciId.isEmpty()) return null
+        val j = ffmpegAdapterOf(ffmpeg, monitor.adapterPciId, skip = adapterIndexFor(monitor)) ?: return null
+        return monitor.copy(ffmpegAdapter = j).takeIf { confirm(ffmpeg, it) }
+    }
+
+    /** The adapter index `FFmpeg` is told for [monitor]. */
+    internal fun adapterIndexFor(monitor: Monitor): Int = if (monitor.ffmpegAdapter >= 0) monitor.ffmpegAdapter else monitor.adapter
+
+    /**
+     * `FFmpeg`'s index for the GPU with PCI id [pciId], trying each adapter index but [skip] (one short run each, the
+     * device only); null when none (or two identical GPUs, which cannot be told apart this way, both match).
+     */
+    private fun ffmpegAdapterOf(ffmpeg: String, pciId: String, skip: Int): Int? {
+        val count = runCatching { Dxgi.enumerate().adapters.size }.getOrDefault(0)
+        val matches = (0 until count).filter { j ->
+            j != skip && probeScreen(ffmpeg, Monitor(0, "", 0, 0, 0, 0, adapter = j, rectKnown = false))?.pciId == pciId
+        }
+        return matches.singleOrNull()
+    }
+
+    /**
      * Opens [monitor] with Desktop Duplication the way its plan does (one frame) and checks `FFmpeg` got the
      * adapter ([Monitor.adapterPciId]) and a screen of its size: DXGI numbers adapters per process (a GPU preference
      * set for the game reorders them), so an index the game read can name another GPU in `FFmpeg`. Blocks up to a
@@ -389,11 +421,20 @@ object ScreenCapture {
             return null
         }
         // Desktop Duplication, on each adapter that shows this screen
-        for (m in variants) {
+        for (variant in variants) {
+            var m = variant
             for (encoder in encodersFor(ffmpeg, m, softwareOnly)) {
                 val plan = Plan(Source.DDAGRAB, encoder)
-                val r = probePipeline(ffmpeg, plan, m)
-                val wrongAdapter = r.pciId != null && m.adapterPciId.isNotEmpty() && r.pciId != m.adapterPciId
+                var r = probePipeline(ffmpeg, plan, m)
+                var wrongAdapter = r.pciId != null && m.adapterPciId.isNotEmpty() && r.pciId != m.adapterPciId
+                if (wrongAdapter && !m.byVendor && m.ffmpegAdapter < 0) {
+                    // FFmpeg numbers this GPU differently (two GPUs of one vendor, a GPU preference set for the game)
+                    ffmpegAdapterOf(ffmpeg, m.adapterPciId, skip = m.adapter)?.let { j ->
+                        m = m.copy(ffmpegAdapter = j)
+                        r = probePipeline(ffmpeg, plan, m)
+                        wrongAdapter = r.pciId != null && r.pciId != m.adapterPciId
+                    }
+                }
                 val ok = r.ok && !wrongAdapter
                 val error = if (wrongAdapter) "opened ${r.pciId}, not ${m.adapterPciId}" else r.tail
                 attempts += Attempt(plan, adapterLabel(m), ok, if (ok) "" else error, r.elapsedMs)
@@ -784,7 +825,7 @@ object ScreenCapture {
     private fun adapterArgs(monitor: Monitor): List<String> {
         val device = when {
             monitor.byVendor && monitor.vendorId != 0 -> String.format(Locale.ROOT, "dd:,vendor_id=0x%04x", monitor.vendorId)
-            monitor.adapter >= 0 -> "dd:${monitor.adapter}"
+            monitor.adapter >= 0 -> "dd:${adapterIndexFor(monitor)}"
             else -> return []
         }
         return ["-init_hw_device", "d3d11va=$device", "-filter_hw_device", "dd"]
@@ -792,7 +833,7 @@ object ScreenCapture {
 
     private fun adapterLabel(monitor: Monitor): String = when {
         monitor.byVendor && monitor.vendorId != 0 -> String.format(Locale.ROOT, "vendor 0x%04x", monitor.vendorId)
-        monitor.adapter >= 0 -> "#${monitor.adapter}"
+        monitor.adapter >= 0 -> "#${monitor.adapter}" + if (monitor.ffmpegAdapter >= 0) " (FFmpeg #${monitor.ffmpegAdapter})" else ""
         else -> "default"
     }
 

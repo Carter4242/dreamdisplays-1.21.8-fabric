@@ -612,8 +612,8 @@ object ScreenShare {
                         choice.plan.source == ScreenCapture.Source.GDIGRAB ->
                             Found.Ready(bound ?: choice.copy(monitor = l.ways.first()))
                         bound == null -> Found.NotNow
-                        bound.monitor.byVendor || ScreenCapture.confirm(ffmpeg, bound.monitor) -> Found.Ready(bound)
-                        else -> Found.NotNow
+                        bound.monitor.byVendor -> Found.Ready(bound)
+                        else -> ScreenCapture.confirmed(ffmpeg, bound.monitor)?.let { Found.Ready(bound.copy(monitor = it)) } ?: Found.NotNow
                     }
                 }
             }

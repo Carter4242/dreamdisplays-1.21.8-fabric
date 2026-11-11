@@ -97,6 +97,22 @@ class ScreenIdentityTest {
     }
 
     @Test
+    fun `ffmpeg opens the gpu by its own index when it numbers the gpus differently from the game`() {
+        // Two AMD GPUs, the game set to "High performance": the game lists the dGPU as 0, FFmpeg as 1
+        val m = win(1, "\\\\.\\DISPLAY2", dell, 2560, adapter = 0).copy(ffmpegAdapter = 1)
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, m, Encoder.AMF, "srt://relay.example.com:8890?streamid=x")
+        assertEquals("d3d11va=dd:1", a[a.indexOf("-init_hw_device") + 1])
+        assertTrue(a.any { it.startsWith("ddagrab=output_idx=1:") })
+        // The mapping stays with the screen as it moves between outputs
+        val choice = ScreenCapture.Choice(m, ScreenCapture.Plan(Source.DDAGRAB, Encoder.AMF), emptyList())
+        val moved = ScreenCapture.rebind(choice, listOf(win(0, "\\\\.\\DISPLAY2", dell, 0, adapter = 0)))!!
+        assertEquals(0, moved.monitor.index)
+        assertEquals(1, moved.monitor.ffmpegAdapter)
+        assertEquals(1, ScreenCapture.adapterIndexFor(moved.monitor))
+        assertEquals(0, ScreenCapture.adapterIndexFor(moved.monitor.copy(ffmpegAdapter = -1)))
+    }
+
+    @Test
     fun `x11 rectangle captures need the picked output at the same rectangle`() {
         val picked = Monitor(1, "DP-1", 1920, 0, 2560, 1440, key = "x11:DP-1")
         val hdmi = Monitor(0, "HDMI-1", 0, 0, 1920, 1080, key = "x11:HDMI-1")
