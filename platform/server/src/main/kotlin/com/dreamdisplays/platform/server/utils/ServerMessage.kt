@@ -29,8 +29,6 @@ enum class ServerMessage(val key: String) {
     DISPLAY_BLOCK_BREAK("displayBlockBreak"),
     DISPLAY_COMMAND_MISSING_PERMISSION("displayCommandMissingPermission"),
     DISPLAY_DELETED("displayDeleted"),
-    DISPLAY_HELP_FULLSCREEN("displayHelpFullscreen"),
-    DISPLAY_HELP_HEADER("displayHelpHeader"),
     DISPLAY_INFO_AUTO_LANG("displayInfoAutoLang"),
     DISPLAY_INFO_HEADER("displayInfoHeader"),
     DISPLAY_INFO_MEDIA_LINE("displayInfoMediaLine"),

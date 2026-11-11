@@ -32,13 +32,87 @@ load-after:
   - name: voicechat
     bootstrap: false
 permissions:
-  dreamdisplays.create:
+  # Every node is operator-only by default; dreamdisplays.admin grants all of them.
+  dreamdisplays.admin:
     default: op
-  dreamdisplays.video:
+    children:
+      dreamdisplays.display.create: true
+      dreamdisplays.display.create.unlimited: true
+      dreamdisplays.display.delete: true
+      dreamdisplays.display.name: true
+      dreamdisplays.display.info: true
+      dreamdisplays.display.list: true
+      dreamdisplays.display.others: true
+      dreamdisplays.playback.video: true
+      dreamdisplays.playback.speed: true
+      dreamdisplays.playback.mode: true
+      dreamdisplays.playback.schedule: true
+      dreamdisplays.queue: true
+      dreamdisplays.karaoke.manage: true
+      dreamdisplays.karaoke.join: true
+      dreamdisplays.prepare: true
+      dreamdisplays.fullscreen: true
+      dreamdisplays.fullscreen.network: true
+      dreamdisplays.share.manage: true
+      dreamdisplays.viewing.toggle: true
+      dreamdisplays.viewing.toggle.others: true
+      dreamdisplays.admin.config: true
+      dreamdisplays.admin.policy: true
+      dreamdisplays.diag: true
+      dreamdisplays.local: true
+      dreamdisplays.synced: true
+      dreamdisplays.broadcast: true
+      dreamdisplays.watchparty: true
+      dreamdisplays.custom: true
+      dreamdisplays.lock: true
+      dreamdisplays.share: true
+      dreamdisplays.premium: true
+      dreamdisplays.updates: true
+  dreamdisplays.display.create:
     default: op
-  dreamdisplays.info:
+  dreamdisplays.display.create.unlimited:
     default: op
-  dreamdisplays.help:
+  dreamdisplays.display.delete:
+    default: op
+  dreamdisplays.display.name:
+    default: op
+  dreamdisplays.display.info:
+    default: op
+  dreamdisplays.display.list:
+    default: op
+  dreamdisplays.display.others:
+    default: op
+  dreamdisplays.playback.video:
+    default: op
+  dreamdisplays.playback.speed:
+    default: op
+  dreamdisplays.playback.mode:
+    default: op
+  dreamdisplays.playback.schedule:
+    default: op
+  dreamdisplays.queue:
+    default: op
+  dreamdisplays.karaoke.manage:
+    default: op
+  dreamdisplays.karaoke.join:
+    default: op
+  dreamdisplays.prepare:
+    default: op
+  dreamdisplays.fullscreen:
+    default: op
+  dreamdisplays.fullscreen.network:
+    default: op
+  dreamdisplays.share.manage:
+    default: op
+  dreamdisplays.viewing.toggle:
+    default: op
+  dreamdisplays.viewing.toggle.others:
+    default: op
+  dreamdisplays.admin.config:
+    default: op
+  dreamdisplays.admin.policy:
+    default: op
+  dreamdisplays.diag:
     default: op
   dreamdisplays.local:
     default: op
@@ -50,57 +124,103 @@ permissions:
     default: op
   dreamdisplays.custom:
     default: op
-  dreamdisplays.share:
-    default: op
-  dreamdisplays.share.admin:
-    default: op
   dreamdisplays.lock:
     default: op
-  dreamdisplays.delete:
-    default: op
-  dreamdisplays.lock.bypass.worldguard:
-    default: op
-  dreamdisplays.delete.others:
-    default: op
-  dreamdisplays.list:
-    default: op
-  dreamdisplays.stats:
+  dreamdisplays.share:
     default: op
   dreamdisplays.premium:
     default: op
-  dreamdisplays.reload:
-    default: op
   dreamdisplays.updates:
     default: op
-  dreamdisplays.toggle.others:
+  # Nodes of the previous release, kept for one release so existing grants still work.
+  dreamdisplays.create:
     default: op
+    children:
+      dreamdisplays.display.create: true
   dreamdisplays.create.bypass:
     default: op
-  dreamdisplays.fullscreen.start:
+    children:
+      dreamdisplays.display.create.unlimited: true
+  dreamdisplays.delete:
     default: op
-  dreamdisplays.fullscreen.stop:
+    children:
+      dreamdisplays.display.delete: true
+  dreamdisplays.delete.others:
     default: op
-  dreamdisplays.fullscreen.list:
-    default: op
-  dreamdisplays.fullscreen.network:
-    default: op
-  dreamdisplays.remote:
-    default: op
+    children:
+      dreamdisplays.display.others: true
   dreamdisplays.name:
     default: op
+    children:
+      dreamdisplays.display.name: true
   dreamdisplays.name.others:
     default: op
-  dreamdisplays.schedule:
+    children:
+      dreamdisplays.display.others: true
+  dreamdisplays.info:
     default: op
-  dreamdisplays.schedule.others:
+    children:
+      dreamdisplays.display.info: true
+  dreamdisplays.list:
     default: op
+    children:
+      dreamdisplays.display.list: true
+  dreamdisplays.video:
+    default: op
+    children:
+      dreamdisplays.playback.video: true
   dreamdisplays.speed:
     default: op
+    children:
+      dreamdisplays.playback.speed: true
   dreamdisplays.mode:
     default: op
-  dreamdisplays.queue:
+    children:
+      dreamdisplays.playback.mode: true
+  dreamdisplays.schedule:
     default: op
+    children:
+      dreamdisplays.playback.schedule: true
+  dreamdisplays.schedule.others:
+    default: op
+    children:
+      dreamdisplays.display.others: true
   dreamdisplays.karaoke:
     default: op
-  dreamdisplays.karaoke.join:
+    children:
+      dreamdisplays.karaoke.manage: true
+  dreamdisplays.fullscreen.start:
     default: op
+    children:
+      dreamdisplays.fullscreen: true
+      dreamdisplays.prepare: true
+  dreamdisplays.fullscreen.stop:
+    default: op
+    children:
+      dreamdisplays.fullscreen: true
+  dreamdisplays.fullscreen.list:
+    default: op
+    children:
+      dreamdisplays.fullscreen: true
+  dreamdisplays.share.admin:
+    default: op
+    children:
+      dreamdisplays.share.manage: true
+  dreamdisplays.help:
+    default: op
+    children:
+      dreamdisplays.viewing.toggle: true
+  dreamdisplays.toggle.others:
+    default: op
+    children:
+      dreamdisplays.viewing.toggle.others: true
+  dreamdisplays.reload:
+    default: op
+    children:
+      dreamdisplays.admin.config: true
+      dreamdisplays.admin.policy: true
+      dreamdisplays.diag: true
+  dreamdisplays.stats:
+    default: op
+    children:
+      dreamdisplays.diag: true

@@ -1,7 +1,12 @@
 package com.dreamdisplays.platform.server.commands.suggest
 
+import com.dreamdisplays.core.command.CommandDef
+import com.dreamdisplays.core.command.DisplayCommands
+import com.dreamdisplays.core.command.Kind
+import com.dreamdisplays.core.command.Suggestion
+import com.dreamdisplays.core.command.TargetMatch
+import com.dreamdisplays.core.command.startingWith
 import com.dreamdisplays.platform.server.commands.subcommands.FullscreenCommand
-import com.dreamdisplays.platform.server.commands.subcommands.ListFilter
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -25,13 +30,6 @@ internal object DisplaySuggestions {
         Suggestion("https://kick.com/", "suggestLinkKick"),
         Suggestion("https://", "suggestLinkDirect"),
     ]
-
-    private val FILTERS = mapOf(
-        ListFilter.MINE to "suggestFilterMine",
-        ListFilter.WORLD to "suggestFilterWorld",
-        ListFilter.OWNER to "suggestFilterOwner",
-        ListFilter.SYNC to "suggestFilterSync",
-    )
 
     private val SELECTORS = [
         Suggestion("@a", "suggestSelectorAll"),
@@ -104,11 +102,6 @@ internal object DisplaySuggestions {
         }
     }
 
-    /** The `/display list` filters, then the page numbers of the unfiltered list. */
-    fun listFilters(typed: String): List<Suggestion> =
-        (ListFilter.entries.map { Suggestion(it.token, FILTERS[it]) } + pages(DisplayManager.getDisplays().size))
-            .startingWith(typed)
-
     /** Page numbers for a list of [size] displays. */
     fun pages(size: Int): List<Suggestion> {
         val count = maxOf(1, (size + PAGE_SIZE - 1) / PAGE_SIZE)
@@ -155,6 +148,45 @@ internal object DisplaySuggestions {
         val text = value?.let { String.format(Locale.ROOT, "%.1f", it) } ?: return []
         return [Suggestion(text, "suggestCoordinate", [axis.uppercase()])].startingWith(typed)
     }
+
+    /**
+     * What every platform suggests the same way for argument [name] of [kind] (null inside flags): display targets,
+     * links, sessions, fixed value lists. Null when the slot needs platform knowledge (players, worlds, ...).
+     */
+    fun common(def: CommandDef, name: String, kind: Kind?, typed: String, values: Map<String, String>): List<Suggestion>? =
+        when (kind) {
+            Kind.DISPLAY -> targets(typed, remote = true)
+            Kind.DISPLAY_OR_ALL -> (targets(typed, remote = true) + Suggestion(TargetMatch.ALL, "cmd.suggest.allDisplays"))
+                .startingWith(typed)
+
+            Kind.SOURCE -> targets(typed, remote = true) + links(typed)
+            Kind.SESSION -> (fullscreenStops(typed) + displays()).distinctBy { it.text }.startingWith(typed)
+            Kind.URL -> if (def.id == "video") {
+                links(typed) + listOf(Suggestion(DisplayCommands.CLEAR_VIDEO, "cmd.suggest.clearVideo")).startingWith(typed)
+            } else links(typed)
+
+            Kind.POSITIVE -> when (name) {
+                "page" -> pages(DisplayManager.getDisplays().size).startingWith(typed)
+                else -> null
+            }
+
+            else -> when (name) {
+                "name" -> currentName(values["display"] ?: TargetMatch.THIS, typed) +
+                        listOf(Suggestion("reset", "cmd.suggest.clearName")).startingWith(typed)
+
+                "mode" -> MODES.startingWith(typed)
+                "state" -> listOf(Suggestion("on"), Suggestion("off")).startingWith(typed)
+                "duet" -> listOf(Suggestion("duet", "suggestKaraokeSingerDuet")).startingWith(typed)
+                "servers" -> servers(typed)
+                "qualities" -> qualities(typed)
+                "volumes" -> volumes(typed)
+                "radii" -> radii(typed)
+                "ms", "lead", "count" -> emptyList()
+                else -> null
+            }
+        }
+
+    private val MODES = listOf("synced", "broadcast", "local").map { Suggestion(it) }
 
     private fun displays(): List<Suggestion> =
         DisplayManager.getDisplays()

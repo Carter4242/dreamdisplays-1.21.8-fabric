@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.core.command.DisplayCommands
 import com.dreamdisplays.platform.client.utils.literalText
 import com.dreamdisplays.platform.server.ModLoaderOnly
 import com.dreamdisplays.platform.server.PaperServer
@@ -9,6 +10,7 @@ import com.dreamdisplays.platform.server.datatypes.display.VanillaDisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.Scheduler.runAsync
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
+import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import com.dreamdisplays.platform.server.utils.VanillaPermissions
@@ -53,6 +55,13 @@ class NameCommand : SubCommand {
             return
         }
 
+        if (requestedName.equals(RESET_NAME, ignoreCase = true)) {
+            data.name = null
+            runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
+            MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.name.cleared"))
+            return
+        }
+
         val normalized = normalizeDisplayName(requestedName)
         if (normalized == null) {
             ServerMessage.INVALID_NAME.sendTo(player)
@@ -69,12 +78,15 @@ class NameCommand : SubCommand {
     }
 }
 
+/** `/display name <display> reset` clears the name. */
+private const val RESET_NAME = "reset"
+
 private val DISPLAY_NAME_PATTERN = Regex("^[A-Za-z0-9_-]{1,32}$")
 
 private fun normalizeDisplayName(raw: String?): String? {
     val trimmed = raw?.trim() ?: return null
     if (!DISPLAY_NAME_PATTERN.matches(trimmed)) return null
-    if (trimmed.equals("this", ignoreCase = true)) return null
+    if (trimmed.lowercase() in DisplayCommands.RESERVED_NAMES) return null
     if (runCatching { UUID.fromString(trimmed) }.isSuccess) return null
     return trimmed
 }
@@ -104,6 +116,13 @@ object VanillaNameCommand {
         ) {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return 0
+        }
+
+        if (requestedName.equals(RESET_NAME, ignoreCase = true)) {
+            data.name = null
+            ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(data) }
+            MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.name.cleared"))
+            return 1
         }
 
         val normalized = normalizeDisplayName(requestedName)

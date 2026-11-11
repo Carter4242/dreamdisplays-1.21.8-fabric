@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server
 
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.core.display.policy.ClientLogLevel
 import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.platform.server.storage.StorageBackend
@@ -199,7 +200,7 @@ data class SettingsSection(
     )
 
     /**
-     * Clients section: [latest_build] is the build id `/display clients` compares players against (empty = none);
+     * Clients section: [latest_build] is the build id `/display diag clients` compares players against (empty = none);
      * [error_reports] asks clients for error / hitch reports, which go to [error_log] (in the plugin folder) along with
      * display commands when [command_log] is on.
      */
@@ -244,77 +245,40 @@ data class StorageSection(
     )
 }
 
-/** Permissions section of the config. */
-data class PermissionsSection(
-    val permissions: PermissionsConfig = PermissionsConfig(),
-) {
-    val create get() = permissions.create
-    val video get() = permissions.video
-    val info get() = permissions.info
-    val premium get() = permissions.premium
-    val delete get() = permissions.delete
-    val list get() = permissions.list
-    val reload get() = permissions.reload
-    val updates get() = permissions.updates
-    val help get() = permissions.help
-    val stats get() = permissions.stats
-    val toggleOthers get() = permissions.toggle_others
-    val local get() = permissions.local
-    val synced get() = permissions.synced
-    val broadcast get() = permissions.broadcast
-    val watchparty get() = permissions.watchparty
-    val lock get() = permissions.lock
-    val deleteOthers get() = permissions.delete_others
-    val createBypass get() = permissions.create_bypass
-    val fullscreenStart get() = permissions.fullscreen_start
-    val fullscreenStop get() = permissions.fullscreen_stop
-    val fullscreenList get() = permissions.fullscreen_list
-    val fullscreenNetwork get() = permissions.fullscreen_network
-    val remote get() = permissions.remote
-    val custom get() = permissions.custom
-    val name get() = permissions.name
-    val nameOthers get() = permissions.name_others
-    val schedule get() = permissions.schedule
-    val scheduleOthers get() = permissions.schedule_others
-    val queue get() = permissions.queue
-    val karaoke get() = permissions.karaoke
-    val karaokeJoin get() = permissions.karaoke_join
-    val share get() = permissions.share
+/**
+ * The permission nodes the server checks ([Perm]). Fixed: `config.toml`'s old `[permissions]` table is ignored, so
+ * LuckPerms (or ops) is the one place they are managed.
+ */
+class PermissionsSection {
+    val create = Perm.DISPLAY_CREATE
+    val createBypass = Perm.DISPLAY_CREATE_UNLIMITED
+    val delete = Perm.DISPLAY_DELETE
 
-    data class PermissionsConfig(
-        val create: String = "dreamdisplays.create",
-        val video: String = "dreamdisplays.video",
-        val info: String = "dreamdisplays.info",
-        val premium: String = "group.premium",
-        val delete: String = "dreamdisplays.delete",
-        val list: String = "dreamdisplays.list",
-        val reload: String = "dreamdisplays.reload",
-        val updates: String = "dreamdisplays.updates",
-        val help: String = "dreamdisplays.help",
-        val stats: String = "dreamdisplays.stats",
-        val toggle_others: String = "dreamdisplays.toggle.others",
-        val local: String = "dreamdisplays.local",
-        val synced: String = "dreamdisplays.synced",
-        val broadcast: String = "dreamdisplays.broadcast",
-        val watchparty: String = "dreamdisplays.watchparty",
-        val lock: String = "dreamdisplays.lock",
-        val delete_others: String = "dreamdisplays.delete.others",
-        val create_bypass: String = "dreamdisplays.create.bypass",
-        val fullscreen_start: String = "dreamdisplays.fullscreen.start",
-        val fullscreen_stop: String = "dreamdisplays.fullscreen.stop",
-        val fullscreen_list: String = "dreamdisplays.fullscreen.list",
-        val fullscreen_network: String = "dreamdisplays.fullscreen.network",
-        val remote: String = "dreamdisplays.remote",
-        val custom: String = "dreamdisplays.custom",
-        val name: String = "dreamdisplays.name",
-        val name_others: String = "dreamdisplays.name.others",
-        val schedule: String = "dreamdisplays.schedule",
-        val schedule_others: String = "dreamdisplays.schedule.others",
-        val queue: String = "dreamdisplays.queue",
-        val karaoke: String = "dreamdisplays.karaoke",
-        val karaoke_join: String = "dreamdisplays.karaoke.join",
-        val share: String = "dreamdisplays.share",
-    )
+    /** Act on displays someone else owns (also the menu's playback admin). */
+    val deleteOthers = Perm.DISPLAY_OTHERS
+    val nameOthers = Perm.DISPLAY_OTHERS
+    val scheduleOthers = Perm.DISPLAY_OTHERS
+    val toggleOthers = Perm.VIEWING_TOGGLE_OTHERS
+    val info = Perm.DISPLAY_INFO
+    val list = Perm.DISPLAY_LIST
+    val name = Perm.DISPLAY_NAME
+    val video = Perm.PLAYBACK_VIDEO
+    val schedule = Perm.PLAYBACK_SCHEDULE
+    val queue = Perm.QUEUE
+    val reload = Perm.ADMIN_CONFIG
+    val stats = Perm.DIAG
+    val karaoke = Perm.KARAOKE_MANAGE
+    val karaokeJoin = Perm.KARAOKE_JOIN
+    val fullscreenNetwork = Perm.FULLSCREEN_NETWORK
+    val local = Perm.MENU_LOCAL
+    val synced = Perm.MENU_SYNCED
+    val broadcast = Perm.MENU_BROADCAST
+    val watchparty = Perm.MENU_WATCHPARTY
+    val custom = Perm.MENU_CUSTOM
+    val lock = Perm.MENU_LOCK
+    val share = Perm.MENU_SHARE
+    val premium = Perm.MENU_PREMIUM
+    val updates = Perm.MENU_UPDATES
 }
 
 /**
@@ -434,42 +398,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             use_ssl = t?.getBoolean("storage.use_ssl") ?: false,
         )
     ),
-    permissions = PermissionsSection(
-        permissions = PermissionsSection.PermissionsConfig(
-            create = t?.getString("permissions.create") ?: "dreamdisplays.create",
-            video = t?.getString("permissions.video") ?: "dreamdisplays.video",
-            info = t?.getString("permissions.info") ?: "dreamdisplays.info",
-            premium = t?.getString("permissions.premium") ?: "group.premium",
-            delete = t?.getString("permissions.delete") ?: "dreamdisplays.delete",
-            list = t?.getString("permissions.list") ?: "dreamdisplays.list",
-            reload = t?.getString("permissions.reload") ?: "dreamdisplays.reload",
-            updates = t?.getString("permissions.updates") ?: "dreamdisplays.updates",
-            help = t?.getString("permissions.help") ?: "dreamdisplays.help",
-            stats = t?.getString("permissions.stats") ?: "dreamdisplays.stats",
-            toggle_others = t?.getString("permissions.toggle_others") ?: "dreamdisplays.toggle.others",
-            local = t?.getString("permissions.local") ?: "dreamdisplays.local",
-            synced = t?.getString("permissions.synced") ?: "dreamdisplays.synced",
-            broadcast = t?.getString("permissions.broadcast") ?: "dreamdisplays.broadcast",
-            watchparty = t?.getString("permissions.watchparty") ?: "dreamdisplays.watchparty",
-            lock = t?.getString("permissions.lock") ?: "dreamdisplays.lock",
-            delete_others = t?.getString("permissions.delete_others") ?: "dreamdisplays.delete.others",
-            create_bypass = t?.getString("permissions.create_bypass") ?: "dreamdisplays.create.bypass",
-            fullscreen_start = t?.getString("permissions.fullscreen_start") ?: "dreamdisplays.fullscreen.start",
-            fullscreen_stop = t?.getString("permissions.fullscreen_stop") ?: "dreamdisplays.fullscreen.stop",
-            fullscreen_list = t?.getString("permissions.fullscreen_list") ?: "dreamdisplays.fullscreen.list",
-            fullscreen_network = t?.getString("permissions.fullscreen_network") ?: "dreamdisplays.fullscreen.network",
-            remote = t?.getString("permissions.remote") ?: "dreamdisplays.remote",
-            custom = t?.getString("permissions.custom") ?: "dreamdisplays.custom",
-            name = t?.getString("permissions.name") ?: "dreamdisplays.name",
-            name_others = t?.getString("permissions.name_others") ?: "dreamdisplays.name.others",
-            schedule = t?.getString("permissions.schedule") ?: "dreamdisplays.schedule",
-            schedule_others = t?.getString("permissions.schedule_others") ?: "dreamdisplays.schedule.others",
-            queue = t?.getString("permissions.queue") ?: "dreamdisplays.queue",
-            karaoke = t?.getString("permissions.karaoke") ?: "dreamdisplays.karaoke",
-            karaoke_join = t?.getString("permissions.karaoke_join") ?: "dreamdisplays.karaoke.join",
-            share = t?.getString("permissions.share") ?: "dreamdisplays.share",
-        )
-    ),
+    permissions = PermissionsSection(),
     proxy = ProxySection(
         enabled = t?.getBoolean("proxy.enabled") ?: false,
         clock_sync_interval = t?.getLong("proxy.clock_sync_interval")?.toInt() ?: 5,

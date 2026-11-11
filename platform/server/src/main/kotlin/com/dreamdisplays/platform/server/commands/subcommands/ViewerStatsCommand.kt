@@ -14,9 +14,9 @@ import org.bukkit.entity.Player
 import java.util.Locale
 
 /**
- * `/display stats <display>`: what every viewer of a display last reported (sync drift, rate, latency compensation,
- * corrections, stalls, errors, quality); `/display stats` adds a one-line summary per reported display. Same
- * permission as `/display policy`; output only goes to the sender.
+ * `/display stats [display]`: what every viewer of a display last reported (sync drift, rate, latency compensation,
+ * corrections, stalls, errors, quality); `/display stats all`: a one-line summary per reported display. Output
+ * only goes to the sender.
  */
 @PaperOnly
 object ViewerStatsCommand {
@@ -95,13 +95,7 @@ object ViewerStatsCommand {
         )
     }
 
-    private fun resolve(sender: CommandSender, token: String): DisplayData? {
-        if (sender is Player) return resolvePaperDisplayTarget(sender, sender, token)
-        return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(sender)
-            null
-        }
-    }
+    private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)
 
     private fun ms(value: Int?): String = value?.let { "${it}ms" } ?: "-"
 

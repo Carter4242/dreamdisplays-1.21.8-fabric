@@ -24,8 +24,7 @@ import org.bukkit.entity.Player
 import java.util.UUID
 
 /**
- * `/display queue <display> [list | add <url> | remove <n> | move <n> <pos> | skip | clear | loop on|off]` for
- * operators (`permissions.queue`). Acts with admin rights on the display; positions are 1-based as listed.
+ * `/display queue list|add|remove|move|skip|clear|loop <display> ...` for operators (`dreamdisplays.queue`). Acts with admin rights on the display; positions are 1-based as listed.
  */
 @PaperOnly
 object QueueCommand {
@@ -43,7 +42,7 @@ object QueueCommand {
             }
 
             "move" -> withItem(sender, display, args.getOrNull(0)) { itemId ->
-                val to = args.getOrNull(1)?.toIntOrNull() ?: return@withItem MessageUtil.sendMessage(sender, "queueBadIndex")
+                val to = args.getOrNull(1)?.toIntOrNull() ?: return@withItem MessageUtil.sendMessage(sender, "cmd.queue.badPosition")
                 report(sender, display, QueueManager.move(display, ctx, actorOf(sender, display), itemId, to - 1), "queueMoved")
             }
 
@@ -72,17 +71,8 @@ object QueueCommand {
         return (1..size).map { it.toString() }
     }
 
-    private fun resolve(sender: CommandSender, token: String): PaperDisplayData? {
-        val display = if (sender is Player) {
-            resolvePaperDisplayTarget(sender, sender, token)
-        } else {
-            DisplayManager.resolveByIdOrPrefix(token) ?: run {
-                ServerMessage.NO_DISPLAY.sendTo(sender)
-                null
-            }
-        }
-        return display as? PaperDisplayData
-    }
+    private fun resolve(sender: CommandSender, token: String): PaperDisplayData? =
+        resolvePaperDisplay(sender, token) as? PaperDisplayData
 
     private fun adminContext(display: DisplayData): PlaybackContext {
         val base = PlaybackContexts.of(display, display.ownerId, isAdmin = true)
@@ -124,7 +114,7 @@ object QueueCommand {
     private fun withItem(sender: CommandSender, display: DisplayData, position: String?, block: (String) -> Unit) {
         val index = position?.toIntOrNull()?.minus(1)
         val item = index?.let { QueueManager.snapshotOf(display.id)?.items?.getOrNull(it) }
-            ?: return MessageUtil.sendMessage(sender, "queueBadIndex")
+            ?: return MessageUtil.sendMessage(sender, "cmd.queue.badPosition")
         block(item.itemId)
     }
 
@@ -135,7 +125,7 @@ object QueueCommand {
             QueueManager.Result.NOT_RUNNING -> "queueNotRunning"
             QueueManager.Result.FULL -> "queueFull"
             QueueManager.Result.EMPTY -> "queueEmpty"
-            QueueManager.Result.NOT_FOUND -> "queueBadIndex"
+            QueueManager.Result.NOT_FOUND -> "cmd.queue.badPosition"
             QueueManager.Result.NOT_ALLOWED -> ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.key
             QueueManager.Result.PLAYER_LIMIT -> "queuePlayerLimit"
             QueueManager.Result.THROTTLED -> "queueSlowDown"

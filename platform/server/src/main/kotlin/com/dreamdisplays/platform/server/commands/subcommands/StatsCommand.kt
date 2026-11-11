@@ -18,8 +18,7 @@ import net.minecraft.server.level.ServerPlayer
 import org.bukkit.command.CommandSender
 
 /**
- * Handles the `/display stats` command. Prints a per-mod-version breakdown of currently
- * connected players that have reported their client version.
+ * The mod-version tally of `/display diag clients`: how many connected players run each reported client version.
  */
 @PaperOnly
 class StatsCommand : SubCommand {
@@ -45,7 +44,6 @@ class StatsCommand : SubCommand {
 
         val total = counts.values.sum()
         MessageUtil.sendColoredMessage(sender, MessageUtil.formatPrintf(sender, ServerMessage.DISPLAY_STATS_TOTAL, total))
-        if (PolicyCommand.allowed(sender)) ViewerStatsCommand.executeAll(sender)
     }
 }
 

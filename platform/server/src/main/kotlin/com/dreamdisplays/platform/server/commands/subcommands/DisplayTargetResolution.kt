@@ -1,60 +1,94 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
-import com.dreamdisplays.platform.server.PaperServer
-import com.dreamdisplays.platform.server.VanillaServerState
+import com.dreamdisplays.core.command.TargetMatch
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
-import com.dreamdisplays.platform.server.utils.ServerMessage
-import com.dreamdisplays.platform.server.utils.sendTo
+import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.RegionUtil
-import com.dreamdisplays.platform.server.utils.VanillaPermissions
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import net.minecraft.server.level.ServerPlayer
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
+/** How far `this` reaches: the display the player looks at within this many blocks. */
+private const val LOOK_REACH = 32
+
+/** Every registered display, as [TargetMatch] sees it. */
+private fun candidates(): List<TargetMatch.Candidate> =
+    DisplayManager.getDisplays().map { TargetMatch.Candidate(it.id, it.name) }
+
 /**
- * Resolves [token] to a [DisplayData] for `/display info|delete|video`, shared across all three since they all accept
- * the same `this` / id / name target syntax.
+ * The display [token] names for any sender, the one way every `/display` command reads a display: `this` (or null) is
+ * the display a player looks at; otherwise a full id, a name, or a unique id prefix (see [TargetMatch]). Tells
+ * [sender] why when there is none and returns null.
  */
 @PaperOnly
-fun resolvePaperDisplayTarget(sender: CommandSender, player: Player, token: String): DisplayData? {
-    if (token.equals("this", ignoreCase = true)) {
-        val block = player.getTargetBlock(null, 32)
-        return DisplayManager.isContains(block.location) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(sender)
-            null
+fun resolvePaperDisplay(sender: CommandSender, token: String?): DisplayData? =
+    when (val match = TargetMatch.match(token, candidates())) {
+        TargetMatch.Result.LookedAt -> {
+            val player = sender as? Player
+            if (player == null) {
+                MessageUtil.sendColoredMessage(sender, MessageUtil.formatIndexed(sender, "cmd.error.needsPlayer"))
+                null
+            } else {
+                DisplayManager.isContains(player.getTargetBlock(null, LOOK_REACH).location) ?: run {
+                    MessageUtil.sendColoredMessage(sender, MessageUtil.formatIndexed(sender, "cmd.error.notLooking", LOOK_REACH.toString()))
+                    null
+                }
+            }
         }
-    }
-    if (!player.hasPermission(PaperServer.config.permissions.remote)) {
-        ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(sender)
-        return null
-    }
-    return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-        ServerMessage.NO_DISPLAY.sendTo(sender)
-        null
-    }
-}
 
-/** `Fabric` / `NeoForge` counterpart of [resolvePaperDisplayTarget]. */
-fun resolveVanillaDisplayTarget(player: ServerPlayer, token: String): DisplayData? {
-    if (token.equals("this", ignoreCase = true)) {
-        val targetPos = RegionUtil.getTargetedBlockPos(player) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(player)
-            return null
+        is TargetMatch.Result.Found -> DisplayManager.getDisplayData(match.id)
+        TargetMatch.Result.NotFound -> {
+            MessageUtil.sendColoredMessage(sender, MessageUtil.formatIndexed(sender, "cmd.error.noDisplay", token.orEmpty()))
+            null
         }
-        val worldKey = RegionUtil.getPlayerLevelKey(player)
-        return DisplayManager.isContains(worldKey, targetPos) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(player)
+
+        is TargetMatch.Result.Ambiguous -> {
+            MessageUtil.sendColoredMessage(
+                sender,
+                MessageUtil.formatIndexed(
+                    sender, "cmd.error.ambiguous", token.orEmpty(), match.labels.size.toString(), match.labels.joinToString(", "),
+                ),
+            )
             null
         }
     }
-    if (!VanillaPermissions.has(player, VanillaServerState.config.permissions.remote, VanillaPermissions.Fallback.OP)) {
-        ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
-        return null
+
+/** [resolvePaperDisplay] for commands that already hold the sending [player]. */
+@PaperOnly
+fun resolvePaperDisplayTarget(sender: CommandSender, player: Player, token: String): DisplayData? =
+    resolvePaperDisplay(sender, token)
+
+/** The display [token] names by id, name or prefix (never `this`), without telling anyone when there is none. */
+fun findDisplayQuietly(token: String): DisplayData? =
+    (TargetMatch.match(token, candidates()) as? TargetMatch.Result.Found)?.let { DisplayManager.getDisplayData(it.id) }
+
+/** `Fabric` / `NeoForge` counterpart of [resolvePaperDisplay], for a player sender. */
+fun resolveVanillaDisplayTarget(player: ServerPlayer, token: String): DisplayData? =
+    when (val match = TargetMatch.match(token, candidates())) {
+        TargetMatch.Result.LookedAt -> {
+            val targetPos = RegionUtil.getTargetedBlockPos(player)
+            val display = targetPos?.let { DisplayManager.isContains(RegionUtil.getPlayerLevelKey(player), it) }
+            display ?: run {
+                MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.error.notLooking", LOOK_REACH.toString()))
+                null
+            }
+        }
+
+        is TargetMatch.Result.Found -> DisplayManager.getDisplayData(match.id)
+        TargetMatch.Result.NotFound -> {
+            MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.error.noDisplay", token))
+            null
+        }
+
+        is TargetMatch.Result.Ambiguous -> {
+            MessageUtil.sendColoredMessage(
+                player,
+                MessageUtil.formatIndexed(
+                    player, "cmd.error.ambiguous", token, match.labels.size.toString(), match.labels.joinToString(", "),
+                ),
+            )
+            null
+        }
     }
-    return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-        ServerMessage.NO_DISPLAY.sendTo(player)
-        null
-    }
-}

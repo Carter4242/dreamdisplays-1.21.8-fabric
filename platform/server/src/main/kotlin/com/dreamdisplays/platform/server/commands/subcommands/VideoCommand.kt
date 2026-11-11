@@ -202,3 +202,24 @@ object VanillaVideoCommand {
         return 1
     }
 }
+
+/**
+ * `/display video <display> clear`: takes the video off [display] for everyone, with the same ownership rule as
+ * setting one. PLACEHOLDER until the server's own clear-video function lands (branch fix2-server): at the merge,
+ * replace the body below the permission check with a call to it.
+ */
+@PaperOnly
+fun clearDisplayVideo(player: Player, display: PaperDisplayData) {
+    val admin = player.hasPermission(PaperServer.config.permissions.deleteOthers)
+    if (!PlaybackPermissions.canSetVideo(PlaybackContexts.of(display, player.uniqueId, admin))) {
+        ServerMessage.DISPLAY_VIDEO_NOT_OWNER.sendTo(player)
+        return
+    }
+    display.url = ""
+    display.lang = ""
+    runAsync { PaperServer.getInstance().storage.saveDisplay(display) }
+    DisplayManager.broadcastUpdate(display)
+    TimelineManager.onVideoChanged(display)
+    ServerApiHost.current?.urlChanged(display)
+    MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.video.cleared", display.name ?: display.id.toString().take(8)))
+}

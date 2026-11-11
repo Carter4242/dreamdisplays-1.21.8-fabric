@@ -22,9 +22,9 @@ import java.time.format.DateTimeFormatter
 import java.util.*
 
 /**
- * `/display errors [player|display|#n] [errors|hitches|commands] [count]`: the latest client error reports, playback
+ * `/display diag errors [player|display|#n] [errors|hitches|shares|commands] [count]`: the latest client error reports, playback
  * hitches and display commands (newest first), each with its detail on hover; clicking one (or `#n`) prints all of
- * it. `/display diag <player>`: that player's client environment summary. Same permission as `/display policy`;
+ * it. `/display diag env <player>`: that player's client environment summary. Permission `dreamdisplays.diag`;
  * output only goes to the sender. Client-supplied text is printed as plain text, never parsed for formatting.
  */
 @PaperOnly
@@ -130,7 +130,7 @@ object ErrorsCommand {
         }
         return head.append(body)
             .hoverEvent(HoverEvent.showText(text(detail(e, hover = true), NamedTextColor.GRAY)))
-            .clickEvent(ClickEvent.runCommand("/display errors #${e.seq}"))
+            .clickEvent(ClickEvent.runCommand("/display diag errors #${e.seq}"))
     }
 
     private fun showDetail(sender: CommandSender, seq: Long?) {
@@ -187,7 +187,7 @@ object ErrorsCommand {
         if (hover) append("click for everything")
     }.trimEnd()
 
-    /** `/display diag <player>`: the stored environment summary. */
+    /** `/display diag env <player>`: the stored environment summary. */
     fun diag(sender: CommandSender, name: String) {
         val online = Bukkit.getPlayerExact(name)
         val id = online?.uniqueId ?: ClientErrorReports.findPlayer(name)?.first
@@ -238,9 +238,9 @@ object ErrorsCommand {
 }
 
 /**
- * `/display debug <player> [quiet|normal|verbose|ultra|reset]`: shows or sets how much that player's client writes to
+ * `/display diag loglevel <player> [quiet|normal|verbose|ultra|reset]`: shows or sets how much that player's client writes to
  * its own log. Saved per player and pushed to their client within a second; reports to the server are the same at
- * every level. Same permission as `/display policy`.
+ * every level.
  */
 @PaperOnly
 object DebugLevelCommand {

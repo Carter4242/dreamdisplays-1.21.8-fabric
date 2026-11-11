@@ -1,726 +1,240 @@
 package com.dreamdisplays.platform.server.registrar
 
-import com.dreamdisplays.platform.server.PaperServer
-import com.dreamdisplays.platform.server.commands.brigadier.answeredByServer
-import com.dreamdisplays.platform.server.commands.brigadier.argument
-import com.dreamdisplays.platform.server.commands.brigadier.executesCommand
-import com.dreamdisplays.platform.server.commands.brigadier.literal
+import com.dreamdisplays.core.command.Call
+import com.dreamdisplays.core.command.ChatLine
+import com.dreamdisplays.core.command.CommandPlatform
+import com.dreamdisplays.core.command.DisplayCommandTree
+import com.dreamdisplays.core.command.DisplayCommands
+import com.dreamdisplays.core.command.Handler
+import com.dreamdisplays.core.command.Kind
+import com.dreamdisplays.core.command.Perm
+import com.dreamdisplays.core.command.SuggestRequest
+import com.dreamdisplays.core.command.Suggestion
+import com.dreamdisplays.core.command.TargetMatch
+import com.dreamdisplays.core.command.startingWith
 import com.dreamdisplays.platform.server.commands.subcommands.*
 import com.dreamdisplays.platform.server.commands.suggest.DisplaySuggestions
-import com.dreamdisplays.platform.server.commands.suggest.Suggestion
-import com.dreamdisplays.platform.server.commands.suggest.Tooltips
-import com.dreamdisplays.platform.server.commands.suggest.startingWith
-import com.dreamdisplays.platform.server.commands.suggest.suggesting
-import com.dreamdisplays.platform.server.commands.tree.FullscreenFlags
+import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
+import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ScheduleTimeUtil
-import com.mojang.brigadier.Command
-import com.mojang.brigadier.arguments.StringArgumentType
-import com.mojang.brigadier.builder.LiteralArgumentBuilder
-import com.mojang.brigadier.builder.RequiredArgumentBuilder
-import com.mojang.brigadier.context.CommandContext
-import com.mojang.brigadier.tree.CommandNode
 import com.mojang.brigadier.tree.LiteralCommandNode
 import io.github.arnodoelinger.platformweaver.PaperOnly
 //? if >=1.20.5 {
 import io.papermc.paper.command.brigadier.CommandSourceStack
 //?}
+import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.event.HoverEvent
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+import org.bukkit.Bukkit
+import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
 /**
- * Command registrar. Builds the `/display` command tree. See `VanillaCommandTree.kt` for the shared
- * `Fabric` / `NeoForge` equivalent, built on the same DSL and suggestions.
+ * The `Paper` `/display` command: [DisplayCommands] compiled by [DisplayCommandTree], with a handler per command.
+ * `VanillaCommandTree.kt` is the `Fabric` / `NeoForge` counterpart over the same spec.
  */
 @PaperOnly
 object CommandRegistrar {
-    /** Builds the full tree for the `/display` command with all subcommands. */
-    fun buildDisplayCommand(): LiteralCommandNode<CommandSourceStack> =
-        literal<CommandSourceStack>("display") {
-            // hidden from tab-complete and unusable for anyone without the help permission (op by default)
-            requires { it.sender !is Player || it.sender.hasPermission(PaperServer.config.permissions.help) }
-            executesCommand { ctx -> HelpCommand().execute(ctx.source.sender, emptyArray()) }
+    private val legacy = LegacyComponentSerializer.legacyAmpersand()
 
-            createBranch()
-            deleteBranch()
-            videoBranch()
-            nameBranch()
-            infoBranch()
-            listBranch()
-            scheduleBranch()
-            queueBranch()
-            karaokeBranch()
-            fullscreenBranch()
-            statsBranch()
-            clientsBranch()
-            errorsBranch()
-            diagBranch()
-            debugBranch()
-            reloadBranch()
-            policyBranch()
-            speedBranch()
-            modeBranch()
-            configBranch()
-            shareBranch()
-            toggleBranch("on", "suggestOn", OnCommand())
-            toggleBranch("off", "suggestOff", OffCommand())
-            helpBranch()
-        }.build().answeredByServer()
+    /** Builds the `/display` node to register. */
+    fun buildDisplayCommand(): LiteralCommandNode<CommandSourceStack> = DisplayCommandTree(platform, handlers).root()
 
-    private val tips = Tooltips<CommandSourceStack> { source, key, args ->
-        MessageUtil.formatIndexed(source.sender, key, *args)
-    }
+    private val platform = object : CommandPlatform<CommandSourceStack> {
+        override fun has(source: CommandSourceStack, permission: String) = source.sender.hasPermission(permission)
 
-    private fun tip(key: String): (CommandSourceStack) -> String = { tips.of(it, key) }
+        override fun isPlayer(source: CommandSourceStack) = source.sender is Player
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.helpBranch() {
-        literal("help", tip("suggestHelp")) {
-            executesCommand { ctx -> HelpCommand().execute(ctx.source.sender, emptyArray()) }
+        override fun text(source: CommandSourceStack, key: String, vararg args: String) =
+            MessageUtil.formatIndexed(source.sender, key, *args)
+
+        override fun send(source: CommandSourceStack, lines: List<ChatLine>) = lines.forEach { line ->
+            var component = legacy.deserialize(line.text)
+            line.hover?.let { component = component.hoverEvent(HoverEvent.showText(legacy.deserialize(it))) }
+            when (val click = line.click) {
+                is ChatLine.Click.Run -> component = component.clickEvent(ClickEvent.runCommand(click.command))
+                is ChatLine.Click.Suggest -> component = component.clickEvent(ClickEvent.suggestCommand(click.command))
+                null -> {}
+            }
+            MessageUtil.sendComponent(source.sender, component)
         }
+
+        override fun suggest(source: CommandSourceStack, request: SuggestRequest<CommandSourceStack>): List<Suggestion> =
+            suggestions(source, request)
     }
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.createBranch() {
-        literal("create", tip("suggestCreate")) {
-            requires { it.sender is Player && it.sender.hasPermission(PaperServer.config.permissions.create) }
-            executesCommand { ctx -> CreateCommand().execute(ctx.source.sender, emptyArray()) }
-        }
+    private fun h(block: (CommandSender, Call<CommandSourceStack>) -> Unit) =
+        Handler<CommandSourceStack> { call -> block(call.source.sender, call) }
+
+    private val handlers: Map<String, Handler<CommandSourceStack>> = mapOf(
+        "on" to h { s, c -> OnCommand().execute(s, (listOf<String?>("on") + listOfNotNull(c["player"])).toTypedArray()) },
+        "off" to h { s, c -> OffCommand().execute(s, (listOf<String?>("off") + listOfNotNull(c["player"])).toTypedArray()) },
+
+        "create" to h { s, _ -> CreateCommand().execute(s, emptyArray()) },
+        "delete" to h { s, c -> DeleteCommand().execute(s, arrayOf<String?>(c.display)) },
+        "info" to h { s, c -> InfoCommand().execute(s, arrayOf<String?>(c.display)) },
+        "name" to h { s, c -> NameCommand().execute(s, arrayOf(c.display, c["name"])) },
+        "list" to h { s, c -> list(s, null, null, c["page"]) },
+        "list.mine" to h { s, c -> list(s, "mine", null, c["page"]) },
+        "list.world" to h { s, c -> list(s, "world", c["world"], c["page"]) },
+        "list.owner" to h { s, c -> list(s, "owner", c["owner"], c["page"]) },
+        "list.mode" to h { s, c -> list(s, "mode", c["mode"], c["page"]) },
+
+        "video" to h { s, c ->
+            if (c["url"].equals(DisplayCommands.CLEAR_VIDEO, ignoreCase = true)) {
+                val display = resolvePaperDisplay(s, c.display) as? PaperDisplayData ?: return@h
+                clearDisplayVideo(s as Player, display)
+            } else {
+                VideoCommand().execute(s, arrayOf(c.display, c["url"], c["lang"] ?: ""))
+            }
+        },
+        "speed" to h { s, c -> SpeedCommand.execute(s, c.display, c["rate"]) },
+        "mode" to h { s, c -> ModeCommand.execute(s, c.display, c["mode"]) },
+        "stats" to h { s, c ->
+            if (c.display.equals(TargetMatch.ALL, ignoreCase = true)) ViewerStatsCommand.executeAll(s)
+            else ViewerStatsCommand.execute(s, c.display)
+        },
+
+        "schedule.show" to h { s, c -> ScheduleCommand().execute(s, arrayOf(c.display, null, null)) },
+        "schedule.play" to h { s, c -> ScheduleCommand().execute(s, arrayOf(c.display, "play", c["time"])) },
+        "schedule.pause" to h { s, c -> ScheduleCommand().execute(s, arrayOf(c.display, "pause", c["time"])) },
+        "schedule.cancel" to h { s, c -> ScheduleCommand().execute(s, arrayOf(c.display, "cancel", null)) },
+
+        "queue.list" to h { s, c -> QueueCommand.execute(s, c.display, "list", emptyList()) },
+        "queue.add" to h { s, c -> QueueCommand.execute(s, c.display, "add", listOfNotNull(c["url"])) },
+        "queue.remove" to h { s, c -> QueueCommand.execute(s, c.display, "remove", listOfNotNull(c["n"])) },
+        "queue.move" to h { s, c -> QueueCommand.execute(s, c.display, "move", listOfNotNull(c["n"], c["to"])) },
+        "queue.skip" to h { s, c -> QueueCommand.execute(s, c.display, "skip", emptyList()) },
+        "queue.clear" to h { s, c -> QueueCommand.execute(s, c.display, "clear", emptyList()) },
+        // Without on|off it shows the queue, whose header carries the loop state
+        "queue.loop" to h { s, c ->
+            val state = c["state"]
+            QueueCommand.execute(s, c.display, if (state == null) "list" else "loop", listOfNotNull(state))
+        },
+
+        "karaoke.status" to karaoke("status"),
+        "karaoke.stop" to karaoke("stop"),
+        "karaoke.trim" to karaoke("trim", "@ms"),
+        "karaoke.singer.add" to karaoke("singer", "add", "@player", "@duet", "@lead"),
+        "karaoke.singer.remove" to karaoke("singer", "remove", "@singer"),
+        "karaoke.singer.trim" to karaoke("singer", "trim", "@singer", "@ms"),
+        "karaoke.join" to karaoke("join", "@url"),
+        "karaoke.leave" to karaoke("leave"),
+        "karaoke.line.list" to karaoke("line"),
+        "karaoke.line.add" to karaoke("line", "add", "@player", "@url"),
+        "karaoke.line.remove" to karaoke("line", "remove", "@singer"),
+        "karaoke.line.clear" to karaoke("line", "clear"),
+
+        "prepare.start" to h { s, c ->
+            val id = sourceToken(s, c["source"]!!, network = false) ?: return@h
+            PaperFullscreenCommand.prepare(s, c.source.location, id, c.flags!!.prepareOptions())
+        },
+        "prepare.list" to h { s, _ -> PaperFullscreenCommand.list(s) },
+        "prepare.cancel" to h { s, c -> PaperFullscreenCommand.stop(s, sessionToken(c["id"]!!)) },
+        "fullscreen.start" to h { s, c ->
+            val flags = c.flags!!
+            val id = sourceToken(s, c["source"]!!, network = flags.has("server")) ?: return@h
+            PaperFullscreenCommand.start(s, c.source.location, id, flags.startOptions())
+        },
+        "fullscreen.list" to h { s, _ -> PaperFullscreenCommand.list(s) },
+        "fullscreen.stop" to h { s, c -> PaperFullscreenCommand.stop(s, sessionToken(c["id"]!!)) },
+
+        "share.stop" to h { s, c -> ShareCommand.stop(s, c.display) },
+        "share.list" to h { s, _ -> ShareCommand.list(s) },
+
+        "config" to h { s, c -> ConfigCommand.execute(s, c["key"], c["value"]) },
+        "policy" to h { s, c -> PolicyCommand.execute(s, c.display, c["key"], c["value"]) },
+        "reload" to h { s, _ -> ReloadCommand().execute(s, emptyArray()) },
+
+        "diag.clients" to h { s, _ ->
+            StatsCommand().execute(s, emptyArray())
+            ClientsCommand.execute(s)
+        },
+        "diag.env" to h { s, c -> ErrorsCommand.diag(s, c["player"]!!) },
+        "diag.loglevel" to h { s, c -> DebugLevelCommand.execute(s, c["player"]!!, c["level"]) },
+        "diag.errors" to h { s, c -> ErrorsCommand.execute(s, listOfNotNull(c["who"], c["type"], c["count"])) },
+    )
+
+    private fun list(sender: CommandSender, filter: String?, value: String?, page: String?) =
+        ListCommand().execute(sender, (listOf<String?>("list") + listOfNotNull(filter, value, page)).toTypedArray())
+
+    /** Hands [KaraokeCommand] the [words] in its order; `@name` stands for that argument's value (left out when absent). */
+    private fun karaoke(vararg words: String) = h { s, c ->
+        val args = words.mapNotNull { word -> if (word.startsWith("@")) c[word.substring(1)] else word }
+        KaraokeCommand.execute(s, c.display, args)
     }
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.deleteBranch() {
-        literal("delete", tip("suggestDelete")) {
-            requires { it.sender is Player }
-            target {
-                executesCommand { ctx -> DeleteCommand().execute(ctx.source.sender, arrayOf(target(ctx))) }
+    /**
+     * The id `fullscreen`/`prepare` start get for [token]: a URL as typed, else the display's full id. A network
+     * broadcast passes ids as typed too, since the display may live on another backend.
+     */
+    private fun sourceToken(sender: CommandSender, token: String, network: Boolean): String? {
+        if (network || token.contains("://")) return token
+        return resolvePaperDisplay(sender, token)?.id?.toString()
+    }
+
+    /** A session or preparation id, `all`, or a display named any way, as `PaperFullscreenCommand.stop` takes it. */
+    private fun sessionToken(token: String): String {
+        if (token.equals(TargetMatch.ALL, ignoreCase = true)) return token
+        if (FullscreenCommand.stopSuggestions().any { it.equals(token, ignoreCase = true) }) return token
+        return findDisplayQuietly(token)?.id?.toString() ?: token
+    }
+
+    private fun suggestions(source: CommandSourceStack, r: SuggestRequest<CommandSourceStack>): List<Suggestion> {
+        val sender = source.sender
+        val typed = r.typed
+        val values = r.call.values
+        DisplaySuggestions.common(r.def, r.name, r.kind, typed, values)?.let { common ->
+            return when {
+                r.def.id == "share.stop" -> (ShareCommand.sharedDisplaySuggestions().map { Suggestion(it) } + common)
+                    .distinctBy { it.text }.startingWith(typed)
+
+                else -> common
             }
         }
-    }
+        val online = PaperFullscreenCommand.onlinePlayerNames()
+        return when (r.kind) {
+            Kind.PLAYER -> if (r.def.id == "on" || r.def.id == "off") {
+                if (sender.hasPermission(Perm.VIEWING_TOGGLE_OTHERS)) DisplaySuggestions.players(online, typed) else emptyList()
+            } else DisplaySuggestions.players(online, typed)
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.infoBranch() {
-        literal("info", tip("suggestInfo")) {
-            requires { it.sender is Player && it.sender.hasPermission(PaperServer.config.permissions.info) }
-            target {
-                executesCommand { ctx -> InfoCommand().execute(ctx.source.sender, arrayOf(target(ctx))) }
-            }
-        }
-    }
+            Kind.KNOWN_PLAYER -> DisplaySuggestions.players((online + ClientErrorReports.knownPlayerNames()).distinct(), typed)
+            Kind.LANG -> VideoCommand.languageSuggestions.map { Suggestion(it, "suggestLanguage") }.startingWith(typed)
+            Kind.TIME -> DisplaySuggestions.scheduleTimes(
+                (sender as? Player)?.let { ScheduleTimeUtil.offsetMinutesOf(it.uniqueId) } ?: 0, typed,
+            )
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.statsBranch() {
-        literal("stats", tip("suggestStats")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.stats) || PolicyCommand.allowed(it.sender) }
-            executesCommand { ctx -> StatsCommand().execute(ctx.source.sender, emptyArray()) }
-            target {
-                requires { PolicyCommand.allowed(it.sender) }
-                executesCommand { ctx -> ViewerStatsCommand.execute(ctx.source.sender, target(ctx)) }
-            }
-        }
-    }
+            Kind.POSITIVE -> QueueCommand.positions(values["display"] ?: TargetMatch.THIS).map { Suggestion(it) }.startingWith(typed)
+            else -> when (r.name) {
+                "players" -> DisplaySuggestions.playerList(online, typed)
+                "x" -> DisplaySuggestions.coordinate(source.location.x, "x", typed)
+                "y" -> DisplaySuggestions.coordinate(source.location.y, "y", typed)
+                "z" -> DisplaySuggestions.coordinate(source.location.z, "z", typed)
+                "world" -> Bukkit.getWorlds().map { Suggestion(it.name, "suggestWorld") }.startingWith(typed)
+                "owner" -> DisplayManager.getDisplays().mapNotNull { Bukkit.getOfflinePlayer(it.ownerId).name }.distinct()
+                    .sorted().map { Suggestion(it, "suggestOwner") }.startingWith(typed)
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.clientsBranch() {
-        literal("clients", tip("suggestClients")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            executesCommand { ctx -> ClientsCommand.execute(ctx.source.sender) }
-        }
-    }
+                "rate" -> SpeedCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
+                "singer" -> DisplaySuggestions.players(
+                    (KaraokeCommand.knownNames(values["display"] ?: TargetMatch.THIS) + online).distinct(), typed,
+                )
 
-    private fun LiteralArgumentBuilder<CommandSourceStack>.errorsBranch() {
-        fun arg(ctx: CommandContext<CommandSourceStack>, name: String): String? =
-            tryArg(ctx, name, String::class.java)
+                "key" -> (if (r.def.id == "config") ConfigCommand.keySuggestions() else PolicyCommand.keySuggestions())
+                    .map { Suggestion(it) }.startingWith(typed)
 
-        fun run(ctx: CommandContext<CommandSourceStack>) =
-            ErrorsCommand.execute(ctx.source.sender, listOfNotNull(arg(ctx, "a"), arg(ctx, "b"), arg(ctx, "c")))
-
-        literal("errors", tip("suggestErrors")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            executesCommand { ctx -> run(ctx) }
-            argument("a", BareTokenArgumentType) {
-                suggests(suggesting(tips) { _, _, typed ->
-                    ErrorsCommand.targetSuggestions().map { Suggestion(it) }.startingWith(typed)
-                })
-                executesCommand { ctx -> run(ctx) }
-                argument("b", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx -> run(ctx) }
-                    argument("c", StringArgumentType.word()) {
-                        suggests(suggesting(tips) { _, _, typed ->
-                            ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
-                        })
-                        executesCommand { ctx -> run(ctx) }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.debugBranch() {
-        literal("debug", tip("suggestDebug")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            argument("player", StringArgumentType.word()) {
-                suggests(suggesting(tips) { _, _, typed ->
-                    (PaperFullscreenCommand.onlinePlayerNames() + ClientErrorReports.knownPlayerNames()).distinct()
+                "value" -> {
+                    val key = values["key"] ?: return emptyList()
+                    (if (r.def.id == "config") ConfigCommand.valueSuggestions(key) else PolicyCommand.valueSuggestions(key))
                         .map { Suggestion(it) }.startingWith(typed)
-                })
-                executesCommand { ctx ->
-                    DebugLevelCommand.execute(ctx.source.sender, StringArgumentType.getString(ctx, "player"), null)
                 }
-                argument("level", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        DebugLevelCommand.levelSuggestions().map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        DebugLevelCommand.execute(
-                            ctx.source.sender, StringArgumentType.getString(ctx, "player"),
-                            StringArgumentType.getString(ctx, "level"),
-                        )
-                    }
-                }
+
+                "level" -> DebugLevelCommand.levelSuggestions().map { Suggestion(it) }.startingWith(typed)
+                "who" -> ErrorsCommand.targetSuggestions().map { Suggestion(it) }.startingWith(typed)
+                "type" -> ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
+                else -> emptyList()
             }
         }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.diagBranch() {
-        literal("diag", tip("suggestDiag")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            argument("player", StringArgumentType.word()) {
-                suggests(suggesting(tips) { _, _, typed ->
-                    (PaperFullscreenCommand.onlinePlayerNames() + ClientErrorReports.knownPlayerNames()).distinct()
-                        .map { Suggestion(it) }.startingWith(typed)
-                })
-                executesCommand { ctx -> ErrorsCommand.diag(ctx.source.sender, StringArgumentType.getString(ctx, "player")) }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.reloadBranch() {
-        literal("reload", tip("suggestReload")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.reload) }
-            executesCommand { ctx -> ReloadCommand().execute(ctx.source.sender, emptyArray()) }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.policyBranch() {
-        literal("policy", tip("suggestPolicy")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            target {
-                executesCommand { ctx -> PolicyCommand.execute(ctx.source.sender, target(ctx), null, null) }
-                argument("key", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        PolicyCommand.keySuggestions().map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        PolicyCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "key"), null)
-                    }
-                    argument("value", StringArgumentType.word()) {
-                        suggests(suggesting(tips) { ctx, _, typed ->
-                            PolicyCommand.valueSuggestions(StringArgumentType.getString(ctx, "key"))
-                                .map { Suggestion(it) }.startingWith(typed)
-                        })
-                        executesCommand { ctx ->
-                            PolicyCommand.execute(
-                                ctx.source.sender, target(ctx),
-                                StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.speedBranch() {
-        literal("speed", tip("suggestSpeed")) {
-            requires { SpeedCommand.allowed(it.sender) }
-            target {
-                executesCommand { ctx -> SpeedCommand.execute(ctx.source.sender, target(ctx), null) }
-                argument("rate", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        SpeedCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
-                    }
-                }
-            }
-        }
-    }
-
-    /** `/display share stop <display>`: an op ends the screen share running on a display. */
-    private fun LiteralArgumentBuilder<CommandSourceStack>.shareBranch() {
-        literal("share") {
-            requires { ShareCommand.allowed(it.sender) }
-            literal("stop") {
-                argument("target", BareTokenArgumentType) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        (["this"] + ShareCommand.sharedDisplaySuggestions()).map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx -> ShareCommand.stop(ctx.source.sender, target(ctx)) }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.modeBranch() {
-        literal("mode", tip("suggestMode")) {
-            requires { ModeCommand.allowed(it.sender) }
-            target {
-                executesCommand { ctx -> ModeCommand.execute(ctx.source.sender, target(ctx), null) }
-                argument("mode", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed ->
-                        ModeCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        ModeCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "mode"))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.configBranch() {
-        literal("config", tip("suggestConfig")) {
-            requires { PolicyCommand.allowed(it.sender) }
-            executesCommand { ctx -> ConfigCommand.execute(ctx.source.sender, null, null) }
-            argument("key", StringArgumentType.word()) {
-                suggests(suggesting(tips) { _, _, typed ->
-                    ConfigCommand.keySuggestions().map { Suggestion(it) }.startingWith(typed)
-                })
-                executesCommand { ctx ->
-                    ConfigCommand.execute(ctx.source.sender, StringArgumentType.getString(ctx, "key"), null)
-                }
-                // Greedy: a relay URL (`live.*`) has `:`, `/`, `?` and `&`, which a single word cannot hold
-                argument("value", StringArgumentType.greedyString()) {
-                    suggests(suggesting(tips) { ctx, _, typed ->
-                        ConfigCommand.valueSuggestions(StringArgumentType.getString(ctx, "key"))
-                            .map { Suggestion(it) }.startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        ConfigCommand.execute(
-                            ctx.source.sender,
-                            StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.videoBranch() {
-        literal("video", tip("suggestVideo")) {
-            requires { it.sender is Player && it.sender.hasPermission(PaperServer.config.permissions.video) }
-            target {
-                argument("url_and_lang", StringArgumentType.greedyString()) {
-                    suggests(suggesting(tips) { _, remaining, typed ->
-                        DisplaySuggestions.link(remaining, typed) { VideoCommand.languageSuggestions }
-                    })
-                    executesCommand { ctx ->
-                        val parts = StringArgumentType.getString(ctx, "url_and_lang").trim().split(" ")
-                        val lang = if (parts.size > 1) parts.last() else ""
-                        VideoCommand().execute(ctx.source.sender, arrayOf(target(ctx), parts[0], lang))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.nameBranch() {
-        literal("name", tip("suggestName")) {
-            requires { it.sender is Player && it.sender.hasPermission(PaperServer.config.permissions.name) }
-            target {
-                executesCommand { ctx -> NameCommand().execute(ctx.source.sender, arrayOf(target(ctx))) }
-                argument("name", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { ctx, _, typed -> DisplaySuggestions.currentName(target(ctx), typed) })
-                    executesCommand { ctx ->
-                        NameCommand().execute(
-                            ctx.source.sender,
-                            arrayOf(target(ctx), StringArgumentType.getString(ctx, "name")),
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.scheduleBranch() {
-        literal("schedule", tip("suggestSchedule")) {
-            requires { it.sender is Player && it.sender.hasPermission(PaperServer.config.permissions.schedule) }
-            target {
-                executesCommand { ctx -> schedule(ctx, null, null) }
-                scheduleAction("play", "suggestSchedulePlay")
-                scheduleAction("pause", "suggestSchedulePause")
-                literal("cancel", tip("suggestScheduleCancel")) {
-                    executesCommand { ctx -> schedule(ctx, "cancel", null) }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.queueBranch() {
-        literal("queue", tip("suggestQueue")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.queue) }
-            target {
-                executesCommand { ctx -> queue(ctx, null) }
-                literal("list", tip("suggestQueueList")) { executesCommand { ctx -> queue(ctx, "list") } }
-                literal("add", tip("suggestQueueAdd")) {
-                    argument("url", StringArgumentType.greedyString()) {
-                        suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
-                        executesCommand { ctx -> queue(ctx, "add", StringArgumentType.getString(ctx, "url")) }
-                    }
-                }
-                literal("remove", tip("suggestQueueRemove")) {
-                    then(queuePosition("position") { executesCommand { ctx -> queue(ctx, "remove", position(ctx)) } })
-                }
-                literal("move", tip("suggestQueueMove")) {
-                    then(queuePosition("position") {
-                        then(queuePosition("to") {
-                            executesCommand { ctx ->
-                                queue(ctx, "move", position(ctx), StringArgumentType.getString(ctx, "to"))
-                            }
-                        })
-                    })
-                }
-                literal("skip", tip("suggestQueueSkip")) { executesCommand { ctx -> queue(ctx, "skip") } }
-                literal("clear", tip("suggestQueueClear")) { executesCommand { ctx -> queue(ctx, "clear") } }
-                literal("loop", tip("suggestQueueLoop")) {
-                    literal("on", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "on") } }
-                    literal("off", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "off") } }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.karaokeBranch() {
-        val op = java.util.function.Predicate<CommandSourceStack> { KaraokeCommand.operator(it.sender) }
-        literal("karaoke", tip("suggestKaraoke")) {
-            requires { KaraokeCommand.allowed(it.sender) }
-            target {
-                executesCommand { ctx -> karaoke(ctx) }
-                literal("stop", tip("suggestKaraokeStop")) { requires(op); executesCommand { ctx -> karaoke(ctx, "stop") } }
-                literal("status", tip("suggestKaraokeStatus")) {
-                    requires(op)
-                    executesCommand { ctx -> karaoke(ctx, "status") }
-                }
-                literal("trim", tip("suggestKaraokeTrim")) {
-                    requires(op)
-                    argument("ms", StringArgumentType.word()) { executesCommand { ctx -> karaoke(ctx, "trim", arg(ctx, "ms")) } }
-                }
-                literal("singer", tip("suggestKaraokeSinger")) {
-                    requires(op)
-                    literal("add", tip("suggestKaraokeSingerAdd")) {
-                        then(karaokePlayer(online = true) {
-                            executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player")) }
-                            literal("duet", tip("suggestKaraokeSingerDuet")) {
-                                executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player"), "duet") }
-                                argument("lead", StringArgumentType.word()) {
-                                    executesCommand { ctx ->
-                                        karaoke(ctx, "singer", "add", arg(ctx, "player"), "duet", arg(ctx, "lead"))
-                                    }
-                                }
-                            }
-                            argument("lead", StringArgumentType.word()) {
-                                executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player"), arg(ctx, "lead")) }
-                            }
-                        })
-                    }
-                    literal("remove", tip("suggestKaraokeSingerRemove")) {
-                        then(karaokePlayer(online = false) {
-                            executesCommand { ctx -> karaoke(ctx, "singer", "remove", arg(ctx, "player")) }
-                        })
-                    }
-                    literal("trim", tip("suggestKaraokeSingerTrim")) {
-                        then(karaokePlayer(online = false) {
-                            argument("ms", StringArgumentType.word()) {
-                                executesCommand { ctx -> karaoke(ctx, "singer", "trim", arg(ctx, "player"), arg(ctx, "ms")) }
-                            }
-                        })
-                    }
-                }
-                literal("join", tip("suggestKaraokeJoin")) {
-                    argument("url", StringArgumentType.greedyString()) {
-                        suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
-                        executesCommand { ctx -> karaoke(ctx, "join", arg(ctx, "url")) }
-                    }
-                }
-                literal("leave", tip("suggestKaraokeLeave")) { executesCommand { ctx -> karaoke(ctx, "leave") } }
-                literal("line", tip("suggestKaraokeLine")) {
-                    executesCommand { ctx -> karaoke(ctx, "line") }
-                    literal("add", tip("suggestKaraokeLineAdd")) {
-                        requires(op)
-                        then(karaokePlayer(online = true) {
-                            argument("url", StringArgumentType.greedyString()) {
-                                suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
-                                executesCommand { ctx -> karaoke(ctx, "line", "add", arg(ctx, "player"), arg(ctx, "url")) }
-                            }
-                        })
-                    }
-                    literal("remove", tip("suggestKaraokeLineRemove")) {
-                        requires(op)
-                        then(karaokePlayer(online = false) {
-                            executesCommand { ctx -> karaoke(ctx, "line", "remove", arg(ctx, "player")) }
-                        })
-                    }
-                    literal("clear", tip("suggestKaraokeLineClear")) {
-                        requires(op)
-                        executesCommand { ctx -> karaoke(ctx, "line", "clear") }
-                    }
-                }
-            }
-        }
-    }
-
-    /** A `player` argument: online players, or (not [online]) the display's singers and line too. */
-    private fun karaokePlayer(
-        online: Boolean,
-        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
-    ): RequiredArgumentBuilder<CommandSourceStack, String> =
-        RequiredArgumentBuilder.argument<CommandSourceStack, String>("player", StringArgumentType.word()).apply {
-            suggests(suggesting(tips) { ctx, _, typed ->
-                val names = if (online) PaperFullscreenCommand.onlinePlayerNames()
-                else KaraokeCommand.knownNames(target(ctx)) + PaperFullscreenCommand.onlinePlayerNames()
-                DisplaySuggestions.players(names.distinct(), typed)
-            })
-            block()
-        }
-
-    private fun arg(ctx: CommandContext<CommandSourceStack>, name: String): String = StringArgumentType.getString(ctx, name)
-
-    private fun karaoke(ctx: CommandContext<CommandSourceStack>, vararg args: String) {
-        KaraokeCommand.execute(ctx.source.sender, target(ctx), args.toList())
-    }
-
-    private fun queuePosition(
-        name: String,
-        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
-    ): RequiredArgumentBuilder<CommandSourceStack, String> =
-        RequiredArgumentBuilder.argument<CommandSourceStack, String>(name, StringArgumentType.word()).apply {
-            suggests(suggesting(tips) { ctx, _, typed ->
-                QueueCommand.positions(target(ctx)).map { Suggestion(it) }.startingWith(typed)
-            })
-            block()
-        }
-
-    private fun position(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "position")
-
-    private fun queue(ctx: CommandContext<CommandSourceStack>, action: String?, vararg args: String) {
-        QueueCommand.execute(ctx.source.sender, target(ctx), action, args.toList())
-    }
-
-    private fun RequiredArgumentBuilder<CommandSourceStack, String>.scheduleAction(action: String, tooltip: String) {
-        literal(action, tip(tooltip)) {
-            executesCommand { ctx -> schedule(ctx, action, null) }
-            argument("time", BareTokenArgumentType) {
-                suggests(suggesting(tips) { ctx, _, typed ->
-                    val player = ctx.source.sender as? Player
-                    val offset = player?.let { ScheduleTimeUtil.offsetMinutesOf(it.uniqueId) } ?: 0
-                    DisplaySuggestions.scheduleTimes(offset, typed)
-                })
-                executesCommand { ctx -> schedule(ctx, action, StringArgumentType.getString(ctx, "time")) }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.listBranch() {
-        val cmd = ListCommand()
-        literal("list", tip("suggestList")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.list) }
-            executesCommand { ctx -> cmd.execute(ctx.source.sender, arrayOf("list")) }
-            argument("filter", StringArgumentType.word()) {
-                suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.listFilters(typed) })
-                executesCommand { ctx -> cmd.execute(ctx.source.sender, arrayOf("list", filter(ctx))) }
-                argument("value", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { ctx, _, typed ->
-                        completions(cmd, ctx, arrayOf("list", filter(ctx), typed)).startingWith(typed)
-                    })
-                    executesCommand { ctx ->
-                        cmd.execute(ctx.source.sender, arrayOf("list", filter(ctx), value(ctx)))
-                    }
-                    argument("page", StringArgumentType.word()) {
-                        suggests(suggesting(tips) { ctx, _, typed ->
-                            completions(cmd, ctx, arrayOf("list", filter(ctx), value(ctx), typed)).startingWith(typed)
-                        })
-                        executesCommand { ctx ->
-                            cmd.execute(
-                                ctx.source.sender,
-                                arrayOf("list", filter(ctx), value(ctx), StringArgumentType.getString(ctx, "page")),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.toggleBranch(name: String, tooltip: String, cmd: SubCommand) {
-        literal(name, tip(tooltip)) {
-            executesCommand { ctx -> cmd.execute(ctx.source.sender, arrayOf(name)) }
-            argument("player", StringArgumentType.word()) {
-                requires { it.sender.hasPermission(PaperServer.config.permissions.toggleOthers) }
-                suggests(suggesting(tips) { _, _, typed ->
-                    DisplaySuggestions.players(PaperFullscreenCommand.onlinePlayerNames(), typed)
-                })
-                executesCommand { ctx ->
-                    cmd.execute(ctx.source.sender, arrayOf(name, StringArgumentType.getString(ctx, "player")))
-                }
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenBranch() {
-        val flags = FullscreenFlags<CommandSourceStack>(
-            run = { ctx -> runFullscreenStart(ctx); Command.SINGLE_SUCCESS },
-            network = { it.sender.hasPermission(PaperServer.config.permissions.fullscreenNetwork) },
-            players = { PaperFullscreenCommand.onlinePlayerNames() },
-            position = { source -> source.location.let { Triple(it.x, it.y, it.z) } },
-            tooltips = tips,
-        ).nodes()
-        val prepareFlags = FullscreenFlags<CommandSourceStack>(
-            run = { ctx -> runFullscreenPrepare(ctx); Command.SINGLE_SUCCESS },
-            network = { false },
-            players = { PaperFullscreenCommand.onlinePlayerNames() },
-            position = { source -> source.location.let { Triple(it.x, it.y, it.z) } },
-            tooltips = tips,
-            order = FullscreenFlags.PREPARE_ORDER,
-        ).nodes()
-
-        literal("fullscreen", tip("suggestFullscreen")) {
-            executesCommand { ctx ->
-                (ctx.source.sender as? Player)?.let { player ->
-                    MessageUtil.sendColoredMessage(
-                        ctx.source.sender,
-                        "&f ${PaperServer.config.getMessageForPlayer(player, "displayHelpFullscreen")}"
-                    )
-                }
-            }
-            literal("start", tip("suggestFullscreenStart")) {
-                requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
-                literal("id", tip("suggestFullscreenId")) {
-                    fullscreenSource(flags, ::runFullscreenStart) { ctx, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) }
-                }
-                literal("url", tip("suggestFullscreenUrl")) {
-                    fullscreenSource(flags, ::runFullscreenStart) { _, typed -> DisplaySuggestions.links(typed) }
-                }
-            }
-            literal("prepare", tip("suggestFullscreenPrepare")) {
-                requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
-                literal("id", tip("suggestFullscreenId")) {
-                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
-                        DisplaySuggestions.targets(typed, remote(ctx.source))
-                    }
-                }
-                literal("url", tip("suggestFullscreenUrl")) {
-                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { _, typed -> DisplaySuggestions.links(typed) }
-                }
-            }
-            literal("stop", tip("suggestFullscreenStop")) {
-                requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStop) }
-                argument("id", StringArgumentType.word()) {
-                    suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.fullscreenStops(typed) })
-                    executesCommand { ctx ->
-                        PaperFullscreenCommand.stop(ctx.source.sender, StringArgumentType.getString(ctx, "id"))
-                    }
-                }
-            }
-            literal("list", tip("suggestFullscreenList")) {
-                requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenList) }
-                executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
-            }
-        }
-        // In-world events: the same preparation without a fullscreen broadcast; alone it lists preparations
-        literal("prepare", tip("suggestPrepare")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
-            executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
-            fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
-                DisplaySuggestions.targets(typed, remote(ctx.source))
-            }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenSource(
-        flags: List<CommandNode<CommandSourceStack>>,
-        run: (CommandContext<CommandSourceStack>) -> Unit,
-        items: (CommandContext<CommandSourceStack>, String) -> List<Suggestion>,
-    ) {
-        argument("id", BareTokenArgumentType) {
-            suggests(suggesting(tips) { ctx, _, typed -> items(ctx, typed) })
-            executesCommand { ctx -> run(ctx) }
-            flags.forEach { then(it) }
-        }
-    }
-
-    private fun LiteralArgumentBuilder<CommandSourceStack>.target(
-        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
-    ) {
-        argument("target", BareTokenArgumentType) {
-            suggests(suggesting(tips) { ctx, _, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) })
-            block()
-        }
-    }
-
-    private fun target(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "target")
-
-    private fun filter(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "filter")
-
-    private fun value(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "value")
-
-    private fun schedule(ctx: CommandContext<CommandSourceStack>, action: String?, time: String?) {
-        ScheduleCommand().execute(ctx.source.sender, arrayOf(target(ctx), action, time))
-    }
-
-    private fun completions(
-        cmd: SubCommand,
-        ctx: CommandContext<CommandSourceStack>,
-        args: Array<String?>,
-    ): List<Suggestion> = cmd.complete(ctx.source.sender, args).map { Suggestion(it) }
-
-    private fun remote(source: CommandSourceStack): Boolean =
-        source.sender.hasPermission(PaperServer.config.permissions.remote)
-
-    private fun <T : Any> tryArg(ctx: CommandContext<CommandSourceStack>, name: String, type: Class<T>): T? =
-        runCatching { ctx.getArgument(name, type) }.getOrNull()
-
-    private fun runFullscreenPrepare(ctx: CommandContext<CommandSourceStack>) {
-        val nodeNames = ctx.nodes.map { it.node.name }
-        PaperFullscreenCommand.prepare(
-            ctx.source.sender,
-            origin = ctx.source.location,
-            id = StringArgumentType.getString(ctx, "id"),
-            options = FullscreenPrepareOptions(
-                players = tryArg(ctx, "players", String::class.java),
-                radiusBlocks = tryArg(ctx, "blocks", Double::class.javaObjectType),
-                radiusX = tryArg(ctx, "x", Double::class.javaObjectType),
-                radiusY = tryArg(ctx, "y", Double::class.javaObjectType),
-                radiusZ = tryArg(ctx, "z", Double::class.javaObjectType),
-                quality = tryArg(ctx, "quality", String::class.java),
-                rewind = "rewind" in nodeNames,
-            ),
-        )
-    }
-
-    private fun runFullscreenStart(ctx: CommandContext<CommandSourceStack>) {
-        val nodeNames = ctx.nodes.map { it.node.name }
-        val mode = when {
-            "standard" in nodeNames -> "standard"
-            "immersive" in nodeNames -> "immersive"
-            else -> null
-        }
-        PaperFullscreenCommand.start(
-            ctx.source.sender,
-            origin = ctx.source.location,
-            id = StringArgumentType.getString(ctx, "id"),
-            options = FullscreenStartOptions(
-                serverScope = tryArg(ctx, "name", String::class.java),
-                players = tryArg(ctx, "players", String::class.java),
-                radiusBlocks = tryArg(ctx, "blocks", Double::class.javaObjectType)?.toDouble(),
-                radiusX = tryArg(ctx, "x", Double::class.javaObjectType)?.toDouble(),
-                radiusY = tryArg(ctx, "y", Double::class.javaObjectType)?.toDouble(),
-                radiusZ = tryArg(ctx, "z", Double::class.javaObjectType)?.toDouble(),
-                mode = mode,
-                forced = "forced" in nodeNames,
-                transientSession = "transient" in nodeNames,
-                volume = tryArg(ctx, "volume", Double::class.javaObjectType)?.let { (it.toFloat() / 200f) },
-                loop = "looped" in nodeNames,
-                quality = tryArg(ctx, "quality", String::class.java),
-            ),
-        )
     }
 }

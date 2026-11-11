@@ -11,9 +11,9 @@ import org.bukkit.Bukkit
 import org.bukkit.command.CommandSender
 
 /**
- * `/display clients`: every online player with the mod, their mod version and client build id; players whose
+ * `/display diag clients` (after the version tally): every online player with the mod, their mod version and client build id; players whose
  * build is not `[clients] latest_build` are marked (when that key is set). Jars from before the build id
- * report none and show as `older`. Same permission as `/display policy`; output only goes to the sender.
+ * report none and show as `older`. Output only goes to the sender.
  */
 @PaperOnly
 object ClientsCommand {

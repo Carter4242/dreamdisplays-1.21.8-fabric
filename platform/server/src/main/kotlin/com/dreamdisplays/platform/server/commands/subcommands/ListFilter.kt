@@ -7,7 +7,7 @@ internal enum class ListFilter(val token: String) {
     MINE("mine"),
     WORLD("world"),
     OWNER("owner"),
-    SYNC("sync");
+    MODE("mode");
 
     companion object {
         val tokens: List<String> = entries.map { it.token }

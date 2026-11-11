@@ -154,7 +154,7 @@ class ListCommand : SubCommand {
                     }
                 }
 
-                ListFilter.SYNC -> pageSuggestions(displays.count { it.isSync })
+                ListFilter.MODE -> listOf("synced", "broadcast", "local")
                 ListFilter.WORLD -> displays
                     .mapNotNull { it.pos1.world?.name }
                     .distinct()
@@ -204,10 +204,11 @@ class ListCommand : SubCommand {
                 ListQuery(displays.filter { it.ownerId == sender.uniqueId }, page)
             }
 
-            ListFilter.SYNC -> {
-                if (args.size !in 2..3) return wrong(sender)
-                val page = parseOptionalPage(sender, args.getOrNull(2)) ?: return null
-                ListQuery(displays.filter { it.isSync }, page)
+            ListFilter.MODE -> {
+                if (args.size !in 3..4) return wrong(sender)
+                val mode = args.getOrNull(2)?.takeIf { it.isNotBlank() } ?: return wrong(sender)
+                val page = parseOptionalPage(sender, args.getOrNull(3)) ?: return null
+                ListQuery(displays.filter { it.mode.name.equals(mode, ignoreCase = true) }, page)
             }
 
             ListFilter.WORLD -> {
@@ -286,7 +287,7 @@ class ListCommand : SubCommand {
 object VanillaListCommand {
     private const val PAGE_SIZE = 10
 
-    /** Renders a paged, filterable listing of all displays; supports `mine`, `world`, `owner`, and `sync` filters. */
+    /** Renders a paged, filterable listing of all displays; supports `mine`, `world`, `owner`, and `mode` filters. */
     fun execute(
         ctx: CommandContext<CommandSourceStack>,
         filter: String? = null,
@@ -332,7 +333,8 @@ object VanillaListCommand {
                 }
             } ?: displays
 
-            ListFilter.SYNC -> displays.filter { it.isSync }
+            ListFilter.MODE -> value?.let { m -> displays.filter { it.mode.name.equals(m, ignoreCase = true) } }
+                ?: displays
         }
 
         if (filtered.isEmpty()) {

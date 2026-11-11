@@ -1,6 +1,6 @@
 package com.dreamdisplays.core.karaoke
 
-/** One `/display karaoke <display> ...` action, parsed by [KaraokeArgs.parse]. */
+/** One `/display karaoke <action> <display> ...` action, parsed by [KaraokeArgs.parse]. */
 sealed interface KaraokeAction {
     /** Needs the operator permission (everything but joining, leaving and viewing the line). */
     val operatorOnly: Boolean get() = true
@@ -37,7 +37,7 @@ sealed interface KaraokeAction {
     enum class Reason { USAGE, BAD_LEAD, BAD_TRIM }
 }
 
-/** Parses the words after `/display karaoke <display>`. */
+/** Parses a karaoke action's words (the action first, the display left out), as `/display karaoke` hands them over. */
 object KaraokeArgs {
     const val MAX_LEAD_MS = 3_000L
     const val MAX_TRIM_MS = 2_000L

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
@@ -19,7 +20,7 @@ import org.bukkit.entity.Player
 @PaperOnly
 object SpeedCommand {
     /** Permission node (op by default, see `paper-plugin.yml`). */
-    const val PERMISSION = "dreamdisplays.speed"
+    const val PERMISSION = Perm.PLAYBACK_SPEED
 
     private const val RESET = "reset"
 
@@ -54,11 +55,5 @@ object SpeedCommand {
 
     private fun label(rate: Double): String = PlaybackSpeed.format(rate) + "x"
 
-    private fun resolve(sender: CommandSender, token: String): DisplayData? {
-        if (sender is Player) return resolvePaperDisplayTarget(sender, sender, token)
-        return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(sender)
-            null
-        }
-    }
+    private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)
 }

@@ -24,11 +24,9 @@ import org.bukkit.entity.Player
 import java.util.*
 
 /**
- * `/display karaoke <display> ...`: `stop` (alias `off`), `status`, `trim <ms>`, `singer add <player> [duet] [lead_ms]` (replaces the singers unless `duet`),
- * `singer remove <player>`, `singer trim <player> <ms>`, and the singer line: `join <url>`, `leave`, `line`,
- * `line add <player> <url>`, `line remove <player>`, `line clear`. Join, leave and viewing the line need
- * `permissions.karaoke_join`, the rest `permissions.karaoke` (both operator-only by default). There is no `on`: a display
- * is in karaoke while someone sings on it.
+ * `/display karaoke <action> <display> ...` (see `DisplayCommands`): the tree hands [execute] the action words in
+ * [KaraokeArgs] order. Join, leave and viewing the line need `dreamdisplays.karaoke.join`, the rest
+ * `dreamdisplays.karaoke.manage`. There is no `on`: a display is in karaoke while someone sings on it.
  */
 @PaperOnly
 object KaraokeCommand {
@@ -50,7 +48,7 @@ object KaraokeCommand {
                 sender, when (action.reason) {
                     KaraokeAction.Reason.BAD_LEAD -> "karaokeBadLead"
                     KaraokeAction.Reason.BAD_TRIM -> "karaokeBadTrim"
-                    KaraokeAction.Reason.USAGE -> "karaokeUsage"
+                    KaraokeAction.Reason.USAGE -> "cmd.karaoke.usage"
                 }
             )
         }
@@ -264,15 +262,7 @@ object KaraokeCommand {
     private fun onlinePlayer(nameOrId: String): Player? =
         Bukkit.getPlayerExact(nameOrId) ?: runCatching { UUID.fromString(nameOrId) }.getOrNull()?.let(Bukkit::getPlayer)
 
-    private fun resolve(sender: CommandSender, token: String): DisplayData? =
-        if (sender is Player) {
-            resolvePaperDisplayTarget(sender, sender, token)
-        } else {
-            DisplayManager.resolveByIdOrPrefix(token) ?: run {
-                ServerMessage.NO_DISPLAY.sendTo(sender)
-                null
-            }
-        }
+    private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)
 
     private fun say(sender: CommandSender, key: String, vararg args: String) =
         MessageUtil.sendColoredMessage(sender, MessageUtil.formatIndexed(sender, key, *args))

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.core.display.policy.PolicyPaths
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
@@ -71,13 +72,7 @@ object PolicyCommand {
         )
     }
 
-    private fun resolve(sender: CommandSender, token: String): DisplayData? {
-        if (sender is Player) return resolvePaperDisplayTarget(sender, sender, token)
-        return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(sender)
-            null
-        }
-    }
+    private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)
 
     /** Suggestions for the key slot: every policy key plus `reset`. */
     fun keySuggestions(): List<String> = perDisplay.map { it.name } + RESET
@@ -95,6 +90,6 @@ object PolicyCommand {
         } + RESET
     }
 
-    /** Whether [sender] may use this command: the reload permission (op by default). */
-    fun allowed(sender: CommandSender): Boolean = sender.hasPermission(PaperServer.config.permissions.reload)
+    /** Whether [sender] may use this command (op by default). */
+    fun allowed(sender: CommandSender): Boolean = sender.hasPermission(Perm.ADMIN_POLICY)
 }

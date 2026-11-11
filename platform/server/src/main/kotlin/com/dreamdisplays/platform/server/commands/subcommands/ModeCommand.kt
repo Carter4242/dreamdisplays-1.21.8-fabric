@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
@@ -22,7 +23,7 @@ import java.util.Locale
 @PaperOnly
 object ModeCommand {
     /** Permission node (op by default, see `paper-plugin.yml`). */
-    const val PERMISSION = "dreamdisplays.mode"
+    const val PERMISSION = Perm.PLAYBACK_MODE
 
     /** Entry point; [value] is null when not typed. */
     fun execute(sender: CommandSender, token: String, value: String?) {
@@ -54,11 +55,5 @@ object ModeCommand {
 
     private fun label(mode: PlaybackMode): String = mode.name.lowercase(Locale.ROOT)
 
-    private fun resolve(sender: CommandSender, token: String): DisplayData? {
-        if (sender is Player) return resolvePaperDisplayTarget(sender, sender, token)
-        return DisplayManager.resolveByIdOrPrefix(token) ?: run {
-            ServerMessage.NO_DISPLAY.sendTo(sender)
-            null
-        }
-    }
+    private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)
 }

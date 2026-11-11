@@ -2,7 +2,7 @@ package com.dreamdisplays.core.display.policy
 
 /**
  * How much a client writes to its own `latest.log`, set by the server (server-wide `[policy.debug] log_level`, or per
- * player with `/display debug`). Error and hitch reports to the server carry the same detail at every level.
+ * player with `/display diag loglevel`). Error and hitch reports to the server carry the same detail at every level.
  */
 enum class ClientLogLevel(val wire: String) {
     /** Default: real failures (one line each) and startup information only. */
