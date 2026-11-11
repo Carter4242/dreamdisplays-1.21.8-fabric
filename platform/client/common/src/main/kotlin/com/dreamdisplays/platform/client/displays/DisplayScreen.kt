@@ -609,12 +609,15 @@ class DisplayScreen(
     /**
      * Drops every copy of the current private stream's picture: the display texture (reallocated blank), the player's
      * ready frame, the menu preview, and any popout window / PiP / fullscreen overlay of it. With [closeSurfaces] (the
-     * stream is over) those close at once, no fade; without (it only stalled) the popout window closes and PiP /
-     * fullscreen stay open, blank, until frames come again. The display shows the "no video" look until a new frame.
+     * stream is over and nothing plays next) those close at once, no fade; without, the popout window closes and PiP /
+     * fullscreen stay open, blank, until frames come again: from the same stream after a stall, or from the video
+     * that replaces it ([nextVideo]: the current player is detached from them at once). The display shows the
+     * "no video" look until a new frame.
      */
-    internal fun dropPrivatePicture(reason: String, closeSurfaces: Boolean = true) {
+    internal fun dropPrivatePicture(reason: String, closeSurfaces: Boolean = true, nextVideo: Boolean = false) {
         logger.info("Display {}: dropping the live picture ({}).", uuid, reason)
-        if (closeSurfaces) popoutManager.closeImmediately(mediaPlayer) else popoutManager.blankPrivatePicture()
+        if (closeSurfaces) popoutManager.closeImmediately(mediaPlayer)
+        else popoutManager.blankPrivatePicture(detachPlayer = nextVideo)
         previewFrameCache?.clear()
         mediaPlayer?.clearFrame()
         hasEverRendered = false
@@ -959,10 +962,12 @@ class DisplayScreen(
 
     private fun applyInfoUrl(packet: DisplayInfo, previousUrl: String?, firstLoad: Boolean) {
         // A screen share (any private relay stream) ended here: nothing of it stays up, not even until the next
-        // video's first frame, and with nothing next the player stops instead of holding its last picture
+        // video's first frame, and with nothing next the player stops instead of holding its last picture. A PiP or
+        // fullscreen of the display (a pin, a broadcast going on over it) stays open, blank, for the video put back
         if (ScreenShareViewerRules.clearOnUrlChange(previousUrl, packet.url)) {
-            dropPrivatePicture("display URL changed")
-            if (ScreenShareViewerRules.stopPlayerOnUrlChange(previousUrl, packet.url)) {
+            val nothingNext = ScreenShareViewerRules.stopPlayerOnUrlChange(previousUrl, packet.url)
+            dropPrivatePicture("display URL changed", closeSurfaces = nothingNext, nextVideo = !nothingNext)
+            if (nothingNext) {
                 media.unload(packet.lang)
                 return
             }

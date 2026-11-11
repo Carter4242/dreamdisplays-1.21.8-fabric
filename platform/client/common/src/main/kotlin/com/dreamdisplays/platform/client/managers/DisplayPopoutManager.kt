@@ -221,11 +221,18 @@ class DisplayPopoutManager(
      * A private stream stopped delivering: its picture goes from every surface at once, but the viewer's PiP and
      * fullscreen (forced ones included) stay open, blank, and show the stream again when it resumes. The separate OS
      * window holds its last frame in its own buffers, so it is closed (a later popout gets a new window).
+     * [detachPlayer]: the stream is over and another video replaces it; the current player feeds nothing any more
+     * (its decoder may still deliver a frame while it stops), and the surfaces wait for the next one ([attachTo]).
      */
-    fun blankPrivatePicture() {
+    fun blankPrivatePicture(detachPlayer: Boolean = false) {
         closeWindow()
         popoutWindow = null
-        rewireSink()
+        if (detachPlayer) {
+            currentPlayer?.setPopoutSink(null)
+            currentPlayer = null
+        } else {
+            rewireSink()
+        }
         val mc = Minecraft.getInstance()
         val blank = {
             pipOverlay?.blankPicture(mc)
