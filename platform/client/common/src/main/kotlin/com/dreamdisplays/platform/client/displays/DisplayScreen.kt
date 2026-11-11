@@ -927,13 +927,14 @@ class DisplayScreen(
         if (packet.isPaused) {
             timelineFollower.apply(
                 packet.currentTimeMs, packet.serverTimeMs, true, packet.loop, serverSpeed, leadMs = packet.karaokeLeadMs,
+                serverDurationMs = packet.durationMs,
             )
             syncPlaybackSpeed()
         } else {
             syncPlaybackSpeed()
             timelineFollower.apply(
                 packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs,
-                packet.karaokeLeadMs,
+                packet.karaokeLeadMs, packet.durationMs,
             )
         }
     }

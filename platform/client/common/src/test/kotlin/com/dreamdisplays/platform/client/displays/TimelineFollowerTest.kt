@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.client.displays
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -61,5 +62,13 @@ class TimelineFollowerTest {
         assertFalse(expectsJoinLanding(initialTimeline = false, paused = false, clockRunning = false, landingPending = false))
         assertFalse(expectsJoinLanding(initialTimeline = true, paused = true, clockRunning = false, landingPending = false))
         assertFalse(expectsJoinLanding(initialTimeline = true, paused = false, clockRunning = false, landingPending = true))
+    }
+
+    @Test
+    fun `a player with no length of its own restarts at its end on the server timeline's length`() {
+        assertEquals(180_000, followDurationMs(localMs = 180_000, serverMs = 200_000))
+        assertEquals(200_000, followDurationMs(localMs = 0, serverMs = 200_000))
+        assertEquals(0, followDurationMs(localMs = 0, serverMs = 0))
+        assertTrue(heldEndRestarts(500, followDurationMs(0, 200_000), hold))
     }
 }
