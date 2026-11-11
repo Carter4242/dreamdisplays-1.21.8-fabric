@@ -1,0 +1,242 @@
+package com.dreamdisplays.core.queue
+
+import com.dreamdisplays.api.playback.model.Timeline
+import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
+import java.util.*
+
+/** One queued video. Everything but [url] / [lang] / [addedBy] is display text supplied by the adding client. */
+data class QueueItem(
+    val itemId: String,
+    val url: String,
+    val lang: String,
+    val title: String,
+    val durationMs: Long,
+    val thumbnailUrl: String,
+    val addedBy: UUID,
+    val addedByName: String,
+    val addedAtMs: Long,
+) {
+    /** The wire form sent in a `QueueState`. */
+    fun toWire(): QueueItemWire = QueueItemWire(itemId, url, lang, title, durationMs, thumbnailUrl, addedBy, addedByName)
+}
+
+/** Server-wide caps; 0 or less means no cap. */
+data class QueueLimits(val maxItems: Int, val maxPerPlayer: Int)
+
+/** Outcome of [DisplayQueue.add]. */
+enum class QueueAddResult { ADDED, FULL, PLAYER_LIMIT, DUPLICATE }
+
+/**
+ * The "Up next" list of one display plus the entry now playing. Not thread-safe: the owner serialises access.
+ *
+ * [current] is the queue entry the display is playing because the queue advanced to it; a hand-set video clears it
+ * ([onVideoSetByHand]). With [loop] on, [advance] puts [current] back at the end before taking the next one, so the
+ * list cycles.
+ */
+class DisplayQueue(
+    items: List<QueueItem> = emptyList(),
+    loop: Boolean = false,
+    current: QueueItem? = null,
+) {
+    private val list = ArrayList(items)
+
+    /** Re-queue the finished entry at the end instead of dropping it. */
+    var loop: Boolean = loop
+        private set
+
+    /** The queue entry now playing, if the display got its video from the queue. */
+    var current: QueueItem? = current
+        private set
+
+    /** Bumped on every change. */
+    var revision: Long = 0L
+        private set
+
+    /** The queued entries, in play order. */
+    val items: List<QueueItem> get() = list.toList()
+
+    val size: Int get() = list.size
+
+    fun isEmpty(): Boolean = list.isEmpty()
+
+    /** The entry that plays next, or null. */
+    fun head(): QueueItem? = list.firstOrNull()
+
+    fun find(itemId: String): QueueItem? = list.firstOrNull { it.itemId == itemId }
+
+    fun indexOf(itemId: String): Int = list.indexOfFirst { it.itemId == itemId }
+
+    /** How many entries [playerId] has waiting. */
+    fun countBy(playerId: UUID): Int = list.count { it.addedBy == playerId }
+
+    /**
+     * Appends [item] unless the queue is at [QueueLimits.maxItems] or [item]'s adder already has
+     * [QueueLimits.maxPerPlayer] entries waiting ([exemptFromPlayerLimit] skips the latter, e.g. for the owner).
+     */
+    fun add(item: QueueItem, limits: QueueLimits, exemptFromPlayerLimit: Boolean = false): QueueAddResult {
+        if (list.any { it.itemId == item.itemId }) return QueueAddResult.DUPLICATE
+        if (limits.maxItems > 0 && list.size >= limits.maxItems) return QueueAddResult.FULL
+        if (!exemptFromPlayerLimit && limits.maxPerPlayer > 0 && countBy(item.addedBy) >= limits.maxPerPlayer) {
+            return QueueAddResult.PLAYER_LIMIT
+        }
+        list.add(item)
+        changed()
+        return QueueAddResult.ADDED
+    }
+
+    /** Removes the entry [itemId]; returns it, or null when it is not queued. */
+    fun remove(itemId: String): QueueItem? {
+        val index = indexOf(itemId)
+        if (index < 0) return null
+        return list.removeAt(index).also { changed() }
+    }
+
+    /** Moves [itemId] to [toIndex] (clamped into the list). False when it is not queued or already there. */
+    fun move(itemId: String, toIndex: Int): Boolean {
+        val from = indexOf(itemId)
+        if (from < 0) return false
+        val to = toIndex.coerceIn(0, list.size - 1)
+        if (to == from) return false
+        val item = list.removeAt(from)
+        list.add(to, item)
+        changed()
+        return true
+    }
+
+    /** Empties the list (the playing entry stays [current]); returns how many entries were dropped. */
+    fun clear(): Int {
+        val dropped = list.size
+        if (dropped == 0) return 0
+        list.clear()
+        changed()
+        return dropped
+    }
+
+    fun setLoop(enabled: Boolean): Boolean {
+        if (loop == enabled) return false
+        loop = enabled
+        changed()
+        return true
+    }
+
+    /**
+     * Takes the next entry and makes it [current]. With [loop] on, the entry that just finished goes back to the end
+     * first (so a one-entry loop replays itself). Null when nothing is queued.
+     */
+    fun advance(): QueueItem? {
+        if (loop) current?.let { finished -> if (list.none { it.itemId == finished.itemId }) list.add(finished) }
+        if (list.isEmpty()) return null
+        val next = list.removeAt(0)
+        current = next
+        changed()
+        return next
+    }
+
+    /** The display's video was changed outside the queue: whatever plays now is no queue entry. */
+    fun onVideoSetByHand(url: String) {
+        if (current == null || current?.url == url) return
+        current = null
+        changed()
+    }
+
+    /** An independent copy (same entries, loop flag and current entry). */
+    fun copy(): DisplayQueue = DisplayQueue(list, loop, current).also { it.revision = revision }
+
+    private fun changed() {
+        revision++
+    }
+}
+
+/** Display text from a client is untrusted: these keep it short, single-line and free of formatting tricks. */
+object QueueText {
+    const val MAX_TITLE = 200
+    const val MAX_URL = 2048
+    const val MAX_THUMBNAIL_URL = 512
+    const val MAX_NAME = 32
+    const val MAX_ITEM_ID = 64
+    const val MAX_DURATION_MS = 24L * 60 * 60 * 1_000
+
+    /** Strips control / bidi-override characters and legacy `§` colour codes, collapses whitespace, caps length. */
+    fun cleanTitle(raw: String): String = clean(raw, MAX_TITLE)
+
+    /** Same rules as [cleanTitle] for a player name. */
+    fun cleanName(raw: String): String = clean(raw, MAX_NAME)
+
+    /** An `https` URL without whitespace up to [MAX_THUMBNAIL_URL] chars, else empty. */
+    fun cleanThumbnail(raw: String): String {
+        val url = raw.trim()
+        if (url.isEmpty() || url.length > MAX_THUMBNAIL_URL) return ""
+        if (!url.startsWith("https://", ignoreCase = true)) return ""
+        if (url.any { it.isWhitespace() || it.isISOControl() || it == '"' || it == '<' || it == '>' }) return ""
+        return url
+    }
+
+    fun cleanDuration(ms: Long): Long = ms.coerceIn(0L, MAX_DURATION_MS)
+
+    private fun clean(raw: String, max: Int): String {
+        val sb = StringBuilder(minOf(raw.length, max))
+        var skipCode = false
+        var lastSpace = true
+        for (ch in raw) {
+            if (sb.length >= max) break
+            if (skipCode) {
+                skipCode = false
+                continue
+            }
+            when {
+                ch == '§' -> skipCode = true
+                ch.isWhitespace() -> if (!lastSpace) {
+                    sb.append(' ')
+                    lastSpace = true
+                }
+
+                ch.isISOControl() || ch in BIDI_CONTROLS -> {}
+
+                else -> {
+                    sb.append(ch)
+                    lastSpace = false
+                }
+            }
+        }
+        return sb.toString().trim()
+    }
+
+    private val BIDI_CONTROLS: Set<Char> = setOf(
+        '؜', '‎', '‏', '‪', '‫', '‬', '‭', '‮',
+        '⁦', '⁧', '⁨', '⁩',
+    )
+}
+
+/** When a playing timeline reaches the end of its video, and how long the start hold of the next one should be. */
+object QueueTiming {
+    /**
+     * Milliseconds until the current play-through of [timeline] ends at [nowMs], or null when that is unknown
+     * (paused, or no duration reported yet). A looping timeline that already wrapped counts down to its next wrap.
+     */
+    fun msUntilEnd(timeline: Timeline, nowMs: Long): Long? {
+        if (timeline.paused || timeline.durationMs <= 0L) return null
+        val raw = (timeline.positionMs + (nowMs - timeline.serverTimeMs)).coerceAtLeast(0L)
+        val within = if (timeline.loop) raw % timeline.durationMs else raw.coerceAtMost(timeline.durationMs)
+        return timeline.durationMs - within
+    }
+
+    /**
+     * True when the display should move on to the next entry: within [earlyMs] of the end, or (looping timeline)
+     * up to [lateGraceMs] past a wrap the server ticked too late to catch.
+     */
+    fun advanceDue(timeline: Timeline, nowMs: Long, earlyMs: Long, lateGraceMs: Long): Boolean {
+        val untilEnd = msUntilEnd(timeline, nowMs) ?: return false
+        if (untilEnd <= earlyMs) return true
+        if (!timeline.loop) return false
+        val raw = timeline.positionMs + (nowMs - timeline.serverTimeMs)
+        return raw >= timeline.durationMs && timeline.durationMs - untilEnd <= lateGraceMs
+    }
+
+    /**
+     * Start hold for the next entry: [readyHoldMs] when at least one nearby client preloads and every such client
+     * reported READY for it, else [defaultHoldMs]. Clients that cannot preload never count; they catch up through
+     * the normal sync path.
+     */
+    fun holdMs(preloadCapable: Collection<UUID>, ready: Set<UUID>, readyHoldMs: Long, defaultHoldMs: Long): Long =
+        if (preloadCapable.isNotEmpty() && preloadCapable.all { it in ready }) readyHoldMs else defaultHoldMs
+}

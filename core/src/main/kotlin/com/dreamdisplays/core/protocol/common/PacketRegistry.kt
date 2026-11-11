@@ -13,6 +13,9 @@ import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
+import com.dreamdisplays.core.protocol.common.packets.QueueAction
+import com.dreamdisplays.core.protocol.common.packets.QueuePreload
+import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
@@ -89,6 +92,9 @@ object PacketRegistry {
         Entry(PacketType.REMOTE_PLAYBACK_TOGGLE, RemotePlaybackToggle::class, RemotePlaybackToggle.serializer()),
         Entry(PacketType.SERVER_POLICY, ServerPolicy::class, ServerPolicy.serializer()),
         Entry(PacketType.VIEWER_REPORT, ViewerReport::class, ViewerReport.serializer()),
+        Entry(PacketType.QUEUE_STATE, QueueState::class, QueueState.serializer()),
+        Entry(PacketType.QUEUE_ACTION, QueueAction::class, QueueAction.serializer()),
+        Entry(PacketType.QUEUE_PRELOAD, QueuePreload::class, QueuePreload.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }

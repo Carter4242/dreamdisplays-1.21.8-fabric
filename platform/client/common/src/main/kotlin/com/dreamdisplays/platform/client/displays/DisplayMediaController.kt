@@ -40,7 +40,12 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     fun load(videoUrl: String, lang: String, preservePausedState: Boolean) {
         if (videoUrl == "") return
 
-        DreamServices.registry.getOrNull(MediaServices.RESOLVER_REGISTRY)?.prefetch(MediaSource.from(videoUrl))
+        // A queue entry this client preloaded in the background becomes the player as is: already resolved,
+        // buffered and parked warm on its first frame
+        val preloaded = screen.queuePreloader.take(videoUrl, lang)
+        if (preloaded == null) {
+            DreamServices.registry.getOrNull(MediaServices.RESOLVER_REGISTRY)?.prefetch(MediaSource.from(videoUrl))
+        }
 
         val expected = generation.incrementAndGet()
         val oldPlayer = player
@@ -52,13 +57,17 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
 
         screen.onVideoSwapped(videoUrl, lang)
         DisplayRegistry.recordScreen(screen)
+        // The adopted player stays parked until the server timeline starts it, so its warm session survives
+        // the start hold instead of playing ahead and being snapped back with a stream restart.
+        if (preloaded != null) screen.paused = true
         val shouldBePaused = preservePausedState && screen.paused
         val audioStage = DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.registerSource(screen.uuid)
-        val newPlayer = MediaPlayer(
+        val newPlayer = preloaded?.also { it.attachAudioStage(audioStage) } ?: MediaPlayer(
             videoUrl, lang, DisplayPlaybackHost(screen), DreamPlaybackEnvironment,
             screen.takeReplayBootstrap(videoUrl), audioStage,
         )
         player = newPlayer
+        if (preloaded != null) screen.timelineFollower.onWarmAdopted()
         screen.timelineFollower.onPlayerCreated()
         // Set the effective volume (incl. distance) now, before the bridge prelude (which starts at
         // construction) becomes audible — otherwise its first moment plays at the un-attenuated level.

@@ -15,6 +15,7 @@ import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.Scheduler.runAsync
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ServerMessage
@@ -93,6 +94,7 @@ class VideoCommand : SubCommand {
         runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
         DisplayManager.broadcastUpdate(data)
         TimelineManager.onVideoChanged(data)
+        QueueManager.onVideoSetByHand(data)
         ServerApiHost.current?.urlChanged(data)
 
         ServerMessage.SETTED_URL.sendTo(player)

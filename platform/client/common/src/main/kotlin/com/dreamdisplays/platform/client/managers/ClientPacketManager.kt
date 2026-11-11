@@ -59,6 +59,7 @@ object ClientPacketManager {
             is DisplayDelete -> handleDelete(packet)
             is ClearCache -> handleClearCache(packet)
             is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)
+            is QueueState -> com.dreamdisplays.platform.client.displays.DisplayQueues.apply(packet)
             else -> logger.debug("Ignoring non-client-bound packet {}.", packet::class.simpleName)
         }
     }
@@ -101,6 +102,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
+        com.dreamdisplays.platform.client.displays.DisplayQueues.reset()
         FullscreenController.reset()
     }
 }

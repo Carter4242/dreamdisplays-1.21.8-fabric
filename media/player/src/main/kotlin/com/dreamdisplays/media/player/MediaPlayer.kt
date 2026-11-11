@@ -240,6 +240,8 @@ class MediaPlayer(
     /** Pauses playback, capturing the current position for later resume. */
     fun pause() = safeExecute {
         pauseRequested = true
+        // Already parked warm: a second pause must not tear the warm session down into a cold stop
+        if (isPausedWarm()) return@safeExecute
         if (!sessionManager.isPlaying) return@safeExecute
         if (!liveStream) {
             watchdog.stop()
@@ -266,6 +268,15 @@ class MediaPlayer(
      * Read from any thread.
      */
     fun canPark(): Boolean = isReady && sessionManager.canPark()
+
+    /** True once the current session has received at least one decoded video frame. Read from any thread. */
+    fun hasDecodedFrame(): Boolean = sessionManager.lastFrameNanos.get() > 0L
+
+    /**
+     * Installs the acoustics stage on a player built without one: a queue item preloaded in the background gets its
+     * display's stage only when it is adopted, so it never feeds the display's DSP while the current video plays.
+     */
+    fun attachAudioStage(stage: AudioDspStage?) = sessionManager.setAudioStage(stage)
 
     /** Parks the player warm while its display sits out of render distance. */
     fun park() = safeExecute {

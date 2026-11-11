@@ -24,7 +24,12 @@ import com.dreamdisplays.media.source.youtube.cache.VideoMetadataCache
 import com.dreamdisplays.media.source.youtube.cache.VideoTitleCache
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.input.MouseButtons
+import com.dreamdisplays.platform.client.displays.DisplayQueues
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.api.media.source.CustomMediaUrls
+import com.dreamdisplays.api.media.source.YouTubeUrls
+import com.dreamdisplays.util.DreamCoroutines
+import kotlinx.coroutines.launch
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.popout.PopoutManager
@@ -98,6 +103,13 @@ class DisplayMenu private constructor(
     private var lastSuggestedVideoId: String? = null
     private var prevQualityListSize = 0
     private var suggestionsRect: UiRect? = null
+    private lateinit var queueSection: QueueSection
+    private lateinit var skipButton: IconButton
+    private lateinit var loopButton: IconButton
+    private lateinit var queueAddButton: IconButton
+    private var suggestionsTabRect: UiRect? = null
+    private var queueTabRect: UiRect? = null
+    private var queueTip: String? = null
 
     override fun init() {
         super.init()
@@ -330,16 +342,33 @@ class DisplayMenu private constructor(
                 })
         } else null
 
+        skipButton = addUi(IconButton("skip") { DisplayQueues.skip(ds.uuid) })
+        skipButton.visibleWhen = { notErrored() && ds.queueRunsHere && DisplayQueues.items(ds.uuid).isNotEmpty() }
+        skipButton.enabledWhen = { ds.canSkipQueueHere }
+
         suggestions = addUi(SuggestionsPanel(::onPickSuggested, ds.suggestionsController))
         suggestions.visibleWhen = { !ds.errored && suggestionsRect != null }
         // Locked / Broadcast / Watch party displays only let the owner / admin change the video, so
         // the panel shows an "unavailable" notice to everyone else instead of pickable suggestions.
         suggestions.available = { ds.canSetVideoHere }
 
+        // "Up next": the bottom panel's second tab, the search row's "+" and the loop toggle in the tab header
+        queueSection = QueueSection(ds)
+        queueAddButton = addUi(IconButton(icon = { IconButton.modIcon("plus") }, margin = 4) { queueFromSearch() })
+        queueAddButton.visibleWhen = { suggestions.visible && DisplayQueues.supported && suggestions.available() }
+        queueAddButton.enabledWhen = { ds.canAddToQueueHere && linkOf(suggestions.searchText) != null && queueBlockedReason() == null }
+        loopButton = addUi(IconButton("loop") {
+            DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
+        })
+        loopButton.visibleWhen = { showingQueue() && suggestionsRect != null && !ds.errored }
+        loopButton.enabledWhen = { ds.canManageQueueHere }
+
         preview =
             PreviewSection(
                 ds, muteButton, volume, popoutButton, audioTrackButton, subtitleButton, pauseButton, progress,
                 dropdown, audioTrackDropdown, subtitleDropdown,
+                skipButton = skipButton,
+                upNext = { if (ds.queueRunsHere) DisplayQueues.next(ds.uuid)?.let(QueueSection::titleOf) else null },
             )
         settings = SettingsSection(
             rows = settingsRows(qualityReset, brightnessReset, audio3dReset, syncReset, accessReset),
@@ -521,21 +550,188 @@ class DisplayMenu private constructor(
         settings.render(g, layout.settings)
 
         val suggestionsArea = layout.suggestions
+        val tabs = DisplayQueues.supported
+        if (!tabs) queueTabOpen = false
+        queueTip = null
         if (suggestionsArea != null) {
-            suggestions.visible = true
+            suggestions.visible = !showingQueue()
+            suggestions.showTitle = !tabs
+            suggestions.extraSearchActions = if (tabs) 1 else 0
             suggestions.setVertical(layout.suggestionsVertical)
             suggestions.setCompactCards(false)
             suggestions.place(suggestionsArea)
+            queueAddButton.place(suggestions.extraActionRect(0))
+            loopButton.place(UiRect(suggestionsArea.right - 10 - LOOP_BUTTON, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON))
+            if (showingQueue()) {
+                queueSection.vertical = layout.suggestionsVertical
+                queueSection.render(g, suggestionsArea, mouseX, mouseY)
+                queueTip = queueSection.tooltip
+            }
         } else {
             suggestions.visible = false
         }
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
+        if (suggestionsArea != null && tabs) {
+            drawPanelTabs(g, suggestionsArea, mouseX, mouseY)
+            drawSuggestionQueueButton(g, mouseX, mouseY)
+            if (loopButton.visible && DisplayQueues.of(ds.uuid)?.loop == true) {
+                val bottom = loopButton.y + loopButton.height
+                g.fill(loopButton.x + 2, bottom + 1, loopButton.x + loopButton.width - 2, bottom + 3, UiTheme.ACCENT)
+            }
+        }
+        buttonTip(mouseX, mouseY)
         //? if <1.21.6 {
         suggestions.redrawSortDropdownOnTop(g, mouseX, mouseY)
         //?}
         settings.renderTooltips(g, mouseX, mouseY, toRealX(mouseX), toRealY(mouseY))
+        queueTip?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
+    }
+
+    private fun showingQueue(): Boolean = queueTabOpen && DisplayQueues.supported
+
+    /** "Suggestions | Up next (N)" in the bottom panel's title line. */
+    private fun drawPanelTabs(g: GuiGraphicsCompat, area: UiRect, mouseX: Int, mouseY: Int) {
+        val ds = displayScreen
+        val x = area.x + UiTheme.PANEL_PADDING_X
+        val y = area.y + UiTheme.PANEL_PADDING_Y
+        val first = ClientMessage.BUTTON_SUGGESTIONS.text()
+        val second = ClientMessage.QUEUE_TAB.text(DisplayQueues.items(ds.uuid).size)
+        val firstRect = UiRect(x - 2, y - 2, font.width(first) + 4, font.lineHeight + 4)
+        val secondRect = UiRect(firstRect.right + TAB_GAP, y - 2, font.width(second) + 4, font.lineHeight + 4)
+        suggestionsTabRect = firstRect
+        queueTabRect = secondRect
+        drawTab(g, first, firstRect, active = !showingQueue(), hover = firstRect.contains(mouseX, mouseY))
+        drawTab(g, second, secondRect, active = showingQueue(), hover = secondRect.contains(mouseX, mouseY))
+    }
+
+    private fun drawTab(g: GuiGraphicsCompat, label: String, r: UiRect, active: Boolean, hover: Boolean) {
+        val color = when {
+            active -> UiTheme.TEXT_PRIMARY
+            hover -> UiTheme.TEXT_DIM
+            else -> UiTheme.TEXT_SECONDARY
+        }
+        g.drawText(font, label, r.x + 2, r.y + 2, color, false)
+        if (active) g.fill(r.x + 2, r.bottom, r.right - 2, r.bottom + 1, UiTheme.ACCENT)
+    }
+
+    /** The small "+" (add to Up next) in the corner of the hovered suggestion card. */
+    private fun drawSuggestionQueueButton(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int) {
+        val r = suggestionQueueButtonRect() ?: return
+        val hover = r.contains(mouseX, mouseY)
+        QueueSection.drawMiniButton(g, r, "plus", hover)
+        if (hover) queueTip = queueBlockedReason() ?: ClientMessage.QUEUE_ADD.text()
+    }
+
+    private fun suggestionQueueButtonRect(): UiRect? {
+        val ds = displayScreen
+        if (!suggestions.visible || !DisplayQueues.supported || !ds.canAddToQueueHere) return null
+        suggestions.hoveredResult ?: return null
+        val card = suggestions.hoveredCardRect ?: return null
+        val r = UiRect(card.right - 2 - QUEUE_PLUS, card.y + 2, QUEUE_PLUS, QUEUE_PLUS)
+        val strip = suggestions.stripRect()
+        if (r.x < strip.x || r.right > strip.right || r.y < strip.y || r.bottom > strip.bottom) return null
+        return r
+    }
+
+    /** Why the local player can't queue right now (full / own limit), or null. */
+    private fun queueBlockedReason(): String? {
+        val ds = displayScreen
+        val state = DisplayQueues.of(ds.uuid) ?: return null
+        if (state.maxItems > 0 && state.items.size >= state.maxItems) return ClientMessage.QUEUE_FULL.text()
+        val exempt = ds.owner || ds.isAdmin
+        if (!exempt && state.maxPerPlayer > 0 && DisplayQueues.ownCount(ds.uuid) >= state.maxPerPlayer) {
+            return ClientMessage.QUEUE_PLAYER_LIMIT.text(state.maxPerPlayer)
+        }
+        return null
+    }
+
+    private fun buttonTip(mouseX: Int, mouseY: Int) {
+        fun over(b: IconButton) =
+            b.visible && mouseX >= b.x && mouseX < b.x + b.width && mouseY >= b.y && mouseY < b.y + b.height
+        when {
+            over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
+            over(queueAddButton) -> queueTip = queueBlockedReason() ?: ClientMessage.QUEUE_ADD.text()
+            over(loopButton) -> queueTip = if (DisplayQueues.of(displayScreen.uuid)?.loop == true) {
+                ClientMessage.QUEUE_LOOP_ON.text()
+            } else {
+                ClientMessage.QUEUE_LOOP_OFF.text()
+            }
+        }
+    }
+
+    private fun renderQueueTooltip(g: GuiGraphicsCompat, text: String, x: Int, y: Int) {
+        val lines = [literalText(text)]
+        //? if >=1.21.6 {
+        g.setComponentTooltipForNextFrame(font, lines, x, y)
+        //?} else
+        /*g.renderComponentTooltip(font, lines, x, y)*/
+    }
+
+    /** Queue clicks that must win over the panels underneath: tabs, card buttons, the card "+". */
+    private fun handleQueueClick(mx: Int, my: Int): Boolean {
+        if (!DisplayQueues.supported || suggestionsRect == null || displayScreen.errored) return false
+        if (suggestionsTabRect?.contains(mx, my) == true && showingQueue()) {
+            queueTabOpen = false
+            playClick()
+            return true
+        }
+        if (queueTabRect?.contains(mx, my) == true && !showingQueue()) {
+            queueTabOpen = true
+            playClick()
+            return true
+        }
+        if (showingQueue()) {
+            if (queueSection.handleClick(mx, my)) return true
+            // The hidden suggestions panel still sits under the queue: keep its cards from catching the click
+            val overLoop = loopButton.visible && mx >= loopButton.x && mx < loopButton.x + loopButton.width &&
+                my >= loopButton.y && my < loopButton.y + loopButton.height
+            return !overLoop && suggestionsRect?.contains(mx, my) == true
+        }
+        val plus = suggestionQueueButtonRect()
+        if (plus != null && plus.contains(mx, my)) {
+            val result = suggestions.hoveredResult ?: return false
+            playClick()
+            if (queueBlockedReason() == null) DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
+            return true
+        }
+        return false
+    }
+
+    private fun playClick() {
+        Minecraft.getInstance().soundManager.play(
+            net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                com.dreamdisplays.platform.client.utils.buttonClickSound(), 1.0f,
+            ),
+        )
+    }
+
+    /** Queues the link typed in the search box (resolving a YouTube title first), instead of playing it. */
+    private fun queueFromSearch() {
+        val ds = displayScreen
+        val url = linkOf(suggestions.searchText) ?: return
+        val lang = ds.lang ?: ""
+        val videoId = YouTubeUrls.extractVideoId(url)
+        if (videoId == null) {
+            DisplayQueues.add(ds.uuid, url, lang, CustomMediaUrls.displayName(url), 0L, "")
+            return
+        }
+        DreamCoroutines.clientIo.launch {
+            val meta = runCatching { DreamServices.registry.getOrNull(MediaServices.SEARCH)?.metadata(videoId) }.getOrNull()
+            Minecraft.getInstance().execute {
+                if (meta != null) DisplayQueues.add(ds.uuid, meta, lang)
+                else DisplayQueues.add(ds.uuid, YouTubeUrls.watchUrl(videoId), lang, "", 0L, "")
+            }
+        }
+    }
+
+    /** The playable link in [text] (a URL or a YouTube id / link), or null for a search query. */
+    private fun linkOf(text: String): String? {
+        val q = text.trim()
+        if (q.isEmpty() || q.any { it.isWhitespace() }) return null
+        YouTubeUrls.extractVideoId(q)?.let { return YouTubeUrls.watchUrl(it) }
+        return q.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
     }
 
     private fun resyncQualitySlider() {
@@ -628,13 +824,15 @@ class DisplayMenu private constructor(
     }
 
     override fun onMouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean =
-        audioTrackDropdown.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollY) ||
+        (showingQueue() && queueSection.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollX, scrollY)) ||
+            audioTrackDropdown.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollY) ||
                 subtitleDropdown.handleScroll(mouseX.toInt(), mouseY.toInt(), scrollY)
 
     //? if >=1.21.11 {
     override fun onMouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
         val mx = event.x().toInt()
         val my = event.y().toInt()
+        if (MouseButtons.isLeft(event.button()) && handleQueueClick(mx, my)) return true
         val onPopoutButton = popoutButton.isMouseOver(mx.toDouble(), my.toDouble())
         if (dropdown.visible && MouseButtons.isLeft(event.button()) && !onPopoutButton && dropdown.handleClick(mx, my)) return true
         val onAudioTrackButton = audioTrackButton.isMouseOver(mx.toDouble(), my.toDouble())
@@ -657,6 +855,7 @@ class DisplayMenu private constructor(
     /*override fun onMouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
+        if (button == 0 && handleQueueClick(mx, my)) return true
         val onPopoutButton = popoutButton.isMouseOver(mouseX, mouseY)
         if (dropdown.visible && button == 0 && !onPopoutButton && dropdown.handleClick(mx, my)) return true
         val onAudioTrackButton = audioTrackButton.isMouseOver(mouseX, mouseY)
@@ -738,6 +937,12 @@ class DisplayMenu private constructor(
         //?} else
         /*private const val MOD_CONTROL = 0x2; private const val MOD_ALT = 0x4; private const val MOD_SUPER = 0x8
         private const val MOD_SHIFT = 0x1*/
+        private const val LOOP_BUTTON = 16
+        private const val QUEUE_PLUS = 14
+        private const val TAB_GAP = 10
+
+        /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
+        private var queueTabOpen = false
         private const val MIN_CONTENT_W = 640
         private const val MIN_CONTENT_H = 410
 

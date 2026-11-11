@@ -18,6 +18,7 @@ import com.dreamdisplays.platform.server.meta.Scheduler.runAsync
 import com.dreamdisplays.platform.server.meta.VersionState
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
@@ -105,6 +106,7 @@ object DisplayActions {
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onVideoChanged(displayData)
+        QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
     }
 
@@ -180,6 +182,7 @@ object DisplayActions {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
         TimelineManager.sendCurrent(displayData, player.uniqueId)
         WatchPartyManager.sendCurrent(displayData, player.uniqueId)
+        QueueManager.sendCurrent(displayData, player.uniqueId)
     }
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED / BROADCAST only). */

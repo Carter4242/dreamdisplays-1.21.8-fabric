@@ -11,6 +11,9 @@ import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
+import com.dreamdisplays.core.protocol.common.packets.QueueAction
+import com.dreamdisplays.core.protocol.common.packets.QueuePreload
+import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
@@ -61,7 +64,13 @@ enum class PacketType(
 
     // Diagnostics / remote client control; ids start at 40 so packets added elsewhere in the 20s cannot collide
     SERVER_POLICY(40, ServerPolicy::class, PacketDirection.SERVER_TO_CLIENT),
-    VIEWER_REPORT(41, ViewerReport::class, PacketDirection.CLIENT_TO_SERVER);
+    VIEWER_REPORT(41, ViewerReport::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Per-display "Up next" queue; ids start at 50 so packets added elsewhere in the 40s cannot collide.
+    // QUEUE_STATE is only sent to clients that advertise ClientHello.supportsQueue.
+    QUEUE_STATE(50, QueueState::class, PacketDirection.SERVER_TO_CLIENT),
+    QUEUE_ACTION(51, QueueAction::class, PacketDirection.CLIENT_TO_SERVER),
+    QUEUE_PRELOAD(52, QueuePreload::class, PacketDirection.CLIENT_TO_SERVER);
 
     companion object {
         private val byId = entries.associateBy { it.id }

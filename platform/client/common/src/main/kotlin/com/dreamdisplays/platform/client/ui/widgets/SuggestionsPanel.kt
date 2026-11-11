@@ -65,6 +65,17 @@ class SuggestionsPanel(
     /** When this returns false the panel is locked: it shows an "unavailable" notice and ignores input. */
     var available: () -> Boolean = { true }
 
+    /** False when the screen draws its own header (e.g. tabs) over the panel's title line. */
+    var showTitle: Boolean = true
+
+    /** Room for this many extra screen-owned buttons at the right end of the search row ([extraActionRect]). */
+    var extraSearchActions: Int = 0
+
+    /** The card under the mouse in the last frame, and its on-screen rect (for screen-drawn card overlays). */
+    var hoveredCardRect: UiRect? = null
+        private set
+    val hoveredResult: MediaSearchResult? get() = controller.visibleCards.getOrNull(hoveredCard)
+
     private var scrollOffset: Int = 0
     private var scrollOffsetF: Float = 0f
     private var targetScroll: Int = 0
@@ -133,11 +144,22 @@ class SuggestionsPanel(
     private fun layoutChildren() {
         searchBox.x = x + 10
         searchBox.y = searchRowY()
-        searchBox.width = width - 20 - (ACTION_W + ACTION_GAP) * 3
-        clearButton.place(UiRect(x + width - 10 - ACTION_W * 3 - ACTION_GAP * 2, searchRowY(), ACTION_W, SEARCH_H))
-        sortButton.place(UiRect(x + width - 10 - ACTION_W * 2 - ACTION_GAP, searchRowY(), ACTION_W, SEARCH_H))
-        searchButton.place(UiRect(x + width - 10 - ACTION_W, searchRowY(), ACTION_W, SEARCH_H))
+        val extra = extraSearchActions * (ACTION_W + ACTION_GAP)
+        searchBox.width = width - 20 - (ACTION_W + ACTION_GAP) * 3 - extra
+        clearButton.place(UiRect(x + width - 10 - ACTION_W * 3 - ACTION_GAP * 2 - extra, searchRowY(), ACTION_W, SEARCH_H))
+        sortButton.place(UiRect(x + width - 10 - ACTION_W * 2 - ACTION_GAP - extra, searchRowY(), ACTION_W, SEARCH_H))
+        searchButton.place(UiRect(x + width - 10 - ACTION_W - extra, searchRowY(), ACTION_W, SEARCH_H))
     }
+
+    /** Rect of extra search-row slot [index] (0 = right-most), reserved by [extraSearchActions]. */
+    fun extraActionRect(index: Int): UiRect =
+        UiRect(x + width - 10 - ACTION_W - index * (ACTION_W + ACTION_GAP), searchRowY(), ACTION_W, SEARCH_H)
+
+    /** The card strip's rect. */
+    fun stripRect(): UiRect = UiRect(stripLeft(), stripTop(), stripRight() - stripLeft(), stripBottom() - stripTop())
+
+    /** What is typed in the search box. */
+    val searchText: String get() = searchBox.value
 
     private fun cardW(viewportW: Int): Int =
         if (vertical) max(CARD_W, viewportW) else dynCardW()
@@ -191,9 +213,11 @@ class SuggestionsPanel(
     override fun draw(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int, partialTick: Float) {
         val r = UiRect(x, y, width, height)
         g.drawPanelSprite(r)
+        hoveredCard = -1
+        hoveredCardRect = null
 
         val f = Minecraft.getInstance().font
-        g.drawText(f, message, x + 10, y + 10, UiTheme.TEXT_PRIMARY, false)
+        if (showTitle) g.drawText(f, message, x + 10, y + 10, UiTheme.TEXT_PRIMARY, false)
 
         if (!available()) {
             val notice = ClientMessage.SUGGESTIONS_UNAVAILABLE.component().string
@@ -264,7 +288,10 @@ class SuggestionsPanel(
             if (visibleOnAxis) {
                 val hover = mouseX >= max(cardX, stripLeft) && mouseX < min(cardX + cw, stripRight) &&
                         mouseY >= max(cardY, stripTop) && mouseY < min(cardY + ch, stripBottom)
-                if (hover) hoveredCard = i
+                if (hover) {
+                    hoveredCard = i
+                    hoveredCardRect = UiRect(cardX, cardY, cw, ch)
+                }
                 drawCard(g, f, info, cardX, cardY, cw, th, ch, hover)
                 if (cardThumbnail(info) == null) requestCardThumbnail(info)
                 info.channelAvatarUrl?.let { url -> if (Thumbnails.get(url) == null) Thumbnails.request(url, url) }

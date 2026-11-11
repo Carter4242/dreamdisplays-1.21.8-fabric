@@ -47,6 +47,7 @@ object CommandRegistrar {
             infoBranch()
             listBranch()
             scheduleBranch()
+            queueBranch()
             fullscreenBranch()
             statsBranch()
             reloadBranch()
@@ -216,6 +217,57 @@ object CommandRegistrar {
                 }
             }
         }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.queueBranch() {
+        literal("queue", tip("suggestQueue")) {
+            requires { it.sender.hasPermission(PaperServer.config.permissions.queue) }
+            target {
+                executesCommand { ctx -> queue(ctx, null) }
+                literal("list", tip("suggestQueueList")) { executesCommand { ctx -> queue(ctx, "list") } }
+                literal("add", tip("suggestQueueAdd")) {
+                    argument("url", StringArgumentType.greedyString()) {
+                        suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
+                        executesCommand { ctx -> queue(ctx, "add", StringArgumentType.getString(ctx, "url")) }
+                    }
+                }
+                literal("remove", tip("suggestQueueRemove")) {
+                    then(queuePosition("position") { executesCommand { ctx -> queue(ctx, "remove", position(ctx)) } })
+                }
+                literal("move", tip("suggestQueueMove")) {
+                    then(queuePosition("position") {
+                        then(queuePosition("to") {
+                            executesCommand { ctx ->
+                                queue(ctx, "move", position(ctx), StringArgumentType.getString(ctx, "to"))
+                            }
+                        })
+                    })
+                }
+                literal("skip", tip("suggestQueueSkip")) { executesCommand { ctx -> queue(ctx, "skip") } }
+                literal("clear", tip("suggestQueueClear")) { executesCommand { ctx -> queue(ctx, "clear") } }
+                literal("loop", tip("suggestQueueLoop")) {
+                    literal("on", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "on") } }
+                    literal("off", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "off") } }
+                }
+            }
+        }
+    }
+
+    private fun queuePosition(
+        name: String,
+        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
+    ): RequiredArgumentBuilder<CommandSourceStack, String> =
+        RequiredArgumentBuilder.argument<CommandSourceStack, String>(name, StringArgumentType.word()).apply {
+            suggests(suggesting(tips) { ctx, _, typed ->
+                QueueCommand.positions(target(ctx)).map { Suggestion(it) }.startingWith(typed)
+            })
+            block()
+        }
+
+    private fun position(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "position")
+
+    private fun queue(ctx: CommandContext<CommandSourceStack>, action: String?, vararg args: String) {
+        QueueCommand.execute(ctx.source.sender, target(ctx), action, args.toList())
     }
 
     private fun RequiredArgumentBuilder<CommandSourceStack, String>.scheduleAction(action: String, tooltip: String) {

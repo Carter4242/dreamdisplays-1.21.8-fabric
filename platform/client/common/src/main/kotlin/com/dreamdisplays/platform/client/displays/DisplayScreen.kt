@@ -226,6 +226,19 @@ class DisplayScreen(
     /** True if the local player may close the active watch party. */
     val canCloseWatchPartyHere: Boolean get() = PlaybackPermissions.canCloseWatchParty(ctx())
 
+    /** True when the server runs queues and this display's mode lets the queue advance. */
+    val queueRunsHere: Boolean get() = DisplayQueues.supported && PlaybackPermissions.queueRuns(effectiveMode)
+
+    val canAddToQueueHere: Boolean get() = DisplayQueues.supported && PlaybackPermissions.canAddToQueue(ctx())
+
+    val canSkipQueueHere: Boolean get() = DisplayQueues.supported && PlaybackPermissions.canSkipQueue(ctx())
+
+    val canManageQueueHere: Boolean get() = DisplayQueues.supported && PlaybackPermissions.canManageQueue(ctx())
+
+    /** Whether the local player may remove a queue entry; [isAdder] = they added it. */
+    fun canRemoveFromQueueHere(isAdder: Boolean): Boolean =
+        DisplayQueues.supported && PlaybackPermissions.canRemoveFromQueue(ctx(), isAdder)
+
     /** The lock the player actually sees: base lock, or forced on by Watch Party / Broadcast. */
     val effectiveLocked: Boolean get() = PlaybackPermissions.isEffectivelyLocked(effectiveMode, lockedForMe())
 
@@ -399,6 +412,9 @@ class DisplayScreen(
 
     /** Follows the server-authoritative timeline (Synced / Broadcast / watch party). */
     internal val timelineFollower = TimelineFollower(this)
+
+    /** Preloads this display's next queue entry shortly before the current video ends. */
+    internal val queuePreloader = QueuePreloader(this)
 
     private val media = DisplayMediaController(this)
     private val watchPartyController = WatchPartyController(this)
@@ -1056,6 +1072,8 @@ class DisplayScreen(
 
     /** Stops the media player, releases GPU texture, closes any popout, and closes the display menu if open. */
     fun unregister() {
+        queuePreloader.cancel()
+        DisplayQueues.forget(uuid)
         captureReplayCache()
         val currentPlayer = media.shutdown()
         popoutManager.unregister(currentPlayer)
@@ -1227,6 +1245,7 @@ class DisplayScreen(
         val distance = getDistanceToScreen(pos)
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         timelineFollower.tick()
+        queuePreloader.tick()
         restoreAudioTrackIfPending()
         restoreSubtitleTrackIfPending()
         publishStartedFlip()

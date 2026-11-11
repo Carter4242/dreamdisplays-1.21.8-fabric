@@ -4,6 +4,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.Updater
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.policy.ClientDiagnostics
@@ -20,6 +21,7 @@ object SchedulerRegistrar {
     private const val TICKS_PER_SECOND = 20L
     private const val TICK_MILLIS = 50L
     private const val DISPLAY_UPDATE_INTERVAL_TICKS = 1L * TICKS_PER_SECOND
+    private const val QUEUE_TICK_INTERVAL_TICKS = 2L
     private const val UPDATE_CHECK_INTERVAL_TICKS = 60L * 60L * TICKS_PER_SECOND
 
     /** Schedules the periodic display update tick and, when enabled, the hourly update check. */
@@ -40,6 +42,8 @@ object SchedulerRegistrar {
             ProxyBridge.tick()
             ClientDiagnostics.tick()
         }
+        // Queue advances land within a tenth of a second of a video's end; a no-op while nothing is queued
+        runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) { QueueManager.tick() }
         val settings = PaperServer.config.settings
         if (settings.updatesEnabled) {
             runRepeatingAsync(
