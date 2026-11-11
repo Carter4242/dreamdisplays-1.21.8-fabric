@@ -20,8 +20,8 @@ class PopoutDropdown(
     onPip: () -> Unit,
     onFullscreen: () -> Unit,
     onBorderless: () -> Unit,
-) {
-    var visible: Boolean = false
+) : PopupLayer {
+    override var visible: Boolean = false
 
     private val items: List<Pair<String, () -> Unit>> = [
         "Window" to onWindow,
@@ -40,7 +40,7 @@ class PopoutDropdown(
     }
 
     /** Hides the dropdown. */
-    fun hide() {
+    override fun hide() {
         visible = false
     }
 
@@ -115,13 +115,16 @@ class PopoutDropdown(
         /*matrices.popPose()*/
     }
 
+    override fun contains(mx: Int, my: Int): Boolean =
+        mx in rect.x..rect.right && my in rect.y..rect.bottom
+
     /**
      * Handles a left click while visible: picks an item if the click is inside, always hides.
      * Returns true if an item was picked (the click is consumed).
      */
-    fun handleClick(mx: Int, my: Int): Boolean {
+    override fun handleClick(mx: Int, my: Int): Boolean {
         if (!visible) return false
-        val inside = mx in rect.x..rect.right && my in rect.y..rect.bottom
+        val inside = contains(mx, my)
         visible = false
         if (!inside) return false
         val index = ((my - rect.y) / ITEM_H).coerceIn(0, items.size - 1)

@@ -13,8 +13,10 @@ import net.minecraft.resources.Identifier
 //?} else
 /*import net.minecraft.resources.ResourceLocation as Identifier*/
 import com.dreamdisplays.api.display.model.property.DisplayId
+import com.dreamdisplays.core.input.PointerTarget
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.overlay.*
 import com.dreamdisplays.platform.client.render.AsyncTextureUploader
 import com.dreamdisplays.platform.client.storage.ClientSettingsStore
@@ -49,13 +51,17 @@ import java.util.*
 /**
  * In-game `Picture-in-Picture` overlay for one display screen. Click on the body (no drag) opens `DisplayMenu`;
  * click-and-drag moves or resizes the overlay.
+ *
+ * Input arrives as [PointerTarget] events from `PointerInput`, ahead of the screen underneath: every button
+ * press over the overlay (and its release) is consumed here, so nothing below reacts to it. Only the left
+ * button acts. Drags follow the mouse position passed to [render].
  */
 class PipOverlay(
     val displayScreen: DisplayScreen,
     initialCorner: PipCorner = PipCorner.BOTTOM_RIGHT,
     private val interactive: Boolean = true,
     initialSizeFraction: Float = 0.33f,
-) : Overlay {
+) : Overlay, PointerTarget {
     @Volatile
     private var frontBuf: ByteBuffer = EMPTY_DIRECT
     private var backBuf: ByteBuffer = EMPTY_DIRECT
@@ -105,7 +111,7 @@ class PipOverlay(
         private set
 
     private var lastRenderNanos = 0L
-    private var wasLeftPressed = false
+    private var lastDrawnNanos = 0L
     private var pressed = false
     private var pressedInBody = false
     private var pressedInResize = false
@@ -138,7 +144,7 @@ class PipOverlay(
 
     override fun render(context: OverlayRenderContext) {
         val mc = context as? MinecraftOverlayRenderContext ?: return
-        render(mc.mc, mc.graphics, mc.mouseX, mc.mouseY, mc.leftPressed, context.partialTick)
+        render(mc.mc, mc.graphics, mc.mouseX, mc.mouseY, context.partialTick)
     }
 
     override fun onEvent(event: OverlayEvent): Boolean = when (event) {
@@ -228,7 +234,6 @@ class PipOverlay(
         //?} else
         /*g: GuiGraphics,*/
         mouseX: Int, mouseY: Int,
-        leftPressed: Boolean,
         partialTick: Float,
     ): Boolean {
         val now = System.nanoTime()
@@ -266,7 +271,7 @@ class PipOverlay(
             posInitialized = true
         }
 
-        handleMouseInput(mouseX, mouseY, leftPressed, sw, sh, pipW, pipH)
+        if (mouseX != MinecraftOverlayRenderContext.NO_POINTER) updateDrag(mouseX, mouseY, sw, sh, pipW, pipH)
 
         if (!dragging && !resizing) {
             val lerp = minOf(1f, dt * SNAP_LERP_SPEED)
@@ -281,6 +286,7 @@ class PipOverlay(
         val cx = posX.toInt();
         val cy = posY.toInt()
         lastPipX = cx; lastPipY = cy; lastPipW = pipW; lastPipH = pipH
+        lastDrawnNanos = now
 
         val (handleX, handleY) = handlePixelPos(pipW, pipH)
         val (closeX, closeY) = closeButtonPixelPos(pipW, pipH)
@@ -350,93 +356,114 @@ class PipOverlay(
         return true
     }
 
-    private fun handleMouseInput(
-        mx: Int, my: Int, leftPressed: Boolean,
-        sw: Int, sh: Int, pipW: Int, pipH: Int,
-    ) {
-        val cx = posX.toInt();
-        val cy = posY.toInt()
-        val pressJustDown = leftPressed && !wasLeftPressed
-        val pressJustUp = !leftPressed && wasLeftPressed
+    // Only what was drawn in the last few frames can be clicked; a PiP the current screen doesn't draw is not there.
+    override fun hitTest(x: Double, y: Double): Boolean =
+        !closing && animProgress > 0.6f && lastPipW > 0 && lastPipH > 0 &&
+                System.nanoTime() - lastDrawnNanos < HIT_TEST_STALE_NANOS &&
+                inRect(x, y, lastPipX, lastPipY, lastPipW, lastPipH)
 
-        if (pressJustDown) {
-            val inBody = mx in cx..(cx + pipW) && my in cy..(cy + pipH)
-            if (inBody && animProgress > 0.6f) {
-                pressed = true
-                pressMouseX = mx; pressMouseY = my
-                val (hx, hy) = handlePixelPos(pipW, pipH)
-                val (clx, cly) = closeButtonPixelPos(pipW, pipH)
-                pressedInResize = mx in (cx + hx)..(cx + hx + RESIZE_SZ) &&
-                        my in (cy + hy)..(cy + hy + RESIZE_SZ)
-                pressedInClose = interactive && !pressedInResize &&
-                        mx in (cx + clx)..(cx + clx + CLOSE_SZ) &&
-                        my in (cy + cly)..(cy + cly + CLOSE_SZ)
-                pressedInBody = !pressedInResize && !pressedInClose
-                dragOffsetX = mx - cx
-                dragOffsetY = my - cy
-                resizeStartFrac = sizeFraction
-            }
-        }
-
-        if (pressed && leftPressed) {
-            val dx = mx - pressMouseX
-            val dy = my - pressMouseY
-            val dist2 = dx * dx + dy * dy
-            if (pressedInResize) {
-                if (!resizing && dist2 > DRAG_THRESHOLD * DRAG_THRESHOLD) resizing = true
-                if (resizing) {
-                    val (sx, sy) = anchor.centerFacingCorner()
-                    val grow = sx * dx + sy * dy
-                    val activeAxes = (if (sx != 0) 1 else 0) + (if (sy != 0) 1 else 0)
-                    val denom = activeAxes.coerceAtLeast(1) * sw.toFloat()
-                    sizeFraction = (resizeStartFrac + grow / denom).coerceIn(MIN_SIZE_FRAC, MAX_SIZE_FRAC)
-                }
-            } else if (pressedInBody) {
-                if (!dragging && dist2 > DRAG_THRESHOLD * DRAG_THRESHOLD) dragging = true
-                if (dragging) {
-                    posX = (mx - dragOffsetX).toFloat().coerceIn(-pipW * 0.5f, sw - pipW * 0.5f)
-                    posY = (my - dragOffsetY).toFloat().coerceIn(-pipH * 0.5f, sh - pipH * 0.5f)
-                    targetX = posX; targetY = posY
-                }
-            }
-        }
-
-        if (pressJustUp && pressed) {
-            when {
-                dragging -> {
-                    val centerX = posX + pipW / 2f
-                    val centerY = posY + pipH / 2f
-                    anchor = findNearestFreeAnchor(sw, sh, pipW, pipH, centerX, centerY)
-                    val (ax, ay) = anchor.position(sw, sh, pipW, pipH, MARGIN)
-                    targetX = ax.toFloat(); targetY = ay.toFloat()
-                    dragging = false
-                    persistGeometry()
-                }
-
-                resizing -> {
-                    resizing = false
-                    persistGeometry()
-                }
-
-                pressedInClose -> {
-                    val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
-                    Minecraft.getInstance().soundManager.play(s)
-                    displayScreen.deactivatePopout()
-                    // Closing with the X must forget the PiP like the menu does, or it reopens on every join
-                    ClientSettingsStore.setPipOpen(displayScreen.uuid, false)
-                    Initializer.sendPacket(com.dreamdisplays.core.protocol.common.packets.PipPin(displayScreen.uuid, pinned = false))
-                }
-
-                pressedInBody -> if (interactive) DisplayMenu.open(displayScreen)
-            }
-            pressed = false
-            pressedInBody = false
-            pressedInResize = false
-            pressedInClose = false
-        }
-
-        wasLeftPressed = leftPressed
+    override fun onPointerPress(button: Int, x: Double, y: Double) {
+        if (!MouseButtons.isLeft(button)) return
+        val mx = x.toInt()
+        val my = y.toInt()
+        val cx = lastPipX
+        val cy = lastPipY
+        val pipW = lastPipW
+        val pipH = lastPipH
+        pressed = true
+        pressMouseX = mx; pressMouseY = my
+        val (hx, hy) = handlePixelPos(pipW, pipH)
+        pressedInResize = inRect(x, y, cx + hx, cy + hy, RESIZE_SZ, RESIZE_SZ)
+        pressedInClose = interactive && !pressedInResize && overClose(x, y)
+        pressedInBody = !pressedInResize && !pressedInClose
+        dragOffsetX = mx - cx
+        dragOffsetY = my - cy
+        resizeStartFrac = sizeFraction
     }
+
+    override fun onPointerRelease(button: Int, x: Double, y: Double) {
+        if (!MouseButtons.isLeft(button) || !pressed) return
+        when {
+            dragging || resizing -> endDrag()
+            closing -> Unit
+            // Like a button: acts only if released over what was pressed.
+            pressedInClose -> if (overClose(x, y)) {
+                val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
+                Minecraft.getInstance().soundManager.play(s)
+                displayScreen.deactivatePopout()
+                // Closing with the X must forget the PiP like the menu does, or it reopens on every join
+                ClientSettingsStore.setPipOpen(displayScreen.uuid, false)
+                Initializer.sendPacket(com.dreamdisplays.core.protocol.common.packets.PipPin(displayScreen.uuid, pinned = false))
+            }
+
+            pressedInBody -> if (interactive && inRect(x, y, lastPipX, lastPipY, lastPipW, lastPipH)) {
+                DisplayMenu.open(displayScreen)
+            }
+        }
+        clearPress()
+    }
+
+    override fun onPointerCancel(button: Int) {
+        if (!MouseButtons.isLeft(button) || !pressed) return
+        if (dragging || resizing) endDrag()
+        clearPress()
+    }
+
+    private fun updateDrag(mx: Int, my: Int, sw: Int, sh: Int, pipW: Int, pipH: Int) {
+        if (!pressed) return
+        val dx = mx - pressMouseX
+        val dy = my - pressMouseY
+        val dist2 = dx * dx + dy * dy
+        if (pressedInResize) {
+            if (!resizing && dist2 > DRAG_THRESHOLD * DRAG_THRESHOLD) resizing = true
+            if (resizing) {
+                val (sx, sy) = anchor.centerFacingCorner()
+                val grow = sx * dx + sy * dy
+                val activeAxes = (if (sx != 0) 1 else 0) + (if (sy != 0) 1 else 0)
+                val denom = activeAxes.coerceAtLeast(1) * sw.toFloat()
+                sizeFraction = (resizeStartFrac + grow / denom).coerceIn(MIN_SIZE_FRAC, MAX_SIZE_FRAC)
+            }
+        } else if (pressedInBody) {
+            if (!dragging && dist2 > DRAG_THRESHOLD * DRAG_THRESHOLD) dragging = true
+            if (dragging) {
+                posX = (mx - dragOffsetX).toFloat().coerceIn(-pipW * 0.5f, sw - pipW * 0.5f)
+                posY = (my - dragOffsetY).toFloat().coerceIn(-pipH * 0.5f, sh - pipH * 0.5f)
+                targetX = posX; targetY = posY
+            }
+        }
+    }
+
+    // Finishes a move (snaps to the nearest free anchor) or a resize, and saves the result.
+    private fun endDrag() {
+        if (dragging) {
+            val sw = layoutW
+            val sh = layoutH
+            val centerX = posX + lastPipW / 2f
+            val centerY = posY + lastPipH / 2f
+            anchor = findNearestFreeAnchor(sw, sh, lastPipW, lastPipH, centerX, centerY)
+            val (ax, ay) = anchor.position(sw, sh, lastPipW, lastPipH, MARGIN)
+            targetX = ax.toFloat(); targetY = ay.toFloat()
+        }
+        dragging = false
+        resizing = false
+        persistGeometry()
+    }
+
+    private fun clearPress() {
+        pressed = false
+        pressedInBody = false
+        pressedInResize = false
+        pressedInClose = false
+    }
+
+    private fun overClose(x: Double, y: Double): Boolean {
+        val (clx, cly) = closeButtonPixelPos(lastPipW, lastPipH)
+        return inRect(x, y, lastPipX + clx, lastPipY + cly, CLOSE_SZ, CLOSE_SZ)
+    }
+
+    // Edges inclusive, matching the hover checks in render. NaN (unknown position) is never inside.
+    private fun inRect(x: Double, y: Double, rx: Int, ry: Int, rw: Int, rh: Int): Boolean =
+        !x.isNaN() && !y.isNaN() && x >= rx && x <= rx + rw && y >= ry && y <= ry + rh
 
     private fun findNearestFreeAnchor(sw: Int, sh: Int, pw: Int, ph: Int, cx: Float, cy: Float): PipAnchor {
         var best = anchor
@@ -580,6 +607,7 @@ class PipOverlay(
         private const val CLOSE_SZ = 14
         private const val SNAP_LERP_SPEED = 8f
         private const val PIP_Z = 1_000.0
+        private const val HIT_TEST_STALE_NANOS = 250_000_000L
 
         private fun savedAnchor(ds: DisplayScreen): PipAnchor? {
             val name = ClientSettingsStore.getSettings(ds.uuid).pipAnchor ?: return null
