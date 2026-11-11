@@ -103,4 +103,25 @@ class PolicyLeversTest {
         assertFalse(seeks.serverWideOnly)
         assertEquals(false, PolicyPaths.apply(null, seeks, "off")?.sync?.correctiveSeeks)
     }
+    @Test
+    fun `one unreadable field costs only that field`() {
+        val p = assertNotNull(
+            DisplayPolicy.decode(
+                """{"v":1,"client":{"enabled":false,"maxActiveDisplays":"auto","displayDistanceChunks":2.5},
+                   "audio":{"maxVolume":0.5,"radiusBlocks":"far"}}""".toByteArray(),
+            ),
+        )
+        assertEquals(DisplayPolicy.Client(enabled = false), p.client)
+        assertEquals(DisplayPolicy.Audio(maxVolume = 0.5), p.audio)
+        assertNull(assertNotNull(DisplayPolicy.decode("""{"v":1,"client":{"enabled":"nope"}}""".toByteArray())).client)
+    }
+
+    @Test
+    fun `a newer major keeps only the kill switch`() {
+        val off = assertNotNull(DisplayPolicy.decode("""{"v":2,"client":{"enabled":false,"maxActiveDisplays":1}}""".toByteArray()))
+        assertEquals(DisplayPolicy(client = DisplayPolicy.Client(enabled = false)), off)
+        assertFalse(ServerClientSettings(off.serverWide()).displaysEnabled)
+        assertNull(DisplayPolicy.decode("""{"v":2,"client":{"enabled":true},"quality":{"maxHeight":480}}""".toByteArray()))
+        assertNull(DisplayPolicy.decode("""{"v":0}""".toByteArray()))
+    }
 }

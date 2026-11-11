@@ -18,11 +18,12 @@ import kotlinx.serialization.json.jsonObject
  *
  * Every field is optional: `null` means "use the client's default". The server merges its config defaults
  * with a per-display override ([mergedOver]) and sends the result; the client reads it with [decode], which
- * tolerates unknown fields and drops any section it cannot read, so a newer or broken server never breaks
- * an older client (it just falls back to defaults).
+ * tolerates unknown fields and drops any field it cannot read, so a newer or broken server never breaks
+ * an older client (it just falls back to defaults for that field).
  *
  * [v] is the schema major version. Adding fields or sections is compatible and keeps it; only a change that
- * gives an existing field a new meaning bumps it, and clients ignore a policy from a newer major.
+ * gives an existing field a new meaning bumps it. Clients ignore a policy from a newer major except its kill switch
+ * (`client.enabled = false`). A field never changes its JSON type: send a new key instead.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -406,15 +407,20 @@ data class DisplayPolicy(
             if (top == null) base else merge(top, base)
 
         /**
-         * Reads a policy, or null when [bytes] is absent, not a JSON object, or from a newer schema major.
-         * A section that does not parse (wrong types, garbage) is dropped on its own; the rest is kept.
+         * Reads a policy, or null when [bytes] is absent, not a JSON object, or from an unknown schema major. A field
+         * that does not parse (wrong type, garbage) is dropped on its own; the rest of its section is kept. A policy
+         * from a newer major keeps only `client.enabled = false`: a kill switch stays a kill switch.
          */
         fun decode(bytes: ByteArray?): DisplayPolicy? {
             if (bytes == null || bytes.isEmpty()) return null
             val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }
                 .getOrNull() ?: return null
             val version = (root["v"] as? JsonPrimitive)?.intOrNull ?: VERSION
-            if (version > VERSION || version < 1) return null
+            if (version > VERSION) {
+                val off = section(root, "client", Client.serializer())?.enabled == false
+                return if (off) DisplayPolicy(client = Client(enabled = false)) else null
+            }
+            if (version < 1) return null
             return DisplayPolicy(
                 v = VERSION,
                 sync = section(root, "sync", Sync.serializer()),
@@ -427,10 +433,16 @@ data class DisplayPolicy(
             )
         }
 
+        /** Section [name] of [root]: whole when it parses, else only its fields that parse (null when none does). */
         private fun <T> section(root: JsonObject, name: String, serializer: KSerializer<T>): T? {
             val element = root[name] ?: return null
             if (element !is JsonObject) return null
-            return runCatching { json.decodeFromJsonElement(serializer, element) }.getOrNull()
+            runCatching { json.decodeFromJsonElement(serializer, element) }.onSuccess { return it }
+            val readable = element.filter { (key, value) ->
+                runCatching { json.decodeFromJsonElement(serializer, JsonObject(mapOf(key to value))) }.isSuccess
+            }
+            if (readable.isEmpty()) return null
+            return runCatching { json.decodeFromJsonElement(serializer, JsonObject(readable)) }.getOrNull()
         }
 
         /**
