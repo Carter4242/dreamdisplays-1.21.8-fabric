@@ -165,7 +165,7 @@ class SuggestionsPanel(
         if (vertical) max(CARD_W, viewportW) else dynCardW()
 
     private fun thumbH(viewportW: Int): Int =
-        if (vertical) max(THUMB_H, (cardW(viewportW) * 180.0 / 320.0).toInt()) else dynThumbH()
+        if (vertical) StripCardMetrics.verticalThumbH(cardW(viewportW)) else dynThumbH()
 
     private fun cardH(viewportW: Int, info: MediaSearchResult): Int = when {
         !vertical -> dynCardH()
@@ -187,18 +187,11 @@ class SuggestionsPanel(
         return 4 + lines * (lh + 1) + 1 + lh + BOTTOM_PAD
     }
 
-    private fun dynThumbH(): Int {
-        val available = lastStripH - 2 - 3 - CARD_TEXT_H - 2 - BOTTOM_MARGIN
-        return max(30, min(THUMB_H, available))
-    }
+    private fun dynThumbH(): Int = StripCardMetrics.thumbH(lastStripH, StripCardMetrics.SUGGESTIONS_NON_THUMB_H)
 
     private fun dynCardH(): Int = dynThumbH() + 2 + 3 + CARD_TEXT_H + 2
 
-    private fun dynCardW(): Int {
-        val th = dynThumbH()
-        if (th >= THUMB_H) return CARD_W
-        return max(80, (th * CARD_W / THUMB_H.toDouble()).toInt())
-    }
+    private fun dynCardW(): Int = StripCardMetrics.cardW(dynThumbH())
 
     private fun contentExtent(viewportW: Int): Int {
         val cards = controller.visibleCards
@@ -444,7 +437,7 @@ class SuggestionsPanel(
         g.fill(x, y, x + w, y + cardH, if (hover) hoverBg else UiTheme.CARD_BG)
 
         val thumbY = y
-        val thumbW = if (vertical) w else (thumbH.toDouble() * CARD_W / THUMB_H).roundToInt().coerceAtMost(w)
+        val thumbW = if (vertical) w else StripCardMetrics.thumbW(thumbH, w)
         val thumbX = x + (w - thumbW) / 2
         val thumb = cardThumbnail(info)
 
@@ -836,9 +829,9 @@ class SuggestionsPanel(
         private const val SCROLL_EASE_RATE = 8f
         private const val SB_GRAB = 4
         private const val CARD_GAP = 6
-        private const val CARD_W = 152
-        private const val CARD_TEXT_H = 32
-        private const val THUMB_H = 86
+        private const val CARD_W = StripCardMetrics.CARD_W
+        private const val CARD_TEXT_H = StripCardMetrics.CARD_TEXT_H
+        private const val THUMB_H = StripCardMetrics.THUMB_H
         private const val BOTTOM_PAD = 4
         private const val CARD_H = THUMB_H + CARD_TEXT_H
         private const val SEARCH_H = 22
