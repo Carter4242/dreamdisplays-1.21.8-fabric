@@ -53,6 +53,11 @@ object FullscreenOverlayManager {
         forced: Boolean = false,
         sessionId: String? = null
     ): FullscreenOverlay {
+        // Another display's fullscreen must end there too, not just fade: its popout state would otherwise stay
+        // set, keeping that display decoding and heard everywhere (popout audio has no distance falloff)
+        overlays.filter { !it.isClosing && it.displayScreen !== screen }
+            .map { it.displayScreen }.distinct()
+            .forEach { it.deactivateFullscreen() }
         overlays.forEach { it.startClose() }
         val overlay = FullscreenOverlay(screen, mode, forced, sessionId)
         overlays.add(overlay)
