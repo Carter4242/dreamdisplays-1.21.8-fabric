@@ -112,4 +112,23 @@ class ReportScrubberTest {
         val cut = ReportScrubber.truncateBytes(text, 5)
         assertEquals("éé", cut)
     }
+
+    @Test
+    fun `an owner's name in an audio device name is taken out`() {
+        assertEquals(
+            "Display audio line failed on \"Headphones (<name>'s AirPods Pro)\"",
+            ReportScrubber.scrub("Display audio line failed on \"Headphones (Alex's AirPods Pro)\""),
+        )
+        assertEquals("Line unavailable: <name>'s AirPods", ReportScrubber.scrub("Line unavailable: Jo’s AirPods"))
+        assertEquals("Speakers (2- <name>'s Buds2)", ReportScrubber.scrub("Speakers (2- Mia-Li's Buds2)"))
+        assertEquals("openal on <name>'s MacBook Pro Speakers", ReportScrubber.scrub("openal on <name>'s MacBook Pro Speakers"))
+    }
+
+    @Test
+    fun `ordinary possessives and contractions stay readable`() {
+        val plain = "It's gone: the stream's codec isn't supported, FFmpeg's demuxer can't open it"
+        assertEquals(plain, ReportScrubber.scrub(plain))
+        val device = "javasound on \"Speakers (Realtek(R) Audio)\", 44100 Hz"
+        assertEquals(device, ReportScrubber.scrub(device))
+    }
 }

@@ -7,6 +7,7 @@ import com.dreamdisplays.api.media.source.LiveStreamUrls
  * tool paths): the user's home directory becomes `~`, cookie / authorization values are dropped, and signed stream
  * URLs keep their host and path but lose the query (signatures, tokens, the viewer's IP). URL credentials
  * (`user:pass@`, relay `user=` / `pass=` parameters, see [LiveStreamUrls.redactCredentials]) are always dropped.
+ * Owners' names in device names (`Headphones (Alex's AirPods)`, an audio error naming its output) become `<name>'s`.
  */
 object ReportScrubber {
     private const val REDACTED = "<redacted>"
@@ -31,6 +32,18 @@ object ReportScrubber {
 
     /** Command-line secrets: `--cookies <file>`, `--password <x>`, `--username <x>`, `--video-password <x>`. */
     private val SECRET_ARG = Regex("""(?i)(--(?:cookies|cookies-from-browser|password|username|video-password|ap-password|ap-username))(\s+|=)("[^"]*"|'[^']*'|\S+)""")
+
+    /**
+     * A capitalised possessive (`Alex's`, `Jo’s`, `Mia-Li's`): how Bluetooth devices and Macs carry their owner's name,
+     * which the OS passes on in audio device names. Lower-case words (`the stream's`) are left alone.
+     */
+    private val POSSESSIVE = Regex("""(?<![\p{L}\p{N}_.\-])(\p{Lu}[\p{L}\p{N}_.\-]*)['’‘`]s(?=[\s)\]"',:;]|$)""")
+
+    /** Capitalised words with `'s` that are not names (sentence starts, tool names). */
+    private val NOT_NAMES = setOf(
+        "It", "That", "What", "There", "Here", "Let", "Who", "He", "She", "Where", "How", "This", "FFmpeg", "Java",
+        "Minecraft", "YouTube", "Twitch", "Windows", "Mac", "Linux",
+    )
 
     private val URL = Regex("""(?i)\b(?:https?|srt|rtmps?|rtsp)://[^\s"'<>]+""")
 
@@ -57,6 +70,7 @@ object ReportScrubber {
         out = WINDOWS_HOME.replace(out, "~")
         out = UNIX_HOME.replace(out, "~")
         out = ROOT_HOME.replace(out, "~")
+        out = POSSESSIVE.replace(out) { m -> if (m.groupValues[1] in NOT_NAMES) m.value else "<name>'s" }
         return out
     }
 
