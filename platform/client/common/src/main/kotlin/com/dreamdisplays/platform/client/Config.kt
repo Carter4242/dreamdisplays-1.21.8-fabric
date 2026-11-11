@@ -3,12 +3,18 @@ package com.dreamdisplays.platform.client
 import com.dreamdisplays.api.media.audio.AcousticQuality
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.media.source.youtube.cookie.CookieSource
+import org.slf4j.LoggerFactory
 import java.io.File
+import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import kotlin.math.roundToInt
 
 /** Client configuration loaded from and persisted to `config.yml`. */
 class Config(private val baseDir: File) {
     private val file = File(baseDir, "config.yml")
+    private val logger = LoggerFactory.getLogger(Config::class.java)
 
     /** Whether to mute all displays while the game window is not focused. */
     var muteOnAltTab: Boolean = false
@@ -74,7 +80,14 @@ class Config(private val baseDir: File) {
         if (!file.exists()) {
             save(); return
         }
-        val data = file.readLines()
+        // Unreadable (locked by another program): keep the current values rather than fail the mod's start
+        val lines = try {
+            file.readLines()
+        } catch (e: IOException) {
+            logger.warn("Could not read ${file.path}: ${e.message}")
+            return
+        }
+        val data = lines
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith('#') }
             .mapNotNull { line ->
@@ -117,8 +130,7 @@ class Config(private val baseDir: File) {
 
     /** Persists the current configuration values to disk. */
     fun save() {
-        baseDir.mkdirs()
-        file.writeText(buildString {
+        val text = buildString {
             appendLine("mute-on-alt-tab: $muteOnAltTab")
             appendLine("default-render-distance: $defaultDistance")
             appendLine("default-default-display-volume: $defaultDisplayVolume")
@@ -136,7 +148,21 @@ class Config(private val baseDir: File) {
             appendLine("display-distance-chunks: $displayDistanceChunks")
             appendLine("max-active-displays: $maxActiveDisplays")
             appendLine("audio-backend: $audioBackend")
-        })
+        }
+        // Written beside it and moved over it whole: a crash mid-write must not leave a cut-off file whose missing
+        // keys (e.g. the servers that switched displays off) silently fall back to defaults
+        try {
+            baseDir.mkdirs()
+            val tmp = File(baseDir, "config.yml.tmp")
+            tmp.writeText(text)
+            try {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: IOException) {
+            logger.warn("Could not save ${file.path}: ${e.message}")
+        }
     }
 
     companion object {
