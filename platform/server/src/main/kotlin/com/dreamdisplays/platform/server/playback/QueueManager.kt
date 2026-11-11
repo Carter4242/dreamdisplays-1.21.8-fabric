@@ -56,7 +56,7 @@ object QueueManager {
 
     /** A looping timeline the server ticked past the end of is still advanced within this long of the wrap. */
     private const val LATE_GRACE_MS = 2_000L
-    private const val ADD_COOLDOWN_MS = 750L
+    private const val ADD_COOLDOWN_MS = 150L
     private const val EDIT_COOLDOWN_MS = 150L
     private const val PRELOAD_COOLDOWN_MS = 100L
     private const val MAX_SKIPS_PER_ADVANCE = 5
@@ -85,6 +85,9 @@ object QueueManager {
 
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
     private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
+
+    /** When each queue last went from empty to non-empty: a loop wrap before that is no end to advance at. */
+    private val armedAt = ConcurrentHashMap<UUID, Long>()
     private val addThrottle = ActionThrottle()
     private val editThrottle = ActionThrottle()
     private val preloadThrottle = ActionThrottle()
@@ -99,11 +102,13 @@ object QueueManager {
     fun restore() {
         queues.clear()
         rosters.clear()
+        armedAt.clear()
         val loaded = DisplayQueueStore.load()
         var entries = 0
         for ((displayId, queue) in loaded) {
             if (DisplayManager.getDisplayData(displayId) == null) continue
             queues[displayId] = queue
+            armedAt[displayId] = transport.nowMs()
             entries += queue.size
         }
         if (entries > 0) logger.info("Restored {} queued video(s) on {} display(s).", entries, queues.size)
@@ -159,6 +164,7 @@ object QueueManager {
         var added = 0
         var stoppedBy: Result? = null
         synchronized(queue) {
+            if (queue.isEmpty()) armedAt[display.id] = now
             for (entry in valid) {
                 val item = QueueItem(
                     itemId = newItemId(),
@@ -182,8 +188,9 @@ object QueueManager {
         }
         if (added == 0) return AddOutcome(stoppedBy ?: Result.REFUSED, 0)
         changed(display)
-        // Nothing on the display yet: the first queued video starts right away
-        if (display.url.isBlank()) advance(display)
+        // Only a display with no video at all starts the entry now; one that plays something keeps playing it and
+        // the entry waits for the end of the video (tick) or a skip
+        if (QueueTiming.startsOnAdd(display.url)) advance(display)
         return AddOutcome(Result.OK, added)
     }
 
@@ -264,6 +271,7 @@ object QueueManager {
     /** Forgets a deleted display's queue. */
     fun onDisplayRemoved(displayId: UUID) {
         rosters.remove(displayId)
+        armedAt.remove(displayId)
         if (queues.remove(displayId) != null) schedulePersist()
     }
 
@@ -290,7 +298,8 @@ object QueueManager {
             if (display.virtual || !PlaybackPermissions.queueRuns(display.mode)) continue
             if (WatchPartyManager.hasSession(displayId) || TimelineManager.isHolding(displayId)) continue
             val timeline = TimelineManager.timelineOf(displayId) ?: continue
-            if (!QueueTiming.advanceDue(timeline, now, ADVANCE_EARLY_MS, LATE_GRACE_MS)) continue
+            val armed = armedAt[displayId] ?: Long.MIN_VALUE
+            if (!QueueTiming.advanceDue(timeline, now, ADVANCE_EARLY_MS, LATE_GRACE_MS, armed)) continue
             advance(display)
         }
     }

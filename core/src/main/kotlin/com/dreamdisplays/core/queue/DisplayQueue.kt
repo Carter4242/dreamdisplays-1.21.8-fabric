@@ -1,8 +1,10 @@
 package com.dreamdisplays.core.queue
 
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
 import java.util.*
+import kotlin.math.roundToLong
 
 /** One queued video. Everything but [url] / [lang] / [addedBy] is display text supplied by the adding client. */
 data class QueueItem(
@@ -210,25 +212,48 @@ object QueueText {
 /** When a playing timeline reaches the end of its video. */
 object QueueTiming {
     /**
+     * Whether adding to [displayId]'s queue should start the new entry at once: only when the display has no video
+     * at all ([displayUrl] blank). A display that plays something keeps playing it; the entry waits for the end
+     * ([advanceDue]) or a skip.
+     */
+    fun startsOnAdd(displayUrl: String): Boolean = displayUrl.isBlank()
+
+    /**
      * Milliseconds until the current play-through of [timeline] ends at [nowMs], or null when that is unknown
      * (paused, or no duration reported yet). A looping timeline that already wrapped counts down to its next wrap.
      */
     fun msUntilEnd(timeline: Timeline, nowMs: Long): Long? {
         if (timeline.paused || timeline.durationMs <= 0L) return null
-        val raw = (timeline.positionMs + (nowMs - timeline.serverTimeMs)).coerceAtLeast(0L)
+        val raw = rawPosition(timeline, nowMs)
         val within = if (timeline.loop) raw % timeline.durationMs else raw.coerceAtMost(timeline.durationMs)
         return timeline.durationMs - within
     }
 
     /**
      * True when the display should move on to the next entry: within [earlyMs] of the end, or (looping timeline)
-     * up to [lateGraceMs] past a wrap the server ticked too late to catch.
+     * up to [lateGraceMs] past a wrap the server ticked too late to catch. A wrap before [armedAtMs] (when the queue
+     * got the entry it would advance to) does not count: that play-through ended before anything was waiting, so an
+     * add right after a loop wrap must not switch the video.
      */
-    fun advanceDue(timeline: Timeline, nowMs: Long, earlyMs: Long, lateGraceMs: Long): Boolean {
+    fun advanceDue(
+        timeline: Timeline, nowMs: Long, earlyMs: Long, lateGraceMs: Long, armedAtMs: Long = Long.MIN_VALUE,
+    ): Boolean {
         val untilEnd = msUntilEnd(timeline, nowMs) ?: return false
         if (untilEnd <= earlyMs) return true
         if (!timeline.loop) return false
-        val raw = timeline.positionMs + (nowMs - timeline.serverTimeMs)
-        return raw >= timeline.durationMs && timeline.durationMs - untilEnd <= lateGraceMs
+        val raw = rawPosition(timeline, nowMs)
+        if (raw < timeline.durationMs) return false
+        val sinceWrap = raw % timeline.durationMs
+        if (sinceWrap > lateGraceMs) return false
+        val wrappedAtMs = nowMs - (sinceWrap / timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)).roundToLong()
+        return wrappedAtMs >= armedAtMs
+    }
+
+    /** Content position at [nowMs], unwrapped: advances at the timeline's speed, holds before a scheduled start. */
+    private fun rawPosition(timeline: Timeline, nowMs: Long): Long {
+        if (nowMs <= timeline.serverTimeMs) return timeline.positionMs.coerceAtLeast(0L)
+        val elapsed = nowMs - timeline.serverTimeMs
+        val advanced = if (timeline.rate == PlaybackSpeed.NORMAL) elapsed else (elapsed * timeline.rate).roundToLong()
+        return (timeline.positionMs + advanced).coerceAtLeast(0L)
     }
 }

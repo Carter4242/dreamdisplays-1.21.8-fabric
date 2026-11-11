@@ -6,6 +6,7 @@ import com.dreamdisplays.core.protocol.common.packets.QueuePreload
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.api.ServerApiHost
+import com.dreamdisplays.platform.server.commands.subcommands.QueueCommand
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -85,10 +86,16 @@ object QueueActions {
             player.hasPermission(PaperServer.config.permissions.custom),
             player.uniqueId,
         )?.let { return MessageUtil.sendMessage(player, it) }
-        QueueManager.add(
+        val result = QueueManager.add(
             display, context(display, player), player.uniqueId, player.name,
             url, MediaUrlPolicy.sanitizeLang(packet.lang), packet.title, packet.durationMs, packet.thumbnailUrl,
         )
+        reportRefusal(player, display, result)
+    }
+
+    /** A menu add the server turned down is never silent: the player is told why (full, limit, too fast, ...). */
+    private fun reportRefusal(player: Player, display: PaperDisplayData, result: QueueManager.Result) {
+        if (result != QueueManager.Result.OK) QueueCommand.report(player, display, result, "queueAdded")
     }
 
     private fun addBatch(player: Player, display: PaperDisplayData, packet: QueueAction) {
@@ -103,7 +110,7 @@ object QueueActions {
             if (refused != null) return@mapNotNull null
             QueueManager.NewEntry(url, MediaUrlPolicy.sanitizeLang(item.lang), item.title, item.durationMs, item.thumbnailUrl)
         }
-        QueueManager.addAll(display, context(display, player), player.uniqueId, player.name, entries)
+        reportRefusal(player, display, QueueManager.addAll(display, context(display, player), player.uniqueId, player.name, entries).result)
     }
 
     /** The permission context for [player] on [display], admins being the `delete_others` holders. */

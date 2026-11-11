@@ -132,7 +132,9 @@ object QueueCommand {
             QueueManager.Result.EMPTY -> "queueEmpty"
             QueueManager.Result.NOT_FOUND -> "queueBadIndex"
             QueueManager.Result.NOT_ALLOWED -> ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.key
-            QueueManager.Result.PLAYER_LIMIT, QueueManager.Result.THROTTLED, QueueManager.Result.REFUSED -> "queueRefused"
+            QueueManager.Result.PLAYER_LIMIT -> "queuePlayerLimit"
+            QueueManager.Result.THROTTLED -> "queueSlowDown"
+            QueueManager.Result.REFUSED -> "queueRefused"
         }
         MessageUtil.sendColoredMessage(sender, MessageUtil.formatIndexed(sender, key, display.shortLabel))
     }

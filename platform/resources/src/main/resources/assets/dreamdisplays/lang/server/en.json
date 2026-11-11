@@ -50,6 +50,8 @@
   "queueNotRunning": "&7D |&f Queues only run on synced or broadcast displays",
   "queueDisabled": "&7D |&f Queues are turned off on this server",
   "queueRefused": "&7D |&f That video can't be queued on {0}",
+  "queuePlayerLimit": "&7D |&f You already have the most videos you may queue on {0}",
+  "queueSlowDown": "&7D |&f Slow down: that video wasn't queued on {0}, try again",
   "karaokeNoVoice": "&7D |&f Karaoke needs Simple Voice Chat on the server",
   "karaokeNotTimeline": "&7D |&f Karaoke only runs on synced or broadcast displays",
   "karaokeUsage": "&7D |&f Usage: /display karaoke <display> on|off|status|trim <ms>|singer add <player> [lead_ms]|singer remove <player>|singer trim <player> <ms>|join <url>|leave|line [add <player> <url>|remove <player>|clear]",

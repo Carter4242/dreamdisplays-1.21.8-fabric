@@ -123,6 +123,47 @@ class DisplayQueueTest {
         // A brand-new video in its first seconds is not "just past a wrap"
         assertFalse(QueueTiming.advanceDue(t, start + 500, earlyMs = 250, lateGraceMs = 2_000))
     }
+
+    @Test
+    fun `adding to an empty queue while a video plays never advances it`() {
+        val start = 1_000_000L
+        // Known duration, mid-video
+        val t = Timeline.start(start, durationMs = 60_000, loop = true)
+        val addAt = start + 20_000
+        assertFalse(QueueTiming.startsOnAdd("https://youtu.be/playing"))
+        assertFalse(QueueTiming.advanceDue(t, addAt, 250, 2_000, armedAtMs = addAt))
+        // Unknown duration (not reported yet / live): never, however long it has played
+        val unknown = Timeline.start(start, loop = true)
+        assertFalse(QueueTiming.advanceDue(unknown, start + 3_600_000, 250, 2_000, armedAtMs = start + 3_600_000))
+        // Added just after the video looped: that wrap happened before the entry existed, so it waits for the next end
+        val justWrapped = start + 60_000 * 5 + 800
+        assertFalse(QueueTiming.advanceDue(t, justWrapped, 250, 2_000, armedAtMs = justWrapped))
+        assertFalse(QueueTiming.advanceDue(t, justWrapped + 1_000, 250, 2_000, armedAtMs = justWrapped))
+        // ...and does advance at the real end of the current play-through
+        assertTrue(QueueTiming.advanceDue(t, start + 60_000 * 6 - 100, 250, 2_000, armedAtMs = justWrapped))
+        // A wrap the server ticked late after the add still counts
+        assertTrue(QueueTiming.advanceDue(t, start + 60_000 * 6 + 500, 250, 2_000, armedAtMs = justWrapped))
+    }
+
+    @Test
+    fun `the end follows the playback speed`() {
+        val start = 1_000_000L
+        val half = Timeline.start(start, durationMs = 60_000, loop = true, rate = 0.5)
+        // 40 s of wall time at half speed is 20 s of content: far from the end
+        assertEquals(40_000L, QueueTiming.msUntilEnd(half, start + 40_000))
+        assertFalse(QueueTiming.advanceDue(half, start + 40_000, 250, 2_000, armedAtMs = start))
+        assertTrue(QueueTiming.advanceDue(half, start + 119_800, 250, 2_000, armedAtMs = start))
+        // A start scheduled slightly ahead has not begun yet
+        val scheduled = Timeline(0, start + 500, paused = false, durationMs = 60_000, loop = true)
+        assertEquals(60_000L, QueueTiming.msUntilEnd(scheduled, start))
+    }
+
+    @Test
+    fun `adding to an idle display starts the entry at once`() {
+        // Documented behaviour: with nothing on the display there is nothing to wait for
+        assertTrue(QueueTiming.startsOnAdd(""))
+        assertTrue(QueueTiming.startsOnAdd("  "))
+    }
 }
 
 class QueueRecordsTest {

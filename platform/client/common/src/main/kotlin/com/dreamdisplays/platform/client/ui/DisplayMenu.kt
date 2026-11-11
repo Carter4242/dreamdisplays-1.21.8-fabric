@@ -113,6 +113,8 @@ class DisplayMenu private constructor(
     private lateinit var queueAddButton: IconButton
     private lateinit var clearQueueButton: IconButton
     private var clearArmedUntilMs = 0L
+    private var lastQueueCount = -1
+    private var queueFlashUntilMs = 0L
     private var suggestionsTabRect: UiRect? = null
     private var queueTabRect: UiRect? = null
     private var queueTip: String? = null
@@ -333,11 +335,15 @@ class DisplayMenu private constructor(
         // Locked / Broadcast / Watch party displays only let the owner / admin change the video, so
         // the panel shows an "unavailable" notice to everyone else instead of pickable suggestions.
         suggestions.available = { ds.canSetVideoHere }
+        // A press on a card's "+" queues it; the card under it must never also play it
+        suggestions.cardPressBlocked = { mx, my -> suggestionQueueButtonRect()?.contains(mx, my) == true }
 
         // "Up next": the bottom panel's second tab, the search row's "+" and the loop toggle in the tab header
         queueSection = QueueSection(ds)
         queueAddButton = addUi(IconButton(icon = { IconButton.modIcon("plus") }, margin = 4) { queueFromSearch() })
-        queueAddButton.visibleWhen = { suggestions.visible && DisplayQueues.supported && suggestions.available() }
+        queueAddButton.visibleWhen = {
+            !showingQueue() && suggestions.visible && DisplayQueues.supported && suggestions.available()
+        }
         queueAddButton.enabledWhen = {
             ds.canAddToQueueHere && queueBlockedReason() == null &&
                 (linkOf(suggestions.searchText) != null || YouTubePlaylists.parseLink(suggestions.searchText) != null)
@@ -597,13 +603,19 @@ class DisplayMenu private constructor(
         val x = area.x + UiTheme.PANEL_PADDING_X
         val y = area.y + UiTheme.PANEL_PADDING_Y
         val first = ClientMessage.BUTTON_SUGGESTIONS.text()
-        val second = ClientMessage.QUEUE_TAB.text(DisplayQueues.items(ds.uuid).size)
+        val count = DisplayQueues.items(ds.uuid).size
+        val now = System.currentTimeMillis()
+        if (lastQueueCount >= 0 && count > lastQueueCount) queueFlashUntilMs = now + QUEUE_FLASH_MS
+        lastQueueCount = count
+        val second = ClientMessage.QUEUE_TAB.text(count)
         val firstRect = UiRect(x - 2, y - 2, font.width(first) + 4, font.lineHeight + 4)
         val secondRect = UiRect(firstRect.right + TAB_GAP, y - 2, font.width(second) + 4, font.lineHeight + 4)
         suggestionsTabRect = firstRect
         queueTabRect = secondRect
         drawTab(g, first, firstRect, active = !showingQueue(), hover = firstRect.contains(mouseX, mouseY))
         drawTab(g, second, secondRect, active = showingQueue(), hover = secondRect.contains(mouseX, mouseY))
+        // Just queued something: the count lights up so the add is visibly confirmed
+        if (now < queueFlashUntilMs) g.drawText(font, second, secondRect.x + 2, secondRect.y + 2, UiTheme.ACCENT, false)
     }
 
     private fun drawTab(g: GuiGraphicsCompat, label: String, r: UiRect, active: Boolean, hover: Boolean) {
@@ -691,16 +703,20 @@ class DisplayMenu private constructor(
         }
         if (showingQueue()) {
             if (queueSection.handleClick(mx, my)) return true
-            // The hidden suggestions panel still sits under the queue: keep its cards from catching the click
-            val overLoop = loopButton.visible && mx >= loopButton.x && mx < loopButton.x + loopButton.width &&
-                my >= loopButton.y && my < loopButton.y + loopButton.height
-            return !overLoop && suggestionsRect?.contains(mx, my) == true
+            // The hidden suggestions panel still sits under the queue: keep its cards from catching the click, but let
+            // the tab header's own buttons (loop, clear) have it
+            fun over(b: IconButton) =
+                b.visible && mx >= b.x && mx < b.x + b.width && my >= b.y && my < b.y + b.height
+            if (over(loopButton) || over(clearQueueButton)) return false
+            return suggestionsRect?.contains(mx, my) == true
         }
         val plus = suggestionQueueButtonRect()
         if (plus != null && plus.contains(mx, my)) {
             val result = suggestions.hoveredResult ?: return false
             playClick()
-            if (queueBlockedReason() == null) DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
+            val blocked = queueBlockedReason()
+            if (blocked == null) DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
+            else DisplayQueues.notifyLocal(literalText(blocked).withStyle(ChatFormatting.GRAY))
             return true
         }
         return false
@@ -992,6 +1008,7 @@ class DisplayMenu private constructor(
         private const val QUEUE_PLUS = 14
         private const val TAB_GAP = 10
         private const val CLEAR_CONFIRM_MS = 3_000L
+        private const val QUEUE_FLASH_MS = 700L
 
         /** Most playlist videos one "+" queues; the server takes at most this many per batch as well. */
         private const val MAX_PLAYLIST_BATCH = 100

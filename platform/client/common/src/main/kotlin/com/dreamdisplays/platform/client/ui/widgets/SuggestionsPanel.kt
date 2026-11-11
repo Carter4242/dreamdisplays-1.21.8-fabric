@@ -65,6 +65,9 @@ class SuggestionsPanel(
     /** When this returns false the panel is locked: it shows an "unavailable" notice and ignores input. */
     var available: () -> Boolean = { true }
 
+    /** True over a screen-drawn control on top of a card (its "+"): a press there never plays the card. */
+    var cardPressBlocked: (mx: Int, my: Int) -> Boolean = { _, _ -> false }
+
     /** False when the screen draws its own header (e.g. tabs) over the panel's title line. */
     var showTitle: Boolean = true
 
@@ -660,7 +663,7 @@ class SuggestionsPanel(
         // Right-clicking a remembered link removes it from "My links"; a plain left-click plays it.
         if (MouseButtons.isRight(event.button()) && forgetCardAt(mx, my)) return true
         val card = if (MouseButtons.isLeft(event.button())) cardAt(mouseX, mouseY) else -1
-        if (card in controller.visibleCards.indices) {
+        if (card in controller.visibleCards.indices && !cardPressBlocked(mx, my)) {
             val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
             Minecraft.getInstance().soundManager.play(s)
             onPick(controller.visibleCards[card])
@@ -718,7 +721,7 @@ class SuggestionsPanel(
         // Right-clicking a remembered link removes it from "My links"; a plain left-click plays it.
         if (button == 1 && forgetCardAt(mx, my)) return true
         val card = if (button == 0) cardAt(mouseX, mouseY) else -1
-        if (card in controller.visibleCards.indices) {
+        if (card in controller.visibleCards.indices && !cardPressBlocked(mx, my)) {
             val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
             Minecraft.getInstance().soundManager.play(s)
             onPick(controller.visibleCards[card])
