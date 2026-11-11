@@ -87,6 +87,7 @@ object DisplayRegistry {
         val acoustics = DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
         screens.values.forEach { it.unregister(); acoustics?.unregisterSource(it.uuid) }
         screens.clear()
+        ConformingWorldMesh.clear()
         unloadedScreens.clear()
         awaitingReconfirm.clear()
         displaySystem?.clearDisplays()

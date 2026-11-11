@@ -43,6 +43,11 @@ internal object ConformingWorldMesh {
         cache.remove(id)
     }
 
+    /** Drops every cached mesh (all displays unloaded, e.g. leaving a server). */
+    fun clear() {
+        cache.clear()
+    }
+
     /**
      * Quads for [screen], or null when the world is not available yet.
      *
