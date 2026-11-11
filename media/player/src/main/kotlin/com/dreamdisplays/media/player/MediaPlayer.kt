@@ -361,12 +361,14 @@ class MediaPlayer(
     /** Parks the player warm while its display sits out of render distance. */
     fun park() = safeExecute {
         watchdog.stop()
+        // A user pause already holds the session parked: it stays exactly that, with no watchdog
+        if (isPausedWarm()) return@safeExecute
         if (!sessionManager.suspend()) startWatchdog()
     }
 
-    /** Resumes a [park]ed player from its frozen position. */
+    /** Resumes a [park]ed player from its frozen position; a paused one stays paused until [play]. */
     fun unpark() = safeExecute {
-        if (sessionManager.isParked()) {
+        if (sessionManager.isParked() && !isPausedWarm()) {
             sessionManager.resume()
             startWatchdog()
             applySpeed() // A speed change that arrived while parked
