@@ -620,9 +620,15 @@ class VideoPopoutWindow(
 
         override fun renderFrame() = Unit
 
+        /** Open and close requests in the order they were made: the EDT only carries out the latest one. */
+        private val requests = PopoutRequests()
+
         override fun open(videoW: Int, videoH: Int) {
             wanted = true
+            val request = requests.next()
             SwingUtilities.invokeLater {
+                // A close (or another open) asked for since: that one decides, an older close never cancels a newer open
+                if (!requests.isLatest(request)) return@invokeLater
                 val existing = frame
                 if (existing != null && existing.isDisplayable) {
                     existing.toFront(); existing.requestFocus(); return@invokeLater
@@ -635,7 +641,8 @@ class VideoPopoutWindow(
 
         override fun close() {
             wanted = false
-            SwingUtilities.invokeLater { destroyFrame() }
+            val request = requests.next()
+            SwingUtilities.invokeLater { if (requests.isLatest(request)) destroyFrame() }
         }
 
         private fun createFrame(videoW: Int, videoH: Int) {
@@ -899,4 +906,17 @@ private class QuadRenderer {
             }
         }
     }
+}
+
+/**
+ * Numbers a popout window's open / close requests, made on the game thread and carried out later on another (the EDT):
+ * only the latest may act, so a close still queued behind a newer open never cancels that open.
+ */
+internal class PopoutRequests {
+    private val latest = java.util.concurrent.atomic.AtomicLong()
+
+    /** A new request; every earlier one is superseded. */
+    fun next(): Long = latest.incrementAndGet()
+
+    fun isLatest(request: Long): Boolean = latest.get() == request
 }
