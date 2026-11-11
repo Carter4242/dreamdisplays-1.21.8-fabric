@@ -51,6 +51,10 @@ object KaraokeClient {
     @Volatile
     var voiceChatInstalled = false
 
+    /** Set by the voice chat add-on: whether voice chat is disabled right now (its client API). */
+    @Volatile
+    var voiceChatDisabled: () -> Boolean = { false }
+
     /** Displays this player sings on, with their lead (normally at most one). */
     private val leads = ConcurrentHashMap<UUID, Int>()
 
@@ -64,9 +68,7 @@ object KaraokeClient {
 
     @Volatile
     private var micThread: Thread? = null
-    private var nextSeq = 0L
-    private var hasSent = false
-    private var sentSincePoll = false
+    private val frames = MicFrameCounter()
     private var burstStartSeq = 0L
     private var burstAnchorNanos = Long.MAX_VALUE
 
@@ -125,6 +127,7 @@ object KaraokeClient {
     /** Every client tick. */
     fun tick() {
         ticks++
+        if (voiceChatInstalled && voiceChatDisabled()) frames.onDisabledSeen()
         val snapshot = ClientPacketManager.serverSnapshot
         if (!snapshot.hasFeature(ServerFeature.KARAOKE)) {
             if (active != null) setActive(null)
@@ -233,25 +236,18 @@ object KaraokeClient {
     /** Voice chat polled one mic frame (every 20 ms of mic audio, sent or not), before any [onMicFrame] for it. */
     fun onMicPoll() {
         checkMicThread()
-        // The previous frame was not sent after some were: voice chat sent an end-of-burst packet, which takes a number
-        if (!sentSincePoll && hasSent) {
-            nextSeq++
-            hasSent = false
-        }
-        sentSincePoll = false
+        frames.onPoll(System.nanoTime())
     }
 
     /** Voice chat is about to encode and send [pcm] (48 kHz mono) as the next mic frame. */
     fun onMicFrame(pcm: ShortArray) {
         val now = System.nanoTime()
         checkMicThread()
-        val seq = nextSeq++
-        if (!hasSent) {
+        val seq = frames.onFrame()
+        if (frames.newBurst) {
             burstStartSeq = seq
             burstAnchorNanos = Long.MAX_VALUE
         }
-        hasSent = true
-        sentSincePoll = true
         // Frames of a burst are 20 ms apart at capture; they can only be handed over late (a busy mic thread), so the
         // earliest time on that grid is the true one
         val k = seq - burstStartSeq
@@ -279,9 +275,7 @@ object KaraokeClient {
         val thread = Thread.currentThread()
         if (thread === micThread) return
         micThread = thread
-        nextSeq = 0L
-        hasSent = false
-        sentSincePoll = false
+        frames.reset()
     }
 
     private const val FRAME_MS = 20

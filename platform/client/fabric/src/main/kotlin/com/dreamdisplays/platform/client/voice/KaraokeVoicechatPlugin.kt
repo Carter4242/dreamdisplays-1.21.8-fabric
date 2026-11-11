@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.client.voice
 
 import com.dreamdisplays.platform.client.karaoke.KaraokeClient
 import de.maxhenkel.voicechat.api.VoicechatApi
+import de.maxhenkel.voicechat.api.VoicechatClientApi
 import de.maxhenkel.voicechat.api.VoicechatPlugin
 import de.maxhenkel.voicechat.api.events.ClientSoundEvent
 import de.maxhenkel.voicechat.api.events.ClientVoicechatConnectionEvent
@@ -17,14 +18,22 @@ import de.maxhenkel.voicechat.api.events.MergeClientSoundEvent
  * client; the audio is never sent anywhere by this add-on). It never changes or cancels the audio.
  */
 class KaraokeVoicechatPlugin : VoicechatPlugin {
+    /** Voice chat's client API, from its first mic event (add-ons are initialised with the server one). */
+    @Volatile
+    private var client: VoicechatClientApi? = null
+
     override fun getPluginId(): String = "dreamdisplays_karaoke"
 
     override fun initialize(api: VoicechatApi) {
+        KaraokeClient.voiceChatDisabled = { client?.isDisabled == true }
         KaraokeClient.voiceChatInstalled = true
     }
 
     override fun registerEvents(registration: EventRegistration) {
-        registration.registerEvent(MergeClientSoundEvent::class.java) { KaraokeClient.onMicPoll() }
+        registration.registerEvent(MergeClientSoundEvent::class.java) { event ->
+            if (client == null) client = event.voicechat
+            KaraokeClient.onMicPoll()
+        }
         registration.registerEvent(ClientSoundEvent::class.java) { event ->
             event.rawAudio?.takeIf { it.isNotEmpty() }?.let { KaraokeClient.onMicFrame(it) }
         }
