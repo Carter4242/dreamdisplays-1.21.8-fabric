@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.registrar
 
 import com.dreamdisplays.platform.server.PaperServer
+import com.dreamdisplays.platform.server.karaoke.KaraokeManager
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.Updater
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
@@ -43,7 +44,11 @@ object SchedulerRegistrar {
             ClientDiagnostics.tick()
         }
         // Queue advances land within a tenth of a second of a video's end; a no-op while nothing is queued
-        runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) { QueueManager.tick() }
+        runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) {
+            QueueManager.tick()
+            // Karaoke stages (who hears a singer, their pings) stay at most a tenth of a second old
+            KaraokeManager.tick()
+        }
         val settings = PaperServer.config.settings
         if (settings.updatesEnabled) {
             runRepeatingAsync(

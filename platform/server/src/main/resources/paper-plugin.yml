@@ -21,10 +21,15 @@ dependencies:
   - name: WorldGuard
     required: false
     bootstrap: false
+  - name: voicechat
+    required: false
+    bootstrap: false
 load-after:
   - name: LuckPerms
     bootstrap: false
   - name: WorldGuard
+    bootstrap: false
+  - name: voicechat
     bootstrap: false
 permissions:
   dreamdisplays.create:
@@ -88,4 +93,8 @@ permissions:
   dreamdisplays.speed:
     default: op
   dreamdisplays.queue:
+    default: op
+  dreamdisplays.karaoke:
+    default: op
+  dreamdisplays.karaoke.join:
     default: op

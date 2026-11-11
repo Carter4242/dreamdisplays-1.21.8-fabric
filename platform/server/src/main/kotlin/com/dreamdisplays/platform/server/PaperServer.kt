@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.server
 import com.dreamdisplays.core.sync.ResyncMarker
 import com.dreamdisplays.platform.server.api.PaperServerApi
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
+import com.dreamdisplays.platform.server.karaoke.KaraokeManager
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.StorageManager
 import com.dreamdisplays.platform.server.meta.Scheduler
@@ -97,6 +98,8 @@ class PaperServer : JavaPlugin() {
         QueueManager.settings = QueueActions::settings
         QueueManager.applyVideo = QueueActions::applyVideo
         QueueManager.restore()
+        KaraokeManager.settings = KaraokeManager::settingsFromConfig
+        KaraokeManager.init()
         ScheduledPlaybackManager.init(PaperPlaybackTransport)
         ScheduledPlaybackManager.restoreOnStartup()
 
@@ -137,6 +140,7 @@ class PaperServer : JavaPlugin() {
     fun doDisable() {
         if (!::storage.isInitialized) return
         disableStep("stop addons") { PaperServerApi.stop() }
+        disableStep("stop karaoke") { KaraokeManager.shutdown() }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }

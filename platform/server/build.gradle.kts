@@ -177,6 +177,7 @@ repositories {
     maven("https://maven.neoforged.net/releases")
     maven("https://prmaven.neoforged.net/NeoForge/pr3403")
     maven("https://maven.enginehub.org/repo/")
+    maven("https://maven.maxhenkel.de/repository/public")
 }
 
 java {
@@ -196,6 +197,8 @@ dependencies {
     paperweight.devBundle("io.papermc.paper", scVersion("paper.api.version"))
     compileOnly(libs.jspecify)
     compileOnly(libs.luckpermsApi)
+    // Simple Voice Chat server API for karaoke; optional at runtime (our server runs SVC 2.5.36)
+    compileOnly("de.maxhenkel.voicechat:voicechat-api:2.5.36")
     compileOnly(libs.worldguardApi) {
         exclude(group = "com.google.guava", module = "guava")
         exclude(group = "com.google.code.gson", module = "gson")
@@ -265,7 +268,7 @@ tasks.processResources {
                 line.startsWith("api-version:") -> "api-version: '1.18'"
                 line == "dependencies:" -> {
                     skippingBlock = true
-                    "softdepend: [LuckPerms, WorldGuard]"
+                    "softdepend: [LuckPerms, WorldGuard, voicechat]"
                 }
                 line == "load-after:" -> {
                     skippingBlock = true
