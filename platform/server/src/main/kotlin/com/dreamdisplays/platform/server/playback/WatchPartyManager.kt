@@ -257,6 +257,32 @@ object WatchPartyManager {
         }
     }
 
+    /**
+     * The plugin is going down: tell every member their party is over, so clients that stay connected through a
+     * reload (where no session survives) follow the display's timeline again instead of a party nobody runs.
+     */
+    fun endAllForShutdown() {
+        val now = transport.nowMs()
+        for (session in sessions.values.toList()) {
+            val closing = snapshot(session, now).copy(sessionId = "", state = ENDED.wire)
+            if (session.virtual) {
+                session.members.forEach { transport.sendTo(it, closing) }
+            } else {
+                val display = DisplayManager.getDisplayData(session.displayId) ?: continue
+                transport.broadcast(display, closing)
+            }
+        }
+        sessions.clear()
+    }
+
+    /**
+     * Tells [playerId] that none of [displayIds] has a party, except those that do: a client greeted again after a
+     * plugin reload may still hold a party the previous plugin instance ran (it ignores the timeline while it does).
+     */
+    fun clearStalePartiesFor(playerId: UUID, displayIds: Collection<UUID>) {
+        displayIds.filter { !sessions.containsKey(it) }.forEach { transport.sendTo(playerId, WatchPartyState(it)) }
+    }
+
     /** Forgets a session when its display is deleted. */
     fun remove(displayId: UUID) {
         sessions.remove(displayId)

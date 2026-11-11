@@ -15,6 +15,7 @@ import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.PipPinManager
+import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -72,9 +73,15 @@ object PaperV2Networking : PluginMessageListener {
             !V2PlayerTracker.isV2(it.uniqueId) && V2_CHANNEL in it.listeningPluginChannels
         }
         if (waiting.isEmpty()) return
-        waiting.forEach { player -> send([player], buildServerHello(player)) }
+        waiting.forEach { player ->
+            regreeted.add(player.uniqueId)
+            send([player], buildServerHello(player))
+        }
         logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
     }
+
+    /** Players greeted by [greetOnlinePlayers]: their client may still hold state the previous plugin instance set. */
+    private val regreeted: MutableSet<java.util.UUID> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     private fun serverFeatureWires(): List<String> = buildList {
         addAll(ServerFeature.playbackFeatureWires)
@@ -192,6 +199,11 @@ object PaperV2Networking : PluginMessageListener {
         send([player], buildServerHello(player))
         DisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)
         DisplayActions.sendAllDisplays(player)
+        if (regreeted.remove(player.uniqueId)) {
+            val inRange = DisplayManager.getDisplays().filterIsInstance<com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData>()
+                .filter { DisplayManager.isPlayerInRange(player, it) }.map { it.id }
+            WatchPartyManager.clearStalePartiesFor(player.uniqueId, inRange)
+        }
         FullscreenBroadcastManager.onPlayerJoin(player.uniqueId)
         PipPinManager.onPlayerJoin(player.uniqueId)
         ProxyBridge.onPlayerReady(player)
