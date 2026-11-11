@@ -20,4 +20,12 @@ class EmptyDisplaysTest {
         assertFalse(EmptyDisplays.playStartsQueue("", PlaybackAction.SEEK, queueHasNext = true))
         assertFalse(EmptyDisplays.playStartsQueue("https://youtu.be/x", PlaybackAction.PLAY, queueHasNext = true))
     }
+
+    @Test
+    fun `clients older than protocol 12 drop a cleared display first, newer ones stop it themselves`() {
+        assertTrue(EmptyDisplays.dropBeforeClear(11))
+        assertTrue(EmptyDisplays.dropBeforeClear(0))
+        assertFalse(EmptyDisplays.dropBeforeClear(12))
+        assertFalse(EmptyDisplays.dropBeforeClear(13))
+    }
 }

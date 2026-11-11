@@ -16,4 +16,14 @@ object EmptyDisplays {
      */
     fun playStartsQueue(url: String, action: PlaybackAction, queueHasNext: Boolean): Boolean =
         !hasVideo(url) && action == PlaybackAction.PLAY && queueHasNext
+
+    /** First protocol whose clients stop a display's player when its URL goes empty (a cleared video). */
+    const val CLEAR_PROTOCOL = 12
+
+    /**
+     * True when a client on [protocolVersion] (0: unknown) must be told to drop a display whose video was cleared, so
+     * the description sent next brings it back as a display with no video: older clients ignore an empty URL and play
+     * the cleared video on, unsynced.
+     */
+    fun dropBeforeClear(protocolVersion: Int): Boolean = protocolVersion < CLEAR_PROTOCOL
 }

@@ -145,6 +145,8 @@ object DisplayActions {
         )
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         TimelineManager.onVideoCleared(displayData)
+        // Older clients ignore the empty URL below and would play the cleared video on: they drop the display first
+        DisplayManager.dropForPreClearClients(displayData)
         DisplayManager.broadcastUpdate(displayData)
         FullscreenBroadcastManager.endSessionsOf(displayData.id)
         QueueManager.onVideoSetByHand(displayData)

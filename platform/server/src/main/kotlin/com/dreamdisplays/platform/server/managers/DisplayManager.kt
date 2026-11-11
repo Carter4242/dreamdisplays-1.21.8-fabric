@@ -4,6 +4,7 @@ import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.sync.DisplayFollowers
+import com.dreamdisplays.core.sync.EmptyDisplays
 import com.dreamdisplays.platform.server.PaperServer.Companion.config
 import com.dreamdisplays.platform.server.PaperServer.Companion.getInstance
 import com.dreamdisplays.platform.server.PaperSurfaces
@@ -242,6 +243,29 @@ object DisplayManager {
             com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.nearbyPlayerIds(display), FullscreenBroadcastManager.timelineFollowers(display.id), farPinners(display.id),
         )
         for ((playerId, forced) in targets) com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.sendDisplayInfo(playerId, display, forced)
+    }
+
+    /**
+     * [display]'s video was cleared: a client older than [EmptyDisplays.CLEAR_PROTOCOL] ignores the empty URL and plays
+     * the cleared video on, so each one that gets its updates (in range, far followers, pinners) is told to drop it
+     * first. Call just before [broadcastUpdate], whose description brings it back with no video.
+     */
+    @PaperOnly
+    fun dropForPreClearClients(display: PaperDisplayData) {
+        val preClear = { id: UUID -> EmptyDisplays.dropBeforeClear(V2PlayerTracker.helloOf(id)?.protocolVersion ?: 0) }
+        if (PlatformUtil.isFolia) {
+            Scheduler.forEachTrackedPlayer { player ->
+                if (preClear(player.uniqueId) && player.isInRange(display)) PacketUtil.sendDelete([player], display.id)
+            }
+        } else {
+            PacketUtil.sendDelete(getReceivers(display).filter { preClear(it.uniqueId) }, display.id)
+        }
+        val far = DisplayFollowers.farReceivers(
+            com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.nearbyPlayerIds(display), FullscreenBroadcastManager.timelineFollowers(display.id), farPinners(display.id),
+        )
+        for (playerId in far) {
+            if (preClear(playerId)) com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.sendTo(playerId, DisplayDelete(display.id))
+        }
     }
 
     /** Online players with [displayId] pinned to PiP. */
