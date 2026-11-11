@@ -610,8 +610,8 @@ internal class AudioSink(private val debugLabel: String) {
     /**
      * Opens an output line, never giving up just because the device rejects the content format. Java Sound first:
      * 44.1 kHz / 16-bit stereo on the game's device (then the system default) exactly as before, else a format those
-     * devices advertise or accept (converted), else any other output device. When Java Sound cannot play at all,
-     * OpenAL on the game's device. The `audio-backend` setting can force either backend.
+     * devices advertise or accept (converted). If the game's device can't be opened that way, OpenAL on the game's
+     * device, and only then the system default or any other output. The `audio-backend` setting can force either backend.
      */
     private fun openLine(): OpenedLine? {
         val backend = AudioOutputHooks.effectiveBackend()
@@ -631,19 +631,29 @@ internal class AudioSink(private val debugLabel: String) {
                 firstTry = false
                 line
             }
+            // When the game plays on a named device, only that device counts as "right": if Java Sound can't open
+            // it, OpenAL on that same device comes next, and the system default / other devices only after that,
+            // so display audio never silently lands on different speakers than the game.
+            val gameDevice = runCatching { AudioOutputHooks.preferredDeviceName() }.getOrNull()?.trim().orEmpty()
+            val primary: List<Mixer.Info?> = if (gameDevice.isEmpty()) preferred else preferred.filterNotNull()
+            val secondary: List<Mixer.Info?> = if (gameDevice.isEmpty()) emptyList() else listOf(null)
             val cached = lastFallback
-            val chosen = cached?.takeIf { it.first in preferred }?.let { (mixer, format) ->
+            var chosen = cached?.takeIf { it.first in primary }?.let { (mixer, format) ->
                 tryOpen(mixer, format)?.let { Triple(mixer, format, it) }
-            } ?: PcmLineFormat.choose(preferred, other, AudioOutputHooks::advertisedFormats, tryOpen)
+            } ?: PcmLineFormat.choose(primary, emptyList(), AudioOutputHooks::advertisedFormats, tryOpen)
+            if (chosen == null && attempt == 0 && backend == "auto") {
+                logMixersOnce(lastError)
+                openOpenAl("Java Sound could not open the game's output (${lastError ?: "no matching device"})")?.let { return it }
+            }
+            if (chosen == null) {
+                chosen = PcmLineFormat.choose(secondary, other, AudioOutputHooks::advertisedFormats, tryOpen)
+            }
             if (firstTryFailed || chosen == null) logMixersOnce(lastError)
             if (chosen != null) {
                 val (mixer, format, line) = chosen
                 lastFallback = if (format.isContent) null else mixer to format
                 logLineChoice("Java Sound", mixer?.name ?: "system default", format)
                 return OpenedLine(line, PcmLineOutput(format))
-            }
-            if (attempt == 0 && backend == "auto") {
-                openOpenAl("Java Sound could not open any output line ($lastError)")?.let { return it }
             }
             if (attempt == OPEN_RETRIES - 1) {
                 logger.warn("$debugLabel Line unavailable: $lastError.")
