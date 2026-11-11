@@ -47,22 +47,37 @@ internal interface FramePipe {
 }
 
 /**
- * Caches the most recent frame handed to a pipe's raw-frame sink (popout / menu preview) so a sink that attaches late
- * gets an immediate first frame instead of a blank one.
+ * Keeps (a recent copy of) the latest frame a pipe presents, in one reused buffer, whether or not a raw-frame sink
+ * (popout / PiP / menu preview) is attached, so a sink that attaches late, also to a paused video, gets a picture at
+ * once instead of a blank one. A frame stored [raw] is in the pipe's own planar layout and is converted for the sink
+ * by [toSinkFrame] (`(frame, size, w, h) -> RGBA`) only when replayed, so keeping it costs a copy, not a conversion.
+ * Live relay pipes do not use it: a private stream's picture is never held (see `ScreenShareViewerRules`).
  */
-internal class LastFrameCache {
+internal class LastFrameCache(
+    private val toSinkFrame: ((ByteBuffer, Int, Int, Int) -> ByteBuffer?)? = null,
+    private val storeIntervalNanos: Long = STORE_INTERVAL_NANOS,
+    private val nanoTime: () -> Long = System::nanoTime,
+) {
     private val lock = Any()
     private var buffer: ByteBuffer? = null
     private var width = 0
     private var height = 0
+    private var size = 0
+    private var raw = false
     private var storedAtNanos = 0L
     private var format = FramePixelFormat.RGB24
 
-    /** Reader-thread only: stores a copy of the first [size] bytes of [src] (read from position 0). */
-    fun store(src: ByteBuffer, w: Int, h: Int, size: Int, fmt: FramePixelFormat): Unit = synchronized(lock) {
-        val now = System.nanoTime()
-        val sameShape = buffer != null && w == width && h == height && fmt == format
-        if (sameShape && now - storedAtNanos < STORE_INTERVAL_NANOS) return
+    /** True once a frame is held. */
+    val hasFrame: Boolean get() = synchronized(lock) { buffer != null }
+
+    /**
+     * Reader-thread only: stores a copy of the first [size] bytes of [src] (read from position 0, which is left
+     * alone), at most once per store interval for frames of the same shape.
+     */
+    fun store(src: ByteBuffer, w: Int, h: Int, size: Int, fmt: FramePixelFormat, raw: Boolean = false): Unit = synchronized(lock) {
+        val now = nanoTime()
+        val sameShape = buffer != null && w == width && h == height && fmt == format && raw == this.raw
+        if (sameShape && now - storedAtNanos < storeIntervalNanos) return
         storedAtNanos = now
         var dst = buffer
         if (dst == null || dst.capacity() < size) {
@@ -76,6 +91,8 @@ internal class LastFrameCache {
         width = w
         height = h
         format = fmt
+        this.size = size
+        this.raw = raw
         buffer = dst
     }
 
@@ -88,11 +105,14 @@ internal class LastFrameCache {
     /** Replays the cached frame into [sink], if one has been stored yet. Safe to call from any thread. */
     fun replay(sink: (ByteBuffer, Int, Int, FramePixelFormat) -> Unit): Unit = synchronized(lock) {
         val buf = buffer ?: return
-        sink(buf.duplicate(), width, height, format)
+        if (!raw) return sink(buf.duplicate(), width, height, format)
+        val converted = toSinkFrame?.invoke(buf.duplicate(), size, width, height) ?: return
+        sink(converted, width, height, FramePixelFormat.RGBA32)
     }
 
     private companion object {
-        const val STORE_INTERVAL_NANOS = 250_000_000L
+        /** A paused picture is at most this much older than the one on the display; the copy costs little at 10/s. */
+        const val STORE_INTERVAL_NANOS = 100_000_000L
     }
 }
 

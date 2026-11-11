@@ -53,7 +53,15 @@ internal class NativeVideoFramePipe(
 
     @Volatile
     private var rawPopoutFrameSink: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)? = null
-    private val lastFrame = LastFrameCache()
+    private val lastFrame = LastFrameCache(toSinkFrame = { frame, size, w, h ->
+        // A planar frame kept without a sink is converted only now that one wants it
+        val rgba = ByteBuffer.allocateDirect(w * h * 4)
+        if (NativeMedia.i420ToRgba(frame, size, rgba, w, h) == 0) rgba.limit(w * h * 4).position(0) else null
+    })
+
+    /** Whether this session keeps its latest frame for a late sink; never for a live relay (see [LastFrameCache]). */
+    @Volatile
+    private var keepLastFrame = true
 
     override var popoutFrameSink: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)?
         get() = rawPopoutFrameSink
@@ -230,6 +238,8 @@ internal class NativeVideoFramePipe(
         parkFlag: AtomicBoolean?, presentPreview: Boolean, tolerateLateness: Boolean, liveEdge: Boolean = false,
     ): Thread {
         val frameNs = (1_000_000_000.0 / MediaProcess.outputFps(sourceFps)).toLong()
+        keepLastFrame = !liveEdge
+        if (liveEdge) lastFrame.clear()
         // The live edge has no jitter buffer: frames go to the surface as they are read (see read)
         val prebuffer = if (liveEdge) null else FramePrebuffer.create(
             surface, frameNs, getAudioClock, onFirstFrame, terminated, stopFlag, debugLabel, presentPreview,
@@ -592,7 +602,15 @@ internal class NativeVideoFramePipe(
     }
 
     private fun feedPopout(spare: ByteBuffer, w: Int, h: Int, frameSize: Int, metrics: NativeReadMetrics) {
-        val sink = popoutFrameSink ?: return
+        val sink = popoutFrameSink ?: run {
+            // No sink yet: keep the picture anyway (a copy now and then, converted only if one attaches), so a PiP,
+            // fullscreen or preview opened on a paused video shows it instead of a blank frame
+            if (keepLastFrame) {
+                if (planarOutput) lastFrame.store(spare, w, h, frameSize, FramePixelFormat.R8, raw = true)
+                else lastFrame.store(spare, w, h, frameSize, outputFormat)
+            }
+            return
+        }
         val popoutStartNs = if (MediaPlayer.DEBUG) System.nanoTime() else 0L
         if (planarOutput) {
             // The popout window consumes RGBA; convert the planar frame natively
@@ -602,12 +620,12 @@ internal class NativeVideoFramePipe(
             rgba.clear()
             if (NativeMedia.i420ToRgba(spare, frameSize, rgba, w, h) == 0) {
                 rgba.limit(rgbaSize).position(0)
-                lastFrame.store(rgba, w, h, rgbaSize, FramePixelFormat.RGBA32)
+                if (keepLastFrame) lastFrame.store(rgba, w, h, rgbaSize, FramePixelFormat.RGBA32)
                 sink(rgba, w, h, FramePixelFormat.RGBA32)
             }
             spare.rewind()
         } else {
-            lastFrame.store(spare, w, h, frameSize, outputFormat)
+            if (keepLastFrame) lastFrame.store(spare, w, h, frameSize, outputFormat)
             sink(spare, w, h, outputFormat); spare.rewind()
         }
         if (MediaPlayer.DEBUG) metrics.recordPopout(System.nanoTime() - popoutStartNs)

@@ -49,6 +49,10 @@ internal class VideoFramePipe(
     private var rawPopoutFrameSink: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)? = null
     private val lastFrame = LastFrameCache()
 
+    /** Whether this session keeps its latest frame for a late sink; never for a live relay (see [LastFrameCache]). */
+    @Volatile
+    private var keepLastFrame = true
+
     override var popoutFrameSink: ((ByteBuffer, Int, Int, FramePixelFormat) -> Unit)?
         get() = rawPopoutFrameSink
         set(value) {
@@ -105,6 +109,8 @@ internal class VideoFramePipe(
         lastFrameReceivedNanos.set(System.nanoTime())
         // Must be the same rate FFmpeg was pinned to -r, or synthesized timestamps drift
         val frameNs = (1_000_000_000.0 / MediaProcess.outputFps(sourceFps)).toLong()
+        keepLastFrame = !liveEdge
+        if (liveEdge) lastFrame.clear()
         val prebuffer = if (liveEdge) null else FramePrebuffer.create(
             surface, frameNs, getAudioClock, onFirstFrame, terminated, stopFlag, debugLabel, presentPreview,
             tolerateLateness, parkFlag, frameBytes = w * h * pixelFormat.bytesPerPixel,
@@ -264,8 +270,9 @@ internal class VideoFramePipe(
     }
 
     private fun feedSink(buf: ByteBuffer, w: Int, h: Int) {
+        // Kept with or without a sink, so one opened on a paused video shows it; never for a live relay
+        if (keepLastFrame) lastFrame.store(buf, w, h, w * h * pixelFormat.bytesPerPixel, pixelFormat)
         val sink = popoutFrameSink ?: return
-        lastFrame.store(buf, w, h, w * h * pixelFormat.bytesPerPixel, pixelFormat)
         sink(buf, w, h, pixelFormat)
         buf.rewind()
     }
