@@ -1070,6 +1070,14 @@ class DisplayScreen(
     fun reloadTexture() = createTexture()
 
     /**
+     * [reloadTexture] for a reload queued behind other work: skipped once this display has been removed, whose
+     * textures are already released and would otherwise be allocated again with nothing left to free them.
+     */
+    internal fun reloadTextureIfRegistered() {
+        if (DisplayRegistry.screens[uuid] === this) createTexture()
+    }
+
+    /**
      * Pushes the current quality setting to the media player (clamped to [qualityCap], stepped for distance /
      * size). `Auto` is pinned to the height it opens at, or stepping back up from a lower rung would be a no-op.
      */

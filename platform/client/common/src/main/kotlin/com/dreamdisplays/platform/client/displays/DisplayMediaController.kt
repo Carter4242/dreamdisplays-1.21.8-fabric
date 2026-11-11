@@ -89,7 +89,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         oldPlayer?.stop()
         screen.onVideoCleared(lang)
         DisplayRegistry.recordScreen(screen)
-        Minecraft.getInstance().execute { screen.reloadTexture() }
+        Minecraft.getInstance().execute { screen.reloadTextureIfRegistered() }
     }
 
     /** A queue switch waiting for its scheduled start: the current player keeps playing until then. */
@@ -212,7 +212,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             reportDuration()
         }
 
-        if (!seamless) Minecraft.getInstance().execute { screen.reloadTexture() }
+        if (!seamless) Minecraft.getInstance().execute { screen.reloadTextureIfRegistered() }
     }
 
     /** Applies volume, brightness, and paused state to the player, then seeks to the saved position. */
