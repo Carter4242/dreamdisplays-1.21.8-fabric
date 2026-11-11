@@ -265,6 +265,9 @@ class MediaPlayer(
         private const val MAX_STALL_RERESOLVES = 6
         private const val AUDIO_EOS_NEAR_END_GUARD_NS = 3_000_000_000L
 
+        /** How long the other audio tracks stay pre-warmed after the viewer last looked at the track list. */
+        private const val WARM_TRACKS_AFTER_LIST_NS = 60_000_000_000L
+
         /** Pause between attempts to (re)connect a live relay stream that is off the air. */
         private const val RELAY_RECONNECT_MS = 1_000L
         private const val RELAY_WAIT_LOG_INTERVAL_NS = 60_000_000_000L
@@ -702,8 +705,15 @@ class MediaPlayer(
     fun setQuality(quality: VideoQuality, userInitiated: Boolean = false) =
         safeExecute { changeQuality(quality, userInitiated) }
 
-    /** @return selectable audio tracks (deduped by language). */
-    fun getAvailableAudioTracks(): List<MediaStream> {
+    /**
+     * @return selectable audio tracks (deduped by language).
+     *
+     * Asking for the list (the display menu does, every frame it is open) keeps the other tracks pre-warmed for
+     * [WARM_TRACKS_AFTER_LIST_NS], so a pick from it switches at once; nobody pays for that warming otherwise.
+     */
+    fun getAvailableAudioTracks(): List<MediaStream> = audioTracks().also { if (it.size > 1) noteTrackListShown() }
+
+    private fun audioTracks(): List<MediaStream> {
         val audio = streams?.availableAudio?.filter { !it.type.hasVideo } ?: return []
         return audio
             .groupBy { it.audioTrackLang ?: it.audioTrackName }
@@ -715,7 +725,7 @@ class MediaPlayer(
     fun getCurrentAudioTrack(): String? {
         val current = streams?.currentAudio ?: return null
         val key = current.audioTrackLang ?: current.audioTrackName
-        return getAvailableAudioTracks()
+        return audioTracks()
             .firstOrNull { (it.audioTrackLang ?: it.audioTrackName) == key }?.url
             ?: current.url
     }
@@ -1626,15 +1636,41 @@ class MediaPlayer(
         refreshWarmAudioTracks()
     }
 
+    /** Until when ([System.nanoTime]) the other audio tracks are kept warm; see [getAvailableAudioTracks]. */
+    @Volatile
+    private var warmTracksUntilNanos = System.nanoTime()
+
+    private fun noteTrackListShown() {
+        val now = System.nanoTime()
+        val wasOff = now - warmTracksUntilNanos >= 0L
+        warmTracksUntilNanos = now + WARM_TRACKS_AFTER_LIST_NS
+        if (wasOff) {
+            safeExecute(::refreshWarmAudioTracks)
+            scheduleWarmTracksExpiry(WARM_TRACKS_AFTER_LIST_NS)
+        }
+    }
+
+    private fun scheduleWarmTracksExpiry(delayNanos: Long) {
+        if (terminated.get()) return
+        RETRY_SCHEDULER.schedule({
+            safeExecute {
+                val left = warmTracksUntilNanos - System.nanoTime()
+                if (left > 0L) scheduleWarmTracksExpiry(left) else refreshWarmAudioTracks()
+            }
+        }, delayNanos, TimeUnit.NANOSECONDS)
+    }
+
     private fun refreshWarmAudioTracks() {
         val ss = streams
-        if (ss == null || liveStream) {
+        // Each warm track is an FFmpeg process re-spawned (and re-downloading) every few seconds, so only while the
+        // viewer might pick one
+        if (ss == null || liveStream || System.nanoTime() - warmTracksUntilNanos >= 0L) {
             sessionManager.setWarmAudioTracks([])
             return
         }
         val playing = ss.currentAudio.url
         sessionManager.setWarmAudioTracks(
-            getAvailableAudioTracks()
+            audioTracks()
                 .filter { it.url != playing }
                 .map { WarmTrack(it.url, it.seekByDecoding) },
         )
