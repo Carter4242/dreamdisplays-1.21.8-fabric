@@ -427,6 +427,9 @@ class DisplayScreen(
      */
     internal val playbackQuality: VideoQuality get() = effectiveQuality()
 
+    /** The height [reloadQuality] pins the player to (what a player adopted now is switched to). */
+    internal val playbackQualityHeight: Int get() = effectiveQuality().targetHeight ?: DEFAULT_QUALITY
+
     private var distanceQualitySteps = 0
     private fun updateDistanceQuality(fraction: Float) {
         var steps = distanceQualitySteps
@@ -1024,7 +1027,7 @@ class DisplayScreen(
      * size). `Auto` is pinned to the height it opens at, or stepping back up from a lower rung would be a no-op.
      */
     fun reloadQuality() {
-        mediaPlayer?.setQuality(VideoQuality.Fixed(effectiveQuality().targetHeight ?: DEFAULT_QUALITY))
+        mediaPlayer?.setQuality(VideoQuality.Fixed(playbackQualityHeight))
     }
 
     /** Returns true if [pos] falls within the screen's block bounding box. */

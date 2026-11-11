@@ -38,4 +38,11 @@ class QueuePreloaderTest {
         assertFalse(preloadMatches("https://a", "en", "https://a", "fr"), "The French request would play English.")
         assertFalse(preloadMatches("https://a", "en", "https://b", "en"))
     }
+
+    @Test
+    fun `a held preload is held again after a speed or quality change`() {
+        assertFalse(preloadNeedsRewarm(1.0, 1.0, 720, 720))
+        assertTrue(preloadNeedsRewarm(1.0, 2.0, 720, 720), "A speed change in the last 25 s cold-starts the next entry.")
+        assertTrue(preloadNeedsRewarm(1.0, 1.0, 720, 480), "A distance quality step cold-starts the next entry.")
+    }
 }

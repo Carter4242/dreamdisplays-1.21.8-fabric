@@ -42,6 +42,10 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         var lastWarmAttemptNanos = 0L
         var orphanedSinceNanos = 0L
 
+        /** Speed and quality height the held session was opened at (adoption applies the display's current ones). */
+        var warmedSpeed = 0.0
+        var warmedHeight = 0
+
         /** Still holds a slot of [ACTIVE] (a failed preload gives its slot back at once). */
         var holdsSlot = true
 
@@ -160,6 +164,19 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         if (p.phase == Phase.FAILED) return
         if (p.host.mediaError != null) return fail(p, "load error")
         val now = System.nanoTime()
+        if ((p.phase == Phase.WARMING || p.phase == Phase.READY) && !p.player.isWarmingUp() &&
+            !p.player.isLive() && p.player.canSeek() &&
+            preloadNeedsRewarm(p.warmedSpeed, screen.playbackSpeed, p.warmedHeight, screen.playbackQualityHeight)
+        ) {
+            // The display's speed or quality moved since: adopting this hold would drop it and start cold, so it is
+            // not ready any more until it is held again at the new ones
+            logger.info("Display {}: re-preloading the next queue video at the display's new speed / quality.", shortId())
+            report(p, FullscreenPrepareState.LOADING)
+            p.phase = Phase.WARMING
+            p.lastWarmAttemptNanos = now
+            warm(p)
+            return
+        }
         when (p.phase) {
             Phase.LOADING -> {
                 if (!p.initialized) {
@@ -209,7 +226,10 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
      * player held at another speed would drop its warm session to retime it.
      */
     private fun warm(p: Preload) {
-        p.player.setPlaybackSpeed(screen.playbackSpeed)
+        p.warmedSpeed = screen.playbackSpeed
+        p.warmedHeight = screen.playbackQualityHeight
+        p.player.setPlaybackSpeed(p.warmedSpeed)
+        p.player.setQuality(VideoQuality.Fixed(p.warmedHeight))
         p.player.warmUpPaused(0L)
     }
 
@@ -252,6 +272,13 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         private val ACTIVE = AtomicInteger()
     }
 }
+
+/**
+ * Whether a preload held at [warmedSpeed] / [warmedHeight] must be held again: the display now plays at [speed] /
+ * [height], and adopting it would retime or re-quality the held session, dropping it for a cold start.
+ */
+internal fun preloadNeedsRewarm(warmedSpeed: Double, speed: Double, warmedHeight: Int, height: Int): Boolean =
+    warmedSpeed != speed || warmedHeight != height
 
 /**
  * Whether a preload of [preUrl] resolved with audio language [preLang] can become the player for a load of [url] in
