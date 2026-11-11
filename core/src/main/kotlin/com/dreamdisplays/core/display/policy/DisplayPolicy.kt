@@ -72,6 +72,11 @@ data class DisplayPolicy(
         val maxVolume: Double? = null,
         /** Within this many blocks the sound plays at full volume; fading starts beyond it. */
         val fullVolumeBlocks: Double? = null,
+        /**
+         * Multiplier (0..2) on the display's sound for every player, on top of their own volume, which it never
+         * changes. Set by the server, not by config: the karaoke track volume while someone sings.
+         */
+        val gain: Double? = null,
     ) {
         fun mergedOver(base: Audio?): Audio = Audio(
             radiusBlocks = radiusBlocks ?: base?.radiusBlocks,
@@ -79,7 +84,11 @@ data class DisplayPolicy(
             falloff = falloff ?: base?.falloff,
             startVolume = startVolume ?: base?.startVolume,
             maxVolume = maxVolume ?: base?.maxVolume,
+            gain = gain ?: base?.gain,
         )
+
+        /** [gain] clamped to 0..2; 1 when unset. */
+        val resolvedGain: Double get() = gain?.takeIf { !it.isNaN() }?.coerceIn(0.0, 2.0) ?: 1.0
     }
 
     @Serializable
@@ -226,6 +235,12 @@ data class DisplayPolicy(
         debug = mergeSection(debug, base.debug, Debug::mergedOver),
         network = mergeSection(network, base.network, Network::mergedOver),
     )
+
+    /** This policy with `audio.gain` set to [gain] (null removes it). */
+    fun withGain(gain: Double?): DisplayPolicy {
+        val updated = (audio ?: Audio()).copy(gain = gain)
+        return copy(audio = updated.takeIf { it != Audio() })
+    }
 
     /** Compact JSON bytes for the custom-data entry. */
     fun encode(): ByteArray = json.encodeToString(serializer(), this).toByteArray(Charsets.UTF_8)

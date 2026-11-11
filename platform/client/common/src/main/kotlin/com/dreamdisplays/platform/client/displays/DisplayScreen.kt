@@ -19,6 +19,7 @@ import com.dreamdisplays.platform.client.core.modules.ClientAudioModule
 import com.dreamdisplays.api.media.audio.SourceAcousticState
 import com.dreamdisplays.api.media.audio.SourcePlane
 import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.core.display.policy.PolicyGainRamp
 import com.dreamdisplays.core.display.policy.SyncSettings
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.api.media.stream.MediaStream
@@ -580,6 +581,9 @@ class DisplayScreen(
     var policy: DisplayPolicy = DisplayPolicy.CLIENT_DEFAULTS
         private set
 
+    /** The server's `audio.gain` (karaoke track volume), eased in and out; never touches the saved volume. */
+    private val policyGain = PolicyGainRamp()
+
     /** [policy]'s sync section, resolved and clamped. */
     @Volatile
     var syncSettings: SyncSettings = SyncSettings.DEFAULT
@@ -1057,7 +1061,18 @@ class DisplayScreen(
 
     /** Passes [volume] directly to the media player without persisting to settings. */
     fun setVideoVolume(volume: Float) {
-        mediaPlayer?.setVolume(capVolume(volume))
+        mediaPlayer?.setVolume(playVolume(volume))
+    }
+
+    /** [capVolume] times the server's (ramped) `audio.gain`. */
+    private fun playVolume(volume: Float): Float =
+        (capVolume(volume) * policyGain.value(System.nanoTime())).toFloat().coerceIn(0f, 2f)
+
+    /** Moves the gain ramp toward this display's target and re-applies the volume while it moves; every tick. */
+    private fun tickPolicyGain() {
+        val now = System.nanoTime()
+        policyGain.retarget(PolicyGainRamp.targetFor(policy, com.dreamdisplays.platform.client.karaoke.KaraokeClient.isSinging(uuid)), now)
+        if (policyGain.pollChanged(now)) applyEffectiveVolume()
     }
 
     /** [volume] limited to the server's `audio.maxVolume` for this display, when set. */
@@ -1359,7 +1374,7 @@ class DisplayScreen(
     internal fun primeNewPlayerVolume(mp: MediaPlayer) {
         val player = Minecraft.getInstance().player ?: return
         mp.primeVolume(
-            if (muted || focusMuted || prepareMuted) 0f else capVolume(volume), getDistanceToScreen(player.blockPosition()),
+            if (muted || focusMuted || prepareMuted) 0f else playVolume(volume), getDistanceToScreen(player.blockPosition()),
             audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff(),
         )
     }
@@ -1423,6 +1438,7 @@ class DisplayScreen(
         recoverMediaErrorIfDue()
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
+        tickPolicyGain()
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         syncPlaybackSpeed() // Follows mode / watch-party changes
         timelineFollower.tick()

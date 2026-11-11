@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.policy
 
 import com.dreamdisplays.api.display.data.DisplayCustomDataLimits
 import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.core.karaoke.KaraokeTrackDuck
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import org.slf4j.LoggerFactory
 
@@ -22,6 +23,10 @@ object DisplayPolicies {
     @Volatile
     var defaults: () -> DisplayPolicy = { DisplayPolicy.EMPTY }
 
+    /** Karaoke track volume for [display] while it has singers (`audio.gain`), else null; set by the platform. */
+    @Volatile
+    var trackVolume: (DisplayData) -> Double? = { null }
+
     /** Persists [DisplayData] and re-sends it to viewers after an override change; set by the platform. */
     @Volatile
     var onOverrideChanged: (DisplayData) -> Unit = {}
@@ -30,8 +35,11 @@ object DisplayPolicies {
     fun override(display: DisplayData): DisplayPolicy? = DisplayPolicy.decode(display.customData[DisplayPolicy.KEY])
 
     /** What clients are told for [display]: its override merged over the server defaults. */
-    fun effective(display: DisplayData): DisplayPolicy =
-        (override(display) ?: DisplayPolicy.EMPTY).mergedOver(defaults())
+    fun effective(display: DisplayData): DisplayPolicy {
+        val merged = (override(display) ?: DisplayPolicy.EMPTY).mergedOver(defaults())
+        val track = trackVolume(display) ?: return merged
+        return KaraokeTrackDuck.apply(merged, singing = true, trackVolume = track)
+    }
 
     /**
      * Sets (or with a null [value], clears) one override field of [display], e.g. `sync.deadBandMs` = 30,

@@ -172,6 +172,14 @@ voice_source = "singer"
 # this volume. Between songs and while paused they hear each other normally.
 co_singer_volume = 0.15
 
+# Volume of the singers' voices for listeners, 0.0-3.0 (1.0 = as voice chat plays them). Above 1.0 loud peaks are
+# softly limited instead of clipping. Singers hear each other at co_singer_volume instead.
+singer_volume = 1.4
+
+# Volume of the display's own audio (the track) while someone sings, 0.0-1.0, for everyone except the singers, who
+# hear it as normal. 1.0 = unchanged. Players' own volume settings are untouched; it eases back after the last singer.
+track_volume = 1.0
+
 # Log every karaoke voice stream as it starts (recipient, distance, packet type)
 debug = false
 

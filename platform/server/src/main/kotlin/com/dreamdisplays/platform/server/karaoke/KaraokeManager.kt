@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.server.karaoke
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.karaoke.KaraokeLatency
 import com.dreamdisplays.core.karaoke.KaraokeTiming
+import com.dreamdisplays.core.karaoke.KaraokeTrackDuck
 import com.dreamdisplays.core.karaoke.LeadResync
 import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
 import com.dreamdisplays.core.protocol.common.toSync
@@ -67,6 +68,8 @@ object KaraokeManager {
         val skipAbsent: Boolean = true,
         val fromSinger: Boolean = true,
         val coSingerVolume: Double = 0.15,
+        val trackVolume: Double = KaraokeTrackDuck.DEFAULT_TRACK_VOLUME,
+        val singerVolume: Double = 1.4,
         val debug: Boolean = false,
     )
 
@@ -86,6 +89,7 @@ object KaraokeManager {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val states = ConcurrentHashMap<UUID, State>()
     private val singerDisplay = ConcurrentHashMap<UUID, UUID>()
+    private val duck = KaraokeTrackDuck()
 
     @Volatile
     private var leads: Map<UUID, Map<UUID, Long>> = emptyMap()
@@ -121,6 +125,7 @@ object KaraokeManager {
         singerDisplay.clear()
         leads = emptyMap()
         stagesBySinger = emptyMap()
+        duck.clear()
         KaraokeMeasurements.clear()
     }
 
@@ -393,6 +398,7 @@ object KaraokeManager {
     fun tick() {
         if (states.isEmpty()) {
             if (stagesBySinger.isNotEmpty()) stagesBySinger = emptyMap()
+            syncTrackVolume()
             return
         }
         val slow = ++ticks % SLOW_TICKS == 0L
@@ -452,6 +458,18 @@ object KaraokeManager {
         }
         leads = newLeads
         stagesBySinger = stages
+        syncTrackVolume()
+    }
+
+    /** Re-sends the displays that gained their first singer or lost their last, so `audio.gain` follows. */
+    private fun syncTrackVolume() {
+        val active = states.filterValues { it.singers.isNotEmpty() }.keys
+        val changed = duck.update(active)
+        // At 1.0 (the default) nothing is ducked, so there is nothing to re-send
+        if (settings().trackVolume >= 1.0) return
+        for (displayId in changed) {
+            (DisplayManager.getDisplayData(displayId) as? PaperDisplayData)?.let(DisplayManager::broadcastUpdate)
+        }
     }
 
     private fun buildStage(display: PaperDisplayData, state: State): KaraokeStage? {
@@ -485,6 +503,7 @@ object KaraokeManager {
             songPlaying = timeline != null && !timeline.paused && timeline.serverTimeMs <= now &&
                     !TimelineManager.isHolding(display.id),
             coSingerVolume = s.coSingerVolume,
+            singerVolume = s.singerVolume,
             debug = s.debug,
         )
     }
@@ -547,6 +566,8 @@ object KaraokeManager {
             skipAbsent = it.absent_singer != "play",
             fromSinger = it.voice_source != "display",
             coSingerVolume = it.co_singer_volume,
+            trackVolume = it.track_volume,
+            singerVolume = it.singer_volume,
             debug = it.debug,
         )
     }

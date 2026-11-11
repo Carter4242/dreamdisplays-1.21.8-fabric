@@ -16,7 +16,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, some `[karaoke]` keys and every `[policy.*]` default), then
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, the `[karaoke]` keys and every `[policy.*]` default), then
  * reloads the config the way `/display reload` does.
  *
  * The file is edited in place, one line at a time ([TomlLineEditor]), so comments and layout survive; the
@@ -50,6 +50,15 @@ object ConfigCommand {
         },
         Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
         Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
+        Key("karaoke.default_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.default_lead_ms },
+        Key("karaoke.lead_margin_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.lead_margin_ms },
+        Key("karaoke.min_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.min_lead_ms },
+        Key("karaoke.max_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.max_lead_ms },
+        Key("karaoke.singer_output_capture_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.singer_output_capture_ms },
+        Key("karaoke.listener_buffer_output_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.listener_buffer_output_ms },
+        Key("karaoke.absent_singer", PolicyPaths.Kind.Choice(listOf("skip", "play"))) { it.karaoke.absent_singer },
+        Key("karaoke.track_volume", PolicyPaths.Kind.Decimal(0.0, 1.0)) { it.karaoke.track_volume },
+        Key("karaoke.singer_volume", PolicyPaths.Kind.Decimal(0.0, 3.0)) { it.karaoke.singer_volume },
         Key("karaoke.voice_source", PolicyPaths.Kind.Choice(listOf("singer", "display"))) { it.karaoke.voice_source },
         Key("karaoke.co_singer_volume", PolicyPaths.Kind.Decimal(0.0, 1.0)) { it.karaoke.co_singer_volume },
         Key("karaoke.debug", PolicyPaths.Kind.Bool) { it.karaoke.debug },

@@ -36,6 +36,21 @@ class DisplayPolicyTest {
     }
 
     @Test
+    fun `audio gain round trips, merges and clamps`() {
+        val p = DisplayPolicy(audio = DisplayPolicy.Audio(radiusBlocks = 20.0)).withGain(0.8)
+        assertEquals("{\"v\":1,\"audio\":{\"radiusBlocks\":20.0,\"gain\":0.8}}", p.encode().toString(Charsets.UTF_8))
+        assertEquals(p, DisplayPolicy.decode(p.encode()))
+        assertEquals(0.8, DisplayPolicy.EMPTY.mergedOver(p).audio?.gain)
+        assertEquals(0.5, DisplayPolicy.EMPTY.withGain(0.5).mergedOver(p).audio?.gain)
+        assertEquals(DisplayPolicy.EMPTY, DisplayPolicy.EMPTY.withGain(0.8).withGain(null))
+        assertEquals(1.0, DisplayPolicy.Audio().resolvedGain)
+        assertEquals(2.0, DisplayPolicy.Audio(gain = 9.0).resolvedGain)
+        assertEquals(0.0, DisplayPolicy.Audio(gain = -1.0).resolvedGain)
+        // Survives forDisplay(), so it reaches clients in DisplayInfo
+        assertEquals(0.8, p.forDisplay().audio?.gain)
+    }
+
+    @Test
     fun `garbage and absent data decode to null`() {
         assertNull(DisplayPolicy.decode(null))
         assertNull(DisplayPolicy.decode(ByteArray(0)))

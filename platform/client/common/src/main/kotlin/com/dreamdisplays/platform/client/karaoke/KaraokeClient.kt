@@ -104,6 +104,9 @@ object KaraokeClient {
         if (leadMs > 0) leads[displayId] = leadMs else leads.remove(displayId)
     }
 
+    /** True while this player sings on [displayId] (its track then plays at full volume for them). */
+    fun isSinging(displayId: UUID): Boolean = leads.containsKey(displayId)
+
     /** A clock probe from the server: answered at once. Client thread. */
     fun onClockPing(ping: KaraokeClockPing) {
         val received = System.nanoTime()

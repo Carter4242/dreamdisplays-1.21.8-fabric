@@ -27,6 +27,8 @@ data class KaraokeStage(
     val fromSinger: Boolean = true,
     val songPlaying: Boolean = false,
     val coSingerVolume: Double = 1.0,
+    /** Volume of the singers' voices for listeners (`singer_volume`, 0..3, soft-limited above 1). */
+    val singerVolume: Double = 1.0,
     val debug: Boolean = false,
 )
 
