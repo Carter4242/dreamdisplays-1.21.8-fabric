@@ -61,6 +61,22 @@ class YtDlpBinaryTest {
     }
 
     @Test
+    fun aBundledCopyThatCannotRunHereGivesWayToASystemInstall() {
+        val bundled = "libs/yt-dlp/yt-dlp_linux"
+        assertEquals(
+            "/usr/bin/yt-dlp",
+            YtDlpBinary.pickBinary(null, bundled, system, runs = { it != "yt-dlp" }, answers = { it != bundled }) { bundled },
+        )
+        // Also right after downloading it
+        assertEquals(
+            "/usr/bin/yt-dlp",
+            YtDlpBinary.pickBinary(null, bundled, system, runs = { it == "/usr/bin/yt-dlp" }, answers = { it != bundled }) { bundled },
+        )
+        // No system install: kept, as before
+        assertEquals(bundled, YtDlpBinary.pickBinary(null, bundled, system, runs = { it == bundled }, answers = { false }) { bundled })
+    }
+
+    @Test
     fun aMissingBundledCopyIsDownloadedEvenWithASystemInstall() {
         var downloaded = false
         val pick = YtDlpBinary.pickBinary(null, "libs/yt-dlp/yt-dlp", system, runs = { it in system || downloaded }) {

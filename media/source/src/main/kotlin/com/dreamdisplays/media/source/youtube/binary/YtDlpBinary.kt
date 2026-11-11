@@ -178,6 +178,7 @@ object YtDlpBinary {
                 CANDIDATE_PATHS.asList(),
                 ::canExecute,
                 preferSystem = preference == "system",
+                answers = ::answersVersion,
                 provisionBundled = { download(bundled) },
             )
             resolved = pick
@@ -190,6 +191,9 @@ object YtDlpBinary {
      * The order [resolve] tries: [override] when it runs, the [bundled] copy when present, a fresh download of it
      * ([provisionBundled]), and only then the [system] installs ([preferSystem]: those first). Throws the download's
      * error when nothing runs.
+     *
+     * The bundled copy must also [answers] (`--version`): a release binary that cannot run here (musl, NixOS, a no-exec
+     * folder) gives way to a system install that runs, and is kept only when there is none (as before).
      */
     internal fun pickBinary(
         override: String?,
@@ -197,13 +201,22 @@ object YtDlpBinary {
         system: List<String>,
         runs: (String) -> Boolean,
         preferSystem: Boolean = false,
+        answers: (String) -> Boolean = { true },
         provisionBundled: () -> String,
     ): String {
         if (override != null && runs(override)) return override
         if (preferSystem) system.firstOrNull(runs)?.let { return it }
-        if (runs(bundled)) return bundled
+        fun orSystem(path: String): String {
+            if (answers(path)) return path
+            system.firstOrNull(runs)?.let {
+                logger.warn("Bundled yt-dlp {} does not run here; using system {}.", path, it)
+                return it
+            }
+            return path
+        }
+        if (runs(bundled)) return orSystem(bundled)
         val failure = try {
-            return provisionBundled()
+            return orSystem(provisionBundled())
         } catch (e: IOException) {
             e
         }
@@ -447,6 +460,21 @@ object YtDlpBinary {
     internal fun releaseTag(location: String?): String? =
         location?.substringAfter("/releases/tag/", "")?.substringBefore('?')?.trim('/')
             ?.takeIf { it.matches(Regex("[A-Za-z0-9._-]+")) }
+
+    /** True when [path] runs and answers `--version` (a binary that is present and executable may still not run). */
+    private fun answersVersion(path: String): Boolean = runCatching {
+        val pb = ProcessBuilder(path, "--version")
+        pb.redirectErrorStream(true)
+        val p = pb.start()
+        runCatching { p.outputStream.close() }
+        Processes.drainAsync(p.inputStream)
+        // A first run can be slow (a PyInstaller unpack, an antivirus scan): only a clear failure counts
+        if (!p.waitFor(30, TimeUnit.SECONDS)) {
+            Processes.destroyTree(p)
+            return@runCatching true
+        }
+        p.exitValue() == 0
+    }.getOrDefault(false)
 
     private fun canExecute(path: String): Boolean {
         return runCatching {
