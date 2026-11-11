@@ -59,7 +59,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             // The server switches a moment before the current video ends and schedules the next one at its end
             // instant: this video plays on (or holds its last frame) until then, see onTimelineWhileSwitching
             pendingSwitch = PendingSwitch(videoUrl, lang, preservePausedState, taken).also {
-                it.timer = schedule(SWITCH_FALLBACK_MS.toDouble()) { completePendingSwitch(it, seamless = false) }
+                arm(it, SWITCH_FALLBACK_MS.toDouble()) { completePendingSwitch(it, seamless = false) }
             }
             return
         }
@@ -92,6 +92,16 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         val url: String, val lang: String, val preservePausedState: Boolean, val taken: QueuePreloader.Taken,
     ) {
         var timer: ScheduledFuture<*>? = null
+
+        /** Only the timer armed last may act: cancelling one cannot recall it once handed to the client thread. */
+        val latest = LatestTimer()
+    }
+
+    /** (Re-)arms [p]'s timer to run [action] on the client thread in [delayMs], superseding any earlier one. */
+    private fun arm(p: PendingSwitch, delayMs: Double, action: () -> Unit) {
+        p.timer?.cancel(false)
+        val id = p.latest.arm()
+        p.timer = schedule(delayMs) { if (p.latest.isLatest(id)) action() }
     }
 
     private var pendingSwitch: PendingSwitch? = null
@@ -113,9 +123,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             completePendingSwitch(p, seamless = true)
             return false
         }
-        p.timer?.cancel(false)
         val receivedNanos = System.nanoTime()
-        p.timer = schedule(waitMs) {
+        arm(p, waitMs) {
             if (completePendingSwitch(p, seamless = true)) {
                 val elapsedMs = (System.nanoTime() - receivedNanos) / 1_000_000.0
                 screen.updateData(packet.copy(startInMs = (packet.startInMs - elapsedMs).roundToInt().coerceAtLeast(1)))
@@ -323,4 +332,14 @@ internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs
     if (positionMs <= 0L || sampleAgeMs !in 0..OBSERVED_END_MAX_SAMPLE_AGE_MS) return null
     if (metadataMs > 0L && kotlin.math.abs(positionMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
     return positionMs
+}
+
+/** Ids for a timer that gets re-armed: only the latest arming may act. */
+internal class LatestTimer {
+    private var current = 0L
+
+    /** A new arming; every earlier one is superseded. */
+    fun arm(): Long = ++current
+
+    fun isLatest(id: Long): Boolean = id == current
 }
