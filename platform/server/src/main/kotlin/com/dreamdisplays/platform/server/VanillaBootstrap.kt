@@ -55,12 +55,26 @@ object VanillaBootstrap {
         VanillaServerApi.start()
     }
 
-    /** Persists all displays and disconnects storage. */
+    /**
+     * Persists all displays and disconnects storage. In single-player the game keeps running and the next world opened
+     * starts another server in this same process: everything this one held is forgotten here, and the background scope
+     * stays usable for it.
+     */
     fun onServerStopping() {
         VanillaServerApi.stop()
         DisplayManager.save { VanillaServerState.storage?.saveDisplay(it) }
         ServerCoroutines.shutdown()
         VanillaServerState.storage?.disconnect()
+        forgetWorld()
+    }
+
+    private fun forgetWorld() {
+        DisplayManager.clearAll()
+        FullscreenBroadcastManager.forgetAll()
+        WatchPartyManager.forgetAll()
+        PipPinManager.forgetAll()
+        ScheduledPlaybackManager.forgetAll()
+        com.dreamdisplays.platform.server.listeners.VanillaPlayerListener.onServerStopped()
     }
 
     private fun startRepeatingTasks(server: MinecraftServer) {

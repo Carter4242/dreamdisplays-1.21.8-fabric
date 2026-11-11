@@ -446,6 +446,15 @@ object DisplayManager {
         }
     }
 
+    /**
+     * Forgets every display: an integrated server stopped, and the next world opened in the same game has its own (its
+     * displays would otherwise show up in that world and be saved into its database). Call after the final save.
+     */
+    fun clearAll() {
+        displays.clear()
+        proximityIndex.clear()
+    }
+
     /** Registers a new display. Caller is responsible for broadcasting. */
     fun register(data: VanillaDisplayData) {
         displays[data.id] = data

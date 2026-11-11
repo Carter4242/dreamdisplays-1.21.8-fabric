@@ -49,6 +49,11 @@ object WatchPartyManager {
     )
 
     /** Wires the platform transport. */
+    /** Forgets every party without telling anyone: the server stopped, and the next one in this process starts clean. */
+    fun forgetAll() {
+        sessions.clear()
+    }
+
     fun init(transport: PlaybackTransport) {
         this.transport = transport
     }

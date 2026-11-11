@@ -10,9 +10,12 @@ object ServerCoroutines {
     /** The server-side coroutine scope for all background IO. */
     val io: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("Server-IO"))
 
-    /** Cancels all background server IO coroutines. Called on server stop / plugin disable. */
+    /**
+     * Cancels all background server IO coroutines. Called on server stop / plugin disable. The scope itself stays
+     * usable: in single-player the next world starts another server in this same process and launches here again.
+     */
     fun shutdown() {
-        io.cancel()
+        io.coroutineContext.cancelChildren()
     }
 
     /**
@@ -21,6 +24,6 @@ object ServerCoroutines {
      * while the plugin classloader is fresh.
      */
     fun warmUp() {
-        CoroutineScope(SupervisorJob()).cancel()
+        CoroutineScope(SupervisorJob()).apply { launch(start = CoroutineStart.LAZY) {} }.coroutineContext.cancelChildren()
     }
 }

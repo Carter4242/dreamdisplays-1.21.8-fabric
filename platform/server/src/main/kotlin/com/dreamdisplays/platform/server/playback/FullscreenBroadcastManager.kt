@@ -473,6 +473,15 @@ object FullscreenBroadcastManager {
         }
     }
 
+    /**
+     * Forgets every session and preparation without telling anyone or touching the store: the server stopped (its
+     * players are gone) and the next one in this process restores its own.
+     */
+    fun forgetAll() {
+        sessions.clear()
+        preparations.clear()
+    }
+
     /** Re-evaluates radius membership and refreshes drifting clients. Called once per second. */
     fun tick() {
         if (sessions.isEmpty() && preparations.isEmpty()) return

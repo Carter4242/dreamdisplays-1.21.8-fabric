@@ -18,6 +18,12 @@ internal class DisplayProximityIndex {
         nearbyDisplaysByPlayer.replaceAll { _, ids -> ids - displayId }
     }
 
+    /** Forgets everything (the server this index belonged to stopped). */
+    fun clear() {
+        nearbyPlayersByDisplay.clear()
+        nearbyDisplaysByPlayer.clear()
+    }
+
     /** Removes [playerId] from the cached proximity index. */
     fun forgetPlayer(playerId: UUID) {
         nearbyDisplaysByPlayer.remove(playerId)?.forEach { displayId ->

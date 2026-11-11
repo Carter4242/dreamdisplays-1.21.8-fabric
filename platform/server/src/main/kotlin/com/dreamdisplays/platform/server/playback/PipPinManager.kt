@@ -87,6 +87,11 @@ object PipPinManager {
     }
 
     /** Restores persisted pins from disk; call once at startup. */
+    /** Forgets every pin without touching the store: the server stopped; the next one restores its own. */
+    fun forgetAll() {
+        pins.clear()
+    }
+
     fun restore() {
         val records = PipPinStore.load()
         if (records.isEmpty()) return

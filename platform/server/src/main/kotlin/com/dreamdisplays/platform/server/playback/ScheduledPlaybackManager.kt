@@ -53,6 +53,12 @@ object ScheduledPlaybackManager {
         return true
     }
 
+    /** Drops every countdown without touching storage: the server stopped; the next one re-arms its own. */
+    fun forgetAll() {
+        jobs.values.forEach { it.cancel() }
+        jobs.clear()
+    }
+
     /** Forgets a removed display's schedule, without touching storage (the display row is already gone). */
     fun onDisplayRemoved(displayId: UUID) {
         jobs.remove(displayId)?.cancel()

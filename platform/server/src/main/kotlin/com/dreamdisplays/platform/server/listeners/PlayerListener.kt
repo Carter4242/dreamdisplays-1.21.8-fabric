@@ -123,6 +123,11 @@ class PlayerListener : Listener {
 object VanillaPlayerListener {
     private var hasValidatedWorld = false
 
+    /** The server stopped: the next one (another world in this game) validates its own displays on its first join. */
+    fun onServerStopped() {
+        hasValidatedWorld = false
+    }
+
     /**
      * On the first join after startup, validates all stored displays once. Also schedules a delayed
      * `modRequired` message for vanilla clients when mod detection is enabled.
