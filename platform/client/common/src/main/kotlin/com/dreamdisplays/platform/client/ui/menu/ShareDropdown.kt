@@ -22,13 +22,19 @@ class ShareDropdown(
 
     private var items: List<Pair<String, () -> Unit>> = []
 
-    private var rect = UiRect(0, 0, WIDTH, ITEM_H * items.size)
+    /** Wide enough for the longest label (screen names carry their place and size). */
+    private var width = WIDTH
+    private var rect = UiRect(0, 0, width, ITEM_H * items.size)
     private var animProgress = 0f
     private var lastFrameNanos = 0L
 
     /** Toggles dropdown visibility, re-reading the items when it opens. */
     fun toggle() {
-        if (!visible) items = listItems()
+        if (!visible) {
+            items = listItems()
+            val font = Minecraft.getInstance().font
+            width = maxOf(WIDTH, (items.maxOfOrNull { font.width(it.first) } ?: 0) + 12)
+        }
         visible = !visible && items.isNotEmpty()
     }
 
@@ -56,7 +62,7 @@ class ShareDropdown(
 
         if (items.isEmpty()) return
         val height = ITEM_H * items.size
-        rect = UiRect(anchorCenterX - WIDTH / 2, anchorY - height - 2, WIDTH, height)
+        rect = UiRect(anchorCenterX - width / 2, anchorY - height - 2, width, height)
 
         val scale = 0.85f + 0.15f * animProgress
         val matrices = g.pose()
@@ -83,12 +89,12 @@ class ShareDropdown(
                 g.fill(
                     rect.x + 1,
                     itemY,
-                    rect.x + WIDTH - 1,
+                    rect.x + width - 1,
                     itemY + ITEM_H,
                     scaleAlpha(UiTheme.HOVER_FILL, animProgress)
                 )
                 g.drawOutline(
-                    UiRect(rect.x + 1, itemY, WIDTH - 2, ITEM_H),
+                    UiRect(rect.x + 1, itemY, width - 2, ITEM_H),
                     scaleAlpha(UiTheme.CARD_BORDER_HOVER, animProgress)
                 )
             }

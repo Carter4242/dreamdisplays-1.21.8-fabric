@@ -18,10 +18,11 @@ class ScreenCaptureArgsTest {
     @Test
     fun `windows captures the monitor with desktop duplication and publishes mpegts over srt`() {
         val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, publish)
-        assertEquals("lavfi", a.valueOf("-f"))
-        assertEquals("ddagrab=output_idx=1:framerate=30:draw_mouse=1", a.valueOf("-i"))
-        assertTrue(a.valueOf("-vf")!!.startsWith("hwdownload,format=bgra,scale="))
-        assertTrue(a.valueOf("-vf")!!.endsWith("format=nv12"))
+        val graph = a.valueOf("-filter_complex")!!
+        assertTrue(graph.startsWith("ddagrab=output_idx=1:framerate=30:draw_mouse=1,hwdownload,format=bgra,scale="), graph)
+        assertTrue(graph.endsWith("format=nv12[v]"), graph)
+        assertEquals("[v]", a.valueOf("-map"))
+        assertFalse("-i" in a, "ddagrab as an -i lavfi input ignores the chosen adapter")
         assertEquals("h264_nvenc", a.valueOf("-c:v"))
         assertEquals("ull", a.valueOf("-tune"))
         assertEquals("0", a.valueOf("-bf"))
@@ -37,8 +38,11 @@ class ScreenCaptureArgsTest {
         val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, screen, Encoder.AMF, publish)
         assertEquals("d3d11va=dd:1", a.valueOf("-init_hw_device"))
         assertEquals("dd", a.valueOf("-filter_hw_device"))
-        assertTrue(a.indexOf("-init_hw_device") < a.indexOf("-i"))
-        assertEquals("ddagrab=output_idx=0:framerate=30:draw_mouse=1", a.valueOf("-i"))
+        assertTrue(a.indexOf("-init_hw_device") < a.indexOf("-filter_complex"))
+        assertTrue(a.valueOf("-filter_complex")!!.startsWith("ddagrab=output_idx=0:framerate=30:draw_mouse=1,"))
+        val byVendor = screen.copy(vendorId = 0x1002, byVendor = true)
+        assertEquals("d3d11va=dd:,vendor_id=0x1002",
+            ScreenCapture.args("FFMPEG", Source.DDAGRAB, byVendor, Encoder.AMF, publish).valueOf("-init_hw_device"))
         assertEquals("0", a.valueOf("-omit_video_pes_length"))
         assertEquals("Screen 2 1920x1080", ScreenCapture.label(screen))
         assertFalse("-init_hw_device" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.AMF, publish))
@@ -71,12 +75,12 @@ class ScreenCaptureArgsTest {
         assertEquals("zerolatency", a.valueOf("-tune"))
         assertEquals("4000k", a.valueOf("-b:v"))
         assertEquals("4000k", a.valueOf("-maxrate"))
-        assertTrue(a.valueOf("-vf")!!.endsWith("format=yuv420p"))
+        assertTrue(a.valueOf("-filter_complex")!!.endsWith("format=yuv420p[v]"))
     }
 
     @Test
     fun `the picture is held to 1080p`() {
-        val vf = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.X264, publish).valueOf("-vf")!!
+        val vf = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.X264, publish).valueOf("-filter_complex")!!
         assertTrue("min(1920,iw)" in vf && "min(1080,ih)" in vf && "force_original_aspect_ratio=decrease" in vf, vf)
     }
 
@@ -105,6 +109,59 @@ class ScreenCaptureArgsTest {
             assertEquals("4000k", a.valueOf("-maxrate"))
             assertFalse("-look_ahead" in a)
         }
+    }
+
+    @Test
+    fun `gdi capture copies the screen's desktop rectangle`() {
+        val left = ScreenCapture.Monitor(0, "Screen 1", -1920, 0, 1920, 1080, adapter = 1, deviceName = "\\\\.\\DISPLAY2")
+        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, left, Encoder.X264, publish)
+        assertEquals("gdigrab", a.valueOf("-f"))
+        assertEquals("-1920", a.valueOf("-offset_x"))
+        assertEquals("0", a.valueOf("-offset_y"))
+        assertEquals("1920x1080", a.valueOf("-video_size"))
+        assertEquals("desktop", a.valueOf("-i"))
+        assertFalse("-init_hw_device" in a)
+    }
+
+    @Test
+    fun `server limits lower the frame rate, the picture and the bitrate`() {
+        val s = ScreenCapture.Settings().limitedTo(maxFps = 15, maxHeight = 720)
+        assertEquals(15, s.fps)
+        assertEquals(720, s.maxHeight)
+        assertEquals(1280, s.maxWidth)
+        assertTrue(s.bitrateKbps in 500..2_000, "${s.bitrateKbps}")
+        assertEquals(ScreenCapture.Settings(), ScreenCapture.Settings().limitedTo(0, 0))
+        assertEquals(30, ScreenCapture.Settings().limitedTo(60, 2160).fps)
+    }
+
+    @Test
+    fun `the safe plan drops to x264, and to gdi unless only the encoder failed`() {
+        val screen = ScreenCapture.Monitor(0, "Screen 1", 0, 0, 1920, 1080, adapter = 0, deviceName = "\\\\.\\DISPLAY6")
+        val amf = ScreenCapture.Plan(Source.DDAGRAB, Encoder.AMF)
+        assertEquals(ScreenCapture.Plan(Source.DDAGRAB, Encoder.X264), ScreenCapture.safePlan(amf, screen, encoderFailed = true))
+        assertEquals(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264), ScreenCapture.safePlan(amf, screen, encoderFailed = false))
+        assertEquals(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264),
+            ScreenCapture.safePlan(ScreenCapture.Plan(Source.DDAGRAB, Encoder.X264), screen, encoderFailed = false))
+        assertEquals(null, ScreenCapture.safePlan(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264), screen, encoderFailed = false))
+    }
+
+    @Test
+    fun `encoder open failures are told apart from capture failures`() {
+        assertTrue(ScreenCapture.isEncoderOpenFailure("[h264_amf @ 0x1] Failed to create derived AMF device context: No such device"))
+        assertTrue(ScreenCapture.isEncoderOpenFailure("[h264_nvenc @ 0x1] Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0"))
+        assertTrue(ScreenCapture.isEncoderOpenFailure("[vost#0:0/h264_qsv] [enc:h264_qsv] Error while opening encoder - maybe incorrect parameters"))
+        assertFalse(ScreenCapture.isEncoderOpenFailure("[Parsed_ddagrab_0 @ 0x1] Failed to enumerate DXGI output 1"))
+        assertFalse(ScreenCapture.isEncoderOpenFailure("[tcp @ 0x1] Connection to tcp://relay:1935 failed: Connection refused"))
+    }
+
+    @Test
+    fun `screens are named by their place on the desktop`() {
+        fun m(x: Int, dev: String) = ScreenCapture.Monitor(0, "", x, 0, 1920, 1080, adapter = 0, deviceName = dev)
+        val named = ScreenCapture.named([m(1920, "B"), m(0, "A"), m(-1920, "C")])
+        assertEquals(["C", "A", "B"], named.map { it.deviceName })
+        assertEquals(["Screen 1 (left)", "Screen 2 (middle, main)", "Screen 3 (right)"], named.map { it.name })
+        assertEquals("Screen 2 (middle, main) 1920x1080", ScreenCapture.label(named[1]))
+        assertEquals(["Screen 1"], ScreenCapture.named([m(0, "A")]).map { it.name })
     }
 
     @Test

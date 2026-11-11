@@ -48,6 +48,8 @@ object ClientErrorReporter {
     private val queue = ConcurrentLinkedQueue<PlaybackFailure>()
     private val errors = ReportThrottle(dedupeWindowMs = 10 * 60_000L, perDisplayPerMinute = 4, totalPerMinute = 12)
     private val hitches = ReportThrottle(dedupeWindowMs = 60_000L, perDisplayPerMinute = 4, totalPerMinute = 12)
+    private val shareReports = ConcurrentLinkedQueue<ClientErrorReport>()
+    private val shares = ReportThrottle(dedupeWindowMs = 10 * 60_000L, perDisplayPerMinute = 4, totalPerMinute = 8)
 
     private class Episode(val startMs: Long, val positionMs: Long, var reported: Boolean = false)
 
@@ -86,9 +88,11 @@ object ClientErrorReporter {
         enabled = false
         PlaybackDiagnostics.listener = null
         queue.clear()
+        shareReports.clear()
         episodes.clear()
         errors.reset()
         hitches.reset()
+        shares.reset()
         synchronized(histories) { histories.clear() }
         lastEnvSent = null
         envSends = 0
@@ -240,6 +244,44 @@ object ClientErrorReporter {
             val failure = queue.poll() ?: break
             send(failure, now)
         }
+        while (true) {
+            val report = shareReports.poll() ?: break
+            val signature = ReportThrottle.signature(report.type, report.stage, report.action, report.message, 0, report.final)
+            val suppressed = shares.admit(report.id, signature, now) ?: continue
+            runCatching { Initializer.sendPacket(report.copy(suppressed = suppressed)) }
+                .onFailure { logger.debug("Could not send a screen share report.", it) }
+        }
+    }
+
+    /**
+     * A screen share to [displayId] failed, or only worked after a fallback ([action]: what happened, e.g.
+     * `fallback_ok`, `failed`). [attempts] are the pipeline tests (plan, adapter, ok, error); [metrics] the screens,
+     * GPUs and the plan chosen. Scrubbed here; sent on the next client tick to servers that take reports. Any thread.
+     */
+    fun reportShare(
+        displayId: UUID, message: String, stage: String, action: String, final: Boolean, stderr: String,
+        attempts: List<ResolveAttemptReport>, metrics: Map<String, String>,
+    ) {
+        if (!enabled || shareReports.size >= MAX_QUEUED) return
+        val homes = ClientEnvironmentProbe.homes()
+        shareReports.add(
+            ClientErrorReport(
+                id = displayId,
+                kind = "SHARE",
+                message = ReportScrubber.scrub(message, homes).take(512),
+                stage = stage.take(32),
+                attempts = attempts.takeLast(MAX_ATTEMPTS).map {
+                    it.copy(source = it.source.take(32), client = it.client.take(32),
+                        error = ReportScrubber.scrub(it.error, homes).take(300))
+                },
+                stderr = ReportScrubber.excerpt(stderr, maxLines = 15, maxBytes = 2048, homes = homes),
+                final = final,
+                timestampMs = System.currentTimeMillis(),
+                type = ClientErrorReport.TYPE_SHARE,
+                action = action.take(32),
+                metrics = metrics.entries.take(24).associate { (k, v) -> k.take(32) to ReportScrubber.scrub(v, homes).take(200) },
+            )
+        )
     }
 
     private fun startEnvBuild(now: Long) {
