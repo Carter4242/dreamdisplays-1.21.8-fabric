@@ -61,7 +61,7 @@ object ProtocolRouter {
             v2Negotiated = true
             logger.info("Protocol v2 negotiated (server protocol ${packet.protocolVersion}).")
         }
-        ClientPacketManager.handle(packet)
+        dispatchGuarded(packet::class.simpleName, logger) { ClientPacketManager.handle(packet) }
         if (answer) {
             logger.info("Server greeted this client again (plugin reloaded?); answering with a hello.")
             sendHello()
