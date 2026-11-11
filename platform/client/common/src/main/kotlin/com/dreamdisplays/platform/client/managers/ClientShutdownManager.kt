@@ -20,5 +20,6 @@ object ClientShutdownManager {
         DreamCoroutines.shutdown()
         DisplayRegistry.unloadAll()
         Focuser.instance?.interrupt()
+        com.dreamdisplays.platform.client.storage.ClientSettingsStore.flush()
     }
 }

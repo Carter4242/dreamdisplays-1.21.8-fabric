@@ -10,12 +10,13 @@ import kotlinx.serialization.builtins.serializer
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /**
  * In-memory cache and JSON persistence for per-display, client-local [ClientDisplaySettings].
  *
- * Backed by `client-display-settings.json`. Every mutator persists immediately so the file always
- * reflects the latest viewer preferences.
+ * Backed by `client-display-settings.json`. Every mutator persists: changes are written off the render thread,
+ * coalesced to one write per [SAVE_DELAY_MS], and [flush] writes any pending change at shutdown.
  */
 object ClientSettingsStore : ClientSettingsStorage {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -24,6 +25,13 @@ object ClientSettingsStore : ClientSettingsStorage {
     private val jsonFiles = JsonFileStore()
     private val settingsSerializer = MapSerializer(String.serializer(), ClientDisplaySettings.serializer())
     private val settings = ConcurrentHashMap<UUID, ClientDisplaySettings>()
+    private const val SAVE_DELAY_MS = 500L
+    private val writer = CoalescingWriter(
+        SAVE_DELAY_MS,
+        Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "DreamDisplays-SettingsWriter").apply { isDaemon = true }
+        },
+    ) { writeNow() }
 
     override fun load() {
         val loaded: Map<String, ClientDisplaySettings> =
@@ -35,7 +43,12 @@ object ClientSettingsStore : ClientSettingsStorage {
         }
     }
 
-    override fun save() {
+    override fun save() = writer.request()
+
+    /** Writes any change still waiting for its coalesced save. Call on shutdown. */
+    fun flush() = writer.flush()
+
+    private fun writeNow() {
         if (!jsonFiles.ensureDir(logger)) return
         val toSave = settings.entries.associate { (k, v) -> k.toString() to v }
         jsonFiles.writeVersioned(jsonFiles.file(FILE_NAME), settingsSerializer, toSave, SCHEMA_VERSION, logger)
