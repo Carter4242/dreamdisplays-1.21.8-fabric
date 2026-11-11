@@ -674,6 +674,7 @@ object ScreenShare {
         val started = runShare(r, ffmpeg, window, plan, publishUrl, announce = true) ?: return
         if (r.stopped) return
         val first = afterRelay(r, ffmpeg, window, plan, publishUrl, started) ?: return
+        if (windowClosed(r, window)) return
         val retryPlan = when {
             retryWithoutSound(r, first) -> plan
             first.ranMs < EARLY_EXIT_MS && plan.encoder != ScreenCapture.Encoder.X264 ->
@@ -687,8 +688,15 @@ object ScreenShare {
         logger.warn("Window share with {} ended at once ({}); retrying with {}.", plan, first.reason, retryPlan)
         r.settings = settingsFor(r, ffmpeg, retryPlan)
         val retry = runShare(r, ffmpeg, window, retryPlan, publishUrl, announce = false) ?: return
-        if (r.stopped) return
+        if (r.stopped || windowClosed(r, window)) return
         fail(r, retry.reason)
+    }
+
+    /** True (and the share ended, saying so) when the shared [window] is gone: its capture ends with it. */
+    private fun windowClosed(r: Running, window: ScreenCapture.Window): Boolean {
+        if (WinWindows.exists(window)) return false
+        fail(r, "the shared window was closed")
+        return true
     }
 
     /** [ended] as the run to judge a window's plan by, once the relay is ruled out (see [relayRetry]); null when that settled the share. */
