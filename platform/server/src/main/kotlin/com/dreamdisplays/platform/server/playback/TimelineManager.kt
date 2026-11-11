@@ -28,12 +28,14 @@ object TimelineManager {
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
-    private val RESYNC_PARAM = Regex("""([?&])ddsync=(\d+)""")
 
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
 
-    /** resync hold length; the platform points this at its live config (`display.resync_hold_seconds`). */
-    var resyncHoldMs: () -> Long = { 10_000L }
+    /** Hold after a resume of a paused display; the platform points this at `display.resume_hold_seconds`. */
+    var resumeHoldMs: () -> Long = { 1_000L }
+
+    /** Hold after a seek or restart; the platform points this at `display.seek_hold_seconds`. */
+    var seekHoldMs: () -> Long = { 3_000L }
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
     fun init(transport: PlaybackTransport) {
@@ -64,12 +66,16 @@ object TimelineManager {
             PlaybackAction.SEEK -> current.seekedTo(clampSeek(positionMs, display), now)
             PlaybackAction.RESTART -> Timeline.start(now)
         }
-        // a resume, seek or restart reloads every viewer at the new position and holds it paused until
-        // they have all buffered, so they start together instead of each correcting its own drift.
+        // A resume, seek or restart parks every viewer paused at the new position for a moment, so they all
+        // snap onto it and then start together instead of each correcting its own offset afterwards.
         val resumes = action == PlaybackAction.PLAY && current.paused
         val jumps = action == PlaybackAction.SEEK || action == PlaybackAction.RESTART
         if (resumes || jumps) {
-            resyncAndHold(display, updated, now, holdThenPlay = resumes || action == PlaybackAction.RESTART || !current.paused)
+            holdThenRelease(
+                display, updated, now,
+                playAfter = resumes || action == PlaybackAction.RESTART || !current.paused,
+                holdMs = if (resumes) resumeHoldMs() else seekHoldMs(),
+            )
             return true
         }
         timelines[display.id] = updated
@@ -78,35 +84,22 @@ object TimelineManager {
     }
 
     /**
-     * resync. The stock client only corrects drift above 1.5 s behind / 3.5 s ahead and backs off after slow
-     * seeks, so viewers drift apart and stay there. Changing a display's URL makes every client drop its player,
-     * request the timeline and open the video already positioned at it, so: park the timeline paused at
-     * [target], bump a harmless `ddsync` query parameter so clients reload, then (when [holdThenPlay]) release
-     * the hold after [resyncHoldMs] through the existing start-hold tick, starting everyone from the same frame.
+     * Start hold: park the timeline paused at [target] and, when [playAfter], release it after [holdMs] through the
+     * start-hold tick. Clients snap their paused player exactly onto a paused timeline, so during the hold every
+     * viewer lines up on the same frame and the release starts them together. A zero hold plays at once and
+     * leaves any small offsets to the clients' drift correction.
      */
-    private fun resyncAndHold(display: DisplayData, target: Timeline, now: Long, holdThenPlay: Boolean) {
+    private fun holdThenRelease(display: DisplayData, target: Timeline, now: Long, playAfter: Boolean, holdMs: Long) {
+        if (playAfter && holdMs <= 0L) {
+            val playing = target.withPaused(false, now)
+            timelines[display.id] = playing
+            broadcast(display, playing)
+            return
+        }
         val held = target.withPaused(true, now)
         timelines[display.id] = held
-        if (holdThenPlay) startHolds[display.id] = now + resyncHoldMs()
-        bumpResyncMarker(display)
+        if (playAfter) startHolds[display.id] = now + holdMs
         broadcast(display, held)
-    }
-
-    private fun bumpResyncMarker(display: DisplayData) {
-        val url = display.url
-        if (url.isBlank()) return
-        val hashAt = url.indexOf('#')
-        val base = if (hashAt >= 0) url.substring(0, hashAt) else url
-        val fragment = if (hashAt >= 0) url.substring(hashAt) else ""
-        val next = if (RESYNC_PARAM.find(base)?.groupValues?.get(2) == "1") 2 else 1
-        val stripped = base.replace(RESYNC_PARAM) { m -> if (m.groupValues[1] == "?") "?" else "" }
-            .replace("?&", "?").removeSuffix("?")
-        val separator = if ('?' in stripped) "&" else "?"
-        display.url = "$stripped${separator}ddsync=$next$fragment"
-        transport.runOnMainThread {
-            transport.saveDisplay(display)
-            transport.nearbyPlayerIds(display).forEach { transport.sendDisplayInfo(it, display, forced = false) }
-        }
     }
 
     /**

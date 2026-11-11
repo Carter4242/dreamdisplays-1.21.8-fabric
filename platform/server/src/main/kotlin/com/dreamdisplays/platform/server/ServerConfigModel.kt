@@ -57,8 +57,11 @@ data class SettingsSection(
     /** Max displays one player may own at once; `0` or less means no limit. Bypassed by [PermissionsSection.createBypass]. */
     val maxDisplaysPerPlayer get() = display.max_displays_per_player
 
-    /** how long a resync holds a synced display paused while every viewer reloads. */
-    val resyncHoldMs get() = display.resync_hold_seconds * 1000L
+    /** How long a resumed synced display stays parked so every viewer can snap onto it (0 = no hold). */
+    val resumeHoldMs get() = display.resume_hold_seconds * 1000L
+
+    /** How long a seeked / restarted synced display stays parked while viewers re-buffer (0 = no hold). */
+    val seekHoldMs get() = display.seek_hold_seconds * 1000L
 
     /** Volume in [0, 1] ready for the wire. */
     val defaultVolume get() = display.default_volume / 200f
@@ -106,7 +109,8 @@ data class SettingsSection(
         val max_height: Int = 24,
         val default_volume: Int = 50,
         val max_displays_per_player: Int = 100,
-        val resync_hold_seconds: Int = 10,
+        val resume_hold_seconds: Int = 1,
+        val seek_hold_seconds: Int = 3,
     )
 
     /**
@@ -265,7 +269,8 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_height = t?.getLong("display.max_height")?.toInt() ?: 24,
             default_volume = t.intOr("display.default_volume", 50).coerceIn(0, 200),
             max_displays_per_player = t?.getLong("display.max_displays_per_player")?.toInt() ?: 100,
-            resync_hold_seconds = t?.getLong("display.resync_hold_seconds")?.toInt()?.coerceIn(1, 60) ?: 10,
+            resume_hold_seconds = t.numberOrNull("display.resume_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 1,
+            seek_hold_seconds = t.numberOrNull("display.seek_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 3,
         ),
         customMedia = SettingsSection.CustomMediaConfig(
             enabled = t?.getBoolean("custom_media.enabled") ?: true,

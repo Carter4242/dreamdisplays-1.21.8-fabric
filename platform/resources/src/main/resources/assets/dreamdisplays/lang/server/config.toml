@@ -44,6 +44,11 @@ default_volume = 50
 # Max displays one player may own at once. 0 or less means no limit
 max_displays_per_player = 0
 
+# Synced displays: after a resume / a seek or restart, the timeline stays paused this many seconds so every
+# viewer can line up on the same frame before playback starts together (0 to 60, 0 = start at once)
+resume_hold_seconds = 1
+seek_hold_seconds = 3
+
 # Display policy: server-controlled client behaviour, sent with every display.
 # Anything left unset uses the client's own default. A display can override any of these for itself.
 [policy.sync]

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server
 
+import com.dreamdisplays.core.sync.ResyncMarker
 import com.dreamdisplays.platform.server.api.PaperServerApi
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -70,7 +71,7 @@ class PaperServer : JavaPlugin() {
             username = s.username, password = s.password, useSSL = s.useSSL,
         )
         storage.createSchema()
-        DisplayManager.register(storage.loadAllPaperDisplays())
+        DisplayManager.register(storage.loadAllPaperDisplays().onEach(::stripResyncMarker))
         DisplayPolicies.defaults = { Companion.config.settings.policy }
         DisplayPolicies.onOverrideChanged = { display ->
             (display as? PaperDisplayData)?.let {
@@ -81,7 +82,8 @@ class PaperServer : JavaPlugin() {
 
         WatchPartyManager.init(PaperPlaybackTransport)
         TimelineManager.init(PaperPlaybackTransport)
-        TimelineManager.resyncHoldMs = { Companion.config.settings.resyncHoldMs }
+        TimelineManager.resumeHoldMs = { Companion.config.settings.resumeHoldMs }
+        TimelineManager.seekHoldMs = { Companion.config.settings.seekHoldMs }
         FullscreenBroadcastManager.init(PaperPlaybackTransport)
         FullscreenBroadcastManager.restore()
         PipPinManager.init(PaperPlaybackTransport)
@@ -98,6 +100,16 @@ class PaperServer : JavaPlugin() {
         TelemetryMetrics.register(this, Metrics(this, 26488))
 
         PaperServerApi.start()
+    }
+
+    /** Removes the `ddsync=N` reload marker older builds put in display URLs, saving the cleaned URL. */
+    private fun stripResyncMarker(display: PaperDisplayData) {
+        val cleaned = ResyncMarker.strip(display.url)
+        if (cleaned == display.url) return
+        display.url = cleaned
+        runCatching { storage.saveDisplay(display) }
+            .onSuccess { Companion.logger.info("Removed the old resync marker from display ${display.id}'s URL.") }
+            .onFailure { Companion.logger.warn("Could not save display ${display.id} after removing its resync marker.", it) }
     }
 
     private fun runRepeatingTasks() {
