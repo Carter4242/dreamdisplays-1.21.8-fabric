@@ -208,6 +208,17 @@ object ScreenCapture {
         return if (rebound == m) choice else choice.copy(monitor = rebound)
     }
 
+    /** [choice] on its screen as it is now (see [rebind]), without probing anything; [choice] itself when unknown. */
+    fun current(choice: Choice): Choice = freshVariants(choice.monitor)?.let { rebind(choice, it) } ?: choice
+
+    /**
+     * True when `FFmpeg`'s [output] says Desktop Duplication lost the screen after capturing it: a secure desktop
+     * (UAC, Ctrl+Alt+Del), a mode or HDR change, a hot-plug, a fullscreen app taking the output. The screen comes back.
+     */
+    fun isCaptureLost(output: String): Boolean = CAPTURE_LOST.containsMatchIn(output)
+
+    private val CAPTURE_LOST = Regex("(?i)AcquireNextFrame failed|887a0026|ACCESS_LOST")
+
     /** Every way to reach [monitor]'s screen as DXGI lists it now, or null when that cannot be told (no DXGI here). */
     private fun freshVariants(monitor: Monitor): List<Monitor>? {
         if (monitor.deviceName.isEmpty() || sourceForThisOs() != Source.DDAGRAB) return null

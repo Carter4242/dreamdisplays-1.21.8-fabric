@@ -180,6 +180,13 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `desktop duplication losing its screen is told apart from other ends`() {
+        assertTrue(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] AcquireNextFrame failed: 887a0026"))
+        assertFalse(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] DuplicateOutput failed: 80070005"))
+        assertFalse(ScreenCapture.isCaptureLost("<relay-url>: Input/output error"))
+    }
+
+    @Test
     fun `relay failures are told apart from capture and encoder failures`() {
         val refused = ScreenCapture.RelayFailure.REFUSED
         val unreachable = ScreenCapture.RelayFailure.UNREACHABLE

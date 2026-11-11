@@ -392,7 +392,8 @@ object ScreenShare {
         }
         val started = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return
         if (r.stopped) return
-        val first = afterRelay(r, ffmpeg, choice.monitor, choice.plan, publishUrl, started) ?: return
+        val first = afterLost(r, ffmpeg, choice, publishUrl, afterRelay(r, ffmpeg, choice.monitor, choice.plan, publishUrl, started) ?: return)
+            ?: return
         // Died at once because of the sound input: the same plan again, without sound
         if (retryWithoutSound(r, first)) {
             val again = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = false) ?: return
@@ -488,6 +489,37 @@ object ScreenShare {
             }
         }
     }
+
+    /**
+     * [ended] as the run to judge the plan by, after any loss of the screen was recovered from; null when that settled
+     * the share. A capture that ran fine and then lost its screen (Desktop Duplication "access lost": a UAC prompt, a
+     * mode change, a hot-plug) is started again on the screen as it is now, every second for up to [LOST_RECOVERY_MS]
+     * (the secure desktop refuses it meanwhile); viewers see the share's "no picture" until it is back.
+     */
+    private fun afterLost(r: Running, ffmpeg: String, choice: ScreenCapture.Choice, publishUrl: String, ended: Ended): Ended? {
+        var last = ended
+        while (last.ranMs >= EARLY_EXIT_MS && ScreenCapture.isCaptureLost(last.output)) {
+            logger.warn("Screen capture lost its screen ({}); capturing it again.", last.reason)
+            val deadline = System.currentTimeMillis() + LOST_RECOVERY_MS
+            var run: Ended
+            do {
+                runCatching { Thread.sleep(1_000L) }
+                if (r.stopped) return null
+                val now = ScreenCapture.current(choice)
+                run = runShare(r, ffmpeg, now.monitor, now.plan, publishUrl, announce = false) ?: return null
+                if (r.stopped) return null
+            } while (run.ranMs < EARLY_EXIT_MS && System.currentTimeMillis() < deadline)
+            if (run.ranMs < EARLY_EXIT_MS) {
+                report(r, choice, choice.plan, run.output, "lost", final = true, "screen share lost its screen: ${run.reason}")
+                fail(r, "the screen could not be captured again")
+                return null
+            }
+            last = run
+        }
+        return last
+    }
+
+    private const val LOST_RECOVERY_MS = 60_000L
 
     /** True (and sound turned off for the rest of [r]) when the run with sound died at once on its sound input. */
     private fun retryWithoutSound(r: Running, ended: Ended): Boolean {
