@@ -156,6 +156,15 @@ object KaraokeTiming {
     }
 
     /**
+     * Where a client that preloaded a display's next video counts as held ready when that video starts held at 0: a
+     * singer with [leadMs] is waited for at their lead position ([leadPosition]), while their client keeps the preloaded
+     * stream on its first frame and jumps the lead in place once it plays; at 0 they would hold everyone for the whole
+     * start hold. Everyone else ([leadMs] 0) at 0.
+     */
+    fun heldReadyPositionMs(leadMs: Long, rate: Double, durationMs: Long): Long =
+        if (leadMs <= 0L) 0L else leadPosition(0L, leadMs, rate, durationMs, loop = true)
+
+    /**
      * True when a karaoke line singer's song is over: the display no longer plays their queue entry ([currentItemId]
      * differs from [singerItemId]), its play-through is within [endMs] of its end ([msUntilEnd]), or it was just
      * started over at its end for everyone ([restartedAtEnd]). The restart is decided up to a couple hundred ms before

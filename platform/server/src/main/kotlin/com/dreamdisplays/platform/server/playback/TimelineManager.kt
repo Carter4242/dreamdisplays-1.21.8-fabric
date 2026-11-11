@@ -450,7 +450,11 @@ object TimelineManager {
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
         ReadinessTracker.forgetHeldStates(display.id)
-        readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
+        // A singer is waited for at their lead: count their preload there
+        val leads = playerLeadsMs(display.id)
+        readyAtStart.forEach {
+            ReadinessTracker.markReady(display.id, it, KaraokeTiming.heldReadyPositionMs(leads[it] ?: 0L, speed, knownMs))
+        }
         startWhenReady(display, now + START_HOLD_MS)
     }
 
