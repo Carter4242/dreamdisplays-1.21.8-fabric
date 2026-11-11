@@ -411,6 +411,33 @@ internal class PlaybackSessionManager(
         audio.currentVolume = volume
     }
 
+    /** The gain the audio sink applies now. */
+    val sinkVolume: Double get() = audio.currentVolume
+
+    /** When PCM last reached the output line ([System.nanoTime], 0 before any). */
+    val lastPcmOutNanos: Long get() = audio.lastPcmOutNanos
+
+    /** Audio-side state for a silent-audio report: phase, the audio half's process / thread, feeder, and sink. */
+    fun describeAudio(): String {
+        val half = audioHalf
+        val proc = half?.process
+        val procState = when {
+            half == null -> "no-half"
+            proc == null -> "no-process"
+            proc.isAlive -> "alive"
+            else -> "exited(${runCatching { proc.exitValue() }.getOrNull()})"
+        }
+        return "phase=${phase.get()::class.simpleName} parked=${parkFlag.get()} clockRunning=${clock.isRunning} " +
+                "tempo=$tempo silent=$silentSession incoming=${incoming != null} process=$procState " +
+                "thread=${half?.thread?.state} stopFlag=${half?.stop?.get()} feeder=${audioFeeder != null} " +
+                "pipeline=${pipelineLabel()} ${audio.describe()}"
+    }
+
+    /** True when this session should be putting sound on the line now: active, running, not a silent source. */
+    fun audioExpected(): Boolean =
+        phase.get() is Phase.Active && !parkFlag.get() && clock.isRunning && !silentSession &&
+                incoming == null
+
     /** Timestamp of the live channel's last decoded video frame; read by [StreamWatchdog]. */
     val lastFrameNanos: AtomicLong get() = active?.pipe?.lastFrameReceivedNanos ?: noFrames
 

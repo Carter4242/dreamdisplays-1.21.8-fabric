@@ -124,6 +124,11 @@ internal class AudioSink(private val debugLabel: String) {
     @Volatile
     var currentVolume: Double = 1.0
 
+    /** [System.nanoTime] when PCM last reached an output line (0 before any), for the silent-audio self-heal. */
+    @Volatile
+    var lastPcmOutNanos: Long = 0L
+        private set
+
     @Volatile
     private var dspStage: AudioDspStage? = null
 
@@ -400,6 +405,20 @@ internal class AudioSink(private val debugLabel: String) {
         runCatching { ln.close() }
     }
 
+    /** One line of sink state for a silent-audio report: line running / queued bytes, last write, gain, rate. */
+    fun describe(): String {
+        val s = current
+        val ln = s?.line
+        val now = System.nanoTime()
+        val lastOut = lastPcmOutNanos.let { if (it == 0L) "never" else "${(now - it) / 1_000_000} ms ago" }
+        val line = if (ln == null) "none" else runCatching {
+            "open=${ln.isOpen} running=${ln.isRunning} active=${ln.isActive} " +
+                    "queued=${ln.bufferSize - ln.available()}/${ln.bufferSize} frame=${ln.longFramePosition}"
+        }.getOrElse { "error(${it.message})" }
+        return "session=${s?.epoch ?: "none"} pcmFlowing=${s?.pcmFlowing} line[$line] lastPcmOut=$lastOut " +
+                "gain=$currentVolume rate=$playbackRate parkFlag=${parked?.get()} pendingResync=${pendingResyncNanos.get()}"
+    }
+
     /** Pauses playback for a warm park without closing or flushing the queued PCM. */
     fun pauseForPark() {
         current?.line?.let { runCatching { it.stop() } }
@@ -445,7 +464,8 @@ internal class AudioSink(private val debugLabel: String) {
         }.onFailure { e ->
             if (!terminated.get() && !stopFlag.get()) {
                 if (e is IOException) {
-                    if (MediaPlayer.DEBUG) logger.warn("$debugLabel Read: ${e.message}.")
+                    // After the line started this silences the session while its video plays on
+                    logger.warn("$debugLabel [audio] read failed: ${e.message}.")
                 } else {
                     logger.warn("$debugLabel Pipeline: ${e.message}.")
                 }
@@ -536,6 +556,7 @@ internal class AudioSink(private val debugLabel: String) {
             // rate (times the sync rate) and repacked to its sample format
             val outBytes = output.convert(chunk, n, rate)
             if (outBytes > 0) paceLiveWrite(ln, output.output, outBytes, output.format, terminated, stopFlag)
+            lastPcmOutNanos = System.nanoTime()
         }
     }
 

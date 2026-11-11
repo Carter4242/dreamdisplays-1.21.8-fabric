@@ -18,6 +18,14 @@ internal class VolumeController(
     @Volatile
     private var lastMaster = 1.0
 
+    /** The volume the pipeline should be applying now (user volume x attenuation x master). */
+    val effectiveVolume: Double get() = userVolume * lastAttenuation * lastMaster
+
+    override fun toString(): String = "user=$userVolume attenuation=$lastAttenuation master=$lastMaster"
+
+    /** Pushes the effective volume to the pipeline again (after a hold, or when the sink lost it). */
+    fun reapply() = applyVolume(effectiveVolume)
+
     /** Sets the user-controlled volume (clamped to 0.0-2.0) and re-applies the effective value. */
     fun setUserVolume(volume: Float) {
         userVolume = volume.toDouble().coerceIn(0.0, 2.0)

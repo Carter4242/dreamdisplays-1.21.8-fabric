@@ -12,6 +12,7 @@ import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.media.player.events.PlayerEvents
+import com.dreamdisplays.media.player.managers.AudioStallDetector
 import com.dreamdisplays.media.player.managers.PlaybackSessionManager
 import com.dreamdisplays.media.player.managers.StatsReporter
 import com.dreamdisplays.media.player.managers.StreamWatchdog
@@ -226,6 +227,7 @@ class MediaPlayer(
 
         private const val MAX_FETCH_RETRIES = 3
         private const val WARM_UP_STALE_NANOS = 20_000_000_000L
+        private const val AUDIO_HEAL_NANOS = 1_000_000_000L
         private const val CHEAP_SEEK_MS = 250L
         private const val MAX_AUDIO_RESTARTS = 3
         private const val AUDIO_RESTART_BUDGET_RESET_NS = 120_000_000_000L
@@ -263,6 +265,8 @@ class MediaPlayer(
         // Mid warm-up the stream is already opening at the paused position: let it simply play on
         warmingUp = false
         heldReady = false
+        // Every resume (plain, held ready, scheduled start, adopted warm) plays at the current volume
+        volume.reapply()
         if (isPausedWarm()) {
             sessionManager.resume()
             lifecycle = PlayerState.Playing
@@ -719,6 +723,52 @@ class MediaPlayer(
     fun tick(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true) {
         if (!isReady) return
         volume.updateAttenuation(distance, maxRadius, fullVolumeRadius, squared)
+        checkAudioHealth()
+    }
+
+    private val audioStall = AudioStallDetector()
+    private var sinkMutedSinceNanos = 0L
+
+    /**
+     * Self-heal for a session whose picture plays on in silence: a sink gain stuck at 0 while the volume is up is
+     * re-applied, and an audio half that stopped putting sound on the line while video keeps decoding is restarted.
+     */
+    private fun checkAudioHealth() {
+        val now = System.nanoTime()
+        val audible = volume.effectiveVolume > 0.0
+        val playing = audible && lifecycle == PlayerState.Playing && !terminated.get()
+        if (playing && sessionManager.sinkVolume <= 0.0) {
+            if (sinkMutedSinceNanos == 0L) sinkMutedSinceNanos = now
+            else if (now - sinkMutedSinceNanos > AUDIO_HEAL_NANOS) {
+                logger.warn("$debugLabel Audio gain stuck at 0 while playing; restoring it. ${audioStateLine()}")
+                volume.reapply()
+                sinkMutedSinceNanos = 0L
+            }
+        } else {
+            sinkMutedSinceNanos = 0L
+        }
+        val expecting = playing && sessionManager.audioExpected()
+        if (audioStall.check(now, expecting, sessionManager.lastPcmOutNanos, sessionManager.lastFrameNanos.get())) {
+            safeExecute(::healSilentAudio)
+        }
+    }
+
+    private fun audioStateLine(): String =
+        "[lifecycle=${lifecycle::class.simpleName} pauseRequested=$pauseRequested heldReady=$heldReady " +
+                "warmingUp=$warmingUp warmUpPending=$warmUpPending volume($volume) " +
+                "lastFrame=${(System.nanoTime() - sessionManager.lastFrameNanos.get()) / 1_000_000} ms ago " +
+                "${sessionManager.describeAudio()}]"
+
+    private fun healSilentAudio() {
+        val ss = streams ?: return
+        if (terminated.get() || lifecycle != PlayerState.Playing || !sessionManager.audioExpected()) return
+        val at = if (liveStream) 0L else getCurrentTime()
+        logger.warn(
+            "$debugLabel Video plays but no sound reached the line for over a second; restarting audio at " +
+                    "${at / 1_000_000} ms. ${audioStateLine()}"
+        )
+        volume.reapply()
+        if (!sessionManager.restartAudio(ss, at)) logger.warn("$debugLabel Audio restart was not possible right now.")
     }
 
     private fun onControl(action: () -> Unit) {
