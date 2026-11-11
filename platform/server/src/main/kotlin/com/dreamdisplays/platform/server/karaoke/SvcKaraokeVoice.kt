@@ -350,6 +350,13 @@ class SvcKaraokeVoice : KaraokeVoice {
         private var closed = false
 
         /**
+         * This burst is re-encoded: from its first frame at a gain other than 1.0 to its end. Switching back to the
+         * singer's own packets mid-burst (a fade that reached 1.0) would hand the receiver's decoder another encoder's
+         * stream and click; so would picking the codecs up again later with stale state.
+         */
+        private var encoding = false
+
+        /**
          * Frame [seq] of burst [burst] ([data]) at [volume]; passes through at 1.0, and the empty end-of-burst frame
          * passes and resets the codecs. Null when the frame came too late for this stream's codecs (not sent).
          */
@@ -368,7 +375,8 @@ class SvcKaraokeVoice : KaraokeVoice {
                 resetCodecs()
                 return data
             }
-            if (closed || KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
+            if (closed || !encoding && KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
+            encoding = true
             val dec = decoder ?: api.createDecoder().also { decoder = it }
             val enc = encoder ?: api.createEncoder().also { encoder = it }
             val pcm = dec.decode(data)
@@ -377,6 +385,7 @@ class SvcKaraokeVoice : KaraokeVoice {
         }
 
         private fun resetCodecs() {
+            encoding = false
             decoder?.resetState()
             encoder?.resetState()
         }
@@ -403,8 +412,9 @@ class SvcKaraokeVoice : KaraokeVoice {
         ): ByteArray? {
             if (data.isEmpty()) return ramped(api, burst, seq, data, volume, volume)
             val (from, to) = ramp.next(volume, nowNanos, levels)
-            if (from <= 0.0 && to <= 0.0) return null
-            return ramped(api, burst, seq, data, from, to)
+            // Silent frames still go through the codecs (not sent), so a fade back up continues their stream
+            val out = ramped(api, burst, seq, data, from, to) ?: return null
+            return out.takeUnless { from <= 0.0 && to <= 0.0 }
         }
     }
 
