@@ -798,6 +798,19 @@ class DisplayScreen(
         if (requiresServerTimeline()) sendRequestSyncPacket()
     }
 
+    /**
+     * Recreates the player for the same video at the same position, keeping every popout, PiP and fullscreen of the
+     * display open: a player picks its decoder output (GPU YUV planes, alpha) once, when it is created, and a shader
+     * pack switched on since rules those out.
+     */
+    internal fun rebuildPlayerInPlace() {
+        val url = videoUrl?.takeIf { it.isNotEmpty() } ?: return
+        if (mode == PlaybackMode.LOCAL && watchParty == null) savedTimeNanos = currentTimeNanos
+        loadVideoInternal(url, lang ?: "", preservePausedState = true)
+        // Like a retry: the new player's follower starts without a timeline
+        if (requiresServerTimeline()) sendRequestSyncPacket()
+    }
+
     /** Called once a load got far enough to start playing: unattended retries get their full budget back. */
     internal fun onMediaStarted() = errorGate.resetAutoRetries()
 

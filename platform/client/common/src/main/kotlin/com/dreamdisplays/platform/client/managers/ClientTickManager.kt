@@ -246,9 +246,19 @@ object ClientTickManager {
         lastRenderPath = path
         if (previous == null || previous == path) return
         val screens = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual }
-        if (screens.isEmpty()) return
+        // Kept up (a PiP, window or fullscreen of it, or a broadcast-only display): not torn down, but given a new player
+        // in place, its popouts staying open, when its current one is on a path that no longer applies
+        val serverPathChanged = previous.copy(shaderPack = active) != path
+        val rebuiltInPlace = DisplayRegistry.getScreens().filter {
+            RenderPathRules.newPlayerInPlace(
+                shadersTurnedOn = active && !previous.shaderPack, serverPathChanged = serverPathChanged,
+                keptUp = it.isPopoutActive || it.virtual, yuvTexture = it.isYuvTexture, alpha = it.videoHasAlpha,
+            )
+        }
+        if (screens.isEmpty() && rebuiltInPlace.isEmpty()) return
         org.slf4j.LoggerFactory.getLogger(ClientTickManager::class.java)
-            .info("Playback path changed ({}); reloading {} display(s) on it.", path, screens.size)
+            .info("Playback path changed ({}); reloading {} display(s) on it, {} in place.", path, screens.size, rebuiltInPlace.size)
+        rebuiltInPlace.forEach { it.rebuildPlayerInPlace() }
         for (screen in screens) {
             DisplayRegistry.saveScreenData(screen)
             DisplayRegistry.unregisterScreen(screen)
