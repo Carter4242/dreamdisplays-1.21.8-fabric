@@ -12,9 +12,12 @@ class TargetMatchNameTest {
 
     @Test
     fun aNameEqualToAnotherDisplaysShortIdWouldTakeItsCommands() {
-        // The reason for the rule: names win over id prefixes
-        val displays = listOf(TargetMatch.Candidate(victim, null), TargetMatch.Candidate(decoy, "a1b2c3d4"))
-        assertEquals(TargetMatch.Result.Found(decoy), TargetMatch.match("a1b2c3d4", displays))
+        // The reason for the rule: names win over id prefixes. Matching only catches a name equal to the listed 8-character
+        // short id (ambiguous); any other prefix of the id would still reach the named display
+        val listed = listOf(TargetMatch.Candidate(victim, null), TargetMatch.Candidate(decoy, "a1b2c3d4"))
+        assertTrue(TargetMatch.match("a1b2c3d4", listed) is TargetMatch.Result.Ambiguous)
+        val shorter = listOf(TargetMatch.Candidate(victim, null), TargetMatch.Candidate(decoy, "a1b2"))
+        assertEquals(TargetMatch.Result.Found(decoy), TargetMatch.match("a1b2", shorter))
         assertTrue(TargetMatch.nameShadowsId("a1b2c3d4", victim))
         assertTrue(TargetMatch.nameShadowsId("A1B2", victim))
         assertTrue(TargetMatch.nameShadowsId("a1b2c3d4-0000", victim))
