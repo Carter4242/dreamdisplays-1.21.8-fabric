@@ -367,7 +367,8 @@ object KaraokeManager {
 
     private fun dropEntry(display: DisplayData, state: State, entry: LineEntry) {
         state.line.remove(entry.itemId)
-        QueueManager.remove(display, adminContext(display), entry.playerId, entry.itemId)
+        // Karaoke's own bookkeeping, not a player's edit: never refused by the edit throttle
+        QueueManager.removeEntry(display, entry.itemId)
     }
 
     /**

@@ -237,6 +237,10 @@ object DisplayActions {
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onModeChanged(displayData, positionMs)
+        // No shared clock any more: nobody can sing to it, so singers' voices go back to voice chat
+        if (!KaraokeManager.runsOn(displayData)) {
+            KaraokeManager.endSinging(displayData)
+        }
     }
 
     /** Applies a playback intent (play / pause / seek / restart / speed) to a `SYNCED` display's server clock. */

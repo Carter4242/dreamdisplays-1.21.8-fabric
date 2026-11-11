@@ -223,6 +223,14 @@ object QueueManager {
         return Result.OK
     }
 
+    /** Removes entry [itemId] for the server itself (no permission or edit throttle); false when it is not queued. */
+    fun removeEntry(display: DisplayData, itemId: String): Boolean {
+        val queue = queues[display.id] ?: return false
+        if (synchronized(queue) { queue.remove(itemId) } == null) return false
+        changed(display)
+        return true
+    }
+
     /** Moves entry [itemId] to [toIndex]; owner or admin. */
     fun move(display: DisplayData, ctx: PlaybackContext, actorId: UUID, itemId: String, toIndex: Int): Result {
         if (!PlaybackPermissions.canManageQueue(ctx)) return Result.NOT_ALLOWED

@@ -56,7 +56,9 @@ object KaraokeCommand {
             return ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(sender)
         }
         val display = resolve(sender, token) ?: return
-        if (!KaraokeManager.runsOn(display)) return say(sender, "karaokeNotTimeline")
+        // Stopping and looking always work, so karaoke left on a display that is no longer shared can be ended
+        val anyMode = action == KaraokeAction.Stop || action == KaraokeAction.Status || action is KaraokeAction.SingerRemove
+        if (!anyMode && !KaraokeManager.runsOn(display)) return say(sender, "karaokeNotTimeline")
         val label = display.shortLabel
         when (action) {
             KaraokeAction.Stop -> {
