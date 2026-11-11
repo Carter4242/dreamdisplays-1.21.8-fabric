@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.karaoke
 
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import com.dreamdisplays.core.karaoke.BurstAnchor
+import com.dreamdisplays.core.karaoke.EmitWait
 import com.dreamdisplays.core.karaoke.KaraokeCodecOrder
 import com.dreamdisplays.core.karaoke.KaraokeCoSinger
 import com.dreamdisplays.core.karaoke.KaraokeRoute
@@ -521,7 +522,8 @@ class SvcKaraokeVoice : KaraokeVoice {
 
         /** Wake this much before a frame's provisional time: the anchor may still improve until it is sent. */
         const val LOOKAHEAD_SLACK_NANOS = 30_000_000L
-        const val EARLY_TOLERANCE_NANOS = 300_000L
+        /** Sent when due within this: the emitter runs everything due within [EmitWait.DUE_EARLY_NANOS] at once. */
+        const val EARLY_TOLERANCE_NANOS = EmitWait.DUE_EARLY_NANOS + 300_000L
         const val LATE_TOLERANCE_NANOS = 5_000_000L
         const val LATE_WINDOW_NANOS = KaraokeVoice.LATE_WINDOW_MS * 1_000_000L
 

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import com.dreamdisplays.core.karaoke.EmitWait
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.slf4j.LoggerFactory
@@ -8,8 +9,9 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * One thread that runs timed sends at their `System.nanoTime()` deadline, like the song player of our voice chat
- * fork: it sleeps until shortly before a deadline and spins the rest, since sleeps can overshoot by milliseconds.
+ * One thread that runs timed sends at their `System.nanoTime()` deadline: it sleeps until shortly before a deadline,
+ * spins only the last fraction of a millisecond, and runs everything due within a millisecond in that wake
+ * ([EmitWait]).
  *
  * A task returns null when done, or a later deadline to run again then (its target moved).
  */
@@ -96,26 +98,25 @@ class VoiceEmitter : Thread("DreamDisplays Karaoke") {
                 changed.await()
                 return null
             }
-            val wait = head.atNanos - System.nanoTime()
-            if (wait > SPIN_NANOS) {
-                changed.awaitNanos(wait - SPIN_NANOS)
+            val sleep = EmitWait.sleepNanos(head.atNanos, System.nanoTime())
+            if (sleep > 0L) {
+                changed.awaitNanos(sleep)
                 return null
             }
         }
         // Spin out the last stretch without holding the lock, then take whatever is earliest now
         while (running) {
             val head = lock.withLock { queue.peek() } ?: return null
-            if (System.nanoTime() >= head.atNanos) break
+            if (EmitWait.due(head.atNanos, System.nanoTime())) break
             Thread.onSpinWait()
         }
         return lock.withLock {
             val head = queue.peek()
-            if (head != null && System.nanoTime() >= head.atNanos) queue.poll() else null
+            if (head != null && EmitWait.due(head.atNanos, System.nanoTime())) queue.poll() else null
         }
     }
 
     private companion object {
-        const val SPIN_NANOS = 2_000_000L
         const val MAX_QUEUED = 50_000
     }
 }
