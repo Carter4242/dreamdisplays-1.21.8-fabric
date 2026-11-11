@@ -7,6 +7,7 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
+import com.dreamdisplays.media.source.youtube.binary.YtDlpJsRuntime
 import com.dreamdisplays.media.source.youtube.cache.YtFormatCache
 import com.dreamdisplays.media.source.youtube.cookie.YtCookieManager
 import com.dreamdisplays.media.source.youtube.model.YtStream
@@ -61,6 +62,7 @@ object YtDlp {
                 NewPipeResolver.ensureInitialized()
                 NewPipeResolver.prewarmPlayer()
                 YtDlpBinary.resolveCommand()
+                YtDlpJsRuntime.current()
                 cookies.prewarm()
             }.onFailure { e ->
                 logger.warn("Failed to prewarm yt-dlp.", e)

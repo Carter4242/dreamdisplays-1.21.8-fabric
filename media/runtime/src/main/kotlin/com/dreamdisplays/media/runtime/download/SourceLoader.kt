@@ -105,14 +105,20 @@ object SourceLoader {
             ),
         )
 
-    /** File name to lower-case SHA-256 from `sha256sum` output (`<hex>  <name>`, or `<hex> *<name>` in binary mode). */
+    /**
+     * File name to lower-case SHA-256 from `sha256sum` output (`<hex>  <name>`, or `<hex> *<name>` in binary mode), or
+     * from PowerShell `Get-FileHash` list output (`Hash : <HEX>` then `Path : C:\...\<name>`, Deno's Windows files).
+     */
     internal fun parseSha256Sums(text: String): Map<String, String> =
         text.lineSequence().mapNotNull { line ->
             val m = SUM_LINE.matchEntire(line.trim()) ?: return@mapNotNull null
             m.groupValues[2] to m.groupValues[1].lowercase()
-        }.toMap()
+        }.toMap() + POWERSHELL_HASH.findAll(text).associate { m ->
+            m.groupValues[2].trim().substringAfterLast('\\').substringAfterLast('/') to m.groupValues[1].lowercase()
+        }
 
     private val SUM_LINE = Regex("""([0-9a-fA-F]{64})\s+\*?(\S.*)""")
+    private val POWERSHELL_HASH = Regex("""(?m)^Hash\s*:\s*([0-9a-fA-F]{64})\s*\r?\n\s*Path\s*:\s*(\S[^\r\n]*)""")
 
     internal fun sha256(file: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")

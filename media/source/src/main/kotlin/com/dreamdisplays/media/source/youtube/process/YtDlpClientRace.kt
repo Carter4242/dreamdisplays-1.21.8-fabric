@@ -203,10 +203,11 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                 "--ignore-config", "--no-mark-watched",
                 "--extractor-retries", "0",
                 "--socket-timeout", "8",
-                "--",
-                videoUrl,
             ]
         )
+        // Some videos ("made for kids") resolve only with a JavaScript runtime; yt-dlp alone only finds Deno on PATH
+        cmd.addAll(YtDlpBinary.jsRuntimeArgs(base))
+        cmd.addAll(["--", videoUrl])
         val pb = ProcessBuilder(cmd)
         pb.redirectErrorStream(false)
         val process = pb.start()

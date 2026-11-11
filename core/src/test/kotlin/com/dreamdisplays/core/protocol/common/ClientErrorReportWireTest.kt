@@ -43,6 +43,7 @@ class ClientErrorReportWireTest {
             osName = "Windows 11", osArch = "amd64", gpuRenderer = "NVIDIA GeForce RTX 3060/PCIe/SSE2", ytDlpMode = "zipapp",
             ytDlpPython = "python", ytDlpPythonVersion = "3.12.4", ffmpegDecoders = listOf("libvpx-vp9"), nativeLoaded = true,
             audioLine = "Java Sound on \"Speakers\", 48000 Hz", shaderPack = "iris",
+            ytDlpJsRuntime = "deno 2.9.8, ~/libs/deno/deno.exe", ytDlpJsRuntimeSource = "downloaded",
         )
         assertEquals(env, PacketRegistry.decode(PacketRegistry.encode(env)))
     }

@@ -646,6 +646,8 @@ message ClientEnvironment {
   optional string ytDlpPath = 25;
   // WARNING: a default value decoded when value is missing
   optional string ffmpegPath = 26;
+  optional string ytDlpJsRuntime = 27;
+  optional string ytDlpJsRuntimeSource = 28;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport'

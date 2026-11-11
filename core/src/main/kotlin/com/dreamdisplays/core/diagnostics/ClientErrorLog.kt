@@ -161,6 +161,8 @@ class ClientErrorLog(val path: Path, private val maxBytes: Long = DEFAULT_MAX_BY
             putIf("python", e.ytDlpPython)
             putIf("pythonVersion", e.ytDlpPythonVersion)
             putIf("ytDlpNote", e.ytDlpNote)
+            putIf("jsRuntime", e.ytDlpJsRuntime)
+            putIf("jsRuntimeSource", e.ytDlpJsRuntimeSource)
             putIf("ffmpegSource", e.ffmpegSource)
             putIf("ffmpegVersion", e.ffmpegVersion)
             putIf("ffmpegPath", e.ffmpegPath)

@@ -7,14 +7,15 @@ import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.HwAccelBackend
 import com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
+import com.dreamdisplays.media.source.youtube.binary.YtDlpJsRuntime
 import com.dreamdisplays.platform.client.render.ShaderPackCompat
 import org.lwjgl.opengl.GL11
 
 /**
- * Builds the [ClientEnvironment] summary for error reports: OS, Java, GPU strings, how `yt-dlp` and `FFmpeg` run,
- * hardware decoding, the native pipelines, the display audio line and the shader pack. Paths are scrubbed (home
- * directory -> `~`) and owners' names are taken out of device names ([DeviceNames]); no user names or hardware ids
- * are included.
+ * Builds the [ClientEnvironment] summary for error reports: OS, Java, GPU strings, how `yt-dlp` (and its JavaScript
+ * runtime) and `FFmpeg` run, hardware decoding, the native pipelines, the display audio line and the shader pack.
+ * Paths are scrubbed (home directory -> `~`) and owners' names are taken out of device names ([DeviceNames]); no user
+ * names or hardware ids are included.
  */
 object ClientEnvironmentProbe {
     /** GL strings and shader state, read on the render thread (the only one with a GL context). */
@@ -42,6 +43,7 @@ object ClientEnvironmentProbe {
         fun s(text: String) = ReportScrubber.scrub(text, homes).take(256)
         val yt = runCatching { YtDlpBinary.describe() }.getOrNull()
         val ff = runCatching { FFmpegBinary.describe() }.getOrNull()
+        val js = runCatching { YtDlpJsRuntime.describe() }.getOrNull()
         val probed = runCatching { NativeMedia.probesFinished }.getOrDefault(false)
         val native = probed && runCatching { NativeMedia.isAvailable }.getOrDefault(false)
         val lav = probed && runCatching { NativeMedia.lavAvailable }.getOrDefault(false)
@@ -60,6 +62,8 @@ object ClientEnvironmentProbe {
             ytDlpPython = s(yt?.python.orEmpty()),
             ytDlpPythonVersion = yt?.pythonVersion.orEmpty(),
             ytDlpNote = s(yt?.note.orEmpty()),
+            ytDlpJsRuntime = s(js?.first.orEmpty()),
+            ytDlpJsRuntimeSource = s(js?.second ?: "unavailable"),
             ffmpegSource = ff?.source ?: "unavailable",
             ffmpegVersion = s(ff?.version.orEmpty()),
             ffmpegPath = s(ff?.path.orEmpty()),

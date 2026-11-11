@@ -41,6 +41,18 @@ class SourceLoaderChecksumTest {
     }
 
     @Test
+    fun `PowerShell Get-FileHash output parses (Deno's Windows checksum files)`() {
+        // Verbatim shape of deno-x86_64-pc-windows-msvc.zip.sha256sum
+        val text = "\r\nAlgorithm : SHA256\r\nHash      : ${"C".repeat(64)}\r\n" +
+            "Path      : C:\\a\\deno\\deno\\target\\release\\deno-x86_64-pc-windows-msvc.zip\r\n\r\n"
+        assertEquals(mapOf("deno-x86_64-pc-windows-msvc.zip" to "c".repeat(64)), SourceLoader.parseSha256Sums(text))
+        assertEquals(
+            mapOf("deno-x86_64-unknown-linux-gnu.zip" to "e".repeat(64)),
+            SourceLoader.parseSha256Sums("${"e".repeat(64)}  deno-x86_64-unknown-linux-gnu.zip\n"),
+        )
+    }
+
+    @Test
     fun `a download matching its published checksum lands`() {
         val dest = dir.resolve("yt-dlp.pyz")
         SourceLoader.downloadVerified(base + "yt-dlp", base + "SHA2-256SUMS", dest, "yt-dlp")

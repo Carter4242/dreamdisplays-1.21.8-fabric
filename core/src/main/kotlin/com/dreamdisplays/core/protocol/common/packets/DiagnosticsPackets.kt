@@ -224,4 +224,8 @@ data class ClientEnvironment(
     @ProtoNumber(24) val shaderPack: String = "",
     @ProtoNumber(25) val ytDlpPath: String = "",
     @ProtoNumber(26) val ffmpegPath: String = "",
+    /** JavaScript runtime `yt-dlp` gets (`deno 2.9.8, <path>`), empty when none. */
+    @ProtoNumber(27) val ytDlpJsRuntime: String = "",
+    /** Where it came from: `system`, `downloaded`, `downloading`, `missing (<why>)` or `not probed`. */
+    @ProtoNumber(28) val ytDlpJsRuntimeSource: String = "",
 ) : DreamPacket

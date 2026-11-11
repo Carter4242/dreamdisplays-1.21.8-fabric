@@ -248,6 +248,31 @@ object YtDlpBinary {
         }
     }
 
+    /** First `yt-dlp` release with `--js-runtimes`; an older one refuses every call that passes it. */
+    private val JS_RUNTIMES_SINCE = [2025, 11, 12]
+
+    /**
+     * `--js-runtimes` arguments for the runtime [YtDlpJsRuntime] found, when [command] is a `yt-dlp` new enough to take
+     * them (an installed copy can be older); none otherwise. Reads the version once per command.
+     */
+    fun jsRuntimeArgs(command: List<String>): List<String> {
+        val args = YtDlpJsRuntime.args()
+        if (args.isEmpty()) return args
+        val version = versionProbe?.takeIf { it.first == command }?.second ?: runCatching {
+            val (exit, out) = run(command + "--version", 30)
+            if (exit == 0) out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty().take(160) else null
+        }.getOrNull()?.also { versionProbe = command to it }
+        return if (takesJsRuntimes(version)) args else []
+    }
+
+    /** True when `yt-dlp --version` printed [version] (`2026.10.26`) for a release that has `--js-runtimes`. */
+    internal fun takesJsRuntimes(version: String?): Boolean {
+        val parts = version?.let { Regex("""^(\d{4})\.(\d{1,2})\.(\d{1,2})""").find(it.trim()) }?.groupValues?.drop(1)
+            ?.map { it.toInt() } ?: return false
+        for (i in parts.indices) if (parts[i] != JS_RUNTIMES_SINCE[i]) return parts[i] > JS_RUNTIMES_SINCE[i]
+        return true
+    }
+
     private fun override(): String? =
         System.getProperty("dreamdisplays.ytdlp")?.ifEmpty { null } ?: System.getenv("DREAMDISPLAYS_YTDLP")?.ifEmpty { null }
 

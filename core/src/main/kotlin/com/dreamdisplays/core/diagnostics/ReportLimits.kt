@@ -64,6 +64,7 @@ object ReportLimits {
             hwAccel = f(e.hwAccel), nativeLoaded = e.nativeLoaded, nativeUnavailableReason = f(e.nativeUnavailableReason),
             lavLoaded = e.lavLoaded, lavUnavailableReason = f(e.lavUnavailableReason), audioLine = f(e.audioLine),
             shaderPack = f(e.shaderPack), ytDlpPath = f(e.ytDlpPath), ffmpegPath = f(e.ffmpegPath),
+            ytDlpJsRuntime = f(e.ytDlpJsRuntime), ytDlpJsRuntimeSource = f(e.ytDlpJsRuntimeSource),
         )
     }
 

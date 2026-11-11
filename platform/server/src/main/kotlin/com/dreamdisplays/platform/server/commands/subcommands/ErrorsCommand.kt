@@ -215,6 +215,10 @@ object ErrorsCommand {
         add("yt-dlp" to listOf(e.ytDlpMode, e.ytDlpVersion, e.ytDlpPath).filter { it.isNotEmpty() }.joinToString(", "))
         if (e.ytDlpPython.isNotEmpty()) add("yt-dlp Python" to "${e.ytDlpPython} ${e.ytDlpPythonVersion}".trim())
         if (e.ytDlpNote.isNotEmpty()) add("yt-dlp note" to e.ytDlpNote)
+        if (e.ytDlpJsRuntime.isNotEmpty() || e.ytDlpJsRuntimeSource.isNotEmpty()) {
+            add("yt-dlp JS runtime" to listOf(e.ytDlpJsRuntime.ifEmpty { "none" }, e.ytDlpJsRuntimeSource)
+                .filter { it.isNotEmpty() }.joinToString(", "))
+        }
         add("FFmpeg" to listOf(e.ffmpegSource, e.ffmpegVersion, e.ffmpegPath).filter { it.isNotEmpty() }.joinToString(", "))
         add("FFmpeg optional" to "decoders ${e.ffmpegDecoders.ifEmpty { listOf("none") }.joinToString(",")}; " +
             "filters ${e.ffmpegFilters.ifEmpty { listOf("none") }.joinToString(",")}")
