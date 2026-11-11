@@ -311,7 +311,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // This client's stream ended before the shared clock: hold the last frame until the timeline wraps or is
             // moved back (a queue's next entry replaces the player instead)
             controller.resetMeasurement()
-            if (!screen.isQueueSwitchPending && durationMs > 0L && target < durationMs - END_HOLD_MS &&
+            if (!screen.isQueueSwitchPending && heldEndRestarts(target, durationMs, END_HOLD_MS) &&
                 now - lastSnapNanos >= SNAP_COOLDOWN_NANOS
             ) {
                 lastSnapNanos = now
@@ -629,3 +629,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private val quickSeekLeadMs: Long get() = quickSeekLead.leadMs
     }
 }
+
+/**
+ * Whether a player held on its last frame restarts at shared position [targetMs]: the clock is back more than
+ * [endHoldMs] before the end (it wrapped or was seeked back). Media shorter than twice that restarts once the clock is
+ * in its first half, or a short loop would wait for a position that never comes.
+ */
+internal fun heldEndRestarts(targetMs: Long, durationMs: Long, endHoldMs: Long): Boolean =
+    durationMs > 0L && targetMs < durationMs - minOf(endHoldMs, durationMs / 2)
