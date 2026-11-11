@@ -10,6 +10,7 @@ import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.MediaStreamType
 import com.dreamdisplays.shared.policy.MediaHosts
+import com.dreamdisplays.media.player.readahead.ReadAhead
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import com.github.benmanes.caffeine.cache.Cache
@@ -26,6 +27,7 @@ object DirectStreamResolver : MediaResolverService {
     override val priority: Int = 20
 
     private const val MAX_PLAYLIST_BYTES = 1 * 1024 * 1024
+    private const val UNREACHABLE_MESSAGE = "Could not reach this link. Check that it is public and still valid."
     private const val CACHE_MINUTES = 10L
     private val cache: Cache<String, ResolvedMedia> = Caffeine.newBuilder()
         .maximumSize(64)
@@ -63,29 +65,23 @@ object DirectStreamResolver : MediaResolverService {
         // redirects itself) only ever talks to a host the guard has cleared - closing the blind-SSRF
         // hole where a public URL 302s to an internal address.
         val safeUrl = runCatching { MediaHostGuard.resolveSafeUrl(url) }.getOrElse { e ->
-            if (declaredKind.isDirect) {
-                throw DreamMediaException.Network(
-                    "Could not reach this link. Check that it is public and still valid.",
-                    e
-                )
+            // The guard refusing a hop (private address, endless redirects) is a verdict about the
+            // link; anything else (DNS hiccup, timeout) may pass and is retried, never cached.
+            val refused = e is MediaHostGuard.HostRefusedException
+            if (refused && !declaredKind.isDirect) notDirect.put(url, true)
+            throw when {
+                refused && declaredKind.isDirect -> DreamMediaException.NotFound(UNREACHABLE_MESSAGE, e)
+                refused -> DreamMediaException.NotFound("Not a direct media URL: $url.", e)
+                else -> DreamMediaException.Network(UNREACHABLE_MESSAGE, e)
             }
-            notDirect.put(url, true)
-            throw DreamMediaException.NotFound("Not a direct media URL: $url.", e)
         }
 
         // A host nobody vouched for has to prove what it serves: its headers are whatever it chose
         // to write, so the probe reads the leading bytes and names the container itself.
         val firstParty = MediaHosts.isFirstParty(safeUrl)
-        val probe = DirectMediaProbe.probe(safeUrl, requireBytes = !firstParty)
-
-        if (probe == null) {
-            // A direct link that cannot even be probed is worth reporting as such; an unrecognized
-            // remote URL just moves on to the extractors, which may well know how to open it.
-            if (declaredKind.isDirect) {
-                throw DreamMediaException.Network("Could not reach this link. Check that it is public and still valid.")
-            }
-            notDirect.put(url, true)
-            throw DreamMediaException.NotFound("Not a direct media URL: $url.")
+        val probe = when (val outcome = DirectMediaProbe.probeOutcome(safeUrl, requireBytes = !firstParty)) {
+            is DirectMediaProbe.Outcome.Ok -> outcome.result
+            is DirectMediaProbe.Outcome.Failed -> throw probeFailure(url, safeUrl, declaredKind, outcome.failure)
         }
 
         val effectiveKind = effectiveKind(declaredKind, probe)
@@ -107,8 +103,42 @@ object DirectStreamResolver : MediaResolverService {
 
     /** Drops [url]'s cached verdicts, so the next open re-probes instead of re-serving a dead link. */
     fun invalidate(url: String) {
-        cache.invalidate(url)
-        notDirect.invalidate(url)
+        // Entries are keyed by the normalized URL the resolver sees, which may differ from the raw one
+        val keys = setOfNotNull(url, runCatching { MediaSource.from(url).toResolvableUrl() }.getOrNull())
+        keys.forEach {
+            cache.invalidate(it)
+            notDirect.invalidate(it)
+        }
+    }
+
+    /**
+     * Turns a failed probe into the exception the player sees. A passing failure (timeout, 429 / 5xx,
+     * a cut-short read) is a retryable [DreamMediaException.Network] and is never cached; a server
+     * that refuses the link outright (404, 403, 410, ...) is a dead link and fails for good.
+     */
+    private fun probeFailure(
+        url: String, safeUrl: String, declared: CustomMediaKind, failure: DirectMediaProbe.Failure,
+    ): DreamMediaException = when (failure) {
+        is DirectMediaProbe.Failure.Unreachable -> {
+            // Forget the redirect walk too: a stale hop is a common reason the probe missed.
+            MediaHostGuard.invalidate(url)
+            if (safeUrl != url) MediaHostGuard.invalidate(safeUrl)
+            logger.debug("Direct probe of {} did not complete: {}.", url.take(120), failure.reason)
+            // A speculative Remote probe that merely timed out proves nothing about the URL either,
+            // so it is reported as retryable rather than recorded as "not direct".
+            DreamMediaException.Network(UNREACHABLE_MESSAGE)
+        }
+
+        is DirectMediaProbe.Failure.Refused -> {
+            if (!declared.isDirect) {
+                // An unrecognized remote URL just moves on to the extractors, which may well know
+                // how to open it.
+                notDirect.put(url, true)
+                DreamMediaException.NotFound("Not a direct media URL: $url.")
+            } else {
+                DreamMediaException.NotFound("$UNREACHABLE_MESSAGE (HTTP ${failure.status})")
+            }
+        }
     }
 
     private fun rejectNonVideo(
@@ -172,6 +202,14 @@ object DirectStreamResolver : MediaResolverService {
             "Direct file {}: type={} length={} ranges={} duration={}ns.",
             originalUrl.take(120), probe.contentType, probe.contentLength, probe.acceptsRanges, durationNanos,
         )
+        // A seekable file of known size can be played through the client's read-ahead buffer
+        val length = probe.contentLength
+        if (probe.acceptsRanges && length != null && kind == CustomMediaKind.PROGRESSIVE) {
+            ReadAhead.rememberDirectFile(
+                probe.finalUrl,
+                ReadAhead.DirectFile(originalUrl, length, durationNanos, probe.contentType),
+            )
+        }
         return ResolvedMedia(
             streams = [muxedStream(probe.finalUrl)],
             metadata = metadataFor(originalUrl, durationNanos, probe.fileName),

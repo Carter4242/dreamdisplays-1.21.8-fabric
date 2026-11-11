@@ -13,6 +13,7 @@ class DisplayPolicyTest {
         audio = DisplayPolicy.Audio(48.0, DisplayPolicy.Falloff.SQUARED, 0.8, 1.0),
         visibility = DisplayPolicy.Visibility(96.0),
         quality = DisplayPolicy.Quality(720),
+        network = DisplayPolicy.Network(30),
     )
 
     private fun decode(text: String) = DisplayPolicy.decode(text.toByteArray())
@@ -131,5 +132,18 @@ class DisplayPolicyTest {
         assertEquals(500, SyncSettings.from(DisplayPolicy.Sync(deadBandMs = 900, seekThresholdMs = 1_000)).deadBandMs)
         assertEquals(SyncSettings.DEFAULT, SyncSettings.from(DisplayPolicy.CLIENT_DEFAULTS.sync))
         assertEquals(1.0, SyncSettings.from(DisplayPolicy.Sync(maxRatePct = Double.NaN)).maxRatePct)
+    }
+
+    @Test
+    fun `network read-ahead decodes, merges and counts as content`() {
+        assertEquals(DisplayPolicy.Network(45), decode("""{"v":1,"network":{"readAheadSeconds":45}}""")?.network)
+        assertNull(decode("""{"v":1,"network":"nope","quality":{"maxHeight":720}}""")?.network)
+        val merged = DisplayPolicy(network = DisplayPolicy.Network(0)).mergedOver(full)
+        assertEquals(0, merged.network?.readAheadSeconds, "A display can turn read-ahead off over a server default.")
+        assertEquals(30, DisplayPolicy().mergedOver(full).network?.readAheadSeconds)
+        assertTrue(DisplayPolicy(network = DisplayPolicy.Network()).isEmpty)
+        assertTrue(!DisplayPolicy(network = DisplayPolicy.Network(10)).isEmpty)
+        assertEquals(20, PolicyPaths.apply(null, PolicyPaths.find("network.read_ahead_seconds")!!, "20")?.network?.readAheadSeconds)
+        assertNull(PolicyPaths.apply(null, PolicyPaths.find("network.read_ahead_seconds")!!, "500"), "Out of range.")
     }
 }

@@ -6,7 +6,10 @@ import com.dreamdisplays.api.media.player.PlaybackEnvironment
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.StreamPreferences
+import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.StreamSelector
+import com.dreamdisplays.media.player.policy.TransientResolveGap
+import com.dreamdisplays.media.player.readahead.ReadAhead
 import com.dreamdisplays.media.player.stream.ActiveStreams
 
 /**
@@ -15,14 +18,28 @@ import com.dreamdisplays.media.player.stream.ActiveStreams
  */
 internal object MediaPreparationService {
 
-    /** Resolves [url] through the registry's [MediaResolverRegistry], selects tracks via [StreamSelector], and returns a [PreparedMedia] ready for playback. */
-    fun prepare(url: String, lang: String, quality: VideoQuality, env: PlaybackEnvironment): PreparedMedia {
+    /**
+     * Resolves [url] through the registry's [MediaResolverRegistry], selects tracks via [StreamSelector], and returns a
+     * [PreparedMedia] ready for playback. A direct media file is routed through [readAhead]'s buffer when one is given.
+     */
+    fun prepare(
+        url: String, lang: String, quality: VideoQuality, env: PlaybackEnvironment,
+        readAhead: ReadAhead.Target? = null,
+    ): PreparedMedia {
         val chain: MediaResolverRegistry = env.resolverChain()
         val selector: StreamSelector = env.streamSelector()
         val source = MediaSource.from(url)
         val resolved = chain.resolve(source)
 
-        if (resolved.streams.isEmpty()) throw DreamMediaException.NotFound("No streams available for $url.")
+        // An extractor that came back empty-handed may do better on the next try; a direct link that
+        // resolved to nothing will not, so only the platform case is marked as worth retrying.
+        val platform = source !is MediaSource.DirectStream && source !is MediaSource.Remote
+        fun gap(message: String) = if (platform) TransientResolveGap(message) else null
+
+        if (resolved.streams.isEmpty()) {
+            val message = "No streams available for $url."
+            throw DreamMediaException.NotFound(message, gap(message))
+        }
 
         val prefs = StreamPreferences(
             maxHeight = (quality.targetHeight ?: 1080).takeIf { it > 0 },
@@ -35,21 +52,35 @@ internal object MediaPreparationService {
 
         // An audio-only result is a distinct, actionable mistake (a music file / audio-only upload
         // pointed at a screen), not the generic "nothing usable" case, so it says so.
-        val video = selected.videoStream ?: throw DreamMediaException.NotFound(
-            if (resolved.hasAudio) "This link is audio only. A display needs a video to show."
-            else "No usable video stream for $url.",
-        )
-        val audio = selected.audioStream
-            ?: throw DreamMediaException.NotFound("No usable audio stream for $url.")
+        val video = selected.videoStream ?: throw if (resolved.hasAudio && !platform) {
+            DreamMediaException.NotFound("This link is audio only. A display needs a video to show.")
+        } else {
+            val message = if (resolved.hasAudio) "This link is audio only. A display needs a video to show."
+            else "No usable video stream for $url."
+            DreamMediaException.NotFound(message, gap(message))
+        }
+        val audio = selected.audioStream ?: run {
+            val message = "No usable audio stream for $url."
+            throw DreamMediaException.NotFound(message, gap(message))
+        }
 
         val durationNanos = resolved.metadata.durationMs?.times(1_000_000L) ?: 0L
 
+        // A progressive file read straight off its host has only the decoder's sub-second buffer
+        // between a network stall and a frozen picture; routing it through the local read-ahead
+        // buffer keeps tens of seconds downloaded ahead instead.
+        val buffered = readAhead
+            ?.takeIf { !resolved.isLive && resolved.isSeekable && video.url == audio.url && video.type.hasAudio }
+            ?.let { ReadAhead.wrap(it, video.url) }
+            ?.takeIf { it != video.url }
+        fun MediaStream.routed(): MediaStream = if (buffered != null && url == video.url) copy(url = buffered) else this
+
         return PreparedMedia(
             streamSet = ActiveStreams(
-                availableVideo = resolved.videoStreams,
-                availableAudio = resolved.audioStreams,
-                currentVideo = video,
-                currentAudio = audio,
+                availableVideo = resolved.videoStreams.map { it.routed() },
+                availableAudio = resolved.audioStreams.map { it.routed() },
+                currentVideo = video.routed(),
+                currentAudio = audio.routed(),
             ),
             isLive = resolved.isLive,
             isSeekable = resolved.isSeekable,

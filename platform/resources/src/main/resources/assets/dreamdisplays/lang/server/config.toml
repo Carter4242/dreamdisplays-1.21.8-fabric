@@ -97,6 +97,9 @@ auto_pause_when_empty_seconds = 0
 # verbose = false           # true = clients log their media / sync debug output
 # report_interval_seconds = 5  # seconds between the viewer reports behind /display stats <display>; 0 = off
 
+[policy.network]
+# read_ahead_seconds = 30   # seconds of a direct video file (.mp4 / .webm link) clients keep downloaded ahead; 0 = off
+
 [custom_media]
 # Custom videos: links players paste themselves (direct .mp4 / .m3u8 files, file hosts,
 # and any other site the resolver can open)

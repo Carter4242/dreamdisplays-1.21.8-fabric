@@ -34,6 +34,7 @@ data class DisplayPolicy(
     val quality: Quality? = null,
     val client: Client? = null,
     val debug: Debug? = null,
+    val network: Network? = null,
 ) {
     /** Playback sync to the server timeline (Synced / Broadcast / watch parties). */
     @Serializable
@@ -164,11 +165,22 @@ data class DisplayPolicy(
         )
     }
 
+    /** How clients fetch a display's media. */
+    @Serializable
+    data class Network(
+        /** Seconds of a direct media file (MP4 / WebM link) kept downloaded ahead of playback; 0 turns it off. */
+        val readAheadSeconds: Int? = null,
+    ) {
+        fun mergedOver(base: Network?): Network =
+            Network(readAheadSeconds = readAheadSeconds ?: base?.readAheadSeconds)
+    }
+
     /** True when no section sets anything, so there is nothing worth sending. */
     val isEmpty: Boolean
         get() = (sync == null || sync == Sync()) && (audio == null || audio == Audio()) &&
                 (visibility == null || visibility == Visibility()) && (quality == null || quality == Quality()) &&
-                (client == null || client == Client()) && (debug == null || debug == Debug())
+                (client == null || client == Client()) && (debug == null || debug == Debug()) &&
+                (network == null || network == Network())
 
     /** What travels with one display: everything except the server-wide-only fields ([GLOBAL_ONLY]). */
     fun forDisplay(): DisplayPolicy {
@@ -191,6 +203,7 @@ data class DisplayPolicy(
         quality = mergeSection(quality, base.quality, Quality::mergedOver),
         client = mergeSection(client, base.client, Client::mergedOver),
         debug = mergeSection(debug, base.debug, Debug::mergedOver),
+        network = mergeSection(network, base.network, Network::mergedOver),
     )
 
     /** Compact JSON bytes for the custom-data entry. */
@@ -251,6 +264,7 @@ data class DisplayPolicy(
                 quality = section(root, "quality", Quality.serializer()),
                 client = section(root, "client", Client.serializer()),
                 debug = section(root, "debug", Debug.serializer()),
+                network = section(root, "network", Network.serializer()),
             )
         }
 

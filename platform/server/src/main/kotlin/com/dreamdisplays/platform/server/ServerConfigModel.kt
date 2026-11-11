@@ -395,6 +395,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         verbose = t.boolOrNull("policy.debug.verbose"),
         reportIntervalSeconds = t.numberOrNull("policy.debug.report_interval_seconds")?.toInt(),
     )
+    val network = DisplayPolicy.Network(t.numberOrNull("policy.network.read_ahead_seconds")?.toInt())
     return DisplayPolicy(
         sync = sync.takeIf { it != DisplayPolicy.Sync() },
         audio = audio.takeIf { it != DisplayPolicy.Audio() },
@@ -402,6 +403,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         quality = quality.takeIf { it != DisplayPolicy.Quality() },
         client = client.takeIf { it != DisplayPolicy.Client() },
         debug = debug.takeIf { it != DisplayPolicy.Debug() },
+        network = network.takeIf { it != DisplayPolicy.Network() },
     )
 }
 

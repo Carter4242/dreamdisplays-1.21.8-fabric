@@ -7,6 +7,7 @@ import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.player.GpuTextureRef
 import com.dreamdisplays.api.media.player.PlaybackEnvironment
 import com.dreamdisplays.api.media.player.PlaybackHost
+import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.media.player.events.PlayerEvents
@@ -15,11 +16,14 @@ import com.dreamdisplays.media.player.managers.StatsReporter
 import com.dreamdisplays.media.player.managers.StreamWatchdog
 import com.dreamdisplays.media.player.managers.WarmTrack
 import com.dreamdisplays.media.player.pipeline.PlaybackClock
+import com.dreamdisplays.media.player.policy.LoadFailures
+import com.dreamdisplays.media.player.policy.LoadRetrySchedule
 import com.dreamdisplays.media.player.policy.RetryPolicy
 import com.dreamdisplays.media.player.preparation.MediaPreparationService
 import com.dreamdisplays.media.player.preparation.PreparedMedia
 import com.dreamdisplays.media.player.process.HwAccelBackend
 import com.dreamdisplays.media.player.process.MediaProcess
+import com.dreamdisplays.media.player.readahead.ReadAhead
 import com.dreamdisplays.media.player.stream.ActiveStreams
 import com.dreamdisplays.media.player.stream.MediaStreamSelector
 import com.dreamdisplays.media.player.subtitle.SubtitleController
@@ -49,6 +53,8 @@ class MediaPlayer(
     private val clock = PlaybackClock()
     private val startedFromReplay = replayBootstrap != null
     private val retryPolicy = RetryPolicy(MAX_FETCH_RETRIES)
+    private val loadRetry = LoadRetrySchedule()
+    private val source: MediaSource = MediaSource.from(url)
 
     @Volatile
     private var lifecycle: PlayerState = PlayerState.Idle
@@ -83,7 +89,7 @@ class MediaPlayer(
     private var primedStartPositionNanos = -1L
 
     private val events = PlayerEvents(
-        onError = { e -> onControl { lifecycle = PlayerState.Error }; host.mediaError = e },
+        onError = { e -> onControl { lifecycle = PlayerState.Error }; reportError(e) },
         onSeek = { host.afterSeek() },
     )
 
@@ -618,7 +624,9 @@ class MediaPlayer(
         onControl { lifecycle = PlayerState.Preparing }
         runCatching {
             val prepared = preparedBootstrap?.also { preparedBootstrap = null }
-                ?: MediaPreparationService.prepare(url, lang, host.quality, env)
+                ?: MediaPreparationService.prepare(
+                    url, lang, host.quality, env, ReadAhead.Target(host.uuid, host.readAheadSeconds),
+                )
 
             if (terminated.get()) return
 
@@ -649,17 +657,57 @@ class MediaPlayer(
 
             safeExecute { if (!terminated.get()) startStreams(prepared.streamSet, initialOffset) }
         }.onSuccess {
+            loadRetry.reset()
+            // A load that worked after an automatic retry clears whatever the earlier attempt showed
+            if (host.mediaError != null && !terminated.get()) host.mediaError = null
             drainInitCallbacks(run = true)
         }.onFailure { e ->
+            if (terminated.get()) {
+                drainInitCallbacks(run = false)
+                return
+            }
+            // A passing failure (timeout, dropped connection, 429 / 5xx) is retried quietly: the
+            // display keeps showing "loading" instead of an error, and the init callbacks stay queued
+            // so the retry that works starts playback exactly like a first load would.
+            if (scheduleLoadRetry(e)) return
             logger.error("$debugLabel Initialization failed: ${e.message}.")
             onControl { lifecycle = PlayerState.Error }
-            host.mediaError = e as? DreamMediaException
-                ?: DreamMediaException.Unknown(
-                    e.message ?: "initialization failed",
-                    e
-                )
+            reportError(finalLoadError(e))
             drainInitCallbacks(run = false)
         }
+    }
+
+    private fun scheduleLoadRetry(e: Throwable): Boolean {
+        if (!LoadFailures.isTransient(e, source)) return false
+        val delayMs = loadRetry.next(LoadFailures.maxAttempts(source)) ?: return false
+        logger.warn(
+            "$debugLabel Load failed (${MediaUtil.truncate(e.message ?: e.javaClass.simpleName)}); " +
+                    "retrying (${loadRetry.retries}/${LoadFailures.maxAttempts(source) - 1}) in $delayMs ms."
+        )
+        // Whatever the failed attempt cached (a negative verdict, a half-walked redirect) must not
+        // answer the retry.
+        env.cacheInvalidator.invalidate(url)
+        MediaHostGuard.invalidate(url)
+        forgetResolvedStreamUrls()
+        onControl { if (!terminated.get()) lifecycle = PlayerState.Restarting }
+        RETRY_SCHEDULER.schedule({ dispatchInitialize() }, delayMs, TimeUnit.MILLISECONDS)
+        return true
+    }
+
+    /**
+     * The error shown once automatic retries are used up. A network failure stays a non-fatal
+     * [DreamMediaException.Network], which tells the display it may try again on its own later.
+     */
+    private fun finalLoadError(e: Throwable): DreamMediaException {
+        if (e is DreamMediaException) return e
+        val message = e.message ?: "initialization failed"
+        return if (LoadFailures.causedByNetwork(e)) DreamMediaException.Network(message, e)
+        else DreamMediaException.Unknown(message, e)
+    }
+
+    /** Surfaces [e] on the display, unless this player was already replaced (a stale error must not paint the new one). */
+    private fun reportError(e: DreamMediaException) {
+        if (!terminated.get()) host.mediaError = e
     }
 
     private fun startStreams(streamSet: ActiveStreams, offsetNanos: Long) {
@@ -781,7 +829,15 @@ class MediaPlayer(
             logger.error("$debugLabel Unrecoverable: ${MediaUtil.truncate(stderr)}.")
         }
         lifecycle = PlayerState.Error
-        host.mediaError = DreamMediaException.Decode("Unrecoverable stream failure", isFatal = true)
+        // Retries used up on a connection problem: still a network failure, which the display may
+        // retry on its own later. Anything else is a verdict on the stream itself.
+        reportError(
+            if (!normalEos && LoadFailures.looksTransient(stderr)) {
+                DreamMediaException.Network("Lost the connection to the video.")
+            } else {
+                DreamMediaException.Decode("Unrecoverable stream failure", isFatal = true)
+            }
+        )
     }
 
     private fun restartFromBeginning() {
@@ -873,7 +929,9 @@ class MediaPlayer(
             if (attempt > MAX_STALL_RERESOLVES) {
                 logger.error("$debugLabel $kind ($reason); giving up after $MAX_STALL_RERESOLVES re-resolves.")
                 lifecycle = PlayerState.Error
-                host.mediaError = DreamMediaException.Decode("Stream keeps stalling", isFatal = true)
+                // Almost always the connection rather than the file: non-fatal, so the display may
+                // try again later on its own.
+                reportError(DreamMediaException.Network("Stream keeps stalling"))
                 return@onControl
             }
             val delayMs = STALL_RERESOLVE_BACKOFF_MS[(attempt - 1).coerceAtMost(STALL_RERESOLVE_BACKOFF_MS.lastIndex)]
@@ -911,6 +969,8 @@ class MediaPlayer(
         stopSession()
         sessionManager.cleanup()
         streams = null
+        // The read-ahead buffer only serves a playing display; the next player re-fills it on demand.
+        ReadAhead.release(host.uuid)
     }
 
     private fun doSeek(nanos: Long, fire: Boolean) {

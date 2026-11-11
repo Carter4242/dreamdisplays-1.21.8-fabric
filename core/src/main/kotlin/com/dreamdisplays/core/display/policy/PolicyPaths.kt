@@ -87,6 +87,9 @@ object PolicyPaths {
         Path("debug.report_interval_seconds", "debug.reportIntervalSeconds", Kind.Whole(0, 600)) {
             it.debug?.reportIntervalSeconds
         },
+        Path("network.read_ahead_seconds", "network.readAheadSeconds", Kind.Whole(0, 120)) {
+            it.network?.readAheadSeconds
+        },
     )
 
     private val byName = all.associateBy { it.name }

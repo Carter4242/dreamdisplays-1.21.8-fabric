@@ -41,6 +41,12 @@ interface PlaybackHost {
     /** Last fatal/recoverable media error; the player sets this to surface failures to the UI. */
     var mediaError: DreamMediaException?
 
+    /**
+     * Seconds of a direct media file to download ahead of playback, or null for the player's default.
+     * 0 turns read-ahead off for this display.
+     */
+    val readAheadSeconds: Int? get() = null
+
     /** Invoked after a seek so the host can react (e.g. clear stale frames). */
     fun afterSeek()
 

@@ -68,3 +68,25 @@ class DirectMediaProbeTest {
         )
     }
 }
+
+class DirectMediaProbeFailureTest {
+    @Test
+    fun `only a server refusing the link is final`() {
+        listOf(400, 401, 403, 404, 410, 451).forEach {
+            kotlin.test.assertIs<DirectMediaProbe.Failure.Refused>(DirectMediaProbe.failureFor(it), "$it")
+        }
+        // Rate limits, timeouts, server errors and a redirect still to be walked can all pass
+        listOf(302, 307, 408, 425, 429, 500, 502, 503, 504).forEach {
+            kotlin.test.assertIs<DirectMediaProbe.Failure.Unreachable>(DirectMediaProbe.failureFor(it), "$it")
+        }
+    }
+
+    @Test
+    fun `a cut-short sniff is no evidence about the container`() {
+        kotlin.test.assertTrue(DirectMediaProbe.isShortRead(ByteArray(0), 10_000_000L))
+        kotlin.test.assertTrue(DirectMediaProbe.isShortRead(ByteArray(5), null))
+        kotlin.test.assertFalse(DirectMediaProbe.isShortRead(ByteArray(512), 10_000_000L))
+        kotlin.test.assertFalse(DirectMediaProbe.isShortRead(ByteArray(64), 10_000_000L), "Enough bytes to judge.")
+        kotlin.test.assertFalse(DirectMediaProbe.isShortRead(ByteArray(5), 5L), "The whole (tiny) file arrived.")
+    }
+}

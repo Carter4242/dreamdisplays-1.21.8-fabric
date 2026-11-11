@@ -11,9 +11,13 @@ import java.util.*
  */
 internal object DirectMediaProbe {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private const val CONNECT_TIMEOUT_MS = 8_000L
-    private const val READ_TIMEOUT_MS = 8_000L
+    private const val CONNECT_TIMEOUT_MS = 10_000L
+
+    // Some file hosts queue parallel requests for well over ten seconds before the first byte; the
+    // load is retried on a timeout anyway, so waiting a little longer here saves a whole round.
+    private const val READ_TIMEOUT_MS = 20_000L
     private const val SNIFF_BYTES = 512
+    private const val MIN_SNIFF_BYTES = 12
     private const val TS_PACKET_BYTES = 188
 
     /** What the server said about the URL.  makes a progressive file seekable. */
@@ -48,43 +52,108 @@ internal object DirectMediaProbe {
     private val TOLERATED_TYPES = setOf("application/octet-stream", "binary/octet-stream")
 
     /**
-     * Probes [url], or returns null when the request failed outright (DNS, TLS, timeout, 4xx/5xx).
-     * Never throws: a failed probe means "the direct path cannot answer for this URL", and the
-     * caller decides whether to refuse or fall through to the extractor chain.
+     * Why a probe produced no [Result]. [Unreachable] is a passing condition worth retrying (timeout,
+     * dropped connection, 429 / 5xx, a redirect that has to be walked again); [Refused] is the server
+     * permanently refusing the link (any other 4xx), so retrying cannot help.
      */
-    fun probe(url: String, requireBytes: Boolean = false): Result? {
-        head(url)?.takeIf { it.contentType != null || it.contentLength != null }?.let { base ->
+    sealed interface Failure {
+        data class Unreachable(val reason: String) : Failure
+        data class Refused(val status: Int) : Failure
+    }
+
+    /** A [Result], or the [Failure] that prevented one. */
+    sealed interface Outcome {
+        data class Ok(val result: Result) : Outcome
+        data class Failed(val failure: Failure) : Outcome
+    }
+
+    /** Probes [url], or returns null when it could not be probed. See [probeOutcome] for the reason. */
+    fun probe(url: String, requireBytes: Boolean = false): Result? =
+        (probeOutcome(url, requireBytes) as? Outcome.Ok)?.result
+
+    /**
+     * Probes [url]. Never throws: a failed probe means "the direct path cannot answer for this URL
+     * right now", and [Outcome.Failed] says whether that is likely to change.
+     */
+    fun probeOutcome(url: String, requireBytes: Boolean = false): Outcome {
+        val head = head(url)
+        (head as? Response.Ok)?.result?.takeIf { it.contentType != null || it.contentLength != null }?.let { base ->
             // A HEAD carries no body. Sniff when the declared type is not media or too generic to
             // tell a playlist from a file, and whenever the caller wants the container proven
             // rather than asserted.
             if (requireBytes || !base.isMediaType || base.contentType in TOLERATED_TYPES) {
-                sniffContentType(url)?.let {
-                    return base.copy(contentType = it, verifiedByBytes = true)
+                when (val sniff = sniff(url, base.contentLength)) {
+                    is Sniff.Recognized -> return Outcome.Ok(base.copy(contentType = sniff.type, verifiedByBytes = true))
+                    // The bytes could not be read this time: that says nothing about what the link
+                    // serves, so it must not be reported as "not a video".
+                    is Sniff.Unread -> return Outcome.Failed(Failure.Unreachable(sniff.reason))
+                    Sniff.Unrecognized -> Unit
                 }
             }
-            return base
+            return Outcome.Ok(base)
         }
 
         // The ranged GET both confirms range support and, crucially, already returns the leading
         // bytes — so the magic-byte sniff reads them from here instead of re-fetching the URL
-        val (base, body) = rangedGet(url) ?: return null
-        magicContentType(body)?.let { return base.copy(contentType = it, verifiedByBytes = true) }
-        return base
+        return when (val ranged = rangedGet(url)) {
+            is Response.Ok -> {
+                val body = ranged.body
+                magicContentType(body)?.let { return Outcome.Ok(ranged.result.copy(contentType = it, verifiedByBytes = true)) }
+                if (isShortRead(body, ranged.result.contentLength)) {
+                    Outcome.Failed(Failure.Unreachable("only ${body.size} leading byte(s) arrived"))
+                } else {
+                    Outcome.Ok(ranged.result)
+                }
+            }
+            // A HEAD that a server refuses outright while the GET merely failed still says
+            // nothing final; only a refusal of the GET itself is a verdict.
+            is Response.Status -> Outcome.Failed(failureFor(ranged.code))
+            is Response.Error -> Outcome.Failed(Failure.Unreachable(ranged.reason))
+        }
     }
 
-    private fun head(url: String): Result? = runCatching {
-        val response = DreamHttpClient.execute(url, requestOptions("HEAD"))
-        if (!response.isSuccessful) return@runCatching null
-        response.toResult()
-    }.onFailure { logger.debug("HEAD probe failed for {}: {}.", url.take(120), it.message) }.getOrNull()
+    /** What the server did with one request. */
+    private sealed interface Response {
+        class Ok(val result: Result, val body: ByteArray = ByteArray(0)) : Response
+        class Status(val code: Int) : Response
+        class Error(val reason: String) : Response
+    }
 
-    private fun rangedGet(url: String): Pair<Result, ByteArray>? = runCatching {
+    private sealed interface Sniff {
+        class Recognized(val type: String) : Sniff
+        data object Unrecognized : Sniff
+        class Unread(val reason: String) : Sniff
+    }
+
+    /** Classifies an HTTP status that ended a probe. Redirects count as passing: the walk is redone. */
+    internal fun failureFor(status: Int): Failure =
+        if (status in 400..499 && status != 408 && status != 425 && status != 429) Failure.Refused(status)
+        else Failure.Unreachable("HTTP $status")
+
+    /**
+     * True when fewer leading bytes arrived than both the sniff window and the file hold: the read was
+     * cut short, so an unrecognized result is no evidence about the container.
+     */
+    internal fun isShortRead(body: ByteArray, contentLength: Long?): Boolean {
+        val expected = minOf(SNIFF_BYTES.toLong(), contentLength ?: SNIFF_BYTES.toLong())
+        return body.size < MIN_SNIFF_BYTES && body.size < expected
+    }
+
+    private fun head(url: String): Response = runCatching<Response> {
+        val response = DreamHttpClient.execute(url, requestOptions("HEAD"))
+        if (!response.isSuccessful) Response.Status(response.code) else Response.Ok(response.toResult())
+    }.getOrElse {
+        logger.debug("HEAD probe failed for {}: {}.", url.take(120), it.message)
+        Response.Error(it.message ?: it.javaClass.simpleName)
+    }
+
+    private fun rangedGet(url: String): Response = runCatching<Response> {
         val response = DreamHttpClient.executeLimited(
             url,
             maxBytes = SNIFF_BYTES,
             options = requestOptions("GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
         )
-        if (!response.isSuccessful) return@runCatching null
+        if (!response.isSuccessful) return@runCatching Response.Status(response.code)
         val contentRange = response.headerValue("content-range")
         val result = response.toResult(
             contentLengthOverride = contentRange?.substringAfter('/', "")?.toLongOrNull()
@@ -92,16 +161,28 @@ internal object DirectMediaProbe {
             acceptsRangesOverride = response.code == 206 ||
                     response.headerValue("accept-ranges")?.contains("bytes", ignoreCase = true) == true,
         )
-        result to response.body
-    }.onFailure { logger.debug("Ranged GET probe failed for {}: {}.", url.take(120), it.message) }.getOrNull()
+        Response.Ok(result, response.body)
+    }.getOrElse {
+        logger.debug("Ranged GET probe failed for {}: {}.", url.take(120), it.message)
+        Response.Error(it.message ?: it.javaClass.simpleName)
+    }
 
-    private fun sniffContentType(url: String): String? = runCatching {
+    private fun sniff(url: String, contentLength: Long?): Sniff = runCatching<Sniff> {
         val response = DreamHttpClient.executeLimited(
             url, maxBytes = SNIFF_BYTES, options = requestOptions("GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
         )
-        if (!response.isSuccessful) return@runCatching null
-        magicContentType(response.body)
-    }.onFailure { logger.debug("Sniff failed for {}: {}.", url.take(120), it.message) }.getOrNull()
+        when {
+            response.isSuccessful -> magicContentType(response.body)?.let { Sniff.Recognized(it) }
+                ?: if (isShortRead(response.body, contentLength)) Sniff.Unread("short read") else Sniff.Unrecognized
+            // The HEAD already answered, so a GET the server turns down is about the range request,
+            // not the link; keep the header verdict.
+            failureFor(response.code) is Failure.Refused -> Sniff.Unrecognized
+            else -> Sniff.Unread("HTTP ${response.code}")
+        }
+    }.getOrElse {
+        logger.debug("Sniff failed for {}: {}.", url.take(120), it.message)
+        Sniff.Unread(it.message ?: it.javaClass.simpleName)
+    }
 
     /**
      * Maps a leading byte pattern to a content type for the container families players paste, or
