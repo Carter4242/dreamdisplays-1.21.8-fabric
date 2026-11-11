@@ -57,6 +57,13 @@ object QueueManager {
      */
     private const val ADVANCE_EARLY_MS = 300L
     private const val TICK_MARGIN_MS = 150L
+
+    /**
+     * With nobody holding the next entry preloaded the new video takes over the moment its URL arrives (no scheduled
+     * start), so it is sent only this long before the timeline's end: that end is [QueueTiming.END_SAFETY_MS] past the
+     * media's, so the switch lands after the media ended, within a [tick] period of it, and before the timeline wraps.
+     */
+    private const val UNPRELOADED_EARLY_MS = 50L
     private const val ADD_COOLDOWN_MS = 150L
     private const val EDIT_COOLDOWN_MS = 150L
     private const val PRELOAD_COOLDOWN_MS = 100L
@@ -301,8 +308,8 @@ object QueueManager {
         if (queues.isEmpty() || !settings().enabled) return
         val now = transport.nowMs()
         for ((displayId, queue) in queues) {
-            val (hasNext, current) = synchronized(queue) { queue.hasNext() to queue.current }
-            if (!hasNext) continue
+            val (head, current) = synchronized(queue) { queue.head() to queue.current }
+            if (head == null) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.virtual || !PlaybackPermissions.queueRuns(display.mode)) continue
             if (WatchPartyManager.hasSession(displayId) || TimelineManager.isHolding(displayId)) continue
@@ -311,7 +318,7 @@ object QueueManager {
             // No reported duration (e.g. the plugin reloaded and no client re-reported it): use the playing queue entry's
             val durationMs = timeline.durationMs.takeIf { it > 0L }
                 ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
-            val earlyMs = maxOf(
+            val earlyMs = if (readyFor(display, head).isEmpty()) UNPRELOADED_EARLY_MS else maxOf(
                 ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, transport.nearbyPlayerIds(display)) + TICK_MARGIN_MS,
             )
             if (!QueueTiming.advanceDue(timeline, now, earlyMs, armed, durationMs)) continue
