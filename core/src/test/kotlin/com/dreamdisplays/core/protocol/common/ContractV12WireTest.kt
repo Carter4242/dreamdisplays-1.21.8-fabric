@@ -14,6 +14,7 @@ import com.dreamdisplays.core.protocol.common.packets.ReportKind
 import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.SetMode
+import com.dreamdisplays.core.protocol.common.packets.SetVideo
 import com.dreamdisplays.shared.protocol.PacketDirection
 import com.dreamdisplays.shared.protocol.ProtocolVersion
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -126,5 +127,23 @@ class ContractV12WireTest {
         assertTrue(ReportKind.has(kinds, ReportKind.PRELOAD))
         assertFalse(ReportKind.has(kinds, ReportKind.DURATION))
         assertNull(ReportRequest().displayId.takeIf { it != ZERO_UUID })
+    }
+
+    @Serializable
+    private data class SetVideoV11(
+        @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
+        @ProtoNumber(2) val url: String = "",
+        @ProtoNumber(3) val lang: String = "",
+    )
+
+    @Test
+    fun `a clear round trips, and a protocol 11 server reads it as an empty URL`() {
+        val clear = SetVideo(id, clear = true)
+        assertEquals(clear, PacketRegistry.decode(PacketRegistry.encode(clear)))
+        assertEquals(
+            SetVideoV11(id),
+            proto.decodeFromByteArray(SetVideoV11.serializer(), proto.encodeToByteArray(SetVideo.serializer(), clear)),
+        )
+        assertFalse(SetVideo(id, url = "").clear)
     }
 }

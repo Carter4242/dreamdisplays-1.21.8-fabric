@@ -116,12 +116,18 @@ data class RequestSync(
     @ProtoNumber(2) val knownMediaGen: Long = 0,
 ) : DreamPacket
 
-/** Client applies a new media URL / audio language to a display. */
+/**
+ * Client applies a new media URL / audio language to a display, or with [clear] takes its video off ([url] and [lang]
+ * then empty): the display shows nothing and its timeline stops. Anyone allowed to set a video may clear it. Only sent
+ * with [clear] to servers that advertise `ServerFeature.CLEAR_VIDEO`; an empty [url] without [clear] is not a clear
+ * (it is refused, as by every older server).
+ */
 @Serializable
 data class SetVideo(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
     @ProtoNumber(2) val url: String = "",
     @ProtoNumber(3) val lang: String = "",
+    @ProtoNumber(4) val clear: Boolean = false,
 ) : DreamPacket
 
 /**

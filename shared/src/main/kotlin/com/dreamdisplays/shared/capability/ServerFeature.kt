@@ -48,7 +48,13 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * The server takes screen-share heartbeats (`ScreenShareRequest.heartbeat`) and ends a share whose sharer stops
      * sending them. Sent together with [SCREEN_SHARE]; clients send no heartbeats otherwise.
      */
-    SCREEN_SHARE_HEARTBEAT("screen_share_heartbeat");
+    SCREEN_SHARE_HEARTBEAT("screen_share_heartbeat"),
+
+    /**
+     * The server clears a display's video on `SetVideo(clear = true)` from anyone allowed to set one: it sends an
+     * empty URL (with a new media generation) and stops the display's timeline. Clients offer "Clear" only then.
+     */
+    CLEAR_VIDEO("clear_video");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
