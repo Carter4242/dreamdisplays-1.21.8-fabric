@@ -607,7 +607,8 @@ class SuggestionsPanel(
 
         fun mouseScrolled(mouseX: Double, mouseY: Double, dx: Double, dy: Double): Boolean {*/
         if (claimPopupScroll(mouseX.toInt(), mouseY.toInt())) return true
-        if (!available()) return false
+        // Hidden (errored display, Up next tab) still gets every click and scroll the screen hands out
+        if (!visible || !available()) return false
         if (!isMouseOver(mouseX, mouseY)) return false
         val stripTop = stripTop()
         val stripBottom = stripBottom()
@@ -629,7 +630,8 @@ class SuggestionsPanel(
 
     //? if >=1.21.11 {
     override fun mouseClicked(event: MouseButtonEvent, dbl: Boolean): Boolean {
-        if (!available()) return false
+        // Hidden (errored display, Up next tab) still gets every click and scroll the screen hands out
+        if (!visible || !available()) return false
         val mouseX = event.x()
         val mouseY = event.y()
         val mx = mouseX.toInt()
@@ -689,7 +691,8 @@ class SuggestionsPanel(
     }
     //?} else
     /*override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
-        if (!available()) return false
+        // Hidden (errored display, Up next tab) still gets every click and scroll the screen hands out
+        if (!visible || !available()) return false
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
@@ -785,11 +788,11 @@ class SuggestionsPanel(
     }
 
     /** True while the search box has keyboard focus, so screen-level hotkeys must stand aside. */
-    val isTyping: Boolean get() = searchBox.isFocused
+    val isTyping: Boolean get() = visible && searchBox.isFocused
 
     //? if >=1.21.11 {
     override fun keyPressed(event: KeyEvent): Boolean {
-        if (!available()) return super.keyPressed(event)
+        if (!visible || !available()) return super.keyPressed(event)
         if (searchBox.isFocused) {
             if (event.key() ==
                 //? if >=26.3 {
@@ -806,12 +809,12 @@ class SuggestionsPanel(
     }
 
     override fun charTyped(event: CharacterEvent): Boolean {
-        if (searchBox.isFocused) return searchBox.charTyped(event)
+        if (visible && searchBox.isFocused) return searchBox.charTyped(event)
         return super.charTyped(event)
     }
     //?} else
     /*override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
-        if (!available()) return super.keyPressed(keyCode, scanCode, modifiers)
+        if (!visible || !available()) return super.keyPressed(keyCode, scanCode, modifiers)
         if (searchBox.isFocused) {
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 controller.runSearch(searchBox.value)
@@ -823,7 +826,7 @@ class SuggestionsPanel(
     }
 
     override fun charTyped(chr: Char, modifiers: Int): Boolean {
-        if (searchBox.isFocused) return searchBox.charTyped(chr, modifiers)
+        if (visible && searchBox.isFocused) return searchBox.charTyped(chr, modifiers)
         return super.charTyped(chr, modifiers)
     }*/
 
