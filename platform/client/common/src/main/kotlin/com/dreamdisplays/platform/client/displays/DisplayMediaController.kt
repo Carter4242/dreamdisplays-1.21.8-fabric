@@ -42,7 +42,12 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
      * [preservePausedState] is true the screen's current paused state is reapplied after start.
      */
     fun load(videoUrl: String, lang: String, preservePausedState: Boolean) {
-        if (videoUrl == "") return
+        if (videoUrl == "") {
+            // Nothing to play (the server cleared the display): stop whatever plays and remember it is empty, so the
+            // next description of the same empty display is no change at all
+            if (emptyLoadUnloads(screen.videoUrl, player != null || pendingSwitch != null)) unload(lang)
+            return
+        }
         pendingSwitch?.let {
             if (it.url == videoUrl && it.lang == lang) return // The same switch again
             cancelPendingSwitch()
@@ -68,8 +73,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     }
 
     /**
-     * The display has nothing to play any more after a private stream (a screen share ended on a display that had no
-     * video before): the current player stops and nothing replaces it. The caller has already dropped the picture.
+     * The display has nothing to play any more (a screen share ended on a display that had no video before, or the
+     * server cleared its link): the current player stops and nothing replaces it.
      */
     fun unload(lang: String) {
         cancelPendingSwitch()
@@ -343,3 +348,9 @@ internal class LatestTimer {
 
     fun isLatest(id: Long): Boolean = id == current
 }
+
+/**
+ * Whether loading an empty link unloads: something still plays ([hasPlayer]) or the display does not yet know it is
+ * empty ([shownUrl] is not ""). False for an empty display described again.
+ */
+internal fun emptyLoadUnloads(shownUrl: String?, hasPlayer: Boolean): Boolean = hasPlayer || shownUrl != ""
