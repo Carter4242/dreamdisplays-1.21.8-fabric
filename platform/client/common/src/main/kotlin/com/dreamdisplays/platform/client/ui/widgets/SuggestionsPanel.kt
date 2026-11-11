@@ -216,6 +216,7 @@ class SuggestionsPanel(
         if (showTitle) g.drawText(f, message, x + 10, y + 10, UiTheme.TEXT_PRIMARY, false)
 
         if (!available()) {
+            sortDropdown.hide()
             val notice = ClientMessage.SUGGESTIONS_UNAVAILABLE.component().string
             g.drawText(f, notice, x + 10, stripTop() + 6, UiTheme.TEXT_SECONDARY, false)
             return
@@ -598,6 +599,9 @@ class SuggestionsPanel(
 
     /** True when a scroll lands on the open sort dropdown, which swallows it so the cards beneath don't scroll. */
     fun claimPopupScroll(mx: Int, my: Int): Boolean = sortDropdown.claimScroll(mx, my)
+
+    /** Closes the sort dropdown; called while the panel is hidden, when nothing draws it. */
+    fun hidePopups() = sortDropdown.hide()
 
     //? if >=1.20.2 {
     override fun mouseScrolled(mouseX: Double, mouseY: Double, dx: Double, dy: Double): Boolean {

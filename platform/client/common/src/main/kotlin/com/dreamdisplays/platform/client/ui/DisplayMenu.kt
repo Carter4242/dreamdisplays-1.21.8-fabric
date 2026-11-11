@@ -562,7 +562,12 @@ class DisplayMenu private constructor(
         audio3d.syncToCurrent()
 
         if (ds.errored) {
+            // An open popup whose anchor is hidden would still claim (and act on) the next click
             dropdown.hide()
+            shareDropdown.hide()
+            audioTrackDropdown.hide()
+            subtitleDropdown.hide()
+            suggestions.hidePopups()
             suggestionsRect = null
             errorPanel.render(g, width, height)
             drawChildren(g, mouseX, mouseY, partialTick)
@@ -601,6 +606,7 @@ class DisplayMenu private constructor(
         } else {
             suggestions.visible = false
         }
+        if (!suggestions.visible) suggestions.hidePopups()
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
@@ -610,6 +616,8 @@ class DisplayMenu private constructor(
                 g.fill(shareButton.x + 2, bottom + 1, shareButton.x + shareButton.width - 2, bottom + 3, 0xFFFF5050.toInt())
             }
             shareDropdown.draw(g, shareButton.x + shareButton.width / 2, shareButton.y, mouseX, mouseY)
+        } else {
+            shareDropdown.hide()
         }
         if (suggestionsArea != null && tabs) {
             drawPanelTabs(g, suggestionsArea, mouseX, mouseY)

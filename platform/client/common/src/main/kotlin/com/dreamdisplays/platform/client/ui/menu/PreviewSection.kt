@@ -143,9 +143,12 @@ class PreviewSection(
         // Centered on the slot's fixed target position (not the animating button rect), so it never
         // drifts or jitters while the button is still easing in.
         val audioBtnFinalCenterX = audioSlotRight - btn / 2
+        // A dropdown whose button has gone (the track list shrank) closes rather than claim clicks unseen
         if (audioPresence > 0.01f) audioTrackDropdown.draw(g, audioBtnFinalCenterX, controlsRowY, mouseX, mouseY)
+        else audioTrackDropdown.hide()
         val subtitleBtnFinalCenterX = subtitleSlotRight - btn / 2
         if (subtitlePresence > 0.01f) subtitleDropdown.draw(g, subtitleBtnFinalCenterX, controlsRowY, mouseX, mouseY)
+        else subtitleDropdown.hide()
     }
 
     private fun drawVideoArea(g: GuiGraphicsCompat, x: Int, y: Int, w: Int, h: Int) {
