@@ -262,6 +262,14 @@ internal class PlaybackSessionManager(
      */
     private val audioSwitchGeneration = AtomicLong()
 
+    /**
+     * Held while the generation moves on and while a promoted switch claims the session's audio, so a switch can never
+     * take over after a seek / restart / stop that superseded it (see [runAudioTrackSwitch]).
+     */
+    private val audioOwnerLock = Any()
+
+    private fun bumpAudioGeneration(): Long = synchronized(audioOwnerLock) { audioSwitchGeneration.incrementAndGet() }
+
     @Volatile
     private var liveSession = false
 
@@ -285,7 +293,7 @@ internal class PlaybackSessionManager(
         if (value == tempo) return
         tempo = value
         clock.setRate(value)
-        audioSwitchGeneration.incrementAndGet()
+        bumpAudioGeneration()
         // Pre-warmed tracks were spawned at the old speed
         audioWarmPool.invalidateAll()
     }
@@ -629,7 +637,7 @@ internal class PlaybackSessionManager(
         // The shadows hold PCM for the position we are leaving; the refresh pass re-warms at the new one.
         audioWarmPool.invalidateAll()
         // The seek reopens the audio on the current track (a pending switch's included) at the new position
-        audioSwitchGeneration.incrementAndGet()
+        bumpAudioGeneration()
         if (bridging) return false
         synchronized(switchLock) { if (incoming != null) return false }
         val old = active ?: return false
@@ -771,7 +779,7 @@ internal class PlaybackSessionManager(
     /** Replaces audio half of playing session with fresh process on same audio URL, leaving video unchanged. */
     fun restartAudio(streamSet: ActiveStreams, offsetNanos: Long): Boolean {
         if (!isPlaying || terminated.get() || parkFlag.get()) return false
-        audioSwitchGeneration.incrementAndGet()
+        bumpAudioGeneration()
         if (bridging) return false
         synchronized(switchLock) { if (incoming != null) return false }
         val ffmpeg = FFmpegBinary.getPath() ?: return false
@@ -810,18 +818,25 @@ internal class PlaybackSessionManager(
     private val audioSwitchWarmupTimeoutNanos = 15_000_000_000L
 
     /** Seamless audio-track switch for seekable content: spawns new track's FFmpeg on background thread, then swaps. */
-    fun beginAudioTrackSwitch(streamSet: ActiveStreams): Boolean {
+    fun beginAudioTrackSwitch(streamSet: ActiveStreams, onFailed: () -> Unit = {}): Boolean {
         if (!isPlaying || terminated.get() || parkFlag.get()) return false
         if (bridging) return false
         synchronized(switchLock) { if (incoming != null) return false }
         val ffmpeg = FFmpegBinary.getPath() ?: return false
-        val generation = audioSwitchGeneration.incrementAndGet()
-        daemon({ runAudioTrackSwitch(ffmpeg, streamSet, generation) }, "MediaPlayer-audio-switch").start()
+        val generation = bumpAudioGeneration()
+        daemon({ runAudioTrackSwitch(ffmpeg, streamSet, generation, onFailed) }, "MediaPlayer-audio-switch").start()
         return true
     }
 
     private fun audioSwitchStillCurrent(generation: Long): Boolean =
         audioSwitchGeneration.get() == generation && !terminated.get() && isPlaying && !parkFlag.get()
+
+    /**
+     * A switch that did not go live although nothing superseded it (no PCM in time, no output line, a pause during
+     * its warm-up): the previous track plays on, so the caller's selection has to go back to it.
+     */
+    private fun audioSwitchFailed(generation: Long): Boolean =
+        audioSwitchGeneration.get() == generation && !terminated.get() && isPlaying
 
     private class PreparedAudioLine(
         val process: Process,
@@ -889,13 +904,14 @@ internal class PlaybackSessionManager(
         return PreparedAudioLine(ap, aStop, seekNanos, tempo)
     }
 
-    private fun runAudioTrackSwitch(ffmpeg: String, streamSet: ActiveStreams, generation: Long) {
+    private fun runAudioTrackSwitch(ffmpeg: String, streamSet: ActiveStreams, generation: Long, onFailed: () -> Unit) {
         val line = takeWarmAudioLine(streamSet) ?: coldStartAudioLine(ffmpeg, streamSet, generation)
         if (line == null || !audioSwitchStillCurrent(generation)) {
             line?.let {
                 it.stop.set(true)
                 MediaProcess.gracefulDestroy(it.process)
             }
+            if (audioSwitchFailed(generation)) onFailed()
             onAudioTrackSwitchSettled()
             return
         }
@@ -914,11 +930,23 @@ internal class PlaybackSessionManager(
             ap, terminated, aStop,
             contentStartNanos = seekNanos, originKnown = originKnown, catchUp = catchUp,
             shouldPromote = { audioSwitchStillCurrent(generation) },
-            onPromoted = {
+            onPromoted = promoted@{
                 // Runs on the switch thread the instant the new line goes live: take ownership and
                 // retire the old half. The promoted line publishes its own content origin, so the
                 // master clock picks the new session up exactly, with no anchoring guess.
-                audioHalf = AudioHalf(ap, Thread.currentThread(), aStop)
+                val owns = synchronized(audioOwnerLock) {
+                    (audioSwitchGeneration.get() == generation).also { current ->
+                        if (current) audioHalf = AudioHalf(ap, Thread.currentThread(), aStop)
+                    }
+                }
+                if (!owns) {
+                    // A seek / restart / stop took the audio over after this switch was cleared to go live: it opened
+                    // its own half (on this track, at its own position), so this one retires instead of replacing it
+                    aStop.set(true)
+                    daemon({ MediaProcess.gracefulDestroy(ap) }, "MediaPlayer-audio-switch-drop").start()
+                    onAudioTrackSwitchSettled()
+                    return@promoted
+                }
                 audioFinished = false
                 oldAudio?.stop?.set(true)
                 discardHalvesAsync(null, oldAudio)
@@ -935,6 +963,7 @@ internal class PlaybackSessionManager(
                 // The replacement never went live; keep the current track and drop the new process
                 aStop.set(true)
                 MediaProcess.gracefulDestroy(ap)
+                if (audioSwitchFailed(generation)) onFailed()
                 onAudioTrackSwitchSettled()
             },
             onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
@@ -1335,7 +1364,7 @@ internal class PlaybackSessionManager(
     fun stop() {
         phase.set(Phase.Stopped)
         audioWarmPool.invalidateAll()
-        audioSwitchGeneration.incrementAndGet()
+        bumpAudioGeneration()
         audioFeeder = null
         masterClock.reset()
         parkFlag.set(false) // Release any parked readers so they observe the stop flags and exit

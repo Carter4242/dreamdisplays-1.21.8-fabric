@@ -1593,6 +1593,7 @@ class MediaPlayer(
         val ss = streams ?: return
         if (trackUrl == ss.currentAudio.url) return
         val newSs = MediaStreamSelector.switchAudioTrack(ss, trackUrl) ?: return
+        val previousUrl = ss.currentAudio.url
         streams = newSs
         if (WarmPausePolicy.audioTrackChangeReopens(isPausedWarm())) {
             // Neither switch runs on a parked session, and resuming it would play the old track on: drop it, so
@@ -1602,7 +1603,7 @@ class MediaPlayer(
             return
         }
         audioTrackSwitching = true
-        val seamless = sessionManager.beginAudioTrackSwitch(newSs)
+        val seamless = sessionManager.beginAudioTrackSwitch(newSs) { onControl { revertAudioTrack(trackUrl, previousUrl) } }
         refreshWarmAudioTracks()
         if (seamless) return
         env.renderExecutor.execute {
@@ -1611,6 +1612,18 @@ class MediaPlayer(
                 audioTrackSwitching = false
             }
         }
+    }
+
+    /**
+     * A switch to [failedUrl] never went live and [previousUrl] still plays: the selection goes back to it, so the
+     * menu shows what is heard and picking [failedUrl] again really retries.
+     */
+    private fun revertAudioTrack(failedUrl: String, previousUrl: String) {
+        val current = streams ?: return
+        if (current.currentAudio.url != failedUrl) return
+        streams = MediaStreamSelector.switchAudioTrack(current, previousUrl) ?: return
+        logger.warn("$debugLabel Audio-track switch did not go live; the previous track stays selected.")
+        refreshWarmAudioTracks()
     }
 
     private fun refreshWarmAudioTracks() {

@@ -419,20 +419,25 @@ internal class AudioSink(private val debugLabel: String) {
 
                 val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, opened, terminated, stopFlag)
                 if (isInterrupted() || primedBytes <= 0) return@use
-                if (isInterrupted() || !shouldPromote()) return@use
 
                 // The flip publishes the new session and its line together, so no clock reader can ever
-                // see the new line paired with the old session's content origin (or vice versa).
-                val old = current?.line
-                old?.apply {
-                    runCatching { stop() }
-                    runCatching { flush() }
+                // see the new line paired with the old session's content origin (or vice versa). It is decided
+                // under the session lock every seek / restart / stop takes to replace the session, so a switch that
+                // lost that race goes no further and never closes the line that replaced it.
+                val (old, s) = synchronized(sessionLock) {
+                    if (isInterrupted() || !shouldPromote()) return@use
+                    val oldLine = current?.line
+                    oldLine?.apply {
+                        runCatching { stop() }
+                        runCatching { flush() }
+                    }
+                    val flipped = beginSession(contentStartNanos + skippedNanos, originKnown, tempo)
+                    flipped.output = opened.output
+                    publishLine(flipped, opened.line)
+                    oldLine to flipped
                 }
-                val s = beginSession(contentStartNanos + skippedNanos, originKnown, tempo)
-                s.output = opened.output
                 session = s
-                publishLine(s, newLine)
-                newLine.start()
+                opened.line.start()
                 // Only now may the clock be read: the line is running and its primed buffer is the
                 // content at contentStartNanos, so frame position 0 really is that position.
                 s.pcmFlowing = true
