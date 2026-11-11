@@ -26,17 +26,13 @@ object TimelineManager {
     private const val PERIODIC_BROADCAST_MS = 5_000L
     private const val MAX_DURATION_MS = 24L * 60 * 60 * 1_000
     private const val MIN_DURATION_MS = 2_000L
-    private val reportDurationThrottle = ActionThrottle()
-    private const val REPORT_DURATION_COOLDOWN_MS = 2_000L
     private val commandThrottle = ActionThrottle()
     private const val COMMAND_COOLDOWN_MS = 100L
     private lateinit var transport: PlaybackTransport
     private val timelines = ConcurrentHashMap<UUID, Timeline>()
 
-    /** Client-reported media durations of a display's video [url]: the latest per viewer, and the one in use (ms). */
-    private class ReportedDurations(val url: String, val byPlayer: Map<UUID, Long>, val mediaMs: Long)
-
-    private val durationReports = ConcurrentHashMap<UUID, ReportedDurations>()
+    /** Client-reported media durations of each display's video, and the last settled one per display and URL. */
+    private val durations = com.dreamdisplays.core.queue.VideoDurations()
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
@@ -109,7 +105,7 @@ object TimelineManager {
         return timelines.mapNotNull { (displayId, timeline) ->
             val display = DisplayManager.getDisplayData(displayId) ?: return@mapNotNull null
             if (WatchPartyManager.hasSession(displayId)) return@mapNotNull null
-            val mediaMs = durationReports[displayId]?.takeIf { it.url == display.url }?.mediaMs ?: 0L
+            val mediaMs = durations.mediaMsOf(displayId, display.url)
             TimelineRecords.save(displayId, display.url, timeline, startHolds.containsKey(displayId), mediaMs, now)
         }
     }
@@ -125,7 +121,7 @@ object TimelineManager {
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
             if (display.url != record.url) continue
             timelines[displayId] = TimelineRecords.restore(record, now)
-            if (record.mediaMs > 0L) durationReports[displayId] = ReportedDurations(display.url, emptyMap(), record.mediaMs)
+            durations.seed(displayId, display.url, record.mediaMs)
             restored++
         }
         logger.info("Restored {} of {} saved display timeline(s).", restored, saved.size)
@@ -163,12 +159,13 @@ object TimelineManager {
             EndOfStreamGuard.Verdict.DUPLICATE -> return false
         }
         val holding = startHolds.remove(display.id) != null
-        val current = timelines[display.id] ?: Timeline.start(now)
+        val current = timelines[display.id] ?: Timeline.start(now, durationMs = durationMsOf(display), loop = true)
         val updated = when (action) {
             PlaybackAction.PLAY -> current.withPaused(false, now)
             PlaybackAction.PAUSE -> current.withPaused(true, now)
             PlaybackAction.SEEK -> current.seekedTo(target, now)
-            PlaybackAction.RESTART -> Timeline.start(now, rate = current.rate)
+            // Keeps its length and loop: without them its clock would count past the end and never come round again
+            PlaybackAction.RESTART -> Timeline.start(now, durationMs = current.durationMs, loop = true, rate = current.rate)
             PlaybackAction.SPEED -> return false // Handled above
         }
         // A resume, seek or restart parks every viewer paused at the new position for a moment, so they all
@@ -378,8 +375,9 @@ object TimelineManager {
      */
     fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
-        display.duration = null // Fresh video
-        durationReports.remove(display.id)
+        // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length
+        val knownMs = QueueTiming.scheduledDurationMs(durations.onVideoChanged(display.id, display.url))
+        display.duration = knownMs.takeIf { it > 0L }?.let { it * 1_000_000L }
         val now = transport.nowMs()
         endOfStream.onVideoChanged(display.id, maxOf(now, startAtMs ?: now))
         // The display keeps its speed across videos
@@ -389,12 +387,12 @@ object TimelineManager {
             ReadinessTracker.forgetDisplay(display.id)
             readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
             // Anchored at the start instant: until then the wire timeline says "starts in N ms" (DisplaySync.startInMs)
-            val scheduled = Timeline(0, maxOf(now, startAtMs), paused = false, loop = true, rate = speed)
+            val scheduled = Timeline(0, maxOf(now, startAtMs), paused = false, durationMs = knownMs, loop = true, rate = speed)
             timelines[display.id] = scheduled
             broadcast(display, scheduled)
             return
         }
-        val fresh = Timeline.start(now, paused = true, loop = true, rate = speed)
+        val fresh = Timeline.start(now, paused = true, durationMs = knownMs, loop = true, rate = speed)
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
         ReadinessTracker.forgetDisplay(display.id)
@@ -421,13 +419,10 @@ object TimelineManager {
         if (durationMs !in MIN_DURATION_MS..MAX_DURATION_MS) return
         if (url.isNotEmpty() && url != display.url) return
         if (senderId !in transport.nearbyPlayerIds(display)) return
-        if (!reportDurationThrottle.tryAcquire(display.id to senderId, REPORT_DURATION_COOLDOWN_MS)) return
-
-        val known = durationReports[display.id]?.takeIf { it.url == display.url }
-        val byPlayer = (known?.byPlayer ?: emptyMap()) + (senderId to durationMs)
-        val mediaMs = QueueTiming.mediaDurationMs(QueueManager.playingEntryDurationMs(display), byPlayer.values, known?.mediaMs ?: 0L)
-        durationReports[display.id] = ReportedDurations(display.url, byPlayer, mediaMs)
-        if (known != null && mediaMs == known.mediaMs) return
+        // Report cooldowns start afresh with each video ([VideoDurations])
+        val mediaMs = durations.report(
+            display.id, display.url, senderId, durationMs, QueueManager.playingEntryDurationMs(display), transport.nowMs(),
+        ) ?: return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L
         val current = timelines[display.id] ?: return
@@ -441,7 +436,7 @@ object TimelineManager {
         endOfStream.forget(displayId)
         emptySince.remove(displayId)
         timelines.remove(displayId)
-        durationReports.remove(displayId)
+        durations.forget(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)
     }
@@ -456,6 +451,7 @@ object TimelineManager {
         val now = transport.nowMs()
         releaseStartHolds(now)
         autoPauseEmpty(now)
+        carryKnownDurations()
         for ((displayId, timeline) in timelines) {
             if (now - (lastBroadcast[displayId] ?: 0L) < PERIODIC_BROADCAST_MS) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
@@ -493,6 +489,22 @@ object TimelineManager {
             timelines[displayId] = paused
             broadcast(display, paused)
             logger.info("Paused display {}: nobody has been near it for {} s.", displayId, limit / 1_000)
+        }
+    }
+
+    /** Backstop: a timeline without a length while its display knows its video's gets it, so it wraps at the end. */
+    private fun carryKnownDurations() {
+        for ((displayId, timeline) in timelines) {
+            if (timeline.durationMs > 0L && timeline.loop) continue
+            val display = DisplayManager.getDisplayData(displayId) ?: continue
+            if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
+            val durationMs = durationMsOf(display).takeIf { it > 0L } ?: continue
+            // A clock already past that end is restarted at once by tickEnds instead
+            if (QueueTiming.loopRestartAtMs(timeline, transport.nowMs(), 0L, durationMs) != null) continue
+            val updated = timeline.copy(durationMs = durationMs, loop = true)
+            timelines[displayId] = updated
+            broadcast(display, updated)
+            logger.info("Display {}: its timeline had lost its video's length; restored it.", displayId)
         }
     }
 

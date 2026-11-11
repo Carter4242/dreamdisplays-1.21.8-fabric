@@ -273,6 +273,27 @@ object QueueTiming {
         return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt
     }
 
+    /**
+     * Wall time at which a playing [timeline] with nothing queued should restart its video from 0 for everyone, or null
+     * when that is not yet due (more than [earlyMs] of wall time before the end), it is paused, or no duration is known.
+     *
+     * [durationMs] is the video's known (scheduled) length. A timeline that wraps by itself (looping, with that
+     * duration) restarts at the end of its current play-through. One that does not ([Timeline.durationMs] unknown or
+     * not looping) and already ran past [durationMs] restarts at [nowMs]: its clock kept counting past an end that
+     * nobody wrapped. Only an end ahead counts for a wrapping timeline, so a late tick never restarts it mid-video.
+     */
+    fun loopRestartAtMs(timeline: Timeline, nowMs: Long, earlyMs: Long, durationMs: Long = timeline.durationMs): Long? {
+        if (timeline.paused || durationMs <= 0L) return null
+        val rate = timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)
+        val raw = rawPosition(timeline, nowMs)
+        val wraps = timeline.loop && timeline.durationMs == durationMs
+        val left = if (wraps) durationMs - raw % durationMs else durationMs - raw
+        if (left <= 0L) return nowMs
+        val leftWallMs = (left / rate).roundToLong()
+        if (leftWallMs > earlyMs) return null
+        return maxOf(nowMs, timeline.serverTimeMs) + leftWallMs
+    }
+
     /** Past the media end the timeline waits this long more: switching late holds the last frame, early cuts the video. */
     const val END_SAFETY_MS = 150L
 
