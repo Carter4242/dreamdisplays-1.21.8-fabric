@@ -4,6 +4,7 @@ import com.dreamdisplays.platform.client.utils.buttonClickSound
 import com.dreamdisplays.platform.client.utils.translatableText
 import com.dreamdisplays.platform.client.ui.ClientMessage
 import com.dreamdisplays.api.media.search.MediaSearchResult
+import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.render.Thumbnails
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
@@ -107,7 +108,8 @@ class SuggestionsPanel(
         //? if >=1.19.3 {
         searchBox.setHint(ClientMessage.SUGGESTIONS_SEARCH.component())
         //?}
-        searchBox.setMaxLength(200)
+        // A pasted link is kept whole up to the length the server accepts (signed CDN links run past 200)
+        searchBox.setMaxLength(MediaUrlPolicy.MAX_URL_LENGTH)
         clearButton = IconButton(icon = { IconButton.modIcon("cross") }, margin = 4) {
             searchBox.value = ""
             //? if >=1.19.4 {
