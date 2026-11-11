@@ -163,4 +163,11 @@ class ScreenShareRulesTest {
         assertTrue(ScreenShareServerRules.notifiesSharer(EndReason.ADMIN_STOP))
         assertTrue(ScreenShareServerRules.notifiesSharer(EndReason.HEARTBEAT_LOST))
     }
+
+    @Test
+    fun `a share is over once its display shows something else`() {
+        assertTrue(ScreenShareServerRules.stillShown("rtmps://relay.example:1935/ddabc123", "ddabc123"))
+        assertFalse(ScreenShareServerRules.stillShown("https://youtu.be/xyz", "ddabc123"))
+        assertFalse(ScreenShareServerRules.stillShown("", "ddabc123"))
+    }
 }

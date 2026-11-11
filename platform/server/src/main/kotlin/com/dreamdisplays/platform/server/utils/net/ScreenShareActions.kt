@@ -164,8 +164,8 @@ object ScreenShareActions {
     fun sharedDisplays(): Set<UUID> = byDisplay.keys.toSet()
 
     /**
-     * Once a second (global tick): ends every share whose sharer is gone, in another world, out of range, or silent
-     * for longer than [ScreenShareServerRules.HEARTBEAT_TIMEOUT_MS].
+     * Once a second (global tick): ends every share whose display shows something else now, or whose sharer is gone, in
+     * another world, out of range, or silent for longer than [ScreenShareServerRules.HEARTBEAT_TIMEOUT_MS].
      */
     fun tick() {
         if (byDisplay.isEmpty()) return
@@ -174,6 +174,11 @@ object ScreenShareActions {
             val display = DisplayManager.getDisplayData(share.displayId) as? PaperDisplayData
             if (display == null) {
                 end(share, EndReason.DISPLAY_REMOVED)
+                continue
+            }
+            // Its video was set some other way (a command, an addon, the queue): the share no longer owns the display
+            if (!ScreenShareServerRules.stillShown(display.url, share.streamId)) {
+                end(share, EndReason.VIDEO_SET_BY_HAND, error = "Your screen share was replaced.")
                 continue
             }
             val sharer = Bukkit.getPlayer(share.sharerId)

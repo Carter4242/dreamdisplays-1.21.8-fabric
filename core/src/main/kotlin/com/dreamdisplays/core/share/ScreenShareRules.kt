@@ -203,6 +203,12 @@ object ScreenShareServerRules {
         else -> null
     }
 
+    /**
+     * Whether a display showing [displayUrl] still shows the share streaming as [streamId]. Not any more: something
+     * else set its video (a command, an addon, the queue moving on, a clear), and the share is over without a restore.
+     */
+    fun stillShown(displayUrl: String, streamId: String): Boolean = streamId.isNotEmpty() && displayUrl.contains(streamId)
+
     /** Whether ending for [reason] puts the display's previous video back (only while it still shows the share). */
     fun restoresPreviousVideo(reason: EndReason): Boolean =
         reason != EndReason.VIDEO_SET_BY_HAND && reason != EndReason.DISPLAY_REMOVED
