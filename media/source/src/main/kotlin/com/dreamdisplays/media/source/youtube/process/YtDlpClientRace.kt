@@ -16,6 +16,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -35,6 +36,22 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
 
         private const val PRIMARY_CLIENT = "visionos"
         private val FALLBACK_CLIENTS: List<String?> = ["android_vr", "ios", "tv", "android"]
+        private const val MAX_REMEMBERED_ERRORS = 64
+    }
+
+    /** Last `yt-dlp` error output per video, so a total failure can say why (see [YtDlpErrors]). */
+    private val lastErrors = ConcurrentHashMap<String, String>()
+
+    /** Takes (and forgets) the last error `yt-dlp` printed for [videoUrl]. */
+    fun takeLastError(videoUrl: String): String? = lastErrors.remove(videoUrl)
+
+    private fun rememberError(videoUrl: String, e: Throwable) {
+        val message = e.message ?: return
+        if (lastErrors.size >= MAX_REMEMBERED_ERRORS) lastErrors.clear()
+        // Keep an error that explains the failure over a later, vaguer one from another client
+        lastErrors.merge(videoUrl, message) { old, new ->
+            if (YtDlpErrors.classify(old) != null && YtDlpErrors.classify(new) == null) old else new
+        }
     }
 
     /**
@@ -43,6 +60,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
      * spawned subprocess so the caller can kill stragglers once it no longer needs this branch.
      */
     suspend fun resolve(videoUrl: String, onProcess: (Process) -> Unit): List<YtStream>? {
+        lastErrors.remove(videoUrl) // an earlier fetch's errors must not explain this one
         if (!cookies.disabledByConfig()) {
             return runCatchingClient(videoUrl, null, onProcess)?.takeIf { YtStreams.usable(it) }
         }
@@ -54,6 +72,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         runCatching {
             runClientFetch(videoUrl, client, onProcess)
         }.onFailure { e ->
+            rememberError(videoUrl, e)
             logger.debug("yt-dlp client {} failed for {}: {}.", client ?: "cookies", videoUrl, e.message?.take(200))
         }.getOrNull()
 
@@ -84,6 +103,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                             }
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
+                            rememberError(videoUrl, e)
                             logger.debug(
                                 "yt-dlp client {} failed for {}: {}",
                                 client ?: "cookies",

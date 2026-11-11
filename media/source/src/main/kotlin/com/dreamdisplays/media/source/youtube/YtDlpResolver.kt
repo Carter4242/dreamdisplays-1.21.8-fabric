@@ -1,10 +1,12 @@
 package com.dreamdisplays.media.source.youtube
 
+import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.source.MediaMetadata
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
 import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
+import java.io.IOException
 
 /**
  * Subprocess-backed [MediaResolverService] wrapping the [YtDlp] orchestrator. This is the slow, robust
@@ -25,7 +27,13 @@ object YtDlpResolver : MediaResolverService {
     override fun resolve(source: MediaSource): ResolvedMedia {
         val url = source.toResolvableUrl()
             ?: throw UnsupportedOperationException("$source has no resolvable URL.")
-        val streams = YtDlp.fetch(url)
+        // The format cache wraps every failure in an IOException; unwrap a typed one so its message and fatality reach
+        // the player instead of a generic "fetch failed"
+        val streams = try {
+            YtDlp.fetch(url)
+        } catch (e: IOException) {
+            throw (e.cause as? DreamMediaException) ?: e
+        }
         check(streams.isNotEmpty()) { "yt-dlp returned no playable streams for $url." }
 
         val isLive = streams.any { it.isLive }

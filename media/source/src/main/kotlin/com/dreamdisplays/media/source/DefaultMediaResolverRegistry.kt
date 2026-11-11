@@ -93,7 +93,9 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
                 }
                 if (remaining.decrementAndGet() == 0 && !winner.isCompleted) {
                     winner.completeExceptionally(
-                        errors.filterNotNull().firstOrNull()
+                        // A typed failure says why; otherwise the last resolver is the final fallback and its error is
+                        // the conclusive one (earlier ones are often just "deferring to the next resolver")
+                        errors.filterNotNull().let { all -> all.firstOrNull { it is DreamMediaException } ?: all.lastOrNull() }
                             ?: DreamMediaException.Unknown("All resolvers failed for source: $source")
                     )
                 }

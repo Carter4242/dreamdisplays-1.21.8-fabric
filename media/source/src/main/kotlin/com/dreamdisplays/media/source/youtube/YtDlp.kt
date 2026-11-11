@@ -12,6 +12,7 @@ import com.dreamdisplays.media.source.youtube.cookie.YtCookieManager
 import com.dreamdisplays.media.source.youtube.model.YtStream
 import com.dreamdisplays.media.source.youtube.model.YtStreams
 import com.dreamdisplays.media.source.youtube.process.YtDlpClientRace
+import com.dreamdisplays.media.source.youtube.process.YtDlpErrors
 import com.dreamdisplays.media.source.youtube.search.YtDlpSearchCache
 import com.dreamdisplays.util.DreamCoroutines
 import kotlinx.atomicfu.atomic
@@ -184,7 +185,8 @@ object YtDlp {
             }
 
             viaYtDlp.isNotEmpty() -> viaYtDlp
-            else -> throw IOException("All yt-dlp clients failed for $videoUrl.")
+            else -> throw YtDlpErrors.classify(clientRace.takeLastError(videoUrl))
+                ?: IOException("All yt-dlp clients failed for $videoUrl.")
         }
     }
 }
