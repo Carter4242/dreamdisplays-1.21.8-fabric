@@ -130,7 +130,30 @@ object TimelineManager {
         this.transport = transport
         restore(saved)
         DisplayManager.getDisplays().forEach(::ensureTimeline)
-        ReadinessTracker.addListener(::releaseIfReady)
+        if (!listening) {
+            listening = true
+            ReadinessTracker.addListener(::releaseIfReady)
+        }
+    }
+
+    @Volatile
+    private var listening = false
+
+    /**
+     * Forgets every display's clock, length and hold: an integrated (single-player) server stopped, and the next world
+     * opened in the same game must not inherit them. Call before [init] for that world.
+     */
+    fun reset() {
+        timelines.clear()
+        durations.clear()
+        startHolds.clear()
+        lastBroadcast.clear()
+        playThroughs.clear()
+        loopRestarts.clear()
+        emptySince.clear()
+        videoChangedAt.clear()
+        sentLeads.clear()
+        endOfStream.clear()
     }
 
     /** Every shared timeline as it stands now, to hand to the next plugin instance ([init]). */

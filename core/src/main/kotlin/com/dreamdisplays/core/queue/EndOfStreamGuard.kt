@@ -48,6 +48,9 @@ class EndOfStreamGuard(private val graceMs: Long = DEFAULT_GRACE_MS) {
         swallowUntil.remove(displayId)
     }
 
+    /** Forgets every display. */
+    fun clear() = swallowUntil.clear()
+
     companion object {
         const val DEFAULT_GRACE_MS = 3_000L
 

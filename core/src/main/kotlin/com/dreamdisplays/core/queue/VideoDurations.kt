@@ -73,6 +73,12 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
         return applied
     }
 
+    /** Forgets every display. */
+    fun clear() {
+        current.clear()
+        settled.clear()
+    }
+
     /** Forgets a removed display. */
     fun forget(displayId: UUID) {
         current.remove(displayId)
