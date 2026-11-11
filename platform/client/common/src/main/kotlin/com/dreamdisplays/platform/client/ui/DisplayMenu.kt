@@ -27,6 +27,7 @@ import com.dreamdisplays.platform.client.displays.DisplayQueues
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.media.player.process.ScreenCapture
+import com.dreamdisplays.media.player.process.ShareAudio
 import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.util.DreamCoroutines
@@ -83,9 +84,7 @@ class DisplayMenu private constructor(
                 .setAudioTrack(DisplayId(displayScreen.uuid), it.url)
         },
     )
-    private val shareDropdown = ShareDropdown {
-        ScreenShare.monitors().map { m -> ScreenCapture.label(m) to { ScreenShare.start(displayScreen.uuid, m) } }
-    }
+    private val shareDropdown = ShareDropdown(::shareTargetRows)
     private lateinit var shareButton: IconButton
     private val subtitleDropdown = SubtitleDropdown(
         getTracks = { displayScreen.subtitleTrackList },
@@ -406,6 +405,7 @@ class DisplayMenu private constructor(
                 ScreenShare.stop()
                 shareDropdown.hide()
             } else {
+                if (!shareDropdown.visible) ScreenShare.refreshAudioApps()
                 shareDropdown.toggle()
             }
         })
@@ -973,12 +973,54 @@ class DisplayMenu private constructor(
         return true
     }
 
+    /** Share picker, first page: screens, then (Windows) windows; on macOS a note that no sound goes along. */
+    private fun shareTargetRows(): List<ShareRow> = buildList {
+        val os = ScreenShare.audioOs
+        add(ShareRow.Header(ClientMessage.SHARE_SCREENS.text()))
+        ScreenShare.monitors().forEach { m -> add(ShareRow.Item(ScreenCapture.label(m)) { shareAudioRows(m) }) }
+        val windows = ScreenShare.windows()
+        if (windows.isNotEmpty()) {
+            add(ShareRow.Header(ClientMessage.SHARE_WINDOWS.text()))
+            windows.forEach { w -> add(ShareRow.Item(ScreenCapture.label(w)) { shareAudioRows(w) }) }
+        }
+        if (os == ShareAudio.Os.MAC) add(ShareRow.Note(ClientMessage.SHARE_AUDIO_MAC.text()))
+    }
+
+    /**
+     * Share picker, second page: the sound for [target], its default marked (a window's own app, else everything
+     * but the game). macOS has no sound to pick, so a pick there starts at once.
+     */
+    private fun shareAudioRows(target: ScreenCapture.Target): List<ShareRow>? {
+        val os = ScreenShare.audioOs
+        val start = { choice: ShareAudio.Choice -> ScreenShare.start(displayScreen.uuid, target, choice); null }
+        if (os == ShareAudio.Os.MAC) return start(ShareAudio.Choice.Off)
+        val perApp = ScreenShare.processLoopback
+        val windowApp = (target as? ScreenCapture.Window)?.let(ScreenShare::windowApp)
+        val default = ShareAudio.defaultChoice(os, perApp, windowApp)
+        val options = ShareAudio.options(os, perApp, ScreenShare.audioApps(), windowApp)
+        return buildList {
+            add(ShareRow.Header(ClientMessage.SHARE_AUDIO.text()))
+            options.forEach { choice ->
+                val label = when (choice) {
+                    ShareAudio.Choice.ExceptGame -> ClientMessage.SHARE_AUDIO_EXCEPT_GAME.text()
+                    ShareAudio.Choice.WholePc -> ClientMessage.SHARE_AUDIO_WHOLE_PC.text()
+                    ShareAudio.Choice.Off -> ClientMessage.SHARE_AUDIO_NONE.text()
+                    is ShareAudio.Choice.App ->
+                        if (choice == windowApp) ClientMessage.SHARE_AUDIO_THIS_APP.text(choice.name)
+                        else ClientMessage.SHARE_AUDIO_APP.text(choice.name)
+                }
+                add(ShareRow.Item(label, selected = choice == default) { start(choice) })
+            }
+        }
+    }
+
     override fun onMouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
         val mx = mouseX.toInt()
         val my = mouseY.toInt()
         // An open popup swallows scrolls over it even when it has nothing to scroll, so the list beneath stays put.
         return audioTrackDropdown.handleScroll(mx, my, scrollY) ||
                 subtitleDropdown.handleScroll(mx, my, scrollY) ||
+                shareDropdown.handleScroll(mx, my, scrollY) ||
                 dropdown.claimScroll(mx, my) ||
                 shareDropdown.claimScroll(mx, my) ||
                 audioTrackDropdown.claimScroll(mx, my) ||
@@ -1006,11 +1048,13 @@ class DisplayMenu private constructor(
 
     // Scrollbar drags and seek commits belong to the left button only.
     private fun handleDrag(my: Int, button: Int): Boolean =
-        MouseButtons.isLeft(button) && (audioTrackDropdown.handleDrag(my) || subtitleDropdown.handleDrag(my))
+        MouseButtons.isLeft(button) &&
+                (audioTrackDropdown.handleDrag(my) || subtitleDropdown.handleDrag(my) || shareDropdown.handleDrag(my))
 
     private fun handleRelease(button: Int): Boolean =
         MouseButtons.isLeft(button) &&
-                (audioTrackDropdown.handleRelease() || subtitleDropdown.handleRelease() || progress.commitDragIfActive())
+                (audioTrackDropdown.handleRelease() || subtitleDropdown.handleRelease() || shareDropdown.handleRelease() ||
+                        progress.commitDragIfActive())
 
     //? if >=1.21.11 {
     override fun onMouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean =

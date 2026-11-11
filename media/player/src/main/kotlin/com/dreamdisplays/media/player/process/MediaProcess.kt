@@ -368,10 +368,12 @@ object MediaProcess {
     }
 
     /**
-     * Bytes `FFmpeg` probes a live input for before it starts decoding (its minimum). Stream parameters arrive with the
-     * first keyframe anyway; with the default probe the first picture of an RTMP or SRT stream took over 6 s.
+     * Bytes `FFmpeg` may probe a live input for before it starts decoding. Probing ends as soon as every stream is
+     * known (measured: a video-only RTMP or SRT stream starts exactly as with the 32-byte minimum), but a stream with
+     * sound needs room to see both: with the minimum, whichever process (picture or sound) first met the other
+     * stream's packet found no stream of its own and failed. The default (5 MB) held the first picture over 6 s.
      */
-    internal const val LIVE_PROBE_SIZE = "32"
+    internal const val LIVE_PROBE_SIZE = "500000"
 
     private fun MutableList<String>.addHttpOptions(url: String) {
         addAll(headerArgs(url))

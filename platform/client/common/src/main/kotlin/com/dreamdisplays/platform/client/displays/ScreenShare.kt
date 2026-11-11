@@ -11,6 +11,10 @@ import com.dreamdisplays.core.share.ScreenShareServerRules
 import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
+import com.dreamdisplays.media.player.process.ShareAudio
+import com.dreamdisplays.media.player.process.win.AudioPipe
+import com.dreamdisplays.media.player.process.win.WinAudio
+import com.dreamdisplays.media.player.process.win.WinWindows
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
 import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager
@@ -19,6 +23,7 @@ import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.drawText
 import net.minecraft.client.Minecraft
 import com.dreamdisplays.shared.capability.ServerFeature
+import com.dreamdisplays.util.OsInfo
 import net.minecraft.ChatFormatting
 import org.lwjgl.glfw.GLFW
 import org.slf4j.LoggerFactory
@@ -26,7 +31,9 @@ import java.util.*
 
 /**
  * The built-in "Share screen": asks the server for a share on a display, then runs an `FFmpeg` capture of the picked
- * monitor publishing to the relay URL the server hands back (see [ScreenCapture]). Video only.
+ * monitor or window publishing to the relay URL the server hands back (see [ScreenCapture]), with the sound picked
+ * ([ShareAudio]): on Windows captured here through WASAPI and piped into the same `FFmpeg`, on Linux read by `FFmpeg`
+ * from PulseAudio, none on macOS. Sound capture stops with the picture's, on every path.
  *
  * Privacy first: the capture is killed outright (`destroyForcibly` on its process tree, before the server is told) on
  * Stop, on any lifecycle event that ends the share (see [ScreenShareCaptureRules.StopReason]) and on any capture
@@ -39,15 +46,30 @@ object ScreenShare {
 
     private class Running(
         val displayId: UUID,
-        val monitor: ScreenCapture.Monitor,
+        val target: ScreenCapture.Target,
         /** What the display showed when the share was asked for (see [ScreenShareCaptureRules.Observation]). */
         val urlBeforeShare: String?,
         /** The server asked for x264 only. */
         val softwareOnly: Boolean = false,
         val settings: ScreenCapture.Settings = ScreenCapture.Settings(),
+        val audioChoice: ShareAudio.Choice = ShareAudio.Choice.Off,
     ) {
         @Volatile
         var process: Process? = null
+
+        /** Sound is still wanted (a run whose sound input broke FFmpeg turns it off for the retry). */
+        @Volatile
+        var withAudio = audioChoice != ShareAudio.Choice.Off
+
+        /** The sound really being sent by the current run, or null for none. */
+        @Volatile
+        var audio: ShareAudio.Plan? = null
+
+        @Volatile
+        var capture: WinAudio.Capture? = null
+
+        @Volatile
+        var pipe: AudioPipe? = null
 
         @Volatile
         var stopped = false
@@ -63,8 +85,56 @@ object ScreenShare {
     @Volatile
     private var running: Running? = null
 
-    /** Monitor asked for per display, and what the display showed then, until the server answers. */
-    private val pending = Collections.synchronizedMap(HashMap<UUID, Pair<ScreenCapture.Monitor, String?>>())
+    /** What was asked for per display, until the server answers. */
+    private data class Pick(val target: ScreenCapture.Target, val audio: ShareAudio.Choice, val urlBefore: String?)
+
+    private val pending = Collections.synchronizedMap(HashMap<UUID, Pick>())
+
+    /** Every sound capture running in this game, so the watchdog can end one that outlived its share. */
+    private val audioCaptures: MutableSet<WinAudio.Capture> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** The OS as far as share sound goes. */
+    val audioOs: ShareAudio.Os
+        get() = when {
+            OsInfo.isWindows -> ShareAudio.Os.WINDOWS
+            OsInfo.isMac -> ShareAudio.Os.MAC
+            else -> ShareAudio.Os.LINUX
+        }
+
+    /** This Windows can capture one app's sound, or all but the game's (build 20348+). */
+    val processLoopback: Boolean
+        get() = audioOs == ShareAudio.Os.WINDOWS && runCatching { WinAudio.processLoopback }.getOrDefault(false)
+
+    private val selfPid: Long = ProcessHandle.current().pid()
+
+    @Volatile
+    private var playingApps: List<ShareAudio.Choice.App> = emptyList()
+
+    /** Apps playing sound as of the last [refreshAudioApps] (Windows), for "Just <app>". */
+    fun audioApps(): List<ShareAudio.Choice.App> = playingApps
+
+    /** Re-reads which apps play sound, in the background (COM lives off the render thread). */
+    fun refreshAudioApps() {
+        if (!processLoopback) return
+        thread("DreamDisplays-share-apps") {
+            runCatching { WinAudio.playingApps(selfPid) }
+                .onSuccess { playingApps = it }
+                .onFailure { logger.debug("Share: listing apps playing sound failed: {}", it.toString()) }
+        }
+    }
+
+    /** Windows that can be shared (Windows only), frontmost first. Fast enough for the render thread. */
+    fun windows(): List<ScreenCapture.Window> {
+        if (audioOs != ShareAudio.Os.WINDOWS) return emptyList()
+        return runCatching { WinWindows.list(selfPid) }.getOrElse {
+            logger.debug("Share: listing windows failed: {}", it.toString())
+            emptyList()
+        }
+    }
+
+    /** The app owning [window], as a "Just this app" choice (its program's topmost process). */
+    fun windowApp(window: ScreenCapture.Window): ShareAudio.Choice.App =
+        ShareAudio.Choice.App(runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid), window.app)
 
     /** True when this server lets this player share, and this OS has a capture source. */
     val available: Boolean
@@ -134,16 +204,17 @@ object ScreenShare {
                         preparing.set(false)
                     }
                 }
+                ScreenCapture.windowCapture(ffmpeg)
             } else {
                 ScreenCapture.pickEncoder(ffmpeg)
             }
         }
     }
 
-    /** Asks the server to let this client share [monitor] to [displayId]; capture starts once it agrees. */
-    fun start(displayId: UUID, monitor: ScreenCapture.Monitor) {
+    /** Asks the server to let this client share [target] with [audio] to [displayId]; capture starts once it agrees. */
+    fun start(displayId: UUID, target: ScreenCapture.Target, audio: ShareAudio.Choice) {
         if (!available) return
-        pending[displayId] = monitor to DisplayRegistry.screens[displayId]?.videoUrl
+        pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl)
         Initializer.sendPacket(ScreenShareRequest(displayId, start = true))
     }
 
@@ -170,7 +241,7 @@ object ScreenShare {
             current?.let { stop(it, StopReason.SERVER_ENDED) }
             val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight)
             launch(
-                Running(state.id, asked.first, asked.second, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings),
+                Running(state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings, asked.audio),
                 state.publishUrl,
             )
             return
@@ -216,6 +287,8 @@ object ScreenShare {
     private fun tickChecks(mc: Minecraft) {
         val r = running
         ScreenCaptureProcesses.reap(sharing = r != null && !r.stopped, current = r?.process)
+        // Sound capture that outlived its share (it lives in this process, not FFmpeg's)
+        if ((r == null || r.stopped) && audioCaptures.isNotEmpty()) audioCaptures.toList().forEach(::stopCapture)
         if (r == null || r.stopped) return
 
         val screen = DisplayRegistry.screens[r.displayId]
@@ -260,39 +333,94 @@ object ScreenShare {
                 fail(r, "the server's relay address is not allowed")
                 return@thread
             }
-            val choice = ScreenCapture.choose(ffmpeg, r.monitor, r.softwareOnly)
-            if (r.stopped) return@thread
-            // The plan only came after something failed on this PC: worth knowing, though the player sees nothing
-            if (choice.attempts.any { !it.ok } && plannedFallbacksReported.add(ffmpeg + choice.monitor.deviceName + choice.plan)) {
-                report(r, choice, choice.plan, "", "planned_fallback", final = false,
-                    "screen share needed a fallback: ${choice.plan} after ${choice.attempts.count { !it.ok }} failed test(s)")
+            when (val target = r.target) {
+                is ScreenCapture.Window -> shareWindow(r, ffmpeg, target, publishUrl)
+                is ScreenCapture.Monitor -> shareMonitor(r, ffmpeg, target, publishUrl)
             }
-            val first = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return@thread
-            if (r.stopped) return@thread
-            // Died at once: one quiet retry on the safe path (x264, and GDI capture unless only the encoder failed)
-            val encoderFailed = ScreenCapture.isEncoderOpenFailure(first.output)
-            val safe = if (first.ranMs < EARLY_EXIT_MS) ScreenCapture.safePlan(choice.plan, choice.monitor, encoderFailed) else null
-            if (safe == null) {
-                report(r, choice, choice.plan, first.output, "failed", final = true, first.reason)
-                fail(r, first.reason)
-                return@thread
-            }
-            logger.warn("Screen share with {} ended at once ({}); retrying with {}.", choice.plan, first.reason, safe)
-            val retry = runShare(r, ffmpeg, choice.monitor, safe, publishUrl, announce = false, onSettled = {
-                ScreenCapture.rememberChoice(ffmpeg, r.monitor, r.softwareOnly, ScreenCapture.Choice(choice.monitor, safe, choice.attempts))
-                report(r, choice, safe, first.output, "fallback_ok", final = false,
-                    "screen share ${choice.plan} failed at once (${first.reason}); ${safe} works")
-            }) ?: return@thread
-            if (r.stopped) return@thread
-            if (retry.ranMs < EARLY_EXIT_MS) {
-                report(r, choice, safe, first.output + "\n--- retry with $safe ---\n" + retry.output, "fallback_failed",
-                    final = true, retry.reason)
-            } else {
-                report(r, choice, safe, retry.output, "failed", final = true, retry.reason)
-            }
-            fail(r, retry.reason)
         }
     }
+
+    private fun shareMonitor(r: Running, ffmpeg: String, monitor: ScreenCapture.Monitor, publishUrl: String) {
+        val choice = ScreenCapture.choose(ffmpeg, monitor, r.softwareOnly)
+        if (r.stopped) return
+        // The plan only came after something failed on this PC: worth knowing, though the player sees nothing
+        if (choice.attempts.any { !it.ok } && plannedFallbacksReported.add(ffmpeg + choice.monitor.deviceName + choice.plan)) {
+            report(r, choice, choice.plan, "", "planned_fallback", final = false,
+                "screen share needed a fallback: ${choice.plan} after ${choice.attempts.count { !it.ok }} failed test(s)")
+        }
+        val first = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return
+        if (r.stopped) return
+        // Died at once because of the sound input: the same plan again, without sound
+        if (retryWithoutSound(r, first)) {
+            val again = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = false) ?: return
+            if (r.stopped) return
+            report(r, choice, choice.plan, again.output, "failed", final = true, again.reason)
+            fail(r, again.reason)
+            return
+        }
+        // Died at once: one quiet retry on the safe path (x264, and GDI capture unless only the encoder failed)
+        val encoderFailed = ScreenCapture.isEncoderOpenFailure(first.output)
+        val safe = if (first.ranMs < EARLY_EXIT_MS) ScreenCapture.safePlan(choice.plan, choice.monitor, encoderFailed) else null
+        if (safe == null) {
+            report(r, choice, choice.plan, first.output, "failed", final = true, first.reason)
+            fail(r, first.reason)
+            return
+        }
+        logger.warn("Screen share with {} ended at once ({}); retrying with {}.", choice.plan, first.reason, safe)
+        val retry = runShare(r, ffmpeg, choice.monitor, safe, publishUrl, announce = false, onSettled = {
+            ScreenCapture.rememberChoice(ffmpeg, monitor, r.softwareOnly, ScreenCapture.Choice(choice.monitor, safe, choice.attempts))
+            report(r, choice, safe, first.output, "fallback_ok", final = false,
+                "screen share ${choice.plan} failed at once (${first.reason}); ${safe} works")
+        }) ?: return
+        if (r.stopped) return
+        if (retry.ranMs < EARLY_EXIT_MS) {
+            report(r, choice, safe, first.output + "\n--- retry with $safe ---\n" + retry.output, "fallback_failed",
+                final = true, retry.reason)
+        } else {
+            report(r, choice, safe, retry.output, "failed", final = true, retry.reason)
+        }
+        fail(r, retry.reason)
+    }
+
+    /**
+     * One window: Windows Graphics Capture (else GDI) with the best encoder; a quick death retries once on x264, or
+     * without sound when the sound input was what broke.
+     */
+    private fun shareWindow(r: Running, ffmpeg: String, window: ScreenCapture.Window, publishUrl: String) {
+        if (!WinWindows.exists(window)) {
+            fail(r, "that window is closed")
+            return
+        }
+        WinWindows.unminimize(window)
+        val plan = ScreenCapture.windowPlan(ffmpeg, r.softwareOnly)
+        if (r.stopped) return
+        val first = runShare(r, ffmpeg, window, plan, publishUrl, announce = true) ?: return
+        if (r.stopped) return
+        val retryPlan = when {
+            retryWithoutSound(r, first) -> plan
+            first.ranMs < EARLY_EXIT_MS && plan.encoder != ScreenCapture.Encoder.X264 ->
+                ScreenCapture.Plan(plan.source, ScreenCapture.Encoder.X264)
+            else -> null
+        }
+        if (retryPlan == null) {
+            fail(r, first.reason)
+            return
+        }
+        logger.warn("Window share with {} ended at once ({}); retrying with {}.", plan, first.reason, retryPlan)
+        val retry = runShare(r, ffmpeg, window, retryPlan, publishUrl, announce = false) ?: return
+        if (r.stopped) return
+        fail(r, retry.reason)
+    }
+
+    /** True (and sound turned off for the rest of [r]) when the run with sound died at once on its sound input. */
+    private fun retryWithoutSound(r: Running, ended: Ended): Boolean {
+        if (r.audio == null || ended.ranMs >= EARLY_EXIT_MS || !SOUND_INPUT_FAILURE.containsMatchIn(ended.output)) return false
+        logger.warn("Screen share sound ({}) broke FFmpeg at once; sharing without sound: {}", r.audio, ended.reason)
+        r.withAudio = false
+        return true
+    }
+
+    private val SOUND_INPUT_FAILURE = Regex("""(?i)/wav @|/pulse @|dreamdisplays-share-|@DEFAULT_MONITOR@|pulse""")
 
     private const val EARLY_EXIT_MS = 5_000L
 
@@ -306,15 +434,27 @@ object ScreenShare {
      * player was told) or was stopped. [onSettled] runs once the capture has run for [EARLY_EXIT_MS].
      */
     private fun runShare(
-        r: Running, ffmpeg: String, monitor: ScreenCapture.Monitor, plan: ScreenCapture.Plan, publishUrl: String,
+        r: Running, ffmpeg: String, target: ScreenCapture.Target, plan: ScreenCapture.Plan, publishUrl: String,
         announce: Boolean, onSettled: (() -> Unit)? = null,
     ): Ended? {
-        val args = ScreenCapture.args(ffmpeg, plan.source, monitor, plan.encoder, publishUrl, r.settings)
+        val baseMicros = ScreenCapture.wallClockMicros()
+        val baseNanos = System.nanoTime()
+        if (!r.withAudio) r.audio = null
+        val input = if (r.withAudio) startAudio(r, baseNanos) else null
+        val windowCapture = (target as? ScreenCapture.Window)?.let { ScreenCapture.windowCapture(ffmpeg) }
+            ?: ScreenCapture.WindowCapture(ScreenCapture.Source.GFXCAPTURE, false)
+        val args = ScreenCapture.args(
+            ffmpeg, plan.source, target, plan.encoder, publishUrl, r.settings, input, baseMicros, windowCapture,
+        )
         val proc = synchronized(lock) {
             // Started and registered under the lock, so a stop racing this (first run or retry) either sees the
             // process or makes this skip the start
-            if (r.stopped) return null
+            if (r.stopped) {
+                stopAudio(r)
+                return null
+            }
             runCatching { ProcessBuilder(args).redirectErrorStream(true).start() }.getOrElse {
+                stopAudio(r)
                 fail(r, LiveStreamUrls.redactCredentials(it.message ?: "could not start FFmpeg"))
                 return null
             }.also { p ->
@@ -322,10 +462,11 @@ object ScreenShare {
                 r.process = p
             }
         }
+        r.pipe?.start()
         val started = System.currentTimeMillis()
         if (announce) notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
-        logger.info("Sharing {} ({}) with {} at {} fps, up to {}p.", monitor.name, monitor.deviceName.ifEmpty { "#${monitor.index}" },
-            plan, r.settings.fps, r.settings.maxHeight)
+        logger.info("Sharing {} with {} at {} fps, up to {}p, sound: {}.", describe(target), plan, r.settings.fps,
+            r.settings.maxHeight, r.audio ?: "none")
         if (onSettled != null) thread("DreamDisplays-screen-share-settle") {
             runCatching { Thread.sleep(EARLY_EXIT_MS) }
             if (proc.isAlive && !r.stopped) onSettled()
@@ -339,11 +480,60 @@ object ScreenShare {
             }
         }
         val code = runCatching { proc.waitFor() }.getOrDefault(-1)
+        stopAudio(r)
         val ranMs = System.currentTimeMillis() - started
         if (r.stopped) return null
         val output = tail.joinToString("\n")
         logger.warn("Screen capture ({}) ended after {} ms (exit {}): {}", plan, ranMs, code, tail.toList().takeLast(6).joinToString(" | ").take(400))
         return Ended(code, output, tail.lastOrNull()?.take(120) ?: "capture ended (exit $code)", ranMs)
+    }
+
+    /** Starts capturing [r]'s sound per its plans, best first; null (picture only) when none works. */
+    private fun startAudio(r: Running, baseNanos: Long): ShareAudio.Input? {
+        for (plan in ShareAudio.plans(r.audioChoice, audioOs, selfPid)) {
+            when (plan) {
+                is ShareAudio.Plan.Pulse -> {
+                    r.audio = plan
+                    return ShareAudio.Input.Pulse(plan.device)
+                }
+
+                else -> {
+                    var capture: WinAudio.Capture? = null
+                    try {
+                        capture = WinAudio.start(plan) { nanos, data -> r.pipe?.offer(nanos, data) }
+                        audioCaptures += capture
+                        val pipe = AudioPipe(capture.format, baseNanos)
+                        r.pipe = pipe
+                        r.capture = capture
+                        r.audio = plan
+                        return ShareAudio.Input.Pipe(pipe.path, capture.format)
+                    } catch (t: Throwable) {
+                        capture?.let(::stopCapture)
+                        logger.warn("Share sound {} unavailable: {}", plan, t.toString())
+                    }
+                }
+            }
+        }
+        r.audio = null
+        return null
+    }
+
+    private fun stopCapture(capture: WinAudio.Capture) {
+        capture.stop()
+        audioCaptures -= capture
+    }
+
+    /** Ends [r]'s sound capture and pipe (idempotent). */
+    private fun stopAudio(r: Running) {
+        r.capture?.let(::stopCapture)
+        r.capture = null
+        r.pipe?.close()
+        r.pipe = null
+    }
+
+    private fun describe(target: ScreenCapture.Target): String = when (target) {
+        is ScreenCapture.Monitor -> "${target.name} (${target.deviceName.ifEmpty { "#${target.index}" }})"
+        is ScreenCapture.Window -> "a window of ${target.app}"
     }
 
     private val RELAY_URL = Regex("""(?i)\b(?:srt|rtmps?|rtsp)://\S+""")
@@ -394,6 +584,7 @@ object ScreenShare {
             r.process
         }
         val handles = proc?.let(ScreenCaptureProcesses::kill)
+        stopAudio(r)
         if (ScreenShareCaptureRules.tellServer(reason)) {
             runCatching { Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false)) }
         }
@@ -418,9 +609,15 @@ object ScreenShare {
      * process this game started is still alive.
      */
     fun renderIndicator(mc: Minecraft, g: GuiGraphicsCompat) {
-        if (running == null && ScreenCaptureProcesses.alive().isEmpty()) return
+        val r = running
+        if (r == null && ScreenCaptureProcesses.alive().isEmpty()) return
         val font = mc.font
-        val text = "● " + ClientMessage.SHARE_INDICATOR.text()
+        val sound = when {
+            r == null -> ""
+            r.audio != null -> " · " + ClientMessage.SHARE_AUDIO_ON.text()
+            else -> " · " + ClientMessage.SHARE_AUDIO_OFF.text()
+        }
+        val text = "● " + ClientMessage.SHARE_INDICATOR.text() + sound
         val w = font.width(text) + 8
         val x = (mc.window.guiScaledWidth - w) / 2
         val y = 4

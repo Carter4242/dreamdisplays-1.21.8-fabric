@@ -12,7 +12,8 @@ import java.util.concurrent.TimeUnit
  * Builds and probes the `FFmpeg` screen-capture + encode process behind the built-in "Share screen": one monitor,
  * captured at [Settings.fps], scaled to fit [Settings.maxHeight], encoded for the lowest latency the machine offers
  * (hardware H.264 when it works, else x264 `ultrafast` / `zerolatency`) and pushed to a live relay as MPEG-TS over SRT
- * (FLV for RTMP). Video only: `FFmpeg` has no built-in way to capture what the desktop plays.
+ * (FLV for RTMP). On Windows a single window can be shared instead (Windows Graphics Capture). Sound ([ShareAudio])
+ * joins as another input of the same process, picture and sound both on the wall clock, so they leave in step.
  *
  * On Windows each screen gets its own [Plan]: the first capture source and encoder that run that screen's real
  * pipeline (Desktop Duplication on the screen's own graphics adapter with that GPU's encoder, then the other hardware
@@ -21,10 +22,19 @@ import java.util.concurrent.TimeUnit
 object ScreenCapture {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /** Where the picture comes from. [GDIGRAB] is the Windows fallback when Desktop Duplication cannot open a screen. */
+    /**
+     * Where the picture comes from. [GDIGRAB] is the Windows fallback when Desktop Duplication cannot open a screen
+     * (and when a build lacks [GFXCAPTURE], which captures one window).
+     */
     enum class Source(val ffmpegName: String) {
-        DDAGRAB("ddagrab"), GDIGRAB("gdigrab"), AVFOUNDATION("avfoundation"), X11GRAB("x11grab")
+        DDAGRAB("ddagrab"), GDIGRAB("gdigrab"), AVFOUNDATION("avfoundation"), X11GRAB("x11grab"), GFXCAPTURE("gfxcapture")
     }
+
+    /** Something to share: a whole [Monitor] or one [Window]. */
+    sealed interface Target
+
+    /** One top-level window ([hwnd]) of process [pid]: [app] is the program's friendly name, [title] the window's. */
+    data class Window(val hwnd: Long, val pid: Long, val app: String, val title: String) : Target
 
     /**
      * One monitor. [index] is its position in GLFW's list (the primary first), or for Desktop Duplication the output
@@ -38,7 +48,7 @@ object ScreenCapture {
         val vendorId: Int = 0, val byVendor: Boolean = false, val deviceName: String = "", val rectKnown: Boolean = true,
         /** PCI `vvvv:dddd` of [adapter] and its name, when known. */
         val adapterPciId: String = "", val adapterName: String = "",
-    )
+    ) : Target
 
     /** H.264 encoders tried in order; the first that encodes a test picture here wins. */
     enum class Encoder(val ffmpegName: String, val hardware: Boolean) {
@@ -276,36 +286,125 @@ object ScreenCapture {
         RegexOption.IGNORE_CASE,
     )
 
+    // ---- Windows ----
+
+    /**
+     * How [ffmpeg] captures a single window: Windows Graphics Capture (`gfxcapture`, FFmpeg 8+: GPU frames, covered
+     * windows included) when it has it, else GDI (`gdigrab`, which shows hardware-drawn windows black). [dupFrames]:
+     * the build repeats the last frame of a window that draws nothing, rather than stalling the stream.
+     */
+    data class WindowCapture(val source: Source, val dupFrames: Boolean)
+
+    @Volatile
+    private var windowCapture: Pair<String, WindowCapture>? = null
+
+    /** [WindowCapture] for [ffmpeg]; one short `FFmpeg` run the first time, call off the render thread. */
+    fun windowCapture(ffmpeg: String): WindowCapture {
+        windowCapture?.takeIf { it.first == ffmpeg }?.let { return it.second }
+        val found = parseWindowCapture(exec(listOf(ffmpeg, "-hide_banner", "-h", "filter=gfxcapture")).output)
+        logger.info("Screen share window capture: {}{}.", found.source.ffmpegName, if (found.dupFrames) " (dup_frames)" else "")
+        windowCapture = ffmpeg to found
+        return found
+    }
+
+    /** Reads `ffmpeg -h filter=gfxcapture`: an unknown filter prints no option table. */
+    internal fun parseWindowCapture(help: String): WindowCapture =
+        if ("hwnd" in help && "gfxcapture AVOptions" in help) WindowCapture(Source.GFXCAPTURE, "dup_frames" in help)
+        else WindowCapture(Source.GDIGRAB, dupFrames = true)
+
+    /**
+     * How to share [window]: its capture source with the best encoder that opens here (the capture hands frames over
+     * on the CPU, so any encoder takes them), x264 only when [softwareOnly].
+     */
+    fun windowPlan(ffmpeg: String, softwareOnly: Boolean = false): Plan =
+        Plan(windowCapture(ffmpeg).source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg))
+
+    /**
+     * The wall clock (microseconds since the epoch, the clock `FFmpeg`'s `av_gettime` and `RTCTIME` read) as of now:
+     * the share's clock base when it carries sound, see [args].
+     */
+    fun wallClockMicros(): Long {
+        val now = java.time.Instant.now()
+        return now.epochSecond * 1_000_000L + now.nano / 1_000
+    }
+
     // ---- Arguments ----
 
-    /** Full `FFmpeg` argv capturing [monitor] with [source], encoding with [encoder], publishing to [publishUrl]. */
+    /**
+     * Full `FFmpeg` argv capturing [target] with [source], encoding with [encoder], publishing to [publishUrl], with
+     * sound from [audio] when set. With sound, picture and sound both run on the wall clock less [clockBaseMicros]
+     * ([wallClockMicros] taken just before the launch; [ShareAudio.Input.Pipe]'s first sample stands for that instant):
+     * each capture stamps its own frames, so neither waits for the other to start.
+     */
     fun args(
-        ffmpeg: String, source: Source, monitor: Monitor, encoder: Encoder, publishUrl: String,
-        settings: Settings = Settings(),
+        ffmpeg: String, source: Source, target: Target, encoder: Encoder, publishUrl: String,
+        settings: Settings = Settings(), audio: ShareAudio.Input? = null, clockBaseMicros: Long = 0,
+        windowCapture: WindowCapture = WindowCapture(Source.GFXCAPTURE, dupFrames = false),
     ): List<String> = buildList {
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
-        addAll(inputArgs(source, monitor, encoder, settings))
+        val video = videoArgs(source, target, encoder, settings, if (audio != null) clockBaseMicros else null, windowCapture)
+        addAll(video.inputs)
+        // Inputs first, then everything about the output
+        if (audio != null) audioInput(audio, clockBaseMicros)
+        addAll(video.output)
         val fps = settings.fps.toString()
-        add("-an")
+        if (audio == null) {
+            add("-an")
+        } else {
+            if (video.inputCount > 0) addAll(["-map", "0:v:0"])
+            addAll(["-map", "${video.inputCount}:a:0"])
+            audioOutput()
+        }
         addAll(encoderArgs(encoder, settings))
         // A keyframe every second (a viewer joining waits at most that long) and no B-frames (each one is a frame
         // of delay at the encoder)
         addAll(["-g", fps, "-keyint_min", fps, "-bf", "0"])
-        val target = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
-        val flv = LiveStreamUrls.schemeOf(target)?.startsWith("rtmp") == true
+        // A window sends frames only as it draws: keyframes by time, so a viewer joining still waits at most a second
+        if (target is Window) addAll(["-force_key_frames", "expr:gte(t,n_forced)"])
+        val dest = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
+        val flv = LiveStreamUrls.schemeOf(dest)?.startsWith("rtmp") == true
         addAll(["-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0"])
+        // Picture and sound leave interleaved (so a viewer gets them together), but a stream that stalls (a window
+        // minimized without dup_frames) holds the other back at most this long rather than the default 10 s
+        if (audio != null) addAll(["-max_interleave_delta", MAX_INTERLEAVE_MICROS])
         // MPEG-TS: a video PES with its length written goes out only once the frame is complete (~30 ms later)
         if (!flv) addAll(["-omit_video_pes_length", "0"])
-        addAll(["-f", if (flv) "flv" else "mpegts", target])
+        addAll(["-f", if (flv) "flv" else "mpegts", dest])
     }
 
-    /** The capture half of [args]: where the picture comes from, scaled and converted for [encoder]. */
-    internal fun inputArgs(source: Source, monitor: Monitor, encoder: Encoder, settings: Settings): List<String> = buildList {
+    /** How long one stream may run ahead of a stalled other at the muxer (microseconds). */
+    internal const val MAX_INTERLEAVE_MICROS = "150000"
+
+    /** The capture half of [args] without sound: where the picture comes from, scaled and converted for [encoder]. */
+    internal fun inputArgs(source: Source, target: Target, encoder: Encoder, settings: Settings): List<String> =
+        videoArgs(source, target, encoder, settings, null, WindowCapture(Source.GFXCAPTURE, false)).let { it.inputs + it.output }
+
+    /**
+     * The picture: [inputs] (options and `-i` inputs, [inputCount] of them) and [output] (filters, mapping). Sources
+     * inside `-filter_complex` are no input at all.
+     */
+    private class VideoArgs(val inputs: List<String>, val output: List<String>, val inputCount: Int)
+
+    /**
+     * The picture's arguments; with a [clockBase] (sound on) its timestamps are the wall clock less that base: by
+     * `setpts` on `RTCTIME` for filter sources (which count from their first frame), by `-itsoffset` for the
+     * devices that already stamp the wall clock (gdigrab, x11grab).
+     */
+    private fun videoArgs(
+        source: Source, target: Target, encoder: Encoder, settings: Settings, clockBase: Long?,
+        windowCapture: WindowCapture,
+    ): VideoArgs {
+        val inputs = ArrayList<String>()
+        val output = ArrayList<String>()
         val fps = settings.fps.toString()
         val fit = "scale=w='min(${settings.maxWidth},iw)':h='min(${settings.maxHeight},ih)'" +
                 ":force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear"
         val pixFmt = if (encoder.hardware) "nv12" else "yuv420p"
+        val wallClock = clockBase?.let { ",setpts=(RTCTIME-$it)/(TB*1000000)" }.orEmpty()
+        val offset = clockBase?.let { listOf("-itsoffset", "-" + seconds(it)) }.orEmpty()
+        val monitor = target as? Monitor
+        val window = target as? Window
         when (source) {
             Source.DDAGRAB -> {
                 // Desktop Duplication: the GPU hands over each new desktop frame (repeating the last one while the
@@ -313,36 +412,92 @@ object ScreenCapture {
                 // screens of one graphics adapter, so a screen on another one names its adapter. The source has to sit
                 // in -filter_complex: as `-f lavfi -i ddagrab` it never gets -filter_hw_device and always opens the
                 // default adapter, whichever screen was asked for.
-                addAll(adapterArgs(monitor))
-                addAll(["-filter_complex",
-                    "ddagrab=output_idx=${monitor.index}:framerate=$fps:draw_mouse=1,hwdownload,format=bgra,$fit,format=$pixFmt[v]",
+                val m = requireNotNull(monitor) { "ddagrab captures a monitor" }
+                inputs.addAll(adapterArgs(m))
+                output.addAll(["-filter_complex",
+                    "ddagrab=output_idx=${m.index}:framerate=$fps:draw_mouse=1$wallClock,hwdownload,format=bgra,$fit,format=$pixFmt[v]",
+                    "-map", "[v]"])
+            }
+
+            Source.GFXCAPTURE -> {
+                // Windows Graphics Capture of one window, covered or not, on a GPU device of its own. Its frames keep
+                // the window's size at the start; a window resized later is scaled into them with its aspect kept
+                // (black bars). A window that draws nothing (minimized) sends nothing unless the build repeats frames.
+                val w = requireNotNull(window) { "gfxcapture captures a window" }
+                val dup = if (windowCapture.dupFrames) ":dup_frames=1" else ""
+                output.addAll(["-filter_complex",
+                    "gfxcapture=hwnd=${java.lang.Long.toUnsignedString(w.hwnd)}:max_framerate=$fps:capture_cursor=1" +
+                            ":capture_border=0:display_border=0:resize_mode=scale_aspect$dup$wallClock," +
+                            "hwdownload,format=bgra,$fit,format=$pixFmt[v]",
                     "-map", "[v]"])
             }
 
             Source.GDIGRAB -> {
-                // GDI: copies the screen's rectangle of the desktop (primary screen's top left is 0,0); slower than
-                // Desktop Duplication but works where it cannot (old drivers, remote sessions)
-                addAll(["-f", "gdigrab", "-draw_mouse", "1", "-framerate", fps])
-                addAll(["-offset_x", monitor.x.toString(), "-offset_y", monitor.y.toString()])
-                addAll(["-video_size", "${monitor.width}x${monitor.height}", "-i", "desktop"])
-                addAll(["-vf", "$fit,format=$pixFmt"])
+                // GDI: copies the screen's rectangle of the desktop (primary screen's top left is 0,0), or one
+                // window; slower than Desktop Duplication but works where it cannot (old drivers, remote sessions)
+                inputs.addAll(offset)
+                inputs.addAll(["-f", "gdigrab", "-draw_mouse", "1", "-framerate", fps])
+                if (window != null) {
+                    inputs.addAll(["-i", "hwnd=${java.lang.Long.toUnsignedString(window.hwnd)}"])
+                } else {
+                    val m = requireNotNull(monitor)
+                    inputs.addAll(["-offset_x", m.x.toString(), "-offset_y", m.y.toString()])
+                    inputs.addAll(["-video_size", "${m.width}x${m.height}", "-i", "desktop"])
+                }
+                output.addAll(["-vf", "$fit,format=$pixFmt"])
             }
 
             Source.AVFOUNDATION -> {
-                addAll(["-f", "avfoundation", "-capture_cursor", "1", "-framerate", fps])
-                addAll(["-i", "Capture screen ${monitor.index}:none"])
-                addAll(["-vf", "$fit,format=$pixFmt"])
+                val m = requireNotNull(monitor) { "avfoundation captures a monitor" }
+                inputs.addAll(["-f", "avfoundation", "-capture_cursor", "1", "-framerate", fps])
+                inputs.addAll(["-i", "Capture screen ${m.index}:none"])
+                output.addAll(["-vf", "$fit,format=$pixFmt"])
             }
 
             Source.X11GRAB -> {
+                val m = requireNotNull(monitor) { "x11grab captures a monitor" }
                 val display = System.getenv("DISPLAY").orEmpty().ifBlank { ":0" }
-                addAll(["-f", "x11grab", "-draw_mouse", "1", "-framerate", fps])
-                addAll(["-video_size", "${monitor.width}x${monitor.height}"])
-                addAll(["-i", "$display+${monitor.x},${monitor.y}"])
-                addAll(["-vf", "$fit,format=$pixFmt"])
+                inputs.addAll(offset)
+                inputs.addAll(["-f", "x11grab", "-draw_mouse", "1", "-framerate", fps])
+                inputs.addAll(["-video_size", "${m.width}x${m.height}"])
+                inputs.addAll(["-i", "$display+${m.x},${m.y}"])
+                output.addAll(["-vf", "$fit,format=$pixFmt"])
+            }
+        }
+        return VideoArgs(inputs, output, inputs.count { it == "-i" })
+    }
+
+    /**
+     * The sound input (after the picture's); [audioOutput] is its encode. Timestamps are copied as they come (all
+     * inputs already on the shifted wall clock), so `FFmpeg` does not start each input at zero on its own; the picture
+     * keeps its exact capture times (millisecond encoder clock, no frame-rate grid to round onto).
+     */
+    private fun MutableList<String>.audioInput(audio: ShareAudio.Input, clockBase: Long) {
+        when (audio) {
+            is ShareAudio.Input.Pipe -> {
+                // PCM counts its own time from sample 0, which the client lays at the clock base itself; read in 10 ms
+                // packets (raw PCM would come in 85 ms ones, and the muxer would hold the picture back for each)
+                addAll(["-f", "wav", "-ignore_length", "1", "-max_size", audio.format.tenMillisBytes.toString()])
+                addAll(["-probesize", "32", "-analyzeduration", "0", "-i", audio.path])
+            }
+
+            is ShareAudio.Input.Pulse -> {
+                // 10 ms fragments (PulseAudio's default buffers far more); stamped with the wall clock
+                addAll(["-f", "pulse", "-sample_rate", ShareAudio.OUTPUT_RATE.toString(), "-channels", "2"])
+                addAll(["-fragment_size", "1920", "-wallclock", "1", "-itsoffset", "-" + seconds(clockBase), "-i", audio.device])
             }
         }
     }
+
+    private fun MutableList<String>.audioOutput() {
+        addAll(["-copyts", "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000"])
+        addAll(["-c:a", "aac", "-aac_coder", "fast", "-b:a", ShareAudio.AAC_BITRATE])
+        addAll(["-ar", ShareAudio.OUTPUT_RATE.toString(), "-ac", "2"])
+    }
+
+    /** [micros] as `FFmpeg` seconds, exact to the microsecond. */
+    internal fun seconds(micros: Long): String =
+        String.format(Locale.ROOT, "%d.%06d", micros / 1_000_000L, Math.abs(micros % 1_000_000L))
 
     /** `FFmpeg`'s D3D11 device on [monitor]'s adapter, by vendor or index; none for the default adapter. */
     private fun adapterArgs(monitor: Monitor): List<String> {
@@ -518,6 +673,13 @@ object ScreenCapture {
         val pci = USING_DEVICE.find(r.output)?.let { "${it.groupValues[1]}:${it.groupValues[2]}".lowercase() }
         val size = if (r.ok) OPENED.find(r.output)?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() } else null
         return ScreenProbe(pci, size)
+    }
+
+    /** Short label for [window] in the share picker: the program, then the window title. */
+    fun label(window: Window): String {
+        val app = window.app.ifBlank { "Window" }
+        val title = window.title.trim()
+        return if (title.isEmpty() || title.equals(app, ignoreCase = true)) app else "$app - $title"
     }
 
     /** Short label for [monitor] in the share picker. */

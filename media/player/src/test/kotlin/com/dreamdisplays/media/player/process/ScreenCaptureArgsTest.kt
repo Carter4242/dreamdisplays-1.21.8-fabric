@@ -169,4 +169,119 @@ class ScreenCaptureArgsTest {
         assertEquals("2: DELL U2720Q 3840x2160", ScreenCapture.label(monitor))
         assertEquals("1: Generic PnP Mon… 1920x1080", ScreenCapture.label(ScreenCapture.Monitor(0, "Generic PnP Monitor", 0, 0, 1920, 1080)))
     }
+
+    private val window = ScreenCapture.Window(hwnd = 0x2A0F3CL, pid = 900, app = "Google Chrome", title = "Video - YouTube")
+    private val base = 1_762_862_345_123_456L
+    private val pipe = ShareAudio.Input.Pipe("\\\\.\\pipe\\dreamdisplays-share-x", ShareAudio.Format(48_000, 2, float = false))
+
+    private fun List<String>.valuesOf(flag: String): List<String> =
+        indices.filter { this[it] == flag && it + 1 < size }.map { this[it + 1] }
+
+    @Test
+    fun `a window is captured with windows graphics capture, scaled into its first size, keyframes by time`() {
+        val a = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x",
+            windowCapture = ScreenCapture.WindowCapture(Source.GFXCAPTURE, dupFrames = true))
+        val graph = a.valueOf("-filter_complex")!!
+        assertTrue(graph.startsWith("gfxcapture=hwnd=${0x2A0F3C}:max_framerate=30:"), graph)
+        assertTrue(":resize_mode=scale_aspect" in graph && ":display_border=0" in graph && ":dup_frames=1," in graph, graph)
+        assertTrue(graph.endsWith("format=nv12[v]"), graph)
+        assertEquals("[v]", a.valueOf("-map"))
+        assertFalse("-i" in a)
+        assertEquals("expr:gte(t,n_forced)", a.valueOf("-force_key_frames"))
+        assertTrue("-an" in a)
+        val older = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x")
+        assertFalse("dup_frames" in older.valueOf("-filter_complex")!!)
+        assertFalse("-force_key_frames" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/a"))
+    }
+
+    @Test
+    fun `without gfxcapture a window falls back to gdi by handle`() {
+        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, window, Encoder.X264, "rtmp://h/live/x")
+        assertEquals("gdigrab", a.valueOf("-f"))
+        assertEquals("hwnd=${0x2A0F3C}", a.valueOf("-i"))
+        assertFalse("-offset_x" in a)
+        // A handle with the top bit set still reads as the unsigned number FFmpeg parses
+        val high = ScreenCapture.Window(-2L, 1, "x", "y")
+        assertEquals("hwnd=18446744073709551614", ScreenCapture.args("FFMPEG", Source.GDIGRAB, high, Encoder.X264, "rtmp://h/a").valueOf("-i"))
+    }
+
+    @Test
+    fun `gfxcapture help decides the window source`() {
+        val help = "Filter gfxcapture\ngfxcapture AVOptions:\n   hwnd   <uint64>\n   dup_frames <boolean>"
+        assertEquals(ScreenCapture.WindowCapture(Source.GFXCAPTURE, true), ScreenCapture.parseWindowCapture(help))
+        assertEquals(ScreenCapture.WindowCapture(Source.GFXCAPTURE, false), ScreenCapture.parseWindowCapture(help.substringBefore("   dup")))
+        assertEquals(Source.GDIGRAB, ScreenCapture.parseWindowCapture("Unknown filter 'gfxcapture'.").source)
+    }
+
+    @Test
+    fun `windows sound joins as a wav pipe, the picture stamped by the wall clock less the base`() {
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x", audio = pipe, clockBaseMicros = base)
+        assertFalse("-an" in a)
+        val graph = a.valueOf("-filter_complex")!!
+        assertTrue(graph.startsWith("ddagrab=output_idx=1:framerate=30:draw_mouse=1,setpts=(RTCTIME-$base)/(TB*1000000),hwdownload"), graph)
+        assertFalse("-itsoffset" in a)
+        // The only input is the sound: WAV in 10 ms packets, sample 0 at the base itself
+        assertEquals(listOf(pipe.path), a.valuesOf("-i"))
+        val pipeAt = a.indexOf(pipe.path)
+        val soundIn = a.subList(0, pipeAt)
+        assertEquals(listOf("wav"), soundIn.valuesOf("-f"))
+        assertEquals("1", soundIn.valueOf("-ignore_length"))
+        assertEquals("1920", soundIn.valueOf("-max_size"))
+        assertEquals(listOf("[v]", "0:a:0"), a.valuesOf("-map"))
+        assertTrue("-copyts" in a)
+        assertEquals("1:1000", a.valueOf("-enc_time_base:v"))
+        assertEquals("passthrough", a.valueOf("-fps_mode:v"))
+        assertEquals("aac", a.valueOf("-c:a"))
+        assertEquals("160k", a.valueOf("-b:a"))
+        assertEquals(ScreenCapture.MAX_INTERLEAVE_MICROS, a.valueOf("-max_interleave_delta"))
+        assertEquals("flv", a[a.size - 2])
+        // Every output option comes after the input
+        assertTrue(a.indexOf("-copyts") > pipeAt && a.indexOf("-c:v") > pipeAt && a.indexOf("-filter_complex") > pipeAt)
+    }
+
+    @Test
+    fun `a window with sound and a float mix format`() {
+        val float = ShareAudio.Input.Pipe("P", ShareAudio.Format(44_100, 6, float = true))
+        val a = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.AMF, "rtmp://h/live/x", audio = float, clockBaseMicros = base)
+        assertTrue(",setpts=(RTCTIME-$base)/(TB*1000000),hwdownload" in a.valueOf("-filter_complex")!!)
+        val pipeAt = a.indexOf("P")
+        assertEquals("wav", a[a.subList(0, pipeAt).lastIndexOf("-f") + 1])
+        assertEquals("10584", a.subList(0, pipeAt).valueOf("-max_size"))
+        // Output: stereo 48 kHz whatever came in
+        assertEquals("2", a.subList(pipeAt, a.size).valueOf("-ac"))
+        assertEquals("48000", a.subList(pipeAt, a.size).valueOf("-ar"))
+    }
+
+    @Test
+    fun `gdi capture with sound keeps its wall clock stamps less the base`() {
+        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, monitor, Encoder.X264, "rtmp://h/live/x", audio = pipe, clockBaseMicros = base)
+        assertEquals(listOf("-1762862345.123456"), a.valuesOf("-itsoffset"))
+        assertTrue(a.indexOf("-itsoffset") < a.indexOf("gdigrab"))
+        assertEquals(listOf("desktop", pipe.path), a.valuesOf("-i"))
+        assertEquals(listOf("0:v:0", "1:a:0"), a.valuesOf("-map"))
+        assertTrue(a.indexOf("-vf") > a.indexOf(pipe.path))
+    }
+
+    @Test
+    fun `linux sound comes from pulse on the default monitor, stamped by the wall clock like x11grab`() {
+        val a = ScreenCapture.args("FFMPEG", Source.X11GRAB, monitor, Encoder.X264, publish,
+            audio = ShareAudio.Input.Pulse(ShareAudio.PULSE_DEFAULT_MONITOR), clockBaseMicros = base)
+        assertEquals(listOf("-1762862345.123456", "-1762862345.123456"), a.valuesOf("-itsoffset"))
+        assertEquals(listOf("x11grab", "pulse", "mpegts"), a.valuesOf("-f"))
+        assertEquals("@DEFAULT_MONITOR@", a.valuesOf("-i")[1])
+        assertEquals("1920", a.valueOf("-fragment_size"))
+        assertEquals(listOf("0:v:0", "1:a:0"), a.valuesOf("-map"))
+    }
+
+    @Test
+    fun `clock base seconds keep every microsecond`() {
+        assertEquals("1762862345.000001", ScreenCapture.seconds(1_762_862_345_000_001L))
+        assertEquals("0.250000", ScreenCapture.seconds(250_000L))
+    }
+
+    @Test
+    fun `window labels name the program, then the title`() {
+        assertEquals("Google Chrome - Video - YouTube", ScreenCapture.label(window))
+        assertEquals("Notepad", ScreenCapture.label(window.copy(app = "Notepad", title = "notepad")))
+    }
 }
