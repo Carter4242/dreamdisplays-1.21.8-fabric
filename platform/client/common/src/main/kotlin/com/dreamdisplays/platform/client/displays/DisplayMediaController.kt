@@ -80,6 +80,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         cancelPendingSwitch()
         generation.incrementAndGet()
         val oldPlayer = player
+        // Its popouts and menu preview hold the last picture: nothing of the video stays up
+        screen.dropPopouts(oldPlayer)
         player = null
         videoStarted = false
         screen.mediaError = null

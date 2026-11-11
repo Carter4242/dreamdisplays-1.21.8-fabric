@@ -610,6 +610,15 @@ class DisplayScreen(
         if (mc.isSameThread) createTexture() else mc.execute { createTexture() }
     }
 
+    /**
+     * The display has no video any more ([DisplayMediaController.unload]): its popout window, PiP and fullscreen overlay
+     * close at once and the menu preview drops its frame, none of them holding [player]'s last picture.
+     */
+    internal fun dropPopouts(player: MediaPlayer?) {
+        popoutManager.closeImmediately(player)
+        previewFrameCache?.clear()
+    }
+
     private var publishedVideoStarted = false
 
     private fun publishStartedFlip() {
