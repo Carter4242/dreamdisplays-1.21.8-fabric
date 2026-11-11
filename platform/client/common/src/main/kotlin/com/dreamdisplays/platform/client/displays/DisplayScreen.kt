@@ -596,12 +596,13 @@ class DisplayScreen(
 
     /**
      * Drops every copy of the current private stream's picture: the display texture (reallocated blank), the player's
-     * ready frame, the menu preview, and any popout window / PiP / fullscreen overlay of it (closed at once, no fade).
-     * The display shows the "no video" look until a new frame arrives.
+     * ready frame, the menu preview, and any popout window / PiP / fullscreen overlay of it. With [closeSurfaces] (the
+     * stream is over) those close at once, no fade; without (it only stalled) the popout window closes and PiP /
+     * fullscreen stay open, blank, until frames come again. The display shows the "no video" look until a new frame.
      */
-    internal fun dropPrivatePicture(reason: String) {
+    internal fun dropPrivatePicture(reason: String, closeSurfaces: Boolean = true) {
         logger.info("Display {}: dropping the live picture ({}).", uuid, reason)
-        popoutManager.closeImmediately(mediaPlayer)
+        if (closeSurfaces) popoutManager.closeImmediately(mediaPlayer) else popoutManager.blankPrivatePicture()
         previewFrameCache?.clear()
         mediaPlayer?.clearFrame()
         hasEverRendered = false
@@ -1645,7 +1646,9 @@ class DisplayScreen(
         if (hidden && !privatePictureWasHidden && ScreenSharePrivacy.isPrivateStream(videoUrl) &&
             (hasEverRendered || isPopoutActive || previewFrameCache != null)
         ) {
-            dropPrivatePicture("live stream not delivering")
+            // A stall (a Wi-Fi hitch, a still window) is not the end of the share: the viewer's fullscreen / PiP stay
+            // open, blank; the share's end changes the display's URL, which closes them
+            dropPrivatePicture("live stream not delivering", closeSurfaces = false)
         }
         privatePictureWasHidden = hidden
         val distance = getDistanceToScreen(pos)

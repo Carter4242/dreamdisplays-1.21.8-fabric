@@ -10,6 +10,7 @@ import com.dreamdisplays.platform.client.popout.PopoutEvent
 import com.dreamdisplays.platform.client.popout.PopoutManager
 import com.dreamdisplays.platform.client.render.toUploadFormat
 import com.dreamdisplays.platform.client.ui.*
+import net.minecraft.client.Minecraft
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
 
@@ -193,6 +194,24 @@ class DisplayPopoutManager(
         windowActive = false
         closeFullscreenOverlay()
         closePipOverlay()
+    }
+
+    /**
+     * A private stream stopped delivering: its picture goes from every surface at once, but the viewer's PiP and
+     * fullscreen (forced ones included) stay open, blank, and show the stream again when it resumes. The separate OS
+     * window holds its last frame in its own buffers, so it is closed (a later popout gets a new window).
+     */
+    fun blankPrivatePicture() {
+        popoutWindow?.let { if (it.isOpen) it.close() }
+        popoutWindow = null
+        windowActive = false
+        rewireSink()
+        val mc = Minecraft.getInstance()
+        val blank = {
+            pipOverlay?.blankPicture(mc)
+            fullscreenOverlay?.blankPicture(mc)
+        }
+        if (mc.isSameThread) blank() else mc.execute { blank() }
     }
 
     /**

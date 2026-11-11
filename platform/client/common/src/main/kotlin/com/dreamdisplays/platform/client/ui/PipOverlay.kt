@@ -565,6 +565,17 @@ class PipOverlay(
         closing = true
     }
 
+    /**
+     * Drops the picture (texture and any frame not yet uploaded) and keeps the overlay open, drawing no video until the
+     * next frame arrives: a private stream that stalled must not stay on screen, but the viewer keeps their overlay.
+     * Render thread.
+     */
+    fun blankPicture(mc: Minecraft) {
+        frames.clear()
+        uploadedVersion = frames.latestVersion
+        cleanup(mc)
+    }
+
     fun cleanup(mc: Minecraft) {
         try {
             uploader?.cleanup()
