@@ -102,7 +102,7 @@ class FfmpegBuildsTest {
     }
 
     @Test
-    fun `the month-end pin and the mirror come after latest`() {
-        assertEquals(listOf(FfmpegBuilds.LATEST, FfmpegBuilds.PINNED, FfmpegBuilds.MIRROR), FfmpegBuilds.RELEASES.take(3))
+    fun `the month-end pin comes after latest`() {
+        assertEquals(listOf(FfmpegBuilds.LATEST, FfmpegBuilds.PINNED), FfmpegBuilds.RELEASES.take(2))
     }
 }

@@ -11,8 +11,8 @@ import org.slf4j.LoggerFactory
  * its `checksums.sha256`, which names every file it carries and what each must hash to; that is a plain download, so
  * there is no GitHub API rate limit in the way.
  *
- * Every source is a GitHub release of FFmpeg-Builds or of this mod's own repository (never one a server names: a
- * server could then run code on every client). Releases are tried in [RELEASES] order, each for the wanted branch first ([Want.major]); only when none has it does
+ * Every source is a GitHub release of FFmpeg-Builds (never one a server names: a server could then run code on every
+ * client). Releases are tried in [RELEASES] order, each for the wanted branch first ([Want.major]); only when none has it does
  * a caller that can run another branch ([Want.otherMajors]) take the nearest one.
  */
 object FfmpegBuilds {
@@ -20,10 +20,6 @@ object FfmpegBuilds {
 
     const val REPO = "FFmpeg-Builds/FFmpeg-Builds"
     private const val OLD_REPO = "BtbN/FFmpeg-Builds"
-
-    /** Our own copy of the builds this version needs (same file names plus `checksums.sha256`), for when the rest are gone. */
-    const val MIRROR_REPO = "Carter4242/dreamdisplays-1.21.8-fabric"
-    const val MIRROR_TAG = "ffmpeg-builds"
 
     /** A month-end build carrying release branch 9.0 for every platform; kept until about late 2028. */
     const val PINNED_TAG = "autobuild-2026-10-31-12-59"
@@ -37,11 +33,10 @@ object FfmpegBuilds {
 
     val LATEST = Release(REPO, "latest")
     val PINNED = Release(REPO, PINNED_TAG)
-    val MIRROR = Release(MIRROR_REPO, MIRROR_TAG)
     private val OLD_LATEST = Release(OLD_REPO, "latest")
 
     /** The order releases are tried in: newest builds first, then the fixed fallbacks. */
-    val RELEASES: List<Release> = listOf(LATEST, PINNED, MIRROR, OLD_LATEST)
+    val RELEASES: List<Release> = listOf(LATEST, PINNED, OLD_LATEST)
 
     /** `gpl` is the static command-line build; `lgpl-shared` the shared libraries the in-process decoder loads. */
     enum class Variant(val token: String) { GPL("gpl"), LGPL_SHARED("lgpl-shared") }

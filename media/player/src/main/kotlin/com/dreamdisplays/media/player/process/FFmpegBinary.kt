@@ -268,7 +268,7 @@ object FFmpegBinary {
 
     /**
      * macOS archives (no publisher checksum list exists, so each is pinned here; a changed file is refused and the next
-     * one tried). The mirror release can carry `ffmpeg-<platform>.zip` for when these hosts are gone.
+     * one tried).
      */
     private val MAC_ARM = [
         Candidate("https://www.osxexperts.net/ffmpeg902arm.zip", "4597f0f3a397cc0027bfd03dc4dd9c3066be15943cc788370846b4305d178bcb", "9.0"),
@@ -296,12 +296,7 @@ object FFmpegBinary {
                     )
                 }
 
-            fun mac(key: String, pinned: List<Candidate>) = Platform(key, "ffmpeg", "ffmpeg") {
-                val name = "ffmpeg-$key.zip"
-                val mirrored = runCatching { SourceLoader.sha256Sums(FfmpegBuilds.MIRROR.sumsUrl)[name] }.getOrNull()
-                    ?.let { Candidate(FfmpegBuilds.MIRROR.url(name), it, "mirror") }
-                pinned + listOfNotNull(mirrored)
-            }
+            fun mac(key: String, pinned: List<Candidate>) = Platform(key, "ffmpeg", "ffmpeg") { pinned }
         }
     }
 }
