@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.core.protocol.common.packets.DisplayReadiness
+import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import com.dreamdisplays.shared.playback.ReadinessRoster
@@ -37,6 +38,8 @@ object ReadinessTracker {
 
     /** Applies a client's report and tells the listeners. */
     fun onReport(playerId: UUID, packet: DisplayReadiness) {
+        // Only displays that exist: made-up ids would grow the roster without bound
+        if (DisplayManager.getDisplayData(packet.id) == null && !FullscreenBroadcastManager.knowsDisplay(packet.id)) return
         latencyMs[playerId] = packet.latencyMs
         roster.report(packet.id, playerId, ReadinessState.fromWire(packet.state), packet.positionMs, packet.latencyMs)
         listeners.forEach { it(packet.id) }

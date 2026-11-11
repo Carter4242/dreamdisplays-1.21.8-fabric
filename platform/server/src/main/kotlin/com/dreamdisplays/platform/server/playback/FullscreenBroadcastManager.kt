@@ -103,6 +103,10 @@ object FullscreenBroadcastManager {
         return prepared + shown
     }
 
+    /** True if [displayId] is shown or prepared by a fullscreen session (virtual displays included). */
+    fun knowsDisplay(displayId: UUID): Boolean =
+        preparations.containsKey(displayId) || sessions.values.any { it.display.id == displayId }
+
     /** True if a session with [sessionId] is currently live. */
     fun hasSession(sessionId: String): Boolean = sessions.containsKey(sessionId)
 
