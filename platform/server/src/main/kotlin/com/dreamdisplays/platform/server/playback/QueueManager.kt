@@ -269,6 +269,12 @@ object QueueManager {
         if (after != before) changed(display)
     }
 
+    /** Duration (ms) of the queue entry [display] plays now, 0 when it plays none or that is unknown. */
+    fun playingEntryDurationMs(display: DisplayData): Long {
+        val queue = queues[display.id] ?: return 0L
+        return synchronized(queue) { queue.current }?.takeIf { it.url == display.url }?.durationMs ?: 0L
+    }
+
     /** Forgets a deleted display's queue. */
     fun onDisplayRemoved(displayId: UUID) {
         rosters.remove(displayId)

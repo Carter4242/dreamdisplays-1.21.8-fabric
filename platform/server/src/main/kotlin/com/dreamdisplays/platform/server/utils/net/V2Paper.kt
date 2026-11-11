@@ -98,7 +98,7 @@ object PaperV2Networking : PluginMessageListener {
         when (packet) {
             is ClientHello -> handleHello(player, packet)
             is RequestSync -> DisplayActions.requestSync(player, packet.id)
-            is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs)
+            is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs, packet.url)
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
             is QueueAction -> QueueActions.onAction(player, packet)
             is QueuePreload -> QueueActions.onPreload(player, packet)

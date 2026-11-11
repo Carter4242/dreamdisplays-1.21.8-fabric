@@ -32,8 +32,10 @@ object TimelineManager {
     private lateinit var transport: PlaybackTransport
     private val timelines = ConcurrentHashMap<UUID, Timeline>()
 
-    /** Raw client-reported media durations of each display's current video: first and largest kept, in ms. */
-    private val durationReports = ConcurrentHashMap<UUID, Pair<Long, Long>>()
+    /** Client-reported media durations of a display's video [url]: the latest per viewer, and the one in use (ms). */
+    private class ReportedDurations(val url: String, val byPlayer: Map<UUID, Long>, val mediaMs: Long)
+
+    private val durationReports = ConcurrentHashMap<UUID, ReportedDurations>()
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
@@ -374,20 +376,25 @@ object TimelineManager {
     fun isHolding(displayId: UUID): Boolean = startHolds.containsKey(displayId)
 
     /**
-     * Applies a client-reported media duration for [display]'s current video.
+     * Applies a media duration [senderId]'s client measured for [display]'s video [url] (empty from older clients).
+     * Only a nearby viewer's report on the display's current video counts.
      *
-     * The largest report wins, within [QueueTiming.MAX_DURATION_RAISE_MS] of the first; the timeline runs
-     * [QueueTiming.scheduledDurationMs] of it, so its end (and the queue's switch) never comes before the media's.
+     * [QueueTiming.mediaDurationMs] settles on the largest report (bounded by the playing queue entry's duration, never
+     * below it, never shrinking); the timeline runs [QueueTiming.scheduledDurationMs] of it, so its end (and the
+     * queue's switch) never comes before the media's.
      */
-    fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long) {
+    fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "") {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         if (durationMs !in MIN_DURATION_MS..MAX_DURATION_MS) return
-        val known = durationReports[display.id]
-        val mediaMs = QueueTiming.mergeReportedMs(known?.second, known?.first, durationMs) ?: return
+        if (url.isNotEmpty() && url != display.url) return
         if (senderId !in transport.nearbyPlayerIds(display)) return
         if (!reportDurationThrottle.tryAcquire(display.id to senderId, REPORT_DURATION_COOLDOWN_MS)) return
 
-        durationReports[display.id] = (known?.first ?: mediaMs) to mediaMs
+        val known = durationReports[display.id]?.takeIf { it.url == display.url }
+        val byPlayer = (known?.byPlayer ?: emptyMap()) + (senderId to durationMs)
+        val mediaMs = QueueTiming.mediaDurationMs(QueueManager.playingEntryDurationMs(display), byPlayer.values, known?.mediaMs ?: 0L)
+        durationReports[display.id] = ReportedDurations(display.url, byPlayer, mediaMs)
+        if (known != null && mediaMs == known.mediaMs) return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L
         val current = timelines[display.id] ?: return

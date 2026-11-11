@@ -34,11 +34,15 @@ data class PipPin(
     @ProtoNumber(2) val pinned: Boolean = true,
 ) : DreamPacket
 
-/** Client reports media duration after player initializes. */
+/**
+ * Client reports media duration after player initializes. [url] is the video it measured (empty from older clients):
+ * the server ignores a report for anything but the display's current video.
+ */
 @Serializable
 data class ReportDuration(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
     @ProtoNumber(2) val durationMs: Long = 0,
+    @ProtoNumber(3) val url: String = "",
 ) : DreamPacket
 
 /** Server tells client to pause / resume local-mode display player (no seek). */

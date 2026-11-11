@@ -364,6 +364,8 @@ message ReportDuration {
   optional Uuid id = 1;
   // WARNING: a default value decoded when value is missing
   optional int64 durationMs = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string url = 3;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle'

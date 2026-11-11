@@ -276,7 +276,7 @@ object QueueTiming {
     /** Past the media end the timeline waits this long more: switching late holds the last frame, early cuts the video. */
     const val END_SAFETY_MS = 150L
 
-    /** A later, longer client duration report may exceed the first one by at most this much. */
+    /** How far a client's duration report may lie outside the playing queue entry's (metadata) duration. */
     const val MAX_DURATION_RAISE_MS = 3_000L
 
     /**
@@ -291,13 +291,24 @@ object QueueTiming {
     }
 
     /**
-     * The media duration to keep when a client reports [reportedMs] while [currentMs] (null: none yet) is known and
-     * [firstMs] was the first report: the largest, at most [MAX_DURATION_RAISE_MS] above the first. Null: keep
-     * [currentMs].
+     * The media duration (ms) to run a display's current video for, 0 when nothing is known. [entryMs]: the playing
+     * queue entry's duration (0 when none); [reportsMs]: the latest duration each viewer's client measured for this
+     * video; [floorMs]: what was settled on before, which is never undercut.
+     *
+     * The largest report wins, so one short report (a client still on the previous video, a stream that only knew
+     * part of its length) never ends the video early for everyone. With a queue entry, the entry's duration is the
+     * least the video runs, and reports more than [MAX_DURATION_RAISE_MS] beyond it (plus its whole-second rounding)
+     * are another video's and ignored.
      */
-    fun mergeReportedMs(currentMs: Long?, firstMs: Long?, reportedMs: Long): Long? {
-        if (currentMs == null || firstMs == null) return reportedMs
-        return reportedMs.takeIf { it > currentMs && it <= firstMs + MAX_DURATION_RAISE_MS }
+    fun mediaDurationMs(entryMs: Long, reportsMs: Collection<Long>, floorMs: Long = 0L): Long {
+        val best = if (entryMs > 0L) {
+            val slack = if (entryMs % 1_000L == 0L) 1_000L else 0L
+            val most = entryMs + slack + MAX_DURATION_RAISE_MS
+            maxOf(entryMs, reportsMs.filter { it <= most }.maxOrNull() ?: 0L)
+        } else {
+            reportsMs.maxOrNull() ?: 0L
+        }
+        return maxOf(best, floorMs, 0L)
     }
 
     /** Content ms before (or after a loop wrap past) the end within which a client's seek back to the start is its own end-of-stream loop. */

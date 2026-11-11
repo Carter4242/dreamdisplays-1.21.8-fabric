@@ -241,9 +241,9 @@ object DisplayActions {
     }
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED / BROADCAST only). */
-    fun reportDuration(player: Player, displayId: UUID, durationMs: Long) {
+    fun reportDuration(player: Player, displayId: UUID, durationMs: Long, url: String = "") {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
-        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs)
+        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs, url)
     }
 
     private fun context(display: PaperDisplayData, player: Player) =
