@@ -425,6 +425,11 @@ class ScreenCaptureArgsTest {
         assertEquals(30, ScreenCapture.chooseFps("FFMPEG", Source.GDIGRAB, Encoder.NVENC, 1080, 0))
         assertEquals(30, ScreenCapture.chooseFps("FFMPEG", Source.DDAGRAB, Encoder.NVENC, 1080, 30))
         assertEquals(24, ScreenCapture.chooseFps("FFMPEG", Source.DDAGRAB, Encoder.NVENC, 1080, 24))
+        // x264 shares the game's CPU: 30 without benchmarking (the "FFMPEG" binary would fail it anyway)
+        assertEquals(30, ScreenCapture.chooseFps("FFMPEG", Source.DDAGRAB, Encoder.X264, 1080, 0))
+        assertFalse(ScreenCapture.sixtyPossible(60, Source.AVFOUNDATION, Encoder.X264))
+        assertTrue(ScreenCapture.sixtyPossible(60, Source.DDAGRAB, Encoder.QSV))
+        assertFalse(ScreenCapture.sixtyPossible(60, Source.X11GRAB, Encoder.NVENC))
         assertEquals(2.71, ScreenCapture.benchRealSeconds("frame=  120\nbench: utime=3.125s stime=0.218s rtime=2.710s\n"))
         assertEquals(null, ScreenCapture.benchRealSeconds("no bench here"))
     }

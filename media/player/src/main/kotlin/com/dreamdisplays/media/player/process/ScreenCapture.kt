@@ -119,15 +119,20 @@ object ScreenCapture {
         Regex("""bench: .*rtime=([0-9.]+)s""").find(output)?.groupValues?.get(1)?.toDoubleOrNull()
 
     /**
-     * The frame rate to share at: 60 where the source keeps up with it and [encoder] measured within
-     * [SIXTY_BUDGET_MS] a frame, and the server allows it ([serverMaxFps], 0 = no cap); else 30.
+     * The frame rate to share at: 60 where the source keeps up with it, [encoder] is a hardware one that measured
+     * within [SIXTY_BUDGET_MS] a frame, and the server allows it ([serverMaxFps], 0 = no cap); else 30. x264 stays at
+     * 30: its benchmark measures throughput on every core, which in game it shares with Minecraft's threads.
      */
     fun chooseFps(ffmpeg: String, source: Source, encoder: Encoder, maxHeight: Int, serverMaxFps: Int): Int {
         val cap = if (serverMaxFps > 0) serverMaxFps else 60
-        if (cap < 60 || source == Source.GDIGRAB || source == Source.X11GRAB) return minOf(30, cap)
+        if (!sixtyPossible(cap, source, encoder)) return minOf(30, cap)
         val probe = Settings.forFps(60).limitedTo(0, maxHeight)
         return if (encodeMsPerFrame(ffmpeg, encoder, probe) <= SIXTY_BUDGET_MS) 60 else 30
     }
+
+    /** 60 fps can be considered at all: allowed by [cap], a source that keeps up, a hardware encoder. */
+    internal fun sixtyPossible(cap: Int, source: Source, encoder: Encoder): Boolean =
+        cap >= 60 && source != Source.GDIGRAB && source != Source.X11GRAB && encoder.hardware
 
     /** How one screen is shared: where the picture comes from and what encodes it. */
     data class Plan(val source: Source, val encoder: Encoder) {
