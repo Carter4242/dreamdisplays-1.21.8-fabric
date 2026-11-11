@@ -605,6 +605,8 @@ object TimelineManager {
         // Holds end here too: within a tenth of a second of their deadline, and as soon as the last viewer they waited
         // for is gone (quit, walked away) rather than only when someone reports
         releaseStartHolds(now)
+        // A loop never happens at a length clients weren't sent: they wrap by the timeline's own length
+        carryKnownDurations()
         for ((displayId, timeline) in timelines) {
             if (timeline.paused || startHolds.containsKey(displayId)) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
@@ -733,13 +735,16 @@ object TimelineManager {
         }
     }
 
-    /** Backstop: a timeline without a length while its display knows its video's gets it, so it wraps at the end. */
+    /**
+     * Backstop: a timeline without a length while its display (or its playing queue entry) knows its video's gets it,
+     * so it wraps at the end, and clients wrap where the server restarts it.
+     */
     private fun carryKnownDurations() {
         for ((displayId, timeline) in timelines) {
             if (timeline.durationMs > 0L && timeline.loop) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
-            val durationMs = durationMsOf(display).takeIf { it > 0L } ?: continue
+            val durationMs = knownDurationMs(display, timeline).takeIf { it > 0L } ?: continue
             // A clock already past that end is restarted at once by tickEnds instead
             if (QueueTiming.loopRestartAtMs(timeline, transport.nowMs(), 0L, durationMs) != null) continue
             val updated = timeline.copy(durationMs = durationMs, loop = true)
