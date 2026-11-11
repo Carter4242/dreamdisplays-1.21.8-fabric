@@ -41,6 +41,7 @@ class YtCookieManager {
     @Volatile
     private var unavailableThisSession = false
     private val refreshInProgress = atomic(false)
+    private val masterScrubbed = atomic(false)
 
     /** True when the user explicitly disabled browser cookies in the config. */
     fun disabledByConfig(): Boolean =
@@ -67,10 +68,12 @@ class YtCookieManager {
 
         val master = cookieFile
         if (!Files.exists(master) && !unavailableThisSession) ensureMaterialized(master)
+        // A file exported by an older version still holds the whole browser jar
+        if (Files.exists(master) && masterScrubbed.compareAndSet(expect = false, update = true)) scrubJar(master)
         if (Files.exists(master)) {
             val tempCopy = runCatching {
                 val target = Files.createTempFile(YtDlpBinary.bundledDir, "cookies-", ".txt")
-                Files.copy(master, target, StandardCopyOption.REPLACE_EXISTING)
+                Files.write(target, youTubeCookiesOnly(Files.readAllLines(master, JAR_CHARSET)), JAR_CHARSET)
                 target
             }.onFailure { e ->
                 logger.warn("Failed to create temp cookies copy, using master file: ${e.message}")
@@ -182,6 +185,7 @@ class YtCookieManager {
         runCatching { drainer.join(500) }
 
         if (!Files.exists(master)) return null
+        scrubJar(master)
         val lines = Files.readAllLines(master, StandardCharsets.UTF_8)
         val sb = StringBuilder()
         for (line in lines) {
@@ -197,6 +201,27 @@ class YtCookieManager {
         if (result.isEmpty()) return null
         logger.debug("Exported ${lines.size} cookie lines, header ${result.length} chars.")
         return result
+    }
+
+    /**
+     * Cuts the exported jar down to YouTube / Google cookies. `yt-dlp --cookies-from-browser` writes every cookie the
+     * browser holds (banking, mail, every site) in plain text into the game folder, and the file is handed to `yt-dlp`
+     * for any link a server sends; nothing but YouTube needs it.
+     */
+    private fun scrubJar(jar: Path) {
+        runCatching {
+            val lines = Files.readAllLines(jar, JAR_CHARSET)
+            val kept = youTubeCookiesOnly(lines)
+            if (kept.size == lines.size) return
+            val tmp = jar.resolveSibling("${jar.fileName}.tmp")
+            Files.write(tmp, kept, JAR_CHARSET)
+            Files.move(tmp, jar, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            logger.debug("Dropped {} non-YouTube cookies from the exported jar.", lines.size - kept.size)
+        }.onFailure { e ->
+            // Never hand yt-dlp the whole jar: without a scrubbed file it falls back to no cookies
+            logger.warn("Could not trim the exported cookie jar (${e.message}); deleting it.")
+            runCatching { Files.deleteIfExists(jar) }
+        }
     }
 
     private fun resolveBrowser(): String? {
@@ -279,6 +304,23 @@ class YtCookieManager {
     }
 
     companion object {
+        /** Byte-preserving: the jar is only filtered by line, never re-encoded. */
+        private val JAR_CHARSET = StandardCharsets.ISO_8859_1
+        private const val HTTP_ONLY_PREFIX = "#HttpOnly_"
+        private const val TAB = '\t'
+        private val KEPT_DOMAINS = ["youtube.com", "google.com"]
+
+        /** The lines of a Netscape cookie jar minus every cookie not for YouTube / Google; comments stay. */
+        internal fun youTubeCookiesOnly(lines: List<String>): List<String> = lines.filter { line ->
+            val cookie = when {
+                line.startsWith(HTTP_ONLY_PREFIX) -> line.removePrefix(HTTP_ONLY_PREFIX)
+                line.isBlank() || line.startsWith("#") -> return@filter true
+                else -> line
+            }
+            val domain = cookie.substringBefore(TAB).trim().trimStart('.').lowercase()
+            KEPT_DOMAINS.any { domain == it || domain.endsWith(".$it") }
+        }
+
         private const val COOKIE_REFRESH_MS: Long = 2L * 60L * 60L * 1_000L
         private const val BROWSER_RETRY_MS: Long = 60L * 60L * 1_000L
 
