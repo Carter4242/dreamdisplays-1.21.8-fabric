@@ -83,7 +83,10 @@ object FullscreenController {
     }.getOrDefault(false)
 
     private fun apply(screen: DisplayScreen, state: FullscreenState) {
-        if (screen.lastFullscreenState == state) {
+        if (FullscreenViewerRules.alreadyShown(
+                screen.lastFullscreenState, state, screen.isFullscreenActive, screen.isPipActive,
+            )
+        ) {
             val action = if (state.minimized) FullscreenAckAction.MINIMIZED else FullscreenAckAction.SHOWN
             ProtocolRouter.send(FullscreenAck(state.sessionId, action.wire))
             return
