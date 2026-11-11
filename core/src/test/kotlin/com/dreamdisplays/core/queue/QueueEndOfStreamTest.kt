@@ -121,4 +121,11 @@ class QueueEndOfStreamTest {
         assertFalse(EndOfStreamGuard.playsAfterJump(PlaybackAction.SEEK, paused = true, holding = false))
         assertTrue(EndOfStreamGuard.playsAfterJump(PlaybackAction.RESTART, paused = true, holding = false))
     }
+
+    @Test
+    fun `only clients before protocol 12 loop their own player at the end`() {
+        kotlin.test.assertTrue(EndOfStreamGuard.loopsOwnEnd(0), "release 11 sends no version")
+        kotlin.test.assertTrue(EndOfStreamGuard.loopsOwnEnd(11))
+        kotlin.test.assertFalse(EndOfStreamGuard.loopsOwnEnd(12))
+    }
 }

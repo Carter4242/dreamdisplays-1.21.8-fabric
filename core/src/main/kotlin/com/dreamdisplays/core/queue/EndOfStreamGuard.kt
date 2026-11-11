@@ -54,6 +54,12 @@ class EndOfStreamGuard(private val graceMs: Long = DEFAULT_GRACE_MS) {
     companion object {
         const val DEFAULT_GRACE_MS = 3_000L
 
+        /** First protocol whose clients hold their last frame at end of stream instead of seeking back to 0. */
+        const val HOLDING_PROTOCOL = 12
+
+        /** True when a client on [protocolVersion] (0: unknown / release 11) loops its own player by seeking to 0. */
+        fun loopsOwnEnd(protocolVersion: Int): Boolean = protocolVersion < HOLDING_PROTOCOL
+
         /**
          * Whether a seek or restart arriving while the display is [paused] (or [holding], a start hold that is paused
          * only until every viewer is ready) plays once its own hold releases. A start hold is a playing display:

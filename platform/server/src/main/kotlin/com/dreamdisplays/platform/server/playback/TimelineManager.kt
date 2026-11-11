@@ -65,6 +65,13 @@ object TimelineManager {
     /** Older clients loop their own player at end of stream by seeking to 0; those reports are not seeks. */
     private val endOfStream = EndOfStreamGuard()
 
+    /**
+     * True when [playerId]'s client loops its own player at end of stream by seeking to 0 (before protocol 12). Newer
+     * clients hold their last frame, so a seek or restart from them is always the viewer's own.
+     */
+    private fun loopsOwnEndOfStream(playerId: UUID): Boolean =
+        EndOfStreamGuard.loopsOwnEnd(com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(playerId)?.protocolVersion ?: 0)
+
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
 
     /** Hold after a resume of a paused display; the platform points this at `display.resume_hold_seconds`. */
@@ -209,7 +216,9 @@ object TimelineManager {
 
         val now = transport.nowMs()
         val target = if (action == PlaybackAction.SEEK) clampSeek(positionMs, display) else 0L
-        when (endOfStream.classify(display.id, timelines[display.id], now, action, target, durationMsOf(display))) {
+        val verdict = if (!loopsOwnEndOfStream(senderId)) EndOfStreamGuard.Verdict.USER_SEEK
+        else endOfStream.classify(display.id, timelines[display.id], now, action, target, durationMsOf(display))
+        when (verdict) {
             EndOfStreamGuard.Verdict.USER_SEEK -> {}
             // A client's stream ended a moment before the shared clock: the queue moves on at the timeline's own
             // end, or the timeline wraps by itself. Never a restart for everyone.
