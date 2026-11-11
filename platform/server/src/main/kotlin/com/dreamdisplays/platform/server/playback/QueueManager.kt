@@ -19,8 +19,6 @@ import com.dreamdisplays.shared.playback.PlaybackContext
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -99,7 +97,8 @@ object QueueManager {
     private val addThrottle = ActionThrottle()
     private val editThrottle = ActionThrottle()
     private val preloadThrottle = ActionThrottle()
-    private val persistMutex = Mutex()
+    /** Every save holds it: the debounced one and [flush] write the same temporary file. */
+    private val saveLock = Any()
     private val persistScheduled = AtomicBoolean(false)
 
     fun init(transport: PlaybackTransport) {
@@ -124,7 +123,7 @@ object QueueManager {
 
     /** Writes every queue now (plugin disable). */
     fun flush() {
-        runCatching { DisplayQueueStore.save(snapshot()) }
+        runCatching { synchronized(saveLock) { DisplayQueueStore.save(snapshot()) } }
             .onFailure { logger.warn("Could not save display queues.", it) }
     }
 
@@ -418,7 +417,7 @@ object QueueManager {
         ServerCoroutines.io.launch {
             delay(PERSIST_DEBOUNCE_MS)
             persistScheduled.set(false)
-            persistMutex.withLock { DisplayQueueStore.save(snapshot()) }
+            synchronized(saveLock) { DisplayQueueStore.save(snapshot()) }
         }
     }
 }

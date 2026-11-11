@@ -7,8 +7,6 @@ import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.storage.PipPinStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -26,7 +24,8 @@ object PipPinManager {
     private const val PIN_COOLDOWN_MS = 250L
     private const val MAX_PINS_PER_PLAYER = 16
     private const val PERSIST_DEBOUNCE_MS = 2_000L
-    private val persistMutex = Mutex()
+    /** Every save holds it: the debounced one and [flush] write the same temporary file. */
+    private val saveLock = Any()
     private val persistScheduled = AtomicBoolean(false)
 
     /** Wires the platform transport. */
@@ -92,8 +91,14 @@ object PipPinManager {
         ServerCoroutines.io.launch {
             delay(PERSIST_DEBOUNCE_MS)
             persistScheduled.set(false)
-            persistMutex.withLock { persistNow() }
+            synchronized(saveLock) { persistNow() }
         }
+    }
+
+    /** Writes the pins now (plugin disable): a debounced save still waiting would be cancelled with the plugin. */
+    fun flush() {
+        runCatching { synchronized(saveLock) { persistNow() } }
+            .onFailure { logger.warn("Could not save PiP pins.", it) }
     }
 
     private fun persistNow() {
