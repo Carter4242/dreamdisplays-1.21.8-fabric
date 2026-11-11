@@ -92,7 +92,7 @@ object PaperV2Networking : PluginMessageListener {
         // As early as possible: karaoke clock pongs are timed by it
         val receivedNanos = System.nanoTime()
         val packet = runCatching { PacketRegistry.decode(message, PacketDirection.CLIENT_TO_SERVER) }
-            .onFailure { logger.warn("Failed to decode v2 packet from ${player.name}", it) }
+            .onFailure { logDecodeFailure(player, it) }
             .getOrNull() ?: return
 
         when (packet) {
@@ -158,6 +158,24 @@ object PaperV2Networking : PluginMessageListener {
             else -> logger.debug("Ignoring non-serverbound v2 packet {}.", packet::class.simpleName)
         }
     }
+
+    /** When each player's undecodable packet was last logged in full; one a minute each, the rest at debug. */
+    private val decodeFailureLoggedAt = java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long>()
+    private const val DECODE_FAILURE_LOG_MS = 60_000L
+
+    private fun logDecodeFailure(player: Player, error: Throwable) {
+        val now = System.currentTimeMillis()
+        val last = decodeFailureLoggedAt[player.uniqueId]
+        if (last != null && now - last < DECODE_FAILURE_LOG_MS) {
+            logger.debug("Failed to decode v2 packet from {}: {}", player.name, error.toString())
+            return
+        }
+        if (decodeFailureLoggedAt.size > MAX_DECODE_FAILURE_PLAYERS) decodeFailureLoggedAt.clear()
+        decodeFailureLoggedAt[player.uniqueId] = now
+        logger.warn("Failed to decode v2 packet from ${player.name} (further ones logged at most once a minute)", error)
+    }
+
+    private const val MAX_DECODE_FAILURE_PLAYERS = 1_000
 
     private fun handleHello(player: Player, hello: ClientHello) {
         if (V2PlayerTracker.isV2(player.uniqueId)) return
