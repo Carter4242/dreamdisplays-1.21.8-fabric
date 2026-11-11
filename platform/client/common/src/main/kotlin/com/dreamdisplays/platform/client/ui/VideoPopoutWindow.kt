@@ -644,7 +644,7 @@ class VideoPopoutWindow(
                         override fun windowClosing(e: WindowEvent) = destroyFrame()
                     })
 
-                    addKeyListener(object : KeyAdapter() {
+                    val keys = object : KeyAdapter() {
                         override fun keyPressed(e: KeyEvent) {
                             when (e.keyCode) {
                                 KeyEvent.VK_ESCAPE -> destroyFrame()
@@ -653,7 +653,10 @@ class VideoPopoutWindow(
                                     else JFrame.MAXIMIZED_BOTH
                             }
                         }
-                    })
+                    }
+                    // Key events go to the focus owner only, and that is the (focusable) video panel, not the frame
+                    addKeyListener(keys)
+                    p.addKeyListener(keys)
 
                     isVisible = true
                 }
