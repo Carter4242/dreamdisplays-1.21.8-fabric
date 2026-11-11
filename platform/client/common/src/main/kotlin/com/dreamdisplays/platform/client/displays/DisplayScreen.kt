@@ -1679,6 +1679,10 @@ class DisplayScreen(
         isDormant = false
     }
 
+    /** True when [packet] would load another video (or audio language) here, see [updateData]. */
+    internal fun wouldReload(packet: DisplayInfo): Boolean =
+        DisplayInfoReload.needsReload(videoUrl, lastPacketLang, packet.url, packet.lang)
+
     /** True once a dormant display has sat parked longer than [ttlNanos] (caller then tears it down). */
     fun dormantExpired(ttlNanos: Long): Boolean = isDormant && System.nanoTime() - dormantSinceNanos > ttlNanos
 

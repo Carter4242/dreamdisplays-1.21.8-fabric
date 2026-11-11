@@ -61,6 +61,14 @@ object DisplayLifecycleManager {
         ClientSettingsStore.getSettings(packet.id, DisplayScreen.defaultVolume(policy))
 
         DisplayRegistry.screens[packet.id]?.let {
+            // A warm-parked display that gets another video is retired and taken through the path below like an
+            // unloaded one: loading it in place would start the new video outside the parking (playing, audible and
+            // over the active-display budget until the park expires)
+            if (it.isDormant && it.wouldReload(packet)) {
+                DisplayRegistry.saveScreenData(it)
+                DisplayRegistry.unregisterScreen(it)
+                return@let
+            }
             DisplayRegistry.markReconfirmed(packet.id)
             it.dimensionKey = DisplayDimensions.learnedKey(
                 it.dimensionKey, packet.world, packet.forced, packet.virtual, currentDimensionKey(),
