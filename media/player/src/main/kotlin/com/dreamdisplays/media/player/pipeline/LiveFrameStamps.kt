@@ -22,6 +22,10 @@ class LiveFrameStamps(private val key: String) {
 
     private val frameAt = LongArray(RING) { -1L }
     private val ptsAt = LongArray(RING)
+
+    /** Frames shown before their stamp was read (the stats file is written a little behind the picture). */
+    private val waitingFrame = LongArray(RING) { -1L }
+    private val waitingAt = LongArray(RING)
     private val shownPts = LongArray(RING)
     private val shownAt = LongArray(RING)
     private var shownCount = 0L
@@ -41,15 +45,24 @@ class LiveFrameStamps(private val key: String) {
     fun onPresented(frame: Long, nanos: Long) {
         synchronized(this) {
             val slot = (frame % RING).toInt()
-            if (frameAt[slot] != frame) return
-            val i = (shownCount % RING).toInt()
-            shownPts[i] = ptsAt[slot]
-            shownAt[i] = nanos
-            shownCount++
+            if (frameAt[slot] == frame) {
+                record(ptsAt[slot], nanos)
+            } else {
+                // Its stamp is not read yet: matched when it is
+                waitingFrame[slot] = frame
+                waitingAt[slot] = nanos
+            }
         }
     }
 
-    /** Up to [max] latest (PTS µs, presentation nanos) pairs, oldest first. */
+    private fun record(pts: Long, nanos: Long) {
+        val i = (shownCount % RING).toInt()
+        shownPts[i] = pts
+        shownAt[i] = nanos
+        shownCount++
+    }
+
+    /** Up to [max] latest (PTS µs, presentation nanos) pairs, in the order they were matched. */
     fun recent(max: Int = RING): List<Pair<Long, Long>> = synchronized(this) {
         val n = minOf(shownCount, max.toLong(), RING.toLong()).toInt()
         (0 until n).map { k ->
@@ -103,6 +116,10 @@ class LiveFrameStamps(private val key: String) {
             val slot = (stamp.first % RING).toInt()
             frameAt[slot] = stamp.first
             ptsAt[slot] = stamp.second
+            if (waitingFrame[slot] == stamp.first) {
+                record(stamp.second, waitingAt[slot])
+                waitingFrame[slot] = -1L
+            }
         }
     }
 

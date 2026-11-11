@@ -20,6 +20,9 @@ class LiveFrameStampsTest {
         s.onPresented(1, 555L)
         s.onPresented(7, 777L)
         assertEquals(listOf(1_033_000L to 555L), s.recent())
+        // Frame 7's stamp arrives after it was shown (the stats file lags the picture): matched then
+        feed(s, 7L to 1_233_000L)
+        assertEquals(listOf(1_033_000L to 555L, 1_233_000L to 777L), s.recent())
     }
 
     private fun feed(s: LiveFrameStamps, stamp: Pair<Long, Long>) {
