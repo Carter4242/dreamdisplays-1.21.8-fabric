@@ -96,6 +96,20 @@ internal class AudioSink(private val debugLabel: String) {
          * Why a live audio half ended on its own (not stopped): null = nothing to report; [EndKind.FAULT] = it broke
          * (an exception, or FFmpeg exited non-zero), restart it in place; [EndKind.ENDED] = the PCM stream just ended.
          */
+        /**
+         * How long a line holding [unplayedBytes] at [bytesPerSecond] may take to play them out at a natural end: their
+         * duration plus a little slack, never more than [MAX_TAIL_PLAYOUT_NANOS]; 0 when there is nothing to play.
+         */
+        internal fun tailPlayOutBudgetNanos(unplayedBytes: Int, bytesPerSecond: Int): Long {
+            if (unplayedBytes <= 0 || bytesPerSecond <= 0) return 0L
+            val playNanos = unplayedBytes.toLong() * 1_000_000_000L / bytesPerSecond
+            return (playNanos + TAIL_PLAYOUT_SLACK_NANOS).coerceAtMost(MAX_TAIL_PLAYOUT_NANOS)
+        }
+
+        private const val TAIL_PLAYOUT_POLL_MS = 5L
+        private const val TAIL_PLAYOUT_SLACK_NANOS = 100_000_000L
+        private const val MAX_TAIL_PLAYOUT_NANOS = 1_000_000_000L
+
         internal fun endKind(failure: Throwable?, pumped: Boolean, exitCode: Int?): EndKind? = when {
             failure != null -> EndKind.FAULT
             !pumped -> null
@@ -388,6 +402,7 @@ internal class AudioSink(private val debugLabel: String) {
         var session: LineSession? = null
         var promoted = false
         var pumped = false
+        var naturalEnd = false
         var failure: Throwable? = null
 
         fun isInterrupted() = terminated.get() || stopFlag.get()
@@ -427,7 +442,7 @@ internal class AudioSink(private val debugLabel: String) {
                 logger.debug("$debugLabel [audio] switch line promoted — new track playing.")
                 onPromoted()
 
-                pumpLive(s, input, opened.line, terminated, stopFlag)
+                naturalEnd = pumpLive(s, input, opened.line, terminated, stopFlag)
                 pumped = true
             }
         }.onFailure { e ->
@@ -440,6 +455,7 @@ internal class AudioSink(private val debugLabel: String) {
         }
 
         newLine?.let { ln ->
+            if (naturalEnd && !isInterrupted()) playOutTail(ln, session?.output, terminated, stopFlag)
             session?.let { retireSession(it, ln) }
             runCatching { ln.flush() }
             runCatching { ln.stop() }
@@ -555,6 +571,7 @@ internal class AudioSink(private val debugLabel: String) {
     ) {
         var ln: SourceDataLine? = null
         var pumped = false
+        var naturalEnd = false
         var failure: Throwable? = null
         runCatching {
             proc.inputStream.use { input ->
@@ -578,7 +595,7 @@ internal class AudioSink(private val debugLabel: String) {
                 }
                 ln.start()
                 logger.debug("$debugLabel [audio] start gate passed, line started — audio is now playing.")
-                pumpLive(session, input, ln, terminated, stopFlag)
+                naturalEnd = pumpLive(session, input, ln, terminated, stopFlag)
                 pumped = true
             }
         }.onFailure { e ->
@@ -587,6 +604,7 @@ internal class AudioSink(private val debugLabel: String) {
         }
 
         ln?.let {
+            if (naturalEnd) playOutTail(it, session.output, terminated, stopFlag)
             retireSession(session, it)
             runCatching { it.flush() }
             runCatching { it.stop() }
@@ -629,14 +647,15 @@ internal class AudioSink(private val debugLabel: String) {
         return skippedContent()
     }
 
+    /** Pumps PCM to [ln] until it ends or is stopped; true when the PCM stream itself ended (its natural end). */
     private fun pumpLive(
         session: LineSession, input: InputStream, ln: SourceDataLine,
         terminated: AtomicBoolean, stopFlag: AtomicBoolean,
-    ) {
+    ): Boolean {
         val live = session.liveEdge
         val chunkBytes = if (live) LIVE_CHUNK_BYTES else CHUNK_BYTES
         val chunk = ByteArray(chunkBytes)
-        val output = session.output ?: return
+        val output = session.output ?: return false
         var rate = 1.0
         var firstChunk = true
         var totalBytes = 0L
@@ -661,7 +680,7 @@ internal class AudioSink(private val debugLabel: String) {
                     val seconds = totalBytes / (SAMPLE_RATE * BYTES_PER_FRAME).toDouble()
                     logger.warn("$debugLabel [audio] PCM stream ended after ${"%.1f".format(seconds)} s.")
                 }
-                break
+                return !firstChunk
             }
             totalBytes += n
             if (firstChunk) {
@@ -678,6 +697,7 @@ internal class AudioSink(private val debugLabel: String) {
             lastPcmOutNanos = System.nanoTime()
             pcmTap?.let { if (outBytes > 0) tapWritten(it, chunk, n, ln, output, outBytes) }
         }
+        return false
     }
 
     /**
@@ -709,6 +729,24 @@ internal class AudioSink(private val debugLabel: String) {
         val delta = target - current
         return if (kotlin.math.abs(delta) <= RATE_STEP_PER_CHUNK) target
         else current + if (delta > 0) RATE_STEP_PER_CHUNK else -RATE_STEP_PER_CHUNK
+    }
+
+    /**
+     * The PCM ended on its own: lets what [ln] still holds (the pacing cushion, tens to hundreds of ms) play out before
+     * the line is flushed, so a video's last sound is heard. Bounded, and abandoned at once on a stop, teardown or park.
+     */
+    private fun playOutTail(ln: SourceDataLine, output: PcmLineOutput?, terminated: AtomicBoolean, stopFlag: AtomicBoolean) {
+        val bytesPerSecond = output?.format?.bytesPerSecond ?: return
+        val unplayed = { (ln.bufferSize - ln.available()).coerceAtLeast(0) }
+        val deadline = System.nanoTime() + tailPlayOutBudgetNanos(unplayed(), bytesPerSecond)
+        while (!terminated.get() && !stopFlag.get() && parked?.get() != true && System.nanoTime() < deadline) {
+            if (unplayed() <= 0) return
+            try {
+                Thread.sleep(TAIL_PLAYOUT_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return
+            }
+        }
     }
 
     private fun parkIfRequested(ln: SourceDataLine, terminated: AtomicBoolean, stopFlag: AtomicBoolean): Boolean {
