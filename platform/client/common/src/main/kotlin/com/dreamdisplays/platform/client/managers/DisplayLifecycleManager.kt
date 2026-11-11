@@ -70,7 +70,7 @@ object DisplayLifecycleManager {
 
         // Switched off by the server: remember it so it comes back as soon as the server allows it again
         if (!ServerOverrides.displayEnabled(policy)) {
-            if (!packet.virtual) cacheUnloadedDisplay(packet, facing, mode, currentDimensionKey())
+            if (!packet.virtual) cacheUnloadedDisplay(packet, facing, mode, worldOf(packet))
             return
         }
 
@@ -82,7 +82,7 @@ object DisplayLifecycleManager {
                     player.blockPosition(), packet.depth,
                 )
                 if (dist > renderDistance || !fitsBudget(dist, player.blockPosition())) {
-                    cacheUnloadedDisplay(packet, facing, mode, currentDimensionKey())
+                    cacheUnloadedDisplay(packet, facing, mode, worldOf(packet))
                     return
                 }
             }
@@ -95,7 +95,7 @@ object DisplayLifecycleManager {
             packet.id, packet.ownerId, Vector3i(packet.x, packet.y, packet.z), facing,
             packet.width, packet.height, packet.url, packet.lang,
             mode, packet.qualityCap, DisplayRotation.fromQuarterTurns(packet.rotation),
-            currentDimensionKey(), packet.depth, packet.conforming,
+            worldOf(packet), packet.depth, packet.conforming,
         )
         DisplayRegistry.screens[packet.id]?.let {
             it.virtual = packet.virtual
@@ -194,6 +194,12 @@ object DisplayLifecycleManager {
     private fun sameDimension(cached: String, current: String): Boolean =
         cached.isEmpty() || cached == current
 
+    /**
+     * The dimension [packet]'s display stands in: the server's world key (protocol 12), or else the player's current
+     * dimension (older servers only describe displays in the player's own world, fullscreen and PiP aside).
+     */
+    private fun worldOf(packet: DisplayInfo): String = displayWorld(packet.world, currentDimensionKey())
+
     internal fun currentDimensionKey(): String =
         Minecraft.getInstance().level?.let { dimensionKeyOf(it) } ?: ""
 
@@ -247,3 +253,6 @@ object DisplayLifecycleManager {
     private fun isValidDisplaySize(width: Int, height: Int, depth: Int = 1): Boolean =
         width in 1..MAX_DISPLAY_BLOCKS && height in 1..MAX_DISPLAY_BLOCKS && depth in 1..MAX_DISPLAY_BLOCKS
 }
+
+/** The display's dimension: [serverWorld] when the server named one, else [playerDimension] (older servers). */
+internal fun displayWorld(serverWorld: String, playerDimension: String): String = serverWorld.ifEmpty { playerDimension }

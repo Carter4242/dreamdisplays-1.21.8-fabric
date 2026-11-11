@@ -40,6 +40,7 @@ object VanillaPacketUtil {
                 depth = display.depth, conforming = display.conforming,
                 customData = DisplayPolicies.wireCustomData(display),
                 mediaGen = display.mediaGen,
+                world = if (display.virtual) "" else display.worldKey,
             ),
         )
     }

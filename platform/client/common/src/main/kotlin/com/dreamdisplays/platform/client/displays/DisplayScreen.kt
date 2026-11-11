@@ -101,7 +101,12 @@ class DisplayScreen(
     /** Content rotation; only used for floor/ceiling (`UP`/`DOWN`) screens. */
     var rotation: DisplayRotation = DisplayRotation.NONE,
 
-    val dimensionKey: String = "",
+    /**
+     * Dimension the display stands in. From a protocol-12 server it is the server's own world key
+     * (`DisplayInfo.world`, kept up to date by [updateData]); from older servers, the player's dimension when the
+     * display was first described.
+     */
+    var dimensionKey: String = "",
 
     /** Blocks the screen extends away from [facing]. `1` for a flat wall. */
     var depth: Int = 1,
@@ -833,6 +838,7 @@ class DisplayScreen(
     /** Updates position, dimensions, and video URL from an incoming [DisplayInfo] packet. */
     fun updateData(packet: DisplayInfo) {
         virtual = packet.virtual
+        if (packet.world.isNotEmpty()) dimensionKey = packet.world
         customData = acceptedCustomData(packet)
         updatePolicy(customData)
         x = packet.x

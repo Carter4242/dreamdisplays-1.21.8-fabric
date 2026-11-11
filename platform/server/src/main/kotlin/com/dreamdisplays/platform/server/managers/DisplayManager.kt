@@ -214,6 +214,8 @@ object DisplayManager {
             depth = display.depth, conforming = display.conforming,
             customData = DisplayPolicies.wireCustomData(display),
             mediaGen = display.mediaGen,
+            // Virtual (URL-only broadcast) displays stand nowhere
+            world = if (display.virtual) "" else display.pos1.world?.key?.toString().orEmpty(),
         )
     }
 
