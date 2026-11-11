@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.policy
 
+import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.core.display.policy.ServerClientSettings
 import com.dreamdisplays.core.display.viewer.ViewerEntry
 import com.dreamdisplays.core.display.viewer.ViewerReportStore
@@ -39,11 +40,7 @@ object ClientDiagnostics {
         val now = System.currentTimeMillis()
         Scheduler.forEachTrackedPlayer { player ->
             if (!V2PlayerTracker.isV2(player.uniqueId)) return@forEachTrackedPlayer
-            // A player with their own policy (/display policy player) or log level (/display diag loglevel) gets it on
-            // top of the server-wide policy; the log level wins
-            val id = player.uniqueId
-            val bytes = if (PlayerPolicyOverrides.get(id) == null && ClientLogLevels.get(id) == null) shared
-            else ClientLogLevels.applyTo(PlayerPolicyOverrides.applyTo(serverWide, id), id).encode()
+            val bytes = policyFor(player.uniqueId, serverWide, shared)
             val last = sent[player.uniqueId]
             if (last != null && last.bytes.contentEquals(bytes) && now - last.atMs < RESEND_MS) return@forEachTrackedPlayer
             sent[player.uniqueId] = Sent(bytes, now)
@@ -52,6 +49,26 @@ object ClientDiagnostics {
         reports.prune(now, staleAfterMs())
         reports.displays().forEach { id -> if (DisplayManager.getDisplayData(id) == null) reports.forgetDisplay(id) }
     }
+
+    /**
+     * Sends [player] the current policy at once: their hello, before any display is described, so the first displays
+     * already load on the paths it picks (a decoder or upload path it rules out never opens, nothing is rebuilt a
+     * second later).
+     */
+    fun sendPolicy(player: Player) {
+        val serverWide = DisplayPolicies.defaults().serverWide()
+        val bytes = policyFor(player.uniqueId, serverWide, serverWide.encode())
+        sent[player.uniqueId] = Sent(bytes, System.currentTimeMillis())
+        PaperV2Networking.send([player], ServerPolicy(bytes))
+    }
+
+    /**
+     * The encoded policy for [id]: [shared] (the encoded [serverWide]), unless the player has their own policy
+     * (`/display policy player`) or log level (`/display diag loglevel`), which go on top; the log level wins.
+     */
+    private fun policyFor(id: UUID, serverWide: DisplayPolicy, shared: ByteArray): ByteArray =
+        if (PlayerPolicyOverrides.get(id) == null && ClientLogLevels.get(id) == null) shared
+        else ClientLogLevels.applyTo(PlayerPolicyOverrides.applyTo(serverWide, id), id).encode()
 
     /** Takes a report from [player]; unknown displays and reports over the rate limit are dropped. */
     fun onReport(player: Player, report: ViewerReport) {
