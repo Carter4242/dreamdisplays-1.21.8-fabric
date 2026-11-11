@@ -174,9 +174,9 @@ object PaperV2Networking : PluginMessageListener {
             )
 
             is ScreenShareRequest -> if (packet.heartbeat) {
-                ScreenShareActions.onHeartbeat(player, packet.id)
+                ScreenShareActions.onHeartbeat(player, packet.id, packet.nonce)
             } else {
-                ScreenShareActions.onRequest(player, packet.id, packet.start)
+                ScreenShareActions.onRequest(player, packet.id, packet.start, packet.nonce)
             }
 
             is PipPin -> if (packet.pinned) {

@@ -38,6 +38,24 @@ class ScreenShareWireTest {
     }
 
     @Test
+    fun `the share nonce and the sound lever travel, and their absence reads as an older peer`() {
+        val request = ScreenShareRequest(id, start = true, nonce = 0x1234_5678_9abcL)
+        assertEquals(request, PacketRegistry.decode(PacketRegistry.encode(request), PacketDirection.CLIENT_TO_SERVER))
+        val state = ScreenShareState(id, active = false, error = "x", nonce = -42L, noSound = true)
+        assertEquals(state, PacketRegistry.decode(PacketRegistry.encode(state), PacketDirection.SERVER_TO_CLIENT))
+        val old = PacketRegistry.decode(
+            PacketRegistry.encode(ScreenShareState(id, active = true, publishUrl = "rtmp://r/a")), PacketDirection.SERVER_TO_CLIENT,
+        ) as ScreenShareState
+        assertEquals(0L, old.nonce)
+        // Absent = sound allowed: a server that predates the lever keeps today's behaviour
+        assertEquals(false, old.noSound)
+        val oldRequest = PacketRegistry.decode(
+            PacketRegistry.encode(ScreenShareRequest(id, start = true)), PacketDirection.CLIENT_TO_SERVER,
+        ) as ScreenShareRequest
+        assertEquals(0L, oldRequest.nonce)
+    }
+
+    @Test
     fun `type ids stay put`() {
         assertEquals(80, PacketType.SCREEN_SHARE_REQUEST.id)
         assertEquals(81, PacketType.SCREEN_SHARE_STATE.id)

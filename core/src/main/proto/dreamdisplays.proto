@@ -706,6 +706,8 @@ message ScreenShareRequest {
   optional bool start = 2;
   // WARNING: a default value decoded when value is missing
   optional bool heartbeat = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int64 nonce = 4;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ScreenShareState'
@@ -724,6 +726,10 @@ message ScreenShareState {
   optional int32 maxFps = 6;
   // WARNING: a default value decoded when value is missing
   optional int32 maxHeight = 7;
+  // WARNING: a default value decoded when value is missing
+  optional int64 nonce = 9;
+  // WARNING: a default value decoded when value is missing
+  optional bool noSound = 10;
 }
 
 message Uuid {

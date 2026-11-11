@@ -78,6 +78,7 @@ object ConfigCommand {
         Key("live.share_encoder", PolicyPaths.Kind.Choice(listOf("auto", "software"))) { it.live.share_encoder },
         Key("live.share_max_fps", PolicyPaths.Kind.Whole(0, 60)) { it.live.share_max_fps },
         Key("live.share_max_height", PolicyPaths.Kind.Whole(0, 2160)) { it.live.share_max_height },
+        Key("live.share_sound", PolicyPaths.Kind.Bool) { it.live.share_sound },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }

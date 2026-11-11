@@ -55,6 +55,8 @@ object ScreenShareActions {
         val previousEntry: QueueItem?,
         /** The previous video's stored length (ns), saved in its place while the share runs. */
         val previousDuration: Long?,
+        /** The sharer's [ScreenShareRequest.nonce] for this share (0: an older client), echoed on every state about it. */
+        val nonce: Long,
     ) {
         /** When the sharer's last heartbeat (or the start) arrived, epoch ms. */
         @Volatile
@@ -77,17 +79,25 @@ object ScreenShareActions {
     fun mayShare(player: Player): Boolean =
         PaperServer.config.settings.live.shareEnabled && player.hasPermission(PaperServer.config.permissions.share)
 
-    /** Handles a client's start / stop request for display [displayId]. */
-    fun onRequest(player: Player, displayId: UUID, start: Boolean) {
+    /** Handles a client's start / stop request for display [displayId]; [nonce] names the share (0: an older client). */
+    fun onRequest(player: Player, displayId: UUID, start: Boolean, nonce: Long = 0L) {
         if (!start) {
             val share = byDisplay[displayId]
-            if (share != null && (share.sharerId == player.uniqueId || isAdmin(player))) end(share, EndReason.REQUESTED)
-            else reply(player, displayId, active = false)
+            val own = share != null && share.sharerId == player.uniqueId
+            // The sharer's stop for an earlier share on this display must not end the one that replaced it
+            if (share != null && ((own && ScreenShareServerRules.sameShare(share.nonce, nonce)) || (!own && isAdmin(player)))) {
+                end(share, EndReason.REQUESTED)
+            } else {
+                reply(player, displayId, active = false, nonce = nonce)
+            }
             return
         }
-        if (!throttle.tryAcquire(player.uniqueId, REQUEST_COOLDOWN_MS)) return
+        if (!throttle.tryAcquire(player.uniqueId, REQUEST_COOLDOWN_MS)) {
+            // Answer it: a dropped start would leave the client waiting with nothing on screen
+            return reply(player, displayId, active = false, error = "Wait a moment before sharing again.", nonce = nonce)
+        }
         val refusal = refusalFor(player, displayId)
-        if (refusal != null) return reply(player, displayId, active = false, error = refusal)
+        if (refusal != null) return reply(player, displayId, active = false, error = refusal, nonce = nonce)
         val display = DisplayManager.getDisplayData(displayId) as PaperDisplayData
 
         // Only this player is ever sent the publish URL (it carries the relay's publish credentials); everyone sees the
@@ -103,11 +113,12 @@ object ScreenShareActions {
             SavedPlayback.of(TimelineManager.timelineOf(display.id), System.currentTimeMillis()),
             QueueManager.playingEntry(display),
             display.duration,
+            nonce,
         )
         byDisplay[displayId] = share
         DisplayActions.applyVideo(display, LiveStreamUrls.fromTemplate(live.relay_play_url, streamId), "", player, persist = false)
         logger.info("{} started sharing their screen to display {}.", player.name, display.id)
-        reply(player, displayId, active = true, publishUrl = LiveStreamUrls.fromTemplate(live.relay_publish_url, streamId))
+        reply(player, displayId, active = true, publishUrl = LiveStreamUrls.fromTemplate(live.relay_publish_url, streamId), nonce = nonce)
     }
 
     /** Why [player] may not share to [displayId] right now (a message for them), or null when they may. */
@@ -151,15 +162,16 @@ object ScreenShareActions {
 
     /**
      * The sharing client is still capturing to [displayId]. A heartbeat for a share this server does not know (ended
-     * here, or never started) is answered with "inactive", so a client that missed the end stops capturing.
+     * here, never started, or an earlier share of [nonce] on this display) is answered with "inactive" for that
+     * [nonce], so a client that missed the end stops that capture and nothing newer.
      */
-    fun onHeartbeat(player: Player, displayId: UUID) {
+    fun onHeartbeat(player: Player, displayId: UUID, nonce: Long = 0L) {
         val share = byDisplay[displayId]
-        if (share != null && share.sharerId == player.uniqueId) {
+        if (share != null && share.sharerId == player.uniqueId && ScreenShareServerRules.sameShare(share.nonce, nonce)) {
             share.lastHeartbeatMs = System.currentTimeMillis()
             return
         }
-        reply(player, displayId, active = false)
+        reply(player, displayId, active = false, nonce = nonce)
     }
 
     /**
@@ -224,7 +236,7 @@ object ScreenShareActions {
         val sharer = Bukkit.getPlayer(share.sharerId)
         // Tell the sharer first, so their capture stops before (or as) the display changes back
         if (ScreenShareServerRules.notifiesSharer(reason) && sharer != null) {
-            reply(sharer, share.displayId, active = false, error = error)
+            reply(sharer, share.displayId, active = false, error = error, nonce = share.nonce)
         }
         // Only while the display still shows this share: anything else was set since and stays. The previous video
         // comes back paused where it was, at its speed, and still the queue entry it was; it never plays by itself.
@@ -238,11 +250,14 @@ object ScreenShareActions {
         logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }
 
-    private fun reply(player: Player, displayId: UUID, active: Boolean, publishUrl: String = "", error: String = "") {
+    private fun reply(
+        player: Player, displayId: UUID, active: Boolean, publishUrl: String = "", error: String = "", nonce: Long = 0L,
+    ) {
         val live = PaperServer.config.settings.live
         PaperV2Networking.send(
             [player],
-            ScreenShareState(displayId, active, publishUrl, error, live.share_encoder, live.share_max_fps, live.share_max_height),
+            ScreenShareState(displayId, active, publishUrl, error, live.share_encoder, live.share_max_fps, live.share_max_height)
+                .copy(nonce = nonce, noSound = !live.share_sound),
         )
     }
 

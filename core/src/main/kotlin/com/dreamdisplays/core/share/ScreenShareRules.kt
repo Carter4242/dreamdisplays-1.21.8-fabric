@@ -213,6 +213,13 @@ object ScreenShareServerRules {
     fun restoresPreviousVideo(reason: EndReason): Boolean =
         reason != EndReason.VIDEO_SET_BY_HAND && reason != EndReason.DISPLAY_REMOVED
 
+    /**
+     * Whether a sharer's stop or heartbeat carrying [requestNonce] is about the running share started with
+     * [shareNonce]. 0 on either side is an older client or server: matched by display alone.
+     */
+    fun sameShare(shareNonce: Long, requestNonce: Long): Boolean =
+        shareNonce == 0L || requestNonce == 0L || shareNonce == requestNonce
+
     /** Whether the sharer's client is told to stop for [reason] (it already knows when it asked, or it is gone). */
     fun notifiesSharer(reason: EndReason): Boolean = reason != EndReason.SHARER_QUIT
 }

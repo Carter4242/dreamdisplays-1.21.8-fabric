@@ -170,4 +170,13 @@ class ScreenShareRulesTest {
         assertFalse(ScreenShareServerRules.stillShown("https://youtu.be/xyz", "ddabc123"))
         assertFalse(ScreenShareServerRules.stillShown("", "ddabc123"))
     }
+
+    @Test
+    fun `a stop or heartbeat only touches the share it names`() {
+        assertTrue(ScreenShareServerRules.sameShare(7L, 7L))
+        assertFalse(ScreenShareServerRules.sameShare(7L, 6L))
+        // Older client (no nonce) or a share started by one: by display alone
+        assertTrue(ScreenShareServerRules.sameShare(7L, 0L))
+        assertTrue(ScreenShareServerRules.sameShare(0L, 6L))
+    }
 }

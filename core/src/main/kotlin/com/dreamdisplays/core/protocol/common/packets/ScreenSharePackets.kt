@@ -17,12 +17,18 @@ import java.util.*
  * that advertise `ServerFeature.SCREEN_SHARE_HEARTBEAT`; such a server ends a share whose heartbeats stop, and answers a
  * heartbeat for a share it does not know with an inactive [ScreenShareState] (the client then stops capturing). A
  * server without that feature would read it as a stop request, so it is never sent there.
+ *
+ * [nonce]: which share this is about. A start carries a fresh non-zero value the client picks; its stop and heartbeats
+ * carry the same one. The server echoes it on every [ScreenShareState] about that request or share, so a late answer
+ * about an earlier share (a stop's or heartbeat's "inactive") cannot cancel a newer start on the same display. 0 = not
+ * given (an older client): matched by display only.
  */
 @Serializable
 data class ScreenShareRequest(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
     @ProtoNumber(2) val start: Boolean = false,
     @ProtoNumber(3) val heartbeat: Boolean = false,
+    @ProtoNumber(4) val nonce: Long = 0L,
 ) : DreamPacket
 
 /**
@@ -42,6 +48,14 @@ data class ScreenShareState(
     @ProtoNumber(6) val maxFps: Int = 0,
     /** Picture height cap for this share (the width follows), 0 = the client's default. */
     @ProtoNumber(7) val maxHeight: Int = 0,
+    // 8: bitrateKbps (share-latency)
+    /**
+     * The [ScreenShareRequest.nonce] this answers, or the running share's own: a client applies an inactive state only
+     * to the pending start or running capture with the same nonce. 0 = an older server (match by display).
+     */
+    @ProtoNumber(9) val nonce: Long = 0L,
+    /** The server allows no sound with shares: capture the picture only. False (absent) = sound as the sharer picked. */
+    @ProtoNumber(10) val noSound: Boolean = false,
 ) : DreamPacket {
     companion object {
         const val ENCODER_AUTO = "auto"
@@ -51,5 +65,5 @@ data class ScreenShareState(
     /** Never prints [publishUrl]: it carries the relay's publish credentials. */
     override fun toString(): String =
         "ScreenShareState(id=$id, active=$active, publishUrl=${if (publishUrl.isEmpty()) "" else "<redacted>"}, error=$error, " +
-            "encoder=$encoder, maxFps=$maxFps, maxHeight=$maxHeight)"
+            "encoder=$encoder, maxFps=$maxFps, maxHeight=$maxHeight, nonce=$nonce, noSound=$noSound)"
 }

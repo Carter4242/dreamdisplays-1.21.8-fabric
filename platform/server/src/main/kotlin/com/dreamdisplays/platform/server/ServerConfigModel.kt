@@ -150,6 +150,8 @@ data class SettingsSection(
         val share_max_fps: Int = 0,
         /** Picture height cap for shares, 0 = the client's default (1080). */
         val share_max_height: Int = 0,
+        /** False: shares carry no sound whatever the sharer picked (sent with every share start). */
+        val share_sound: Boolean = true,
     ) {
         /**
          * Why the relay templates cannot be used (sharing stays off), or null. Checked at load as well as by
@@ -384,6 +386,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
                 ?.takeIf { it == "auto" || it == "software" } ?: "auto",
             share_max_fps = t.numberOrNull("live.share_max_fps")?.toInt()?.coerceIn(0, 60) ?: 0,
             share_max_height = t.numberOrNull("live.share_max_height")?.toInt()?.coerceIn(0, 2160) ?: 0,
+            share_sound = t.boolOrNull("live.share_sound") ?: true,
         ),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
