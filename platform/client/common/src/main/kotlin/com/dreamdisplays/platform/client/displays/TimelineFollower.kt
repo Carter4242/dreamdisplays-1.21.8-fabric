@@ -38,17 +38,28 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private var landing: LeadKind? = null
     private var landingRunningSinceNanos = 0L
     private var lastSnapNanos = 0L
+
+    /** When a player held at its end was last restarted; apart from [lastSnapNanos], so it never delays a paused snap. */
+    private var lastHeldRestartNanos = 0L
     private var coldAfterSnap = false
 
     /** The player is a preloaded queue item held ready on its first frame: tolerate a small paused offset. */
     private var warmAdopted = false
 
-    /** The video length the server's last timeline carried (0 = unknown); used only while the player knows none. */
+    /**
+     * The length the server's last timeline carried (0 = unknown): where the server's clock wraps and restarts the
+     * video for everyone, its scheduled end (a little past the media's own end).
+     */
     @Volatile
     private var serverDurationMs = 0L
 
-    /** Length of the playing video for wrapping, clamping and the end hold: the player's own, else the timeline's. */
-    private fun knownDurationMs(): Long = followDurationMs(screen.mediaPlayerDurationNanos / 1_000_000L, serverDurationMs)
+    private fun localDurationMs(): Long = screen.mediaPlayerDurationNanos / 1_000_000L
+
+    /** Where the shared clock wraps: the server timeline's length, else the player's own (see [followLoopMs]). */
+    private fun loopPeriodMs(): Long = followLoopMs(localDurationMs(), serverDurationMs)
+
+    /** How far into the media a seek may go: the player's own length, else the timeline's (see [followDurationMs]). */
+    private fun mediaEndMs(): Long = followDurationMs(localDurationMs(), serverDurationMs)
 
     /** Karaoke lead in the last timeline (0 = not singing here). */
     private var karaokeLeadMs = 0
@@ -115,7 +126,10 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             lastTickNanos = 0L
             lastStallEndNanos = 0L
             lastSnapNanos = 0L
+            lastHeldRestartNanos = 0L
             coldAfterSnap = false
+            // The previous video's length must never wrap the next one's clock; its first timeline brings its own
+            serverDurationMs = 0L
             warmAdopted = false
             jumpToLead = false
             // The new player starts at rate 1; only our bookkeeping needs to follow
@@ -243,9 +257,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     fun pausedTargetNanos(): Long? {
         synchronized(lock) {
             if (!estimator.hasTimeline || !estimator.paused) return null
-            val durationMs = knownDurationMs()
             val target = estimator.targetMs(System.nanoTime() / NANOS_PER_MS).roundToLong()
-            return clampSeek(target, loop, durationMs) * 1_000_000L
+            return clampSeek(target, loop) * 1_000_000L
         }
     }
 
@@ -303,10 +316,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         if (!screen.canSeek()) return
         val settings = screen.syncSettings
         controller.settings = settings
-        val durationMs = knownDurationMs()
-        val target = wrap(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, durationMs)
+        // The shared clock wraps where the server's does (its timeline's length), not at this player's media length:
+        // between the two the server has not restarted yet, and this player holds its last frame
+        val periodMs = loopPeriodMs()
+        val target = wrapTimeline(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, periodMs)
         val localMs = screen.syncPositionNanos / 1_000_000L
-        val contentDrift = signedDrift(target - localMs, loop, durationMs)
+        val contentDrift = signedDrift(target - localMs, loop, periodMs)
         // drift > 0: this client is behind the server; < 0: ahead. Judged in real time, so a given content gap
         // counts for less at high speed (it passes sooner) and more at low speed.
         val drift = estimator.toRealMs(contentDrift.toDouble()).roundToLong()
@@ -329,8 +344,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 jumpToLead = true
                 return
             }
-            if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
-                screen.seekVideoTo(target * 1_000_000L)
+            // Held where this player's media can show the paused position: a clock paused past the media's end (the
+            // server's tail before its restart) is measured against the last frame shown, not snapped at forever
+            val snapMs = clampSeek(target, loop)
+            if (abs(snapMs - localMs) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
+                screen.seekVideoTo(snapMs * 1_000_000L)
                 lastSnapNanos = now
                 coldAfterSnap = true
                 note(Action.SNAP)
@@ -342,12 +360,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // This client's stream ended before the shared clock: hold the last frame until the timeline wraps or is
             // moved back (a queue's next entry replaces the player instead)
             controller.resetMeasurement()
-            if (!screen.isQueueSwitchPending && heldEndRestarts(target, durationMs, END_HOLD_MS) &&
-                now - lastSnapNanos >= SNAP_COOLDOWN_NANOS
+            if (!screen.isQueueSwitchPending && heldEndRestarts(target, periodMs, END_HOLD_MS) &&
+                now - lastHeldRestartNanos >= SNAP_COOLDOWN_NANOS
             ) {
-                lastSnapNanos = now
+                lastHeldRestartNanos = now
                 val startMs = target + contentMs(coldLeadMs, estimator.rate)
-                screen.seekVideoTo(clampSeek(startMs, loop, durationMs) * 1_000_000L)
+                screen.seekVideoTo(clampSeek(startMs, loop) * 1_000_000L)
                 expectLanding(LeadKind.COLD)
                 correctAfterLanding = true
                 note(Action.SEEK)
@@ -365,7 +383,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             jumpToLead = false
             if (abs(drift) > settings.deadBandMs) {
                 logVerbose("[dd-sync] {} karaoke lead now {}ms: jumping {}ms", shortId(), karaokeLeadMs, signed(drift.toDouble()))
-                seekPlaying(target, durationMs, now)
+                seekPlaying(target, now)
                 return
             }
         }
@@ -401,7 +419,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 val quick = screen.seeksCheaply
                 val aim = if (!newTarget && kind == (if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK))
                     learnerFor(kind)?.impliedLeadMs(landingLeadMs, filtered) else null
-                seekPlaying(target, durationMs, now, aim)
+                seekPlaying(target, now, aim)
                 landingIsCorrection = true
                 return
             }
@@ -416,7 +434,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
         val decision = controller.update(drift.toDouble(), now / NANOS_PER_MS, cheapSeeks = screen.seeksCheaply)
         if (decision.seek) {
-            seekPlaying(target, durationMs, now)
+            seekPlaying(target, now)
         } else {
             pushRatio(decision.ratio, now)
             if (decision.ratio != 1.0) note(Action.RATE)
@@ -431,10 +449,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         if (cold && !screen.isLive && screen.canSeek() && estimator.hasTimeline && !estimator.paused) {
             // A cold start restarts the stream from the parked position and lands that much later; start
             // ahead by the learned restart time instead.
-            val durationMs = knownDurationMs()
             val now = System.nanoTime()
             val target = estimator.targetMs(now / NANOS_PER_MS).roundToLong() + contentMs(coldLeadMs, estimator.rate)
-            screen.seekVideoTo(clampSeek(target, loop, durationMs) * 1_000_000L)
+            screen.seekVideoTo(clampSeek(target, loop) * 1_000_000L)
             expectLanding(LeadKind.COLD)
         } else if (!screen.isLive && screen.canSeek()) {
             expectLanding(LeadKind.WARM)
@@ -444,13 +461,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         screen.applyServerPaused(false)
     }
 
-    private fun seekPlaying(targetMs: Long, durationMs: Long, now: Long, aimLeadMs: Long? = null) {
+    private fun seekPlaying(targetMs: Long, now: Long, aimLeadMs: Long? = null) {
         // An in-place seek keeps the last frame up and lands within a frame or two; a restart fades back in
         val quick = screen.seeksCheaply
         val kind = if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK
         // Overshoot by the learned restart cost so the post-restart position lands on the live point
         val lead = aimLeadMs ?: leadFor(kind)
-        val seekMs = clampSeek(targetMs + contentMs(lead, estimator.rate), loop, durationMs)
+        val seekMs = clampSeek(targetMs + contentMs(lead, estimator.rate), loop)
         pushRatio(1.0, now)
         if (!quick) screen.clearRenderedFrameForTimeline()
         screen.seekVideoTo(seekMs * 1_000_000L)
@@ -572,23 +589,16 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private fun contentMs(realMs: Long, rate: Double): Long =
         if (rate == 1.0) realMs else (realMs * rate).roundToLong()
 
-    private fun wrapForStart(ms: Long, loop: Boolean): Long =
-        clampSeek(ms, loop, knownDurationMs())
+    private fun wrapForStart(ms: Long, loop: Boolean): Long = clampSeek(ms, loop)
 
-    /** Wraps a looping target into the media, or keeps a one-shot target inside it (never past the end). */
-    private fun clampSeek(ms: Long, loop: Boolean, durationMs: Long): Long = when {
-        loop && durationMs > 0 -> wrap(ms, true, durationMs)
-        durationMs > 0 -> ms.coerceIn(0L, (durationMs - END_MARGIN_MS).coerceAtLeast(0L))
-        else -> ms.coerceAtLeast(0L)
-    }
+    /** Where a seek to shared position [ms] goes in this player's media (see [clampTimelineSeek]). */
+    private fun clampSeek(ms: Long, loop: Boolean): Long =
+        clampTimelineSeek(ms, loop, loopPeriodMs(), mediaEndMs(), END_MARGIN_MS)
 
-    private fun wrap(ms: Long, loop: Boolean, durationMs: Long): Long =
-        if (loop && durationMs > 0) ((ms % durationMs) + durationMs) % durationMs else ms.coerceAtLeast(0)
-
-    private fun signedDrift(rawDiff: Long, loop: Boolean, durationMs: Long): Long {
-        if (!loop || durationMs <= 0) return rawDiff
-        val half = durationMs / 2
-        return ((rawDiff % durationMs) + durationMs + half) % durationMs - half
+    private fun signedDrift(rawDiff: Long, loop: Boolean, periodMs: Long): Long {
+        if (!loop || periodMs <= 0) return rawDiff
+        val half = periodMs / 2
+        return ((rawDiff % periodMs) + periodMs + half) % periodMs - half
     }
 
     private fun oneWayLatencyMs(): Double = Companion.oneWayLatencyMs()
@@ -692,8 +702,37 @@ internal fun expectsJoinLanding(initialTimeline: Boolean, paused: Boolean, clock
     initialTimeline && !paused && !clockRunning && !landingPending
 
 /**
- * The video length a follower works with: the player's own [localMs], else the server timeline's [serverMs] (a player
- * whose source gave no length would otherwise hold its last frame forever when the timeline restarts), else 0.
+ * How far into the media a follower seeks: the player's own length [localMs], else the server timeline's [serverMs] (a
+ * player whose source gave no length would otherwise hold its last frame forever when the timeline restarts), else 0.
  */
 internal fun followDurationMs(localMs: Long, serverMs: Long): Long =
     if (localMs > 0L) localMs else serverMs.coerceAtLeast(0L)
+
+/**
+ * Where a follower wraps the shared clock: the server timeline's length [serverMs] whenever it carries one, since that
+ * is exactly where the server restarts the video for everyone (its scheduled end, a little past the media's own end;
+ * shorter when the server learned the media ends earlier than this player's header says). The player's own [localMs]
+ * only when the server knows none: wrapping at it while the server runs on would restart the video here first, and
+ * again when the server's restart arrives.
+ */
+internal fun followLoopMs(localMs: Long, serverMs: Long): Long =
+    if (serverMs > 0L) serverMs else localMs.coerceAtLeast(0L)
+
+/** [ms] wrapped into a loop of [periodMs] (unchanged, but not negative, when not looping or the period is unknown). */
+internal fun wrapTimeline(ms: Long, loop: Boolean, periodMs: Long): Long =
+    if (loop && periodMs > 0) ((ms % periodMs) + periodMs) % periodMs else ms.coerceAtLeast(0)
+
+/**
+ * Where a follower seeks for shared position [ms]: wrapped into the shared loop of [periodMs] when [loop], then kept
+ * inside this player's media of [endMs]. A one-shot target stays [marginMs] short of the end; a looping one only past
+ * the end (the server's few hundred ms after it, before it restarts) is pulled back that far, rather than wrapped
+ * round to the opening as it was when the loop wrapped at the media's own length.
+ */
+internal fun clampTimelineSeek(ms: Long, loop: Boolean, periodMs: Long, endMs: Long, marginMs: Long): Long {
+    val lastMs = (endMs - marginMs).coerceAtLeast(0L)
+    return when {
+        loop && periodMs > 0 -> wrapTimeline(ms, true, periodMs).let { if (endMs > 0 && it >= endMs) lastMs else it }
+        endMs > 0 -> ms.coerceIn(0L, lastMs)
+        else -> ms.coerceAtLeast(0L)
+    }
+}

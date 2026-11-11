@@ -71,4 +71,34 @@ class TimelineFollowerTest {
         assertEquals(0, followDurationMs(localMs = 0, serverMs = 0))
         assertTrue(heldEndRestarts(500, followDurationMs(0, 200_000), hold))
     }
+
+    @Test
+    fun `the shared clock wraps at the server timeline's length, not the media's`() {
+        assertEquals(11_150, followLoopMs(localMs = 10_000, serverMs = 11_150))
+        assertEquals(180_150, followLoopMs(localMs = 360_000, serverMs = 180_150))
+        assertEquals(10_000, followLoopMs(localMs = 10_000, serverMs = 0))
+        assertEquals(0, followLoopMs(localMs = 0, serverMs = 0))
+    }
+
+    @Test
+    fun `a whole-second clip held at its end waits for the server's restart instead of restarting itself`() {
+        // Media 10 s, server loops at 11.15 s (whole-second slack + end safety)
+        val period = followLoopMs(10_000, 11_150)
+        for (clock in longArrayOf(10_000, 10_500, 11_000, 11_149)) {
+            val target = wrapTimeline(clock, true, period)
+            assertFalse(heldEndRestarts(target, period, hold), "restarted itself at server clock $clock")
+        }
+        // Once the server's clock wraps, it starts over (the restart packet was late)
+        assertTrue(heldEndRestarts(wrapTimeline(11_160, true, period), period, hold))
+    }
+
+    @Test
+    fun `a seek into the server's tail past the media's end holds near the end instead of replaying the opening`() {
+        assertEquals(9_500, clampTimelineSeek(10_400, loop = true, periodMs = 11_150, endMs = 10_000, marginMs = 500))
+        assertEquals(9_800, clampTimelineSeek(9_800, loop = true, periodMs = 11_150, endMs = 10_000, marginMs = 500))
+        assertEquals(300, clampTimelineSeek(11_450, loop = true, periodMs = 11_150, endMs = 10_000, marginMs = 500))
+        assertEquals(9_500, clampTimelineSeek(12_000, loop = false, periodMs = 11_150, endMs = 10_000, marginMs = 500))
+        assertEquals(400, clampTimelineSeek(11_550, loop = true, periodMs = 11_150, endMs = 0, marginMs = 500))
+        assertEquals(0, clampTimelineSeek(-5, loop = false, periodMs = 0, endMs = 0, marginMs = 500))
+    }
 }
