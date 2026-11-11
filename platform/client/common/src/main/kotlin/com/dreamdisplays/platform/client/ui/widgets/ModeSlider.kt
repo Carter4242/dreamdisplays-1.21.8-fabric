@@ -7,6 +7,9 @@ import com.dreamdisplays.platform.client.ui.blitSprite
 import com.dreamdisplays.platform.client.utils.vanillaIdentifier
 import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.kit.UiWidget
+//? if >=1.21.6 <1.21.11 {
+import com.dreamdisplays.platform.client.ui.kit.LegacyCursor
+//?}
 import com.dreamdisplays.platform.client.ui.widgets.ModeSlider.Companion.PENDING_TIMEOUT_NANOS
 //? if >=1.21.11 {
 import com.mojang.blaze3d.platform.cursor.CursorTypes
@@ -94,6 +97,11 @@ class ModeSlider<T : Any>(
         //? if >=1.21.11 {
         if (isHovered) {
             g.requestCursor(if (active) CursorTypes.POINTING_HAND else CursorTypes.NOT_ALLOWED)
+        }
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (isHovered) {
+            (if (active) LegacyCursor.POINTING_HAND else LegacyCursor.NOT_ALLOWED).request()
         }
         //?}
     }

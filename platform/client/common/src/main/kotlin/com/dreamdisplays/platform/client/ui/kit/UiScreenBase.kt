@@ -185,7 +185,24 @@ abstract class UiScreenBase(title: Component) : Screen(title) {
         super.extractRenderState(g, mouseX, mouseY, delta)
     //?} else
     /*
-    //? if >=1.20 {
+    //? if >=1.20 <1.21.6 {
+    final override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) =
+        renderScaled(g, mouseX, mouseY, delta)
+    //?}
+    //? if >=1.21.6 <1.21.11 {
+    // No vanilla cursor API yet: show the shape widgets requested this frame (or the default arrow), and
+    // restore the arrow when the screen goes away so it never sticks in gameplay or other screens.
+    final override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
+        renderScaled(g, mouseX, mouseY, delta)
+        LegacyCursor.applyFrame()
+    }
+
+    override fun removed() {
+        LegacyCursor.reset()
+        super.removed()
+    }
+    //?}
+    //? if >=1.21.11 {
     final override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) =
         renderScaled(g, mouseX, mouseY, delta)
     //?}

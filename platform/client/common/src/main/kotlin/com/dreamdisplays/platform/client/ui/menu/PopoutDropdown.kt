@@ -105,6 +105,9 @@ class PopoutDropdown(
         //? if >=1.21.11 {
         if (visible && hovered >= 0 && animProgress > 0.5f) g.requestCursor(CursorTypes.POINTING_HAND)
         //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (visible && hovered >= 0 && animProgress > 0.5f) LegacyCursor.POINTING_HAND.request()
+        //?}
 
         //? if >=1.21.6 {
         matrices.popMatrix()

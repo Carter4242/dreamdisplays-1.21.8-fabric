@@ -97,7 +97,30 @@ abstract class UiWidget(message: Component) : AbstractWidget(0, 0, 0, 0, message
         )
     //?}
 
-    //? if >=1.19.4 <1.21.11 {
+    //? if >=1.21.6 <1.21.11 {
+    // False while something else (e.g. a hover preview) needs the space a label tooltip would cover.
+    protected open fun showsLabelTooltip(): Boolean = true
+
+    // Draws [text] centered over the widget with vanilla scrolling-on-overflow behavior; when it overflows,
+    // hovering shows the full text as a tooltip.
+    protected fun drawScrollingLabel(g: GuiGraphicsCompat, text: Component, padding: Int) {
+        val font = net.minecraft.client.Minecraft.getInstance().font
+        renderScrollingString(
+            g, font, text, x + padding, y, x + width - padding, y + height,
+            ((alpha * 255).toInt().coerceIn(0, 255) shl 24) or 0xFFFFFF,
+        )
+        if (isHovered && showsLabelTooltip() && font.width(text) > width - 2 * padding) {
+            // Deferred tooltips draw after the screen's scale transform is popped, so anchor at the real mouse.
+            val mc = net.minecraft.client.Minecraft.getInstance()
+            val mouse = mc.mouseHandler
+            g.setTooltipForNextFrame(
+                font, text, mouse.getScaledXPos(mc.window).toInt(), mouse.getScaledYPos(mc.window).toInt(),
+            )
+        }
+    }
+    //?}
+
+    //? if >=1.19.4 <1.21.6 {
     // Draws [text] centered over the widget with vanilla scrolling-on-overflow behavior.
     protected fun drawScrollingLabel(g: GuiGraphicsCompat, text: Component, padding: Int) =
         renderScrollingString(

@@ -13,6 +13,9 @@ import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
 import com.dreamdisplays.platform.client.ui.drawText
 import com.dreamdisplays.platform.client.ui.kit.UiText
 import com.dreamdisplays.platform.client.ui.kit.UiWidget
+//? if >=1.21.6 <1.21.11 {
+import com.dreamdisplays.platform.client.ui.kit.LegacyCursor
+//?}
 //? if >=1.21.11 {
 import com.mojang.blaze3d.platform.cursor.CursorTypes
 //?}
@@ -91,6 +94,11 @@ class SeekBar(
 
     override fun handlesWholeWidgetCursor(): Boolean = false
 
+    //? if >=1.21.6 <1.21.11 {
+    // The scrub preview opens above the bar on hover; a full-text label tooltip would cover it.
+    override fun showsLabelTooltip(): Boolean = previewFrame == null || !active || duration() <= 0
+    //?}
+
     override fun draw(g: GuiGraphicsCompat, mouseX: Int, mouseY: Int, partialTick: Float) {
         val dur = duration()
         val cur = if (dragging) dragTargetNanos else current()
@@ -150,6 +158,11 @@ class SeekBar(
         //? if >=1.21.11 {
         if (isHovered) {
             g.requestCursor(if (active && dur > 0) CursorTypes.RESIZE_EW else CursorTypes.NOT_ALLOWED)
+        }
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (isHovered) {
+            (if (active && dur > 0) LegacyCursor.RESIZE_EW else LegacyCursor.NOT_ALLOWED).request()
         }
         //?}
     }
