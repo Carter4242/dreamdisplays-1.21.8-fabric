@@ -195,7 +195,14 @@ object ScreenShareActions {
             WorldGuardRegions.isRegionMember(player, display.pos1)
         }
         if (!PlaybackPermissions.canSetVideo(ctx)) return "You may not change this display's video."
-        if (!DisplayManager.isPlayerInRange(player, display)) return "Get closer to the display to share to it."
+        // The lease answer is checked on Folia's global thread, which may not read entity positions: its proximity index
+        // answers range there, as in [tick]
+        val inRange = if (PlatformUtil.isFolia) {
+            player.uniqueId in DisplayManager.getTrackedNearbyPlayerIds(display)
+        } else {
+            DisplayManager.isPlayerInRange(player, display)
+        }
+        if (!inRange) return "Get closer to the display to share to it."
         val running = byDisplay[displayId]?.sharerId ?: starting[displayId]?.sharerId
         if (running != null && running != player.uniqueId && !isAdmin(player)) {
             return "Someone is already sharing to this display."
