@@ -4,6 +4,7 @@ import org.slf4j.LoggerFactory
 import java.util.*
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.DataLine
+import javax.sound.sampled.Line
 import javax.sound.sampled.Mixer
 import javax.sound.sampled.SourceDataLine
 
@@ -45,6 +46,27 @@ object AudioOutputHooks {
         }
         return AudioSystem.getLine(info) as SourceDataLine
     }
+
+    /**
+     * Output devices to try, best first: `preferred` is the game's device (when it can be matched) followed by the
+     * system default (`null`); `other` is every remaining device that can play a stream, for when neither of those
+     * opens at all.
+     */
+    fun candidateMixers(): Pair<List<Mixer.Info?>, List<Mixer.Info>> {
+        val outputs = runCatching {
+            AudioSystem.getMixerInfo().filter { info ->
+                runCatching { AudioSystem.getMixer(info).isLineSupported(ANY_SOURCE_LINE) }.getOrDefault(false)
+            }
+        }.getOrDefault(emptyList())
+        val wanted = runCatching { preferredDeviceName() }.getOrNull()?.trim().orEmpty()
+        val matched = if (wanted.isEmpty()) null else bestMatch(wanted, outputs.map { it.name to it })
+        if (matched != null) logOnce("Display audio follows the game's device \"$wanted\" -> \"${matched.name}\".")
+        else if (wanted.isNotEmpty()) logOnce("Display audio: no output matches the game's device \"$wanted\"; using the system default.")
+        val preferred = listOfNotNull(matched) + listOf<Mixer.Info?>(null)
+        return preferred to outputs.filter { it != matched }
+    }
+
+    private val ANY_SOURCE_LINE = Line.Info(SourceDataLine::class.java)
 
     private fun logOnce(message: String) {
         if (lastLogged == message) return

@@ -45,6 +45,10 @@ internal class AudioSink(private val debugLabel: String) {
         /** Largest rate change per PCM chunk (50 ms), so a new rate is reached smoothly: 1 % takes 1 s. */
         private const val RATE_STEP_PER_CHUNK = 0.0005
 
+        /** Device + format that last had to be used instead of the content format; tried first next time. */
+        @Volatile
+        private var lastFallback: Pair<Mixer.Info?, PcmLineFormat>? = null
+
         /** Converts a count of stereo 16-bit PCM frames into nanos of content. */
         fun framesToNanos(frames: Long): Long = frames * 1_000_000_000L / SAMPLE_RATE
 
@@ -81,14 +85,17 @@ internal class AudioSink(private val debugLabel: String) {
         @JvmField
         var pcmFlowing = false
 
-        /** Which content frame each output frame of [line] carries; identity unless the rate was changed. */
+        /**
+         * Converts content into [line]'s format and maps its output frames back to content frames (identity for the
+         * content format at rate 1). Set before the line is published.
+         */
+        @Volatile
         @JvmField
-        val frameMap = ContentFrameMap()
-
-        /** Output frames written to [line] so far (pump thread only). */
-        @JvmField
-        var outFramesWritten = 0L
+        var output: PcmLineOutput? = null
     }
+
+    /** An opened output line and the converter that feeds it. */
+    private class OpenedLine(val line: SourceDataLine, val output: PcmLineOutput)
 
     /**
      * Content catch-up spec for session starting during playback (discard leading PCM).
@@ -125,8 +132,10 @@ internal class AudioSink(private val debugLabel: String) {
         val s = current ?: return ClockSample.NONE
         val ln = s.line ?: return ClockSample.NONE
         if (!s.pcmFlowing) return ClockSample.NONE
-        // Content frames, not output frames: while the sync rate is not 1 the two run apart
-        val contentFrames = s.frameMap.contentAt(ln.longFramePosition)
+        // Content frames, not output frames: they run apart while the sync rate is not 1 or the device runs at
+        // another sample rate
+        val position = ln.longFramePosition
+        val contentFrames = s.output?.frameMap?.contentAt(position) ?: position
         return ClockSample(s.contentStartNanos + framesToNanos(contentFrames), s.epoch, s.originKnown)
     }
 
@@ -139,6 +148,9 @@ internal class AudioSink(private val debugLabel: String) {
     }
 
     private val pendingResyncNanos = AtomicLong(0)
+
+    @Volatile
+    private var lastLineChoice: String? = null
 
     /**
      * Requested playback rate as content frames per output frame (1.01 plays 1 % fast), used to keep synced
@@ -274,21 +286,16 @@ internal class AudioSink(private val debugLabel: String) {
         fun isInterrupted() = terminated.get() || stopFlag.get()
         runCatching {
             proc.inputStream.use { input ->
-                val fmt = pcmFormat()
-                val info = DataLine.Info(SourceDataLine::class.java, fmt)
-                if (!AudioSystem.isLineSupported(info)) {
-                    logger.warn("$debugLabel PCM line not supported (switch).")
-                    return@use
-                }
-                newLine = openLine(info, fmt) ?: run {
+                val opened = openLine() ?: run {
                     logger.warn("$debugLabel [audio] switch line failed to open.")
                     return@use
                 }
+                newLine = opened.line
 
                 if (isInterrupted()) return@use
                 val skippedNanos = catchUp?.let { skipCatchUp(input, it, terminated, stopFlag) } ?: 0L
 
-                val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, newLine, terminated, stopFlag)
+                val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, opened, terminated, stopFlag)
                 if (isInterrupted() || primedBytes <= 0) return@use
                 if (isInterrupted() || !shouldPromote()) return@use
 
@@ -300,7 +307,7 @@ internal class AudioSink(private val debugLabel: String) {
                     runCatching { flush() }
                 }
                 val s = beginSession(contentStartNanos + skippedNanos, originKnown)
-                s.outFramesWritten = (primedBytes / BYTES_PER_FRAME).toLong() // Primed at rate 1: identity
+                s.output = opened.output
                 session = s
                 publishLine(s, newLine)
                 newLine.start()
@@ -313,7 +320,7 @@ internal class AudioSink(private val debugLabel: String) {
                 logger.debug("$debugLabel [audio] switch line promoted — new track playing.")
                 onPromoted()
 
-                pumpLive(s, input, newLine, terminated, stopFlag)
+                pumpLive(s, input, opened.line, terminated, stopFlag)
                 pumped = true
             }
         }.onFailure { e ->
@@ -338,9 +345,9 @@ internal class AudioSink(private val debugLabel: String) {
         }
     }
 
-    /** Pre-fills [ln] at rate 1; returns the bytes written (0 when nothing could be read). */
+    /** Pre-fills the line at rate 1; returns the content bytes written (0 when nothing could be read). */
     private fun primeSwitchLine(
-        input: InputStream, ln: SourceDataLine, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
+        input: InputStream, opened: OpenedLine, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
     ): Int {
         val chunk = ByteArray(CHUNK_BYTES)
         val primeTarget = paceTargetBytes.coerceIn(CHUNK_BYTES * 3, LINE_BUFFER_BYTES - CHUNK_BYTES)
@@ -349,7 +356,8 @@ internal class AudioSink(private val debugLabel: String) {
             val n = MediaUtil.readFull(input, chunk, CHUNK_BYTES)
             if (n <= 0) return buffered
             MediaBufferEffects.applyVolumeS16LE(chunk, n, currentVolume)
-            writeFully(ln, chunk, n, terminated, stopFlag)
+            val out = opened.output.convert(chunk, n, 1.0)
+            writeFully(opened.line, opened.output.output, out, terminated, stopFlag)
             buffered += n
         }
         return buffered
@@ -384,16 +392,12 @@ internal class AudioSink(private val debugLabel: String) {
         var pumped = false
         runCatching {
             proc.inputStream.use { input ->
-                val fmt = pcmFormat()
-                val info = DataLine.Info(SourceDataLine::class.java, fmt)
-                if (!AudioSystem.isLineSupported(info)) {
-                    logger.warn("$debugLabel PCM line not supported.")
-                    return@runCatching
-                }
-                ln = openLine(info, fmt) ?: run {
+                val opened = openLine() ?: run {
                     logger.warn("$debugLabel [audio] line failed to open.")
                     return@runCatching
                 }
+                ln = opened.line
+                session.output = opened.output
                 if (terminated.get() || stopFlag.get()) return@runCatching
                 logger.debug("$debugLabel [audio] line open, waiting for start gate...")
                 if (!awaitStartGate(startGate, terminated, stopFlag)) {
@@ -433,10 +437,6 @@ internal class AudioSink(private val debugLabel: String) {
         }
     }
 
-    private fun pcmFormat() = AudioFormat(
-        AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE.toFloat(), 16, 2, 4, SAMPLE_RATE.toFloat(), false,
-    )
-
     private fun skipCatchUp(
         input: InputStream, catchUp: CatchUp, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
     ): Long {
@@ -471,8 +471,7 @@ internal class AudioSink(private val debugLabel: String) {
         terminated: AtomicBoolean, stopFlag: AtomicBoolean,
     ) {
         val chunk = ByteArray(CHUNK_BYTES)
-        val resampler = PcmRateResampler().also { it.reset(session.outFramesWritten) }
-        val resampled = ByteArray(resampler.maxOutputBytes(CHUNK_BYTES))
+        val output = session.output ?: return
         var rate = 1.0
         var firstChunk = true
         var totalBytes = 0L
@@ -482,7 +481,7 @@ internal class AudioSink(private val debugLabel: String) {
         paceCleanChunks = 0
         while (!terminated.get() && !stopFlag.get()) {
             if (parkIfRequested(ln, terminated, stopFlag)) break
-            if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) resampler.discontinuity()
+            if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) output.discontinuity()
             val n = MediaUtil.readFull(input, chunk, CHUNK_BYTES)
             if (n <= 0) {
                 // A deliberate teardown destroys the process mid-read; that EOF is expected and not
@@ -504,13 +503,10 @@ internal class AudioSink(private val debugLabel: String) {
             val dsp = if (owns(session)) dspStage else null
             dsp?.process(chunk, n, currentVolume) ?: MediaBufferEffects.applyVolumeS16LE(chunk, n, currentVolume)
             rate = stepRate(rate, playbackRate)
-            // At rate 1 this is a plain copy; otherwise the chunk is stretched / squeezed by the rate
-            val contentFrom = resampler.contentPosition
-            val outBytes = resampler.process(chunk, n, rate, resampled)
-            val outFrames = outBytes / BYTES_PER_FRAME
-            session.frameMap.record(session.outFramesWritten, outFrames, contentFrom, resampler.contentPosition)
-            session.outFramesWritten += outFrames
-            if (outBytes > 0) paceLiveWrite(ln, resampled, outBytes, terminated, stopFlag)
+            // For the content format at rate 1 this is a plain copy; otherwise the chunk is resampled to the line's
+            // rate (times the sync rate) and repacked to its sample format
+            val outBytes = output.convert(chunk, n, rate)
+            if (outBytes > 0) paceLiveWrite(ln, output.output, outBytes, output.format, terminated, stopFlag)
         }
     }
 
@@ -556,9 +552,15 @@ internal class AudioSink(private val debugLabel: String) {
         ln: SourceDataLine,
         chunk: ByteArray,
         n: Int,
+        format: PcmLineFormat,
         terminated: AtomicBoolean,
         stopFlag: AtomicBoolean
     ) {
+        // The pacing target is kept in content bytes; a line in another format holds a different byte count for
+        // the same duration
+        val lineTargetBytes = if (format.isContent) paceTargetBytes
+        else (paceTargetBytes.toLong() * format.bytesPerSecond / (SAMPLE_RATE * BYTES_PER_FRAME)).toInt()
+        val lineBytesPerSecond = format.bytesPerSecond
         val unplayedBefore = (ln.bufferSize - ln.available()).coerceAtLeast(0)
         if (paceStreaming) {
             if (unplayedBefore == 0) {
@@ -573,9 +575,9 @@ internal class AudioSink(private val debugLabel: String) {
         paceStreaming = true
         // Hold the backlog at the target: wait for playout to drain the surplus before feeding the next chunk.
         while (!terminated.get() && !stopFlag.get()) {
-            val surplus = (ln.bufferSize - ln.available()).coerceAtLeast(0) - paceTargetBytes
+            val surplus = (ln.bufferSize - ln.available()).coerceAtLeast(0) - lineTargetBytes
             if (surplus <= 0) break
-            val drainMs = (surplus.toLong() * 1_000L / (SAMPLE_RATE * BYTES_PER_FRAME)).coerceIn(1L, 20L)
+            val drainMs = (surplus.toLong() * 1_000L / lineBytesPerSecond).coerceIn(1L, 20L)
             try {
                 Thread.sleep(drainMs)
             } catch (_: InterruptedException) {
@@ -601,23 +603,69 @@ internal class AudioSink(private val debugLabel: String) {
         return false
     }
 
-    private fun openLine(info: DataLine.Info, fmt: AudioFormat): SourceDataLine? {
+    /**
+     * Opens an output line, never giving up just because the device rejects the content format: 44.1 kHz / 16-bit
+     * stereo on the game's device (then the system default) as before, else a format that device does accept with
+     * conversion, else any other output. Retries the whole search a few times when nothing opens (a busy device).
+     */
+    private fun openLine(): OpenedLine? {
+        var lastError: String? = null
         repeat(OPEN_RETRIES) { attempt ->
+            val (preferred, other) = AudioOutputHooks.candidateMixers()
+            val tryOpen = { mixer: Mixer.Info?, format: PcmLineFormat ->
+                tryOpenLine(mixer, format).onFailure { lastError = it.message ?: it.javaClass.simpleName }.getOrNull()
+            }
+            val cached = lastFallback
+            val chosen = cached?.takeIf { it.first in preferred }?.let { (mixer, format) ->
+                tryOpen(mixer, format)?.let { Triple(mixer, format, it) }
+            } ?: PcmLineFormat.choose(preferred, other, tryOpen)
+            if (chosen != null) {
+                val (mixer, format, line) = chosen
+                lastFallback = if (format.isContent) null else mixer to format
+                logLineChoice(mixer, format)
+                return OpenedLine(line, PcmLineOutput(format))
+            }
+            if (attempt == OPEN_RETRIES - 1) {
+                logger.warn("$debugLabel Line unavailable: $lastError.")
+                return null
+            }
             try {
-                return AudioOutputHooks.getLine(info).also { it.open(fmt, LINE_BUFFER_BYTES) }
-            } catch (e: LineUnavailableException) {
-                if (attempt == OPEN_RETRIES - 1) {
-                    logger.warn("$debugLabel Line unavailable: ${e.message}.")
-                    return null
-                }
-                try {
-                    Thread.sleep(RETRY_DELAY_MS * (attempt + 1))
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt(); return null
-                }
+                Thread.sleep(RETRY_DELAY_MS * (attempt + 1))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return null
             }
         }
         return null
+    }
+
+    private fun tryOpenLine(mixer: Mixer.Info?, format: PcmLineFormat): Result<SourceDataLine> = runCatching {
+        val audioFormat = format.toAudioFormat()
+        val info = DataLine.Info(SourceDataLine::class.java, audioFormat)
+        val line = (if (mixer == null) AudioSystem.getLine(info) else AudioSystem.getMixer(mixer).getLine(info))
+            as SourceDataLine
+        try {
+            line.open(audioFormat, lineBufferBytes(format))
+        } catch (e: Throwable) {
+            runCatching { line.close() }
+            throw e
+        }
+        line
+    }
+
+    /** The same ~400 ms buffer in any format (exactly [LINE_BUFFER_BYTES] for the content format). */
+    private fun lineBufferBytes(format: PcmLineFormat): Int {
+        if (format.isContent) return LINE_BUFFER_BYTES
+        val bytes = format.bytesPerSecond.toLong() * LINE_BUFFER_BYTES / (SAMPLE_RATE * BYTES_PER_FRAME)
+        return (bytes / format.bytesPerFrame * format.bytesPerFrame).toInt()
+    }
+
+    private fun logLineChoice(mixer: Mixer.Info?, format: PcmLineFormat) {
+        val device = mixer?.name ?: "system default"
+        val message = if (format.isContent) "Display audio line: \"$device\", $format."
+        else "Display audio line: \"$device\" rejects ${PcmLineFormat.CONTENT}; playing $format with conversion."
+        // Every line is logged while converting (it is the unusual case worth seeing); the normal one only on change
+        if (!format.isContent || lastLineChoice != message) logger.info("$debugLabel $message")
+        lastLineChoice = message
     }
 
     private fun drainStderr(proc: Process, stopFlag: AtomicBoolean): StringBuilder {
