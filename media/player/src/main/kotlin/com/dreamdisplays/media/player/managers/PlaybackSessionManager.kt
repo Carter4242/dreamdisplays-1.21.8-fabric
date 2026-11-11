@@ -196,7 +196,7 @@ internal class PlaybackSessionManager(
                     alreadyResolved = true, seekByDecoding = seekByDecoding, dropToFps = dropToFps,
                     liveStampsPath = stamps?.path,
                 )
-                liveStamps?.close()
+                closeLiveStamps()
                 liveStamps = stamps?.also { it.start() }
                 val vt = nativePipe.start(
                     args = args, w = w, h = h, seekOffsetNanos = offsetNanos, sourceFps = fps,
@@ -204,7 +204,10 @@ internal class PlaybackSessionManager(
                     onFirstFrame = onFirstFrame, getBrightness = getBrightness, onEos = onEos,
                     parkFlag = parkFlag, presentPreview = presentPreview, tolerateLateness = tolerateLateness,
                     liveEdge = liveEdge, liveStamps = stamps,
-                ) ?: throw IOException("Native FFmpeg session failed to start")
+                ) ?: run {
+                    closeLiveStamps()
+                    throw IOException("Native FFmpeg session failed to start")
+                }
                 process = null; thread = vt; return
             }
             val vp = MediaProcess.buildVideo(
@@ -235,6 +238,11 @@ internal class PlaybackSessionManager(
             MediaProcess.gracefulDestroy(process)
             thread?.let { joinSafely(it) }
             nativePipe?.release()
+            closeLiveStamps()
+        }
+
+        /** Stops this channel's stamps tailer (its thread, open file and temp file). Call once its decoder is gone. */
+        fun closeLiveStamps() {
             liveStamps?.close()
             liveStamps = null
         }
@@ -1318,6 +1326,7 @@ internal class PlaybackSessionManager(
             MediaProcess.gracefulDestroy(it.process)
             it.thread?.let { t -> joinSafely(t) }
             it.nativePipe?.release()
+            it.closeLiveStamps()
             renderExecutor.execute { it.pipe.cleanup() }
         }
         audioHalf?.thread?.let { joinSafely(it) }
@@ -1334,6 +1343,7 @@ internal class PlaybackSessionManager(
         active?.let { ch ->
             active = null
             ch.nativePipe?.release()
+            ch.closeLiveStamps()
             renderExecutor.execute { ch.pipe.cleanup() }
         }
     }

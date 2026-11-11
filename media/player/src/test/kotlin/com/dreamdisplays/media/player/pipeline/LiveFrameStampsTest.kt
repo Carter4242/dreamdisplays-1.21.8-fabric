@@ -25,6 +25,21 @@ class LiveFrameStampsTest {
         assertEquals(listOf(1_033_000L to 555L, 1_233_000L to 777L), s.recent())
     }
 
+    @Test
+    fun `stamps files left by an earlier game are swept, current ones and other files are kept`() {
+        val dir = kotlin.io.path.createTempDirectory("dd-stamps").toFile()
+        try {
+            val now = 100L * 24 * 60 * 60 * 1000
+            val old = java.io.File(dir, "dreamdisplays-live-old.txt").apply { writeText("0 0 1/1000"); setLastModified(now - 7L * 60 * 60 * 1000) }
+            val fresh = java.io.File(dir, "dreamdisplays-live-new.txt").apply { writeText("0 0 1/1000"); setLastModified(now - 60_000L) }
+            val other = java.io.File(dir, "something-else.txt").apply { writeText("x"); setLastModified(now - 7L * 60 * 60 * 1000) }
+            assertEquals(1, LiveFrameStamps.sweepStale(dir, now))
+            assertEquals(listOf(false, true, true), listOf(old.exists(), fresh.exists(), other.exists()))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     private fun feed(s: LiveFrameStamps, stamp: Pair<Long, Long>) {
         val m = LiveFrameStamps::class.java.getDeclaredMethod("parse", String::class.java)
         m.isAccessible = true

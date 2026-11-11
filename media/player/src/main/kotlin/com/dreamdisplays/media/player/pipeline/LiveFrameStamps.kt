@@ -17,8 +17,8 @@ class LiveFrameStamps(private val key: String) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Where `FFmpeg` writes the stamps; deleted on [close]. */
-    val path: String = File(System.getProperty("java.io.tmpdir"), "dreamdisplays-live-${UUID.randomUUID()}.txt")
-        .also { it.deleteOnExit() }.absolutePath
+    val path: String = File(System.getProperty("java.io.tmpdir"), "$FILE_PREFIX${UUID.randomUUID()}$FILE_SUFFIX")
+        .also { sweepStaleOnce(it.parentFile); it.deleteOnExit() }.absolutePath
 
     private val frameAt = LongArray(RING) { -1L }
     private val ptsAt = LongArray(RING)
@@ -128,6 +128,29 @@ class LiveFrameStamps(private val key: String) {
         private const val POLL_MS = 15L
 
         private val active = ConcurrentHashMap<String, LiveFrameStamps>()
+
+        private const val FILE_PREFIX = "dreamdisplays-live-"
+        private const val FILE_SUFFIX = ".txt"
+
+        /** A stamps file untouched this long belongs to no running session (a crashed game left it behind). */
+        private const val STALE_AFTER_MS = 6L * 60 * 60 * 1000
+
+        private val swept = java.util.concurrent.atomic.AtomicBoolean()
+
+        private fun sweepStaleOnce(dir: File?) {
+            if (dir == null || !swept.compareAndSet(false, true)) return
+            runCatching { sweepStale(dir, System.currentTimeMillis()) }
+        }
+
+        /**
+         * Deletes stamps files in [dir] last written more than [STALE_AFTER_MS] before [nowMillis]: a running session
+         * writes its file every frame, so only files from a game that exited without cleaning up are that old.
+         * Returns how many were deleted.
+         */
+        internal fun sweepStale(dir: File, nowMillis: Long): Int =
+            dir.listFiles { f -> f.isFile && f.name.startsWith(FILE_PREFIX) && f.name.endsWith(FILE_SUFFIX) }
+                .orEmpty()
+                .count { f -> nowMillis - f.lastModified() > STALE_AFTER_MS && f.delete() }
 
         /** The stamps of [key]'s running live session, or null. */
         fun of(key: String): LiveFrameStamps? = active[key]
