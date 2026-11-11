@@ -6,6 +6,8 @@ import com.dreamdisplays.platform.client.popout.PopoutWindow
 import com.dreamdisplays.platform.client.popout.WindowBackend
 import com.dreamdisplays.platform.client.popout.WindowConfig
 import com.dreamdisplays.platform.client.render.AsyncTextureUploader
+import com.dreamdisplays.platform.client.render.FrameHandoff
+import com.dreamdisplays.platform.client.render.OverlayFrame
 import com.dreamdisplays.platform.client.render.UploadPixelFormat
 import com.dreamdisplays.util.OsInfo
 import kotlinx.atomicfu.atomic
@@ -127,22 +129,11 @@ class VideoPopoutWindow(
     //? if <26.3 {
     private class GlfwBackend(private val onClose: () -> Unit) : PopoutBackend {
 
-        @Volatile
-        private var frontBuf: ByteBuffer = EMPTY_DIRECT
-        private var backBuf: ByteBuffer = EMPTY_DIRECT
+        /** Frames from the decode thread; the render thread borrows the newest one while it uploads it. */
+        private val frames = FrameHandoff<OverlayFrame>()
 
-        @Volatile
-        private var frameW = 0
-
-        @Volatile
-        private var frameH = 0
-
-        @Volatile
-        private var frameFormat = UploadPixelFormat.RGB24
-
-        @Volatile
-        private var contentAspect = 0.0
-        private val frameVersion = atomic(0L)
+        /** The frame now in the window's texture, redrawn every frame until a newer one arrives. */
+        private var shownMeta: OverlayFrame? = null
         private var uploadedVersion = 0L
 
         @Volatile
@@ -159,66 +150,69 @@ class VideoPopoutWindow(
         private var savedW = 0
         private var savedH = 0
 
+        // Set by the window's own GLFW callbacks, acted on from renderFrame: GLFW forbids destroying a window from
+        // inside one of its callbacks (on macOS the event handler keeps using the window after the callback returns)
+        @Volatile
+        private var closeRequested = false
+
+        @Volatile
+        private var fullscreenToggleRequested = false
+
         override val isOpen: Boolean get() = windowHandle != 0L
         override val width: Int get() = winW.value
         override val height: Int get() = winH.value
 
         override fun updateFrame(buf: ByteBuffer, w: Int, h: Int, aspect: Double, format: UploadPixelFormat) {
             if (windowHandle == 0L) return
-            val size = w * h * format.bytesPerPixel
-            if (size <= 0 || buf.remaining() < size) return
-            var back = backBuf
-            if (back.capacity() < size) back = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-            back.clear()
-            val savedLimit = buf.limit()
-            val savedPos = buf.position()
-            buf.limit(savedPos + size)
-            back.put(buf)
-            buf.limit(savedLimit); buf.position(savedPos)
-            back.flip()
-            val prev = frontBuf
-            frontBuf = back
-            backBuf = if (prev.capacity() >= size) prev
-            else ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-            contentAspect = aspect
-            frameFormat = format
-            frameW = w; frameH = h
-            frameVersion.incrementAndGet()
+            frames.publish(buf, w * h * format.bytesPerPixel, OverlayFrame(w, h, format, aspect))
         }
 
         override fun renderFrame() {
+            if (closeRequested) {
+                closeRequested = false
+                destroyWindow()
+                return
+            }
             val handle = windowHandle
             if (handle == 0L) return
-            val fw = frameW
-            val fh = frameH
-            val buf = frontBuf
-            val format = frameFormat
+            if (fullscreenToggleRequested) {
+                fullscreenToggleRequested = false
+                toggleFullscreen(handle)
+            }
             val vw = winW.value
             val vh = winH.value
-            if (fw <= 0 || fh <= 0 || buf.remaining() < fw * fh * format.bytesPerPixel || vw <= 0 || vh <= 0) return
+            if (vw <= 0 || vh <= 0) return
+            val frame = frames.borrowNewest(uploadedVersion)
+            try {
+                val meta = frame?.meta ?: shownMeta ?: return
+                val fw = meta.width
+                val fh = meta.height
+                if (fw <= 0 || fh <= 0) return
 
-            val version = frameVersion.value
-            val haveNewFrame = version != uploadedVersion
+                val prevCtx = GLFW.glfwGetCurrentContext()
+                // Only restore capabilities when there is an active GL context to restore.
+                // Skipping setCapabilities(null) avoids corrupting LWJGL state for mods that
+                // replace the GL pipeline (e.g., Vulkan-based renderers).
+                val prevCaps = if (prevCtx != 0L) runCatching { GL.getCapabilities() }.getOrNull() else null
 
-            val prevCtx = GLFW.glfwGetCurrentContext()
-            // Only restore capabilities when there is an active GL context to restore.
-            // Skipping setCapabilities(null) avoids corrupting LWJGL state for mods that
-            // replace the GL pipeline (e.g., Vulkan-based renderers).
-            val prevCaps = if (prevCtx != 0L) runCatching { GL.getCapabilities() }.getOrNull() else null
+                GLFW.glfwMakeContextCurrent(handle)
+                val caps = popoutCaps
+                if (caps == null) popoutCaps = GL.createCapabilities() else GL.setCapabilities(caps)
 
-            GLFW.glfwMakeContextCurrent(handle)
-            val caps = popoutCaps
-            if (caps == null) popoutCaps = GL.createCapabilities() else GL.setCapabilities(caps)
+                val r = renderer ?: QuadRenderer().also { renderer = it }
+                if (frame != null) {
+                    r.upload(frame.buffer, fw, fh, meta.format)
+                    uploadedVersion = frame.version
+                    shownMeta = meta
+                }
+                r.draw(vw, vh, contentRect(fw, fh, meta.aspect), fw, fh)
+                GLFW.glfwSwapBuffers(handle)
 
-            val r = renderer ?: QuadRenderer().also { renderer = it }
-            if (haveNewFrame) {
-                r.upload(buf, fw, fh, format); uploadedVersion = version
+                GLFW.glfwMakeContextCurrent(prevCtx)
+                if (prevCaps != null) GL.setCapabilities(prevCaps)
+            } finally {
+                if (frame != null) frames.release()
             }
-            r.draw(vw, vh, contentRect(fw, fh, contentAspect), fw, fh)
-            GLFW.glfwSwapBuffers(handle)
-
-            GLFW.glfwMakeContextCurrent(prevCtx)
-            if (prevCaps != null) GL.setCapabilities(prevCaps)
         }
 
         override fun open(videoW: Int, videoH: Int) {
@@ -257,11 +251,11 @@ class VideoPopoutWindow(
             windowHandle = handle
             winW.value = w; winH.value = h
 
-            GLFW.glfwSetWindowCloseCallback(handle) { _ -> destroyWindow() }
+            GLFW.glfwSetWindowCloseCallback(handle) { _ -> closeRequested = true }
             GLFW.glfwSetKeyCallback(handle) { _, key, _, action, _ ->
                 if (action == GLFW.GLFW_PRESS) when (key) {
-                    GLFW.GLFW_KEY_ESCAPE -> destroyWindow()
-                    GLFW.GLFW_KEY_F -> toggleFullscreen(handle)
+                    GLFW.GLFW_KEY_ESCAPE -> closeRequested = true
+                    GLFW.GLFW_KEY_F -> fullscreenToggleRequested = true
                 }
             }
             GLFW.glfwSetFramebufferSizeCallback(handle) { _, fw, fh -> winW.value = fw; winH.value = fh }
@@ -288,24 +282,45 @@ class VideoPopoutWindow(
                 }
                 GLFW.glfwDestroyWindow(handle)
             }
+            shownMeta = null
+            frames.clear()
             onClose()
         }
 
         private fun toggleFullscreen(handle: Long) {
             if (!fullscreen) {
-                val monitor = GLFW.glfwGetPrimaryMonitor()
-                if (monitor == 0L) return
-                val mode = GLFW.glfwGetVideoMode(monitor) ?: return
                 val xa = IntArray(1)
                 val ya = IntArray(1)
+                val wa = IntArray(1)
+                val ha = IntArray(1)
                 GLFW.glfwGetWindowPos(handle, xa, ya)
-                savedX = xa[0]; savedY = ya[0]; savedW = winW.value; savedH = winH.value
+                // Window size in screen coordinates: the framebuffer size is in pixels (twice as large on Retina)
+                GLFW.glfwGetWindowSize(handle, wa, ha)
+                val monitor = monitorUnder(xa[0], ya[0], wa[0], ha[0])
+                if (monitor == 0L) return
+                val mode = GLFW.glfwGetVideoMode(monitor) ?: return
+                savedX = xa[0]; savedY = ya[0]; savedW = wa[0]; savedH = ha[0]
                 GLFW.glfwSetWindowMonitor(handle, monitor, 0, 0, mode.width(), mode.height(), mode.refreshRate())
                 fullscreen = true
             } else {
                 GLFW.glfwSetWindowMonitor(handle, 0L, savedX, savedY, savedW, savedH, GLFW.GLFW_DONT_CARE)
                 fullscreen = false
             }
+        }
+
+        /** The monitor the window at ([x], [y], [w] x [h]) is on, so fullscreen opens there; the primary as a fallback. */
+        private fun monitorUnder(x: Int, y: Int, w: Int, h: Int): Long {
+            val monitors = GLFW.glfwGetMonitors() ?: return GLFW.glfwGetPrimaryMonitor()
+            val handles = LongArray(monitors.limit()) { monitors.get(it) }
+            val rects = handles.map { m ->
+                val mx = IntArray(1)
+                val my = IntArray(1)
+                GLFW.glfwGetMonitorPos(m, mx, my)
+                val mode = GLFW.glfwGetVideoMode(m)
+                MonitorPick.Rect(mx[0], my[0], mode?.width() ?: 0, mode?.height() ?: 0)
+            }
+            val index = MonitorPick.indexFor(x + w / 2, y + h / 2, rects)
+            return if (index >= 0) handles[index] else GLFW.glfwGetPrimaryMonitor()
         }
 
         companion object {
