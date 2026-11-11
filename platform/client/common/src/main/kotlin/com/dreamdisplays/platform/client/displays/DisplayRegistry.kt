@@ -58,6 +58,7 @@ object DisplayRegistry {
         // Every unload writes the resume position here (the session snapshot in DisplayStorage is only written by
         // saveScreenData, so after a dimension change it is the older of the two and must not win)
         displayScreen.savedTimeNanos = clientSettings.savedTimeNanos
+        displayScreen.savedTimeUrl = clientSettings.savedTimeUrl
 
         screens[displayScreen.uuid] = displayScreen
         recordScreen(displayScreen)
@@ -74,7 +75,7 @@ object DisplayRegistry {
             if (DisplayDimensions.cacheableForRestore(displayScreen.dimensionKey)) {
                 unloadedScreens[displayScreen.uuid] = displayScreen.toFullDisplayData()
             }
-            ClientSettingsStore.setSavedTimeNanos(displayScreen.uuid, displayScreen.currentTimeNanos)
+            ClientSettingsStore.setSavedTime(displayScreen.uuid, displayScreen.currentTimeNanos, displayScreen.videoUrl)
         }
         screens.remove(displayScreen.uuid)
         displayScreen.unregister()
@@ -142,7 +143,7 @@ object DisplayRegistry {
     /** Saves the display screen data to disk. */
     fun saveScreenData(displayScreen: DisplayScreen) {
         DisplayStorage.saveDisplayData(displayScreen.uuid, displayScreen.toFullDisplayData())
-        ClientSettingsStore.setSavedTimeNanos(displayScreen.uuid, displayScreen.currentTimeNanos)
+        ClientSettingsStore.setSavedTime(displayScreen.uuid, displayScreen.currentTimeNanos, displayScreen.videoUrl)
     }
 
     /** Restores the display snapshot cached for [serverId] (e.g. saved timecodes) from a prior session. */

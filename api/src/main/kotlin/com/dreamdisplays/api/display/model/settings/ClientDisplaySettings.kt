@@ -42,6 +42,9 @@ data class ClientDisplaySettings(
     /** Last known playback position in nanoseconds, resumed on Local displays after a restart. */
     var savedTimeNanos: Long = 0,
 
+    /** The video [savedTimeNanos] belongs to; null in settings saved before it was kept (resumed whatever plays). */
+    var savedTimeUrl: String? = null,
+
     /** Whether the viewer pinned this display to a `Picture-in-Picture` overlay; re-opened on rejoin regardless of render distance. */
     var pipOpen: Boolean = false,
 

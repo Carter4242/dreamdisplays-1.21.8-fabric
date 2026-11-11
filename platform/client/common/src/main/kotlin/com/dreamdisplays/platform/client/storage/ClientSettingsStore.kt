@@ -116,6 +116,14 @@ object ClientSettingsStore : ClientSettingsStorage {
         save()
     }
 
+    /** Saves the resume position [nanos] together with the video [url] it is a position in. */
+    fun setSavedTime(displayUuid: UUID, nanos: Long, url: String?) {
+        val s = getSettings(displayUuid)
+        s.savedTimeNanos = nanos
+        s.savedTimeUrl = url?.takeIf { it.isNotEmpty() }
+        save()
+    }
+
     override fun setPipOpen(displayUuid: UUID, open: Boolean) {
         val s = getSettings(displayUuid)
         s.pipOpen = open

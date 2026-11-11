@@ -508,6 +508,9 @@ class DisplayScreen(
     /** Last known playback position in nanoseconds, restored on reconnect. */
     var savedTimeNanos: Long = 0
 
+    /** The video [savedTimeNanos] was saved in (null: unknown, from older settings). */
+    var savedTimeUrl: String? = null
+
     /** Follows the server-authoritative timeline (Synced / Broadcast / watch party). */
     internal val timelineFollower = TimelineFollower(this)
 
@@ -1010,6 +1013,9 @@ class DisplayScreen(
         if (!firstLoad) {
             paused = false
             if (packet.url != previousUrl) savedTimeNanos = 0L
+        } else if (ResumePosition.belongsToOtherVideo(savedTimeUrl, packet.url)) {
+            // The video was changed while this display was out of range or the player away: start it from the top
+            savedTimeNanos = 0L
         }
         loadVideo(packet.url, loadLang(packet.lang))
         if (!firstLoad) sendRequestSyncPacket()
