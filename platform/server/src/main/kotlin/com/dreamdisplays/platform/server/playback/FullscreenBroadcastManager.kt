@@ -405,6 +405,17 @@ object FullscreenBroadcastManager {
         preparations.values.forEach { it.roster.forget(playerId) }
     }
 
+    /**
+     * [playerId] switched displays back on (`/display on`): while off their client dropped every display, the fullscreen
+     * they were shown and a prepared one included, without telling the server, and it drops descriptions. Their delivery
+     * is forgotten, so the next [tick] (after the switch reached them) delivers the session's description, state and
+     * timeline, and the preparation, again.
+     */
+    fun onDisplaysEnabled(playerId: UUID) {
+        for (session in sessions.values) if (playerId in session.shownTo) forget(session, playerId)
+        for (preparation in preparations.values) if (preparation.roster.isDelivered(playerId)) preparation.roster.forget(playerId)
+    }
+
     private fun forget(session: Session, playerId: UUID) {
         viewing.remove(playerId, session.sessionId)
         session.shownTo.remove(playerId)

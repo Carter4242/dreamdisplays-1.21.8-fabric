@@ -166,9 +166,16 @@ object PlayerManager {
     fun setModRequiredNotified(player: ServerPlayer, notified: Boolean) =
         setModRequiredNotified(player.uuid, notified)
 
-    /** Sets whether displays should be rendered for [uuid]. */
+    /**
+     * Sets whether displays should be rendered for [uuid]. Switched back on, the fullscreen broadcast or preparation
+     * their client dropped while off is delivered again.
+     */
     fun setDisplaysEnabled(uuid: UUID, enabled: Boolean) {
-        if (enabled) displaysDisabled.remove(uuid) else displaysDisabled.add(uuid)
+        if (!enabled) {
+            displaysDisabled.add(uuid)
+        } else if (displaysDisabled.remove(uuid)) {
+            com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager.onDisplaysEnabled(uuid)
+        }
     }
 
     /** Sets whether displays should be rendered for [player]. */
