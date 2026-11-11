@@ -81,6 +81,9 @@ class SubtitleOverlayTexture {
     /** Releases the GPU texture. Call once when the owning display is unregistered. */
     fun dispose() {
         texture?.close()
+        // Registered under a per-instance id: without a release the texture manager keeps it for the whole session
+        identifier?.let { Minecraft.getInstance().textureManager.release(it) }
+        identifier = null
         texture = null
         cachedRenderType = null
         lastText = null
