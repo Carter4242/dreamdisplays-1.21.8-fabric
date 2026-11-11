@@ -49,6 +49,11 @@ object ClientTickManager {
         DreamServices.registry.getOrNull<ClientApplication>()
             ?.emit(ClientLifecycleEvent.Tick(tickCount))
 
+        //? if <26.3 {
+        // The macOS popout window is drawn in the world pass; with no world drawn (loading, a proxy's configuration
+        // phase, the disconnect screen) it is drawn from here, so it keeps playing and its close button and Esc work
+        if (minecraft.level == null || minecraft.player == null) DisplayRegistry.getScreens().forEach { it.renderPopout() }
+        //?}
         FullscreenOverlayManager.onClientTick(minecraft)
         FullscreenController.onClientTick()
         DisplayWarmup.onClientTick()

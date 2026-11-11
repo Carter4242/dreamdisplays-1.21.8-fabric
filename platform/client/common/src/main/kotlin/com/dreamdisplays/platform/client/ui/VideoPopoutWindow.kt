@@ -175,6 +175,11 @@ class VideoPopoutWindow(
             }
             val handle = windowHandle
             if (handle == 0L) return
+            //? if >=1.21.2 {
+            // Watching the popout is not being idle: Minecraft's idle frame limit (30 fps after a minute without input
+            // to its own window, 10 after ten) would also be this window's frame rate, as it is drawn in Minecraft's frame
+            Minecraft.getInstance().framerateLimitTracker.onInputReceived()
+            //?}
             if (fullscreenToggleRequested) {
                 fullscreenToggleRequested = false
                 toggleFullscreen(handle)
