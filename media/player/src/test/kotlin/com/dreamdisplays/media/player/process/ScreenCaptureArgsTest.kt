@@ -199,6 +199,32 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `a window without sound carries a silent track, a screen without sound none`() {
+        val a = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x", clockBaseMicros = 5)
+        val silence = a.indexOf("anullsrc=r=96000:cl=stereo")
+        assertTrue(silence > 0, a.joinToString(" "))
+        assertEquals(listOf("-re", "-f", "lavfi", "-i"), a.subList(silence - 4, silence))
+        assertFalse("-an" in a)
+        // The only -i is the silence (gfxcapture lives in the filter graph): its sound is input 0
+        assertEquals(listOf("-map", "[v]", "-map", "0:a:0"), a.filterIndexed { i, s -> s == "-map" || (i > 0 && a[i - 1] == "-map") })
+        assertEquals("aac", a.valueOf("-c:a"))
+        assertEquals("150000", a.valueOf("-max_interleave_delta"))
+        // Encoded and clocked like the sound of any share
+        val withSound = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x", audio = pipe, clockBaseMicros = 5)
+        assertEquals(withSound.valueOf("-c:a"), a.valueOf("-c:a"))
+        assertEquals(withSound.valueOf("-ar"), a.valueOf("-ar"))
+        assertEquals(withSound.valueOf("-b:a"), a.valueOf("-b:a"))
+        assertEquals(withSound.valueOf("-filter_complex"), a.valueOf("-filter_complex"))
+        assertFalse("anullsrc" in withSound.joinToString(" "))
+        // A GDI-captured window too
+        assertTrue("anullsrc=r=96000:cl=stereo" in ScreenCapture.args("FFMPEG", Source.GDIGRAB, window, Encoder.X264, "rtmp://h/live/x"))
+        // A screen without sound stays picture-only (no audio delay at the muxer)
+        val screen = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x")
+        assertTrue("-an" in screen)
+        assertFalse("anullsrc" in screen.joinToString(" "))
+    }
+
+    @Test
     fun `desktop duplication losing its screen is told apart from other ends`() {
         assertTrue(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] AcquireNextFrame failed: 887a0026"))
         assertFalse(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] DuplicateOutput failed: 80070005"))
@@ -254,9 +280,9 @@ class ScreenCaptureArgsTest {
         assertTrue(":resize_mode=scale_aspect" in graph && ":display_border=0" in graph && ":dup_frames=1," in graph, graph)
         assertTrue(graph.endsWith("format=nv12[v]"), graph)
         assertEquals("[v]", a.valueOf("-map"))
-        assertFalse("-i" in a)
+        // The picture is no -i input (it lives in the filter graph); the one input is the silent track
+        assertEquals(1, a.count { it == "-i" })
         assertEquals("expr:gte(t,n_forced)", a.valueOf("-force_key_frames"))
-        assertTrue("-an" in a)
         val older = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x")
         assertFalse("dup_frames" in older.valueOf("-filter_complex")!!)
         assertFalse("-force_key_frames" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/a"))

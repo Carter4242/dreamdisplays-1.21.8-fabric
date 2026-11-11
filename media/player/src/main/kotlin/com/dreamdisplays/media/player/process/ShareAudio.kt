@@ -118,7 +118,16 @@ object ShareAudio {
 
         /** `FFmpeg`'s own PulseAudio capture of [device]. */
         data class Pulse(val device: String) : Input
+
+        /**
+         * A silent track `FFmpeg` makes itself: a window shared without sound carries one, so its stream never goes
+         * quiet while the window draws nothing. Never counts as sound being shared.
+         */
+        data object Silence : Input
     }
+
+    /** The silent track's rate (encoded like any share sound). */
+    const val SILENCE_RATE = 96_000
 
     /** What the stream carries: AAC at this rate, stereo 48 kHz. */
     const val AAC_BITRATE = "160k"

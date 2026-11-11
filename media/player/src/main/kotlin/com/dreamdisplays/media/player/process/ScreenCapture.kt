@@ -440,13 +440,16 @@ object ScreenCapture {
     ): List<String> = buildList {
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
-        val video = videoArgs(source, target, encoder, settings, if (audio != null) clockBaseMicros else null, windowCapture)
+        // A window without sound still carries a silent track: a still window sends no frames, and without any packets
+        // the viewers' connection times out and reconnects (a screen keeps sending frames, and skips the audio delay)
+        val sound = audio ?: if (target is Window) ShareAudio.Input.Silence else null
+        val video = videoArgs(source, target, encoder, settings, if (sound != null) clockBaseMicros else null, windowCapture)
         addAll(video.inputs)
         // Inputs first, then everything about the output
-        if (audio != null) audioInput(audio, clockBaseMicros)
+        if (sound != null) audioInput(sound, clockBaseMicros)
         addAll(video.output)
         val fps = settings.fps.toString()
-        if (audio == null) {
+        if (sound == null) {
             add("-an")
         } else {
             if (video.inputCount > 0) addAll(["-map", "0:v:0"])
@@ -464,7 +467,7 @@ object ScreenCapture {
         addAll(["-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0"])
         // Picture and sound leave interleaved (so a viewer gets them together), but a stream that stalls (a window
         // minimized without dup_frames) holds the other back at most this long rather than the default 10 s
-        if (audio != null) addAll(["-max_interleave_delta", MAX_INTERLEAVE_MICROS])
+        if (sound != null) addAll(["-max_interleave_delta", MAX_INTERLEAVE_MICROS])
         // MPEG-TS: a video PES with its length written goes out only once the frame is complete (~30 ms later)
         if (muxer == "mpegts") addAll(["-omit_video_pes_length", "0"])
         // RTSP publishes through its own muxer (an RTSP URL is no output protocol), over TCP: no lost UDP packets
@@ -586,6 +589,9 @@ object ScreenCapture {
                 addAll(["-f", "wav", "-ignore_length", "1", "-max_size", audio.format.tenMillisBytes.toString()])
                 addAll(["-probesize", "32", "-analyzeduration", "0", "-i", audio.path])
             }
+
+            // Silence made in real time (-re: a generator would otherwise run as fast as it can)
+            ShareAudio.Input.Silence -> addAll(["-re", "-f", "lavfi", "-i", "anullsrc=r=${ShareAudio.SILENCE_RATE}:cl=stereo"])
 
             is ShareAudio.Input.Pulse -> {
                 // 10 ms fragments (PulseAudio's default buffers far more); stamped with the wall clock
