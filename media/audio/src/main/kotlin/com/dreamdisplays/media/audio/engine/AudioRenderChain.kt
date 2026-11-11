@@ -14,6 +14,10 @@ import kotlin.math.*
  * Per-display DSP graph: renders the fixed-format S16LE stereo block from the media pipeline as an
  * area-source, direction-aware binaural (or speaker-pan) mix, in place. One instance per registered
  * display, reused across video swaps — only [reset] runs per playback session.
+ *
+ * Geometry arrives once per block (the listener pose once per game tick), so every parameter derived from it — gains,
+ * pan / ITD / head shadow, occlusion cutoff, reverb send — ramps per sample from the previous block's value to the new
+ * one. Stepping them at the block boundary instead clicks whenever they change a lot between blocks (a fast head turn).
  */
 internal class AudioRenderChain(
     private val sampleRate: Float,
@@ -34,6 +38,9 @@ internal class AudioRenderChain(
         const val AIR_ABSORPTION_REF_DISTANCE = 16f
         const val AIR_ABSORPTION_MIN_CUTOFF_HZ = 6000f
         const val REVERB_MAX_DECAY_SECONDS = 3.0f
+
+        /** Samples between occlusion cutoff updates while it moves (~0.7 ms at 44.1 kHz). */
+        const val CUTOFF_CONTROL_INTERVAL = 32
     }
 
     @Volatile
@@ -53,14 +60,20 @@ internal class AudioRenderChain(
     private val distanceGainL = ParamSmoother(GAIN_SMOOTH_SECONDS, 1f)
     private val distanceGainR = ParamSmoother(GAIN_SMOOTH_SECONDS, 1f)
     private val directivitySmoother = ParamSmoother(GAIN_SMOOTH_SECONDS, 1f)
-    private val azimuthL = ParamSmoother(AZIMUTH_SMOOTH_SECONDS, 0f)
-    private val azimuthR = ParamSmoother(AZIMUTH_SMOOTH_SECONDS, 0f)
-    private val occlusionFilterL = Biquad()
-    private val occlusionFilterR = Biquad()
+    private val lateralL = ParamSmoother(AZIMUTH_SMOOTH_SECONDS, 0f)
+    private val lateralR = ParamSmoother(AZIMUTH_SMOOTH_SECONDS, 0f)
+    private val occlusionFilterL = SvfLowPass().apply { setCutoff(sampleRate, MAX_CUTOFF_HZ) }
+    private val occlusionFilterR = SvfLowPass().apply { setCutoff(sampleRate, MAX_CUTOFF_HZ) }
     private val reverb = Reverb(sampleRate)
     private val occlusionCutoff = ParamSmoother(OCCLUSION_SMOOTH_SECONDS, MAX_CUTOFF_HZ)
     private val occlusionGain = ParamSmoother(GAIN_SMOOTH_SECONDS, 1f)
     private val reverbWet = ParamSmoother(REVERB_SMOOTH_SECONDS, 0f)
+
+    // Per-sample ramps from the previous block's parameters to this block's.
+    private val gainRampL = LinearRamp(1f)
+    private val gainRampR = LinearRamp(1f)
+    private val logCutoffRamp = LinearRamp(ln(MAX_CUTOFF_HZ))
+    private val wetRamp = LinearRamp(0f)
     private var floatL = FloatArray(0)
     private var floatR = FloatArray(0)
     private var lastMakeup = 1f
@@ -110,13 +123,16 @@ internal class AudioRenderChain(
             EmitterLayout.distanceGain((listenerPos - rightEmitter).length(), refDistance).toFloat(), dtBlock,
         ) * directivity
 
-        val azL = azimuthL.next(azimuthOf(leftEmitter, listenerPos, listenerForward, listenerRight), dtBlock)
-        val azR = azimuthR.next(azimuthOf(rightEmitter, listenerPos, listenerForward, listenerRight), dtBlock)
+        val latL = lateralL.next(lateralOf(leftEmitter, listenerPos, listenerRight), dtBlock)
+        val latR = lateralR.next(lateralOf(rightEmitter, listenerPos, listenerRight), dtBlock)
 
         val binaural = engine.currentBinaural() && tier != AcousticQuality.BASIC
         if (binaural) {
-            leftBinaural.updateParams(azL.toDouble())
-            rightBinaural.updateParams(azR.toDouble())
+            leftBinaural.rampTo(latL, frames)
+            rightBinaural.rampTo(latR, frames)
+        } else {
+            leftPanner.rampTo(latL.toDouble(), frames)
+            rightPanner.rampTo(latR.toDouble(), frames)
         }
 
         val advanced = tier == AcousticQuality.ADVANCED || tier == AcousticQuality.ULTRA
@@ -134,14 +150,17 @@ internal class AudioRenderChain(
                 max(AIR_ABSORPTION_MIN_CUTOFF_HZ, MAX_CUTOFF_HZ * (AIR_ABSORPTION_REF_DISTANCE / centerDist))
             min(occCutoff, airCutoff)
         } else MAX_CUTOFF_HZ
-        val cutoff = occlusionCutoff.next(cutoffTarget, dtBlock)
-        occlusionFilterL.configure(Biquad.Type.LOW_PASS, sampleRate, cutoff, 0.707f)
-        occlusionFilterR.configure(Biquad.Type.LOW_PASS, sampleRate, cutoff, 0.707f)
+        logCutoffRamp.rampTo(ln(occlusionCutoff.next(cutoffTarget, dtBlock)), frames)
+        var cutoffCountdown = 0
         val occGain = occlusionGain.next(if (advanced) 1f - occ * (1f - OCCLUSION_MIN_GAIN) else 1f, dtBlock)
+        gainRampL.rampTo(gL * userGain * occGain, frames)
+        gainRampR.rampTo(gR * userGain * occGain, frames)
 
         val reverbTargetWet = if (advanced) env.reverbWetGain.coerceIn(0f, 1f) else 0f
+        val wetFrom = wetRamp.value
         val wetGain = reverbWet.next(reverbTargetWet, dtBlock)
-        val reverbActive = wetGain > 1e-3f || reverbTargetWet > 1e-3f // -60 dB threshold
+        wetRamp.rampTo(wetGain, frames)
+        val reverbActive = wetFrom > 1e-3f || wetGain > 1e-3f || reverbTargetWet > 1e-3f // -60 dB threshold
         if (reverbActive) {
             reverb.updateParams((env.reverbDecaySeconds / REVERB_MAX_DECAY_SECONDS).coerceIn(0f, 1f), env.reverbDamping)
         }
@@ -152,11 +171,20 @@ internal class AudioRenderChain(
             val rawR = floatR[i]
             loudness.observe(rawL, rawR, dtSample)
 
+            val cutoffMoving = logCutoffRamp.moving
+            val logCutoff = logCutoffRamp.next()
+            if (cutoffMoving && (--cutoffCountdown <= 0 || !logCutoffRamp.moving)) {
+                cutoffCountdown = CUTOFF_CONTROL_INTERVAL
+                val hz = exp(logCutoff)
+                occlusionFilterL.setCutoff(sampleRate, hz)
+                occlusionFilterR.setCutoff(sampleRate, hz)
+            }
             val srcL = if (advanced) occlusionFilterL.process(rawL) else rawL
             val srcR = if (advanced) occlusionFilterR.process(rawR) else rawR
             val makeup = makeupFrom + makeupStep * (i + 1)
-            val l = srcL * gL * userGain * makeup * occGain
-            val r = srcR * gR * userGain * makeup * occGain
+            val l = srcL * gainRampL.next() * makeup
+            val r = srcR * gainRampR.next() * makeup
+            val wet = wetRamp.next()
 
             if (binaural) {
                 leftBinaural.renderSample(l)
@@ -166,8 +194,8 @@ internal class AudioRenderChain(
 
                 if (reverbActive) {
                     reverb.process((l + r) * 0.5f)
-                    outL += reverb.lastL * wetGain
-                    outR += reverb.lastR * wetGain
+                    outL += reverb.lastL * wet
+                    outR += reverb.lastR * wet
                 }
 
                 if (limit) {
@@ -178,15 +206,15 @@ internal class AudioRenderChain(
                 floatL[i] = outL
                 floatR[i] = outR
             } else {
-                leftPanner.pan(l, azL.toDouble())
-                rightPanner.pan(r, azR.toDouble())
+                leftPanner.pan(l)
+                rightPanner.pan(r)
                 var outL = leftPanner.lastL + rightPanner.lastL
                 var outR = leftPanner.lastR + rightPanner.lastR
 
                 if (reverbActive) {
                     reverb.process((l + r) * 0.5f)
-                    outL += reverb.lastL * wetGain
-                    outR += reverb.lastR * wetGain
+                    outL += reverb.lastL * wet
+                    outR += reverb.lastR * wet
                 }
 
                 if (limit) {
@@ -209,12 +237,17 @@ internal class AudioRenderChain(
         rightBinaural.reset()
         distanceGainL.snap(1f); distanceGainR.snap(1f)
         directivitySmoother.snap(1f)
-        azimuthL.snap(0f); azimuthR.snap(0f)
+        leftPanner.reset(); rightPanner.reset()
+        lateralL.snap(0f); lateralR.snap(0f)
         occlusionFilterL.reset(); occlusionFilterR.reset()
+        occlusionFilterL.setCutoff(sampleRate, MAX_CUTOFF_HZ); occlusionFilterR.setCutoff(sampleRate, MAX_CUTOFF_HZ)
         reverb.reset()
         occlusionCutoff.snap(MAX_CUTOFF_HZ)
         occlusionGain.snap(1f)
         reverbWet.snap(0f)
+        gainRampL.snap(1f); gainRampR.snap(1f)
+        logCutoffRamp.snap(ln(MAX_CUTOFF_HZ))
+        wetRamp.snap(0f)
     }
 
     private fun nextMakeup(normalize: Boolean, dtBlock: Float): Float {
@@ -284,9 +317,16 @@ internal class AudioRenderChain(
         }
     }
 
-    private fun azimuthOf(emitter: Vec3, listenerPos: Vec3, forward: Vec3, right: Vec3): Float {
+    /**
+     * Lateral angle of [emitter] (0 = on the median plane, positive = to the listener's right, ±π/2 = straight out
+     * one ear). Unlike an azimuth it has no ±180° wrap: a source passing behind the head moves through the center
+     * continuously, and front / back mirror images share the same ITD and ILD, as they do for a real head.
+     */
+    private fun lateralOf(emitter: Vec3, listenerPos: Vec3, right: Vec3): Float {
         val rel = emitter - listenerPos
-        return atan2(rel dot right, rel dot forward).toFloat()
+        val len = rel.length()
+        if (len < 1e-9) return 0f
+        return asin(((rel dot right) / len).coerceIn(-1.0, 1.0)).toFloat()
     }
 
     private fun applyLegacyGain(buf: ByteArray, len: Int, gain: Double) {
