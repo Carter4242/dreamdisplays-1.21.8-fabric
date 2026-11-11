@@ -159,9 +159,12 @@ class MediaPlayer(
     @Volatile
     private var startHeldForTimeline = holdFirstStartForTimeline
 
-    /** The resolved streams of a first open waiting for the shared clock's position; control thread. */
+    /**
+     * A first open is waiting for the shared clock's position; control thread. It opens the selection current at its
+     * release ([streams]), so a quality or dub picked meanwhile (or restored on the next tick) is the one played.
+     */
     @Volatile
-    private var heldStart: ActiveStreams? = null
+    private var startHeld = false
 
     /** Playback speed the viewer asked for (see [setPlaybackSpeed]); live / unseekable media plays at 1 anyway. */
     @Volatile
@@ -361,7 +364,7 @@ class MediaPlayer(
         }
         if (sessionManager.isPlaying) return@safeExecute
         // The first open waits for the shared clock's position: it plays from there once that is known
-        if (heldStart != null) return@safeExecute
+        if (startHeld) return@safeExecute
         val ss = streams ?: return@safeExecute
         noteHitch(FailureStages.RESUME, if (liveStream) "re_resolve" else "cold_restart", "resumed without a warm session")
         // A relay stream has one fixed URL that never expires: nothing to resolve again, it just connects
@@ -578,16 +581,18 @@ class MediaPlayer(
     fun primeStartPosition(nanos: Long) {
         if (nanos < 0L || sessionManager.isPlaying) return
         primedStartPositionNanos = nanos
-        // A first open waiting for this position goes ahead now, there
-        if (heldStart != null) safeExecute(::releaseHeldStart)
+        // A first open waiting for this position goes ahead now, there. Asked on the control thread, where the hold is
+        // set: a hold being set up right now read the position before this one landed, and is released all the same
+        if (startHeldForTimeline) safeExecute { if (startHeld) releaseHeldStart() }
     }
 
-    /** Opens the held first start ([heldStart]) at the primed position (else the clock's origin), if still held. */
+    /** Opens the held first start ([startHeld]) at the primed position (else the clock's origin), if still held. */
     private fun releaseHeldStart() {
         startHeldForTimeline = false
-        val ss = heldStart ?: return
-        heldStart = null
+        if (!startHeld) return
+        startHeld = false
         if (terminated.get()) return
+        val ss = streams ?: return
         val offset = primedStartPositionNanos.takeIf { it >= 0L } ?: clock.originNanos
         logger.debug("$debugLabel First open released at ${ms(offset)}ms.")
         startStreams(ss, offset)
@@ -999,7 +1004,7 @@ class MediaPlayer(
                 ) {
                     // A display on a shared clock whose position is not known yet (its timeline is a packet away):
                     // opened at the start, it would be seen and heard there before the timeline moved it
-                    heldStart = streamSet
+                    startHeld = true
                     lifecycle = PlayerState.Paused
                     logger.debug("$debugLabel First open held until the shared clock's position is known.")
                     RETRY_SCHEDULER.schedule(
@@ -1220,6 +1225,8 @@ class MediaPlayer(
 
     private fun startWarmUp(positionNanos: Long) {
         if (!isReady || terminated.get() || liveStream || !seekable) return
+        // A first open still waiting for the shared clock's position would open at a position not known yet
+        if (startHeld) return
         if (warmingUp) {
             if (!warmUpStale()) return
             // Never reached its first frame: drop it and open again
@@ -1668,7 +1675,7 @@ class MediaPlayer(
         // does a seek before the stream was ever opened (its first play opens there)
         if ((lifecycle == PlayerState.Restarting || !streamsEverStarted) && !liveStream) primedStartPositionNanos = nanos
         // A first open waiting for the shared clock's position: this is it
-        if (heldStart != null) {
+        if (startHeld) {
             releaseHeldStart()
             if (fire) events.onSeek()
             return
