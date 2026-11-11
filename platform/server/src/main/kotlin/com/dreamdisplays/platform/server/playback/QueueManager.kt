@@ -367,6 +367,8 @@ object QueueManager {
                 ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, audienceOf(display)) + TICK_MARGIN_MS,
             )
             if (!QueueTiming.advanceDue(timeline, now, earlyMs, armed, durationMs)) continue
+            // The video's end: a fullscreen session of it that does not loop is over, as on a display with no queue
+            FullscreenBroadcastManager.endNonLoopingSessions(displayId)
             advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs))
         }
     }
@@ -386,6 +388,7 @@ object QueueManager {
             ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
         val startAt = QueueTiming.switchAtMs(timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs)
             ?: return
+        FullscreenBroadcastManager.endNonLoopingSessions(display.id)
         advance(display, startAt)
     }
 
