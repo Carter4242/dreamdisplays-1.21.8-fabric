@@ -155,6 +155,31 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `a cached plan follows its screen to its current output and rectangle, or is dropped with its adapter`() {
+        val nvidia = "10de:2684"
+        val intel = "8086:a7a0"
+        val d3 = ScreenCapture.Monitor(1, "Screen 2", 1920, 0, 2560, 1440, adapter = 0, vendorId = 0x10DE,
+            deviceName = "\\\\.\\DISPLAY3", adapterPciId = nvidia)
+        val choice = ScreenCapture.Choice(d3, ScreenCapture.Plan(Source.DDAGRAB, Encoder.NVENC), emptyList())
+        assertEquals(choice, ScreenCapture.rebind(choice, listOf(d3.copy(name = ""))))
+        // DISPLAY2 woke up on the same GPU: DISPLAY3 is output 2 now, and the layout moved it
+        val moved = d3.copy(index = 2, x = -2560, name = "")
+        val now = ScreenCapture.rebind(choice, listOf(moved))!!
+        assertEquals(2, now.monitor.index)
+        assertEquals(-2560, now.monitor.x)
+        assertEquals("Screen 2", now.monitor.name)
+        assertEquals(choice.plan, now.plan)
+        // Docked: the GPU is adapter 1 now; the same GPU is found by its PCI id
+        assertEquals(1, ScreenCapture.rebind(choice, listOf(d3.copy(adapter = 1)))!!.monitor.adapter)
+        // Only another GPU shows it now: the plan (that GPU's encoder) no longer applies
+        assertEquals(null, ScreenCapture.rebind(choice, listOf(d3.copy(adapter = 1, vendorId = 0x8086, adapterPciId = intel))))
+        assertEquals(null, ScreenCapture.rebind(choice, emptyList()))
+        // GDI plans copy the rectangle: a new resolution is picked up
+        val gdi = choice.copy(plan = ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264))
+        assertEquals(1920, ScreenCapture.rebind(gdi, listOf(d3.copy(width = 1920, height = 1080)))!!.monitor.width)
+    }
+
+    @Test
     fun `relay failures are told apart from capture and encoder failures`() {
         val refused = ScreenCapture.RelayFailure.REFUSED
         val unreachable = ScreenCapture.RelayFailure.UNREACHABLE

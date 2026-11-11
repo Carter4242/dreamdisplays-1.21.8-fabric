@@ -163,7 +163,21 @@ object ScreenCapture {
      * a few `FFmpeg` runs the first time, so call off the render thread.
      */
     fun choose(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice {
-        knownChoice(ffmpeg, monitor, softwareOnly)?.let { return it }
+        knownChoice(ffmpeg, monitor, softwareOnly)?.let { cached ->
+            // The screen as it is now: monitors sleep, get plugged, rearranged, resized while the game stays open
+            val fresh = freshVariants(cached.monitor) ?: return cached
+            rebind(cached, fresh)?.let { now ->
+                if (now != cached) {
+                    logger.info("Screen share plan for {}: {} now at output {} of {}, {},{} {}x{}.", monitor.deviceName,
+                        now.plan, now.monitor.index, adapterLabel(now.monitor), now.monitor.x, now.monitor.y,
+                        now.monitor.width, now.monitor.height)
+                    choices[choiceKey(ffmpeg, monitor, softwareOnly)] = now
+                }
+                return now
+            }
+            // Its adapter does not show the screen any more: work the plan out again
+            choices.remove(choiceKey(ffmpeg, monitor, softwareOnly))
+        }
         val source = sourceForThisOs() ?: Source.DDAGRAB
         val choice = if (source != Source.DDAGRAB) {
             Choice(monitor, Plan(source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg)), [])
@@ -176,6 +190,29 @@ object ScreenCapture {
         )
         choices[choiceKey(ffmpeg, monitor, softwareOnly)] = choice
         return choice
+    }
+
+    /**
+     * [choice] for its screen as DXGI lists it now ([fresh]: every way to reach that screen): its plan on the same
+     * adapter, opened the same way, at that adapter's current output index and the screen's current rectangle. Null
+     * when that adapter no longer shows the screen. A screen not known by its Windows name cannot be checked and is
+     * kept as it is.
+     */
+    internal fun rebind(choice: Choice, fresh: List<Monitor>): Choice? {
+        val m = choice.monitor
+        if (m.deviceName.isEmpty()) return choice
+        val sameWay = fresh.filter { it.deviceName == m.deviceName && it.byVendor == m.byVendor && it.adapterPciId == m.adapterPciId }
+        // Adapter indexes follow the primary screen's adapter: the same index first, else that GPU wherever it is now
+        val now = sameWay.firstOrNull { it.adapter == m.adapter } ?: sameWay.firstOrNull() ?: return null
+        val rebound = now.copy(name = m.name)
+        return if (rebound == m) choice else choice.copy(monitor = rebound)
+    }
+
+    /** Every way to reach [monitor]'s screen as DXGI lists it now, or null when that cannot be told (no DXGI here). */
+    private fun freshVariants(monitor: Monitor): List<Monitor>? {
+        if (monitor.deviceName.isEmpty() || sourceForThisOs() != Source.DDAGRAB) return null
+        val groups = dxgiGroups() ?: return null
+        return groups.firstOrNull { g -> g.any { it.deviceName == monitor.deviceName } }.orEmpty()
     }
 
     private fun chooseOnWindows(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean): Choice {
@@ -578,14 +615,15 @@ object ScreenCapture {
     // ---- Windows screens ----
 
     /**
-     * Every screen on the desktop, from DXGI (see [Dxgi]): one per Windows screen, named by where it sits ("Screen 1
-     * (left)", ordered left to right), on the adapter whose [Plan] worked when [choose] already ran for it. Cheap
+     * Every screen on the desktop, from DXGI (see [Dxgi]): one per Windows screen, named by where it sits now ("Screen
+     * 1 (left)", ordered left to right), on the adapter whose [Plan] worked when [choose] already ran for it. Cheap
      * (no `FFmpeg`): call whenever the picker opens. Null when DXGI cannot be read here.
      */
     fun windowsScreens(ffmpeg: String?): List<Monitor>? {
         val groups = dxgiGroups() ?: return null
         val screens = groups.map { variants ->
-            val chosen = ffmpeg?.let { f -> variants.firstNotNullOfOrNull { knownChoice(f, it)?.monitor } }
+            // Where the screen is now (its labels and capture follow the current layout), on the adapter its plan uses
+            val chosen = ffmpeg?.let { f -> knownChoice(f, variants.first())?.let { rebind(it, variants)?.monitor } }
             chosen ?: variants.first()
         }
         return named(screens)
