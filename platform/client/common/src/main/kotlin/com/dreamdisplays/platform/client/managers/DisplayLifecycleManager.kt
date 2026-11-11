@@ -223,7 +223,10 @@ object DisplayLifecycleManager {
      */
     private fun worldOf(packet: DisplayInfo): String = displayWorld(packet.world, currentDimensionKey())
 
-    private class DimensionOf(val level: ClientLevel, val key: String)
+    /** Holds its level weakly: the cache must not keep a disconnected world (and its chunks) alive. */
+    private class DimensionOf(level: ClientLevel, val key: String) {
+        val level = java.lang.ref.WeakReference(level)
+    }
 
     @Volatile
     private var dimensionOf: DimensionOf? = null
@@ -231,7 +234,7 @@ object DisplayLifecycleManager {
     /** The player's current dimension id, or empty outside a world. Cached per level (read every frame per display). */
     internal fun currentDimensionKey(): String {
         val level = Minecraft.getInstance().level ?: return ""
-        dimensionOf?.takeIf { it.level === level }?.let { return it.key }
+        dimensionOf?.takeIf { it.level.get() === level }?.let { return it.key }
         return dimensionKeyOf(level).also { dimensionOf = DimensionOf(level, it) }
     }
 
