@@ -21,7 +21,8 @@ data class ScreenShareRequest(
 
 /**
  * Server tells the sharing player where their share stands on display [id]. [active] with a [publishUrl]: start (or
- * keep) encoding to it. Not [active]: stop encoding; a non-empty [error] says why it was refused or ended.
+ * keep) encoding to it. Not [active]: stop encoding; a non-empty [error] says why it was refused or ended. Only ever sent
+ * to the sharing player: [publishUrl] may carry the relay's publish credentials.
  */
 @Serializable
 data class ScreenShareState(
@@ -29,4 +30,8 @@ data class ScreenShareState(
     @ProtoNumber(2) val active: Boolean = false,
     @ProtoNumber(3) val publishUrl: String = "",
     @ProtoNumber(4) val error: String = "",
-) : DreamPacket
+) : DreamPacket {
+    /** Never prints [publishUrl]: it carries the relay's publish credentials. */
+    override fun toString(): String =
+        "ScreenShareState(id=$id, active=$active, publishUrl=${if (publishUrl.isEmpty()) "" else "<redacted>"}, error=$error)"
+}

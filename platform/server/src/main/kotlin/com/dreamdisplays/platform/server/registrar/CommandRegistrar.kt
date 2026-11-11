@@ -272,7 +272,8 @@ object CommandRegistrar {
                 executesCommand { ctx ->
                     ConfigCommand.execute(ctx.source.sender, StringArgumentType.getString(ctx, "key"), null)
                 }
-                argument("value", StringArgumentType.word()) {
+                // Greedy: a relay URL (`live.*`) has `:`, `/`, `?` and `&`, which a single word cannot hold
+                argument("value", StringArgumentType.greedyString()) {
                     suggests(suggesting(tips) { ctx, _, typed ->
                         ConfigCommand.valueSuggestions(StringArgumentType.getString(ctx, "key"))
                             .map { Suggestion(it) }.startingWith(typed)

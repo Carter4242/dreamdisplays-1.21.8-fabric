@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.util
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import kotlinx.io.IOException
 import java.io.InputStream
 
@@ -39,11 +40,13 @@ object MediaUtil {
     /** @return `true` if [line] is not a known benign `FFmpeg` error that can be safely ignored. */
     fun isInterestingStderr(line: String): Boolean = BORING_STDERR.none { it in line }
 
-    /** Truncates [s] to 120 chars for logging, appending the original length if it was truncated. */
-    fun truncate(s: String?): String = when {
-        s == null -> "null"
-        s.length <= 120 -> s
-        else -> s.substring(0, 120) + "...(${s.length})"
+    /**
+     * Truncates [s] to 120 chars for logging, appending the original length if it was truncated. URL credentials
+     * (a relay's `user` / `pass`, see [LiveStreamUrls.redactCredentials]) are dropped first.
+     */
+    fun truncate(raw: String?): String {
+        val s = raw?.let(LiveStreamUrls::redactCredentials) ?: return "null"
+        return if (s.length <= 120) s else s.substring(0, 120) + "...(${s.length})"
     }
 
     /** Appends [line] to [sb], dropping the oldest text once it exceeds [STDERR_CAP_CHARS] so long sessions don't leak. */

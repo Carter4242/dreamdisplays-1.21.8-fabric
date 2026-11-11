@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -28,6 +29,22 @@ class MediaProcessLiveArgsTest {
         val whitelist = a.valueOf("-protocol_whitelist")!!.split(',')
         assertTrue(whitelist.containsAll(["srt", "rtmp", "rtmps", "rtsp", "rtp", "tcp", "udp", "tls"]))
         assertFalse("http" in whitelist || "https" in whitelist || "file" in whitelist, "A relay input never needs http or files.")
+    }
+
+    @Test
+    fun `an rtmps play template reaches FFmpeg as configured, over tls`() {
+        val url = LiveStreamUrls.fromTemplate("rtmps://live.example.org:443/{id}", "ddabc123")
+        assertEquals("rtmps://live.example.org:443/ddabc123", url)
+        assertTrue(LiveStreamUrls.isValid(url))
+        assertEquals(url, LiveStreamUrls.playUrl(url))
+        val a = input(url)
+        assertEquals(url, a.last())
+        assertEquals("live", a.valueOf("-rtmp_live"))
+        assertEquals("2000000", a.valueOf("-rw_timeout"))
+        assertTrue(a.valueOf("-protocol_whitelist")!!.split(',').containsAll(["rtmps", "tls", "tcp"]))
+        // A play template with a query keeps it
+        val q = LiveStreamUrls.fromTemplate("rtmps://live.example.org/{id}?user=viewer&pass=v", "x1")
+        assertEquals("rtmps://live.example.org/x1?user=viewer&pass=v", input(q).last())
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.dreamdisplays.core.diagnostics
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -48,6 +49,29 @@ class ReportScrubberTest {
         assertFalse("203.0.113.7" in scrubbed)
         assertEquals("https://cdn.example.com/a.mp4?<redacted>", ReportScrubber.scrubUrl("https://cdn.example.com/a.mp4?token=abc&x=1"))
         assertEquals("https://cdn.example.com/a.mp4?<redacted>", ReportScrubber.scrubUrl("https://cdn.example.com/a.mp4?Signature=abc"))
+    }
+
+    @Test
+    fun `relay credentials never survive a scrub`() {
+        val line = "[out#0/flv @ 0x1] Error opening output rtmps://live.example.org:443/ddabc?user=publish&pass=s3cr3t: I/O error"
+        val scrubbed = ReportScrubber.scrub(line)
+        assertFalse("s3cr3t" in scrubbed)
+        assertFalse("publish&" in scrubbed)
+        assertTrue("rtmps://live.example.org:443/ddabc?" in scrubbed)
+        assertFalse("hunter2" in ReportScrubber.scrub("rtmp://alice:hunter2@relay.example.com:1935/ddabc: Connection refused"))
+        assertFalse("hunter2" in ReportScrubber.scrubUrl("rtmp://alice:hunter2@relay.example.com/ddabc"))
+        assertEquals(
+            "srt://h:8890?streamid=publish:room1:<redacted>&passphrase=<redacted>",
+            LiveStreamUrls.redactCredentials("srt://h:8890?streamid=publish:room1:bob:pw&passphrase=longsecret1"),
+        )
+        assertEquals(
+            "srt://h:8890?streamid=read:room1",
+            LiveStreamUrls.redactCredentials("srt://h:8890?streamid=read:room1"),
+        )
+        // Redaction is stable: a redacted line redacts to itself
+        val once = LiveStreamUrls.redactCredentials(line)
+        assertEquals(once, LiveStreamUrls.redactCredentials(once))
+        assertEquals("rtmps://live.example.org:443/ddabc", LiveStreamUrls.redactCredentials("rtmps://live.example.org:443/ddabc"))
     }
 
     @Test

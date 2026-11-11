@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.displays
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
@@ -134,7 +135,7 @@ object ScreenShare {
             if (r.stopped) return@thread
             val args = ScreenCapture.args(ffmpeg, source, r.monitor, encoder, publishUrl)
             val proc = runCatching { ProcessBuilder(args).redirectErrorStream(true).start() }.getOrElse {
-                fail(r, it.message ?: "could not start FFmpeg")
+                fail(r, LiveStreamUrls.redactCredentials(it.message ?: "could not start FFmpeg"))
                 return@thread
             }
             r.process = proc
@@ -147,7 +148,8 @@ object ScreenShare {
             runCatching {
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     if (tail.size >= 6) tail.removeFirst()
-                    tail.addLast(line)
+                    // FFmpeg names the publish URL in its errors; its credentials never reach a log or the chat
+                    tail.addLast(LiveStreamUrls.redactCredentials(line))
                 }
             }
             val code = runCatching { proc.waitFor() }.getOrDefault(-1)

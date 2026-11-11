@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.config.TomlLineEditor
 import com.dreamdisplays.core.display.policy.PolicyPaths
 import com.dreamdisplays.core.protocol.common.ClientBuild
@@ -16,8 +17,9 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, the `[karaoke]` keys and every `[policy.*]` default), then
- * reloads the config the way `/display reload` does.
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, the `[karaoke]` keys, the `[live]` relay URLs and
+ * every `[policy.*]` default), then reloads the config the way `/display reload` does. The relay publish URL carries
+ * credentials: it is only ever shown, replied and logged with them redacted.
  *
  * The file is edited in place, one line at a time ([TomlLineEditor]), so comments and layout survive; the
  * result is parsed before it replaces the old file, and a reset comments the line out again so the built-in
@@ -30,6 +32,8 @@ object ConfigCommand {
     private class Key(
         val name: String,
         val kind: PolicyPaths.Kind,
+        /** Holds credentials: shown, echoed and logged only through [LiveStreamUrls.redactCredentials]. */
+        val secret: Boolean = false,
         val current: (SettingsSection) -> Any?,
     ) {
         val table: String = name.substringBeforeLast('.')
@@ -67,9 +71,20 @@ object ConfigCommand {
         Key("karaoke.co_singer_fade_up_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.karaoke.co_singer_fade_up_ms },
         Key("karaoke.singer_track_volume", PolicyPaths.Kind.Decimal(0.0, 2.0)) { it.karaoke.singer_track_volume },
         Key("karaoke.debug", PolicyPaths.Kind.Bool) { it.karaoke.debug },
+        Key("live.relay_publish_url", RELAY_URL, secret = true) {
+            it.live.relay_publish_url.ifEmpty { null }?.let(LiveStreamUrls::redactCredentials)
+        },
+        Key("live.relay_play_url", RELAY_URL) { it.live.relay_play_url.ifEmpty { null } },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
+
+    /** A relay URL template: a live scheme and an `{id}` somewhere (path, `streamid`, ...); any query is kept. */
+    private val RELAY_URL: PolicyPaths.Kind
+        get() = PolicyPaths.Kind.Text(
+            Regex("""(?i)(?:srt|rtmps?|rtsp)://[^\s"]*\{id}[^\s"]*"""),
+            "<srt|rtmp|rtmps|rtsp URL containing {id}>",
+        )
 
     /** Entry point; [key] and [value] are null when not typed. */
     fun execute(sender: CommandSender, key: String?, value: String?) {
@@ -109,7 +124,7 @@ object ConfigCommand {
         val updated = if (value == null) TomlLineEditor.unset(text, entry.table, entry.key)
         else TomlLineEditor.set(text, entry.table, entry.key, TomlLineEditor.encode(value))
         val check = Toml.parse(updated)
-        if (check.hasErrors()) return "${check.errors().first().message}"
+        if (check.hasErrors()) return LiveStreamUrls.redactCredentials("${check.errors().first().message}")
         if (value != null && check.get("${entry.table}.${entry.key}") == null) return "the key did not land in [${entry.table}]"
         if (updated != text) {
             val temp = file.resolveSibling("config.toml.tmp")
@@ -117,11 +132,12 @@ object ConfigCommand {
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
         }
         PaperServer.config.reload()
-        logger.info("config.toml: {} {}", entry.name, if (value == null) "reset" else "= $value")
+        val shown = if (entry.secret && value is String) LiveStreamUrls.redactCredentials(value) else value
+        logger.info("config.toml: {} {}", entry.name, if (value == null) "reset" else "= $shown")
         null
     }.getOrElse { e ->
-        logger.warn("Could not update config.toml for {}.", entry.name, e)
-        e.message ?: e.javaClass.simpleName
+        logger.warn("Could not update config.toml for {}: {}", entry.name, LiveStreamUrls.redactCredentials(e.toString()))
+        LiveStreamUrls.redactCredentials(e.message ?: e.javaClass.simpleName)
     }
 
     private fun hint(kind: PolicyPaths.Kind): String = PolicyPaths.Path("", "", kind) { null }.hint

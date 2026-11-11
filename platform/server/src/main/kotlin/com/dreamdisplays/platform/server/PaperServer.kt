@@ -66,6 +66,7 @@ class PaperServer : JavaPlugin() {
         )
         ServerCoroutines.warmUp()
         TelemetryMetrics.warmUp()
+        com.dreamdisplays.platform.server.utils.SecretLogFilter.install()
 
         Scheduler.init(this)
 
@@ -152,6 +153,7 @@ class PaperServer : JavaPlugin() {
         disableStep("save queues") { QueueManager.flush() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }
         disableStep("close storage") { storage.disconnect() }
+        disableStep("remove the log filter") { com.dreamdisplays.platform.server.utils.SecretLogFilter.uninstall() }
     }
 
     private fun disableStep(what: String, step: () -> Unit) {

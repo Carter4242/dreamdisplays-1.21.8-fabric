@@ -1,9 +1,12 @@
 package com.dreamdisplays.core.diagnostics
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
+
 /**
  * Removes private details from text a client reports to the server (error messages, `FFmpeg` / `yt-dlp` stderr,
  * tool paths): the user's home directory becomes `~`, cookie / authorization values are dropped, and signed stream
- * URLs keep their host and path but lose the query (signatures, tokens, the viewer's IP).
+ * URLs keep their host and path but lose the query (signatures, tokens, the viewer's IP). URL credentials
+ * (`user:pass@`, relay `user=` / `pass=` parameters, see [LiveStreamUrls.redactCredentials]) are always dropped.
  */
 object ReportScrubber {
     private const val REDACTED = "<redacted>"
@@ -29,7 +32,7 @@ object ReportScrubber {
     /** Command-line secrets: `--cookies <file>`, `--password <x>`, `--username <x>`, `--video-password <x>`. */
     private val SECRET_ARG = Regex("""(?i)(--(?:cookies|cookies-from-browser|password|username|video-password|ap-password|ap-username))(\s+|=)("[^"]*"|'[^']*'|\S+)""")
 
-    private val URL = Regex("""(?i)\bhttps?://[^\s"'<>]+""")
+    private val URL = Regex("""(?i)\b(?:https?|srt|rtmps?|rtsp)://[^\s"'<>]+""")
 
     /** Query parameters that make a URL signed / personal; any of them drops the whole query. */
     private val SIGNED_PARAMS = setOf(
@@ -44,7 +47,7 @@ object ReportScrubber {
     /** Scrubs [text]; [homes] are further home directories to replace (the client's own `user.home`). */
     fun scrub(text: String, homes: Collection<String> = emptyList()): String {
         if (text.isEmpty()) return text
-        var out = SECRET_HEADER.replace(text) { m -> "${m.groupValues[1]}${m.groupValues[2]}$REDACTED" }
+        var out = SECRET_HEADER.replace(LiveStreamUrls.redactCredentials(text)) { m -> "${m.groupValues[1]}${m.groupValues[2]}$REDACTED" }
         out = SECRET_ARG.replace(out) { m -> "${m.groupValues[1]}${m.groupValues[2]}$REDACTED" }
         out = URL.replace(out) { m -> scrubUrl(m.value) }
         for (home in homes) {
@@ -58,7 +61,8 @@ object ReportScrubber {
     }
 
     /** [url] with its query dropped when it is a signed stream URL; other URLs only lose sensitive parameters. */
-    fun scrubUrl(url: String): String {
+    fun scrubUrl(rawUrl: String): String {
+        val url = LiveStreamUrls.redactCredentials(rawUrl)
         val queryStart = url.indexOf('?')
         if (queryStart < 0) return url
         val base = url.substring(0, queryStart)

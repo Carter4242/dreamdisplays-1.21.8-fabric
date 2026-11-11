@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
@@ -59,6 +60,8 @@ object ScreenShareActions {
         if (refusal != null) return reply(player, displayId, active = false, error = refusal)
         val display = DisplayManager.getDisplayData(displayId) as PaperDisplayData
 
+        // Only this player is ever sent the publish URL (it carries the relay's publish credentials); everyone sees the
+        // play URL on the display
         // One share per player: starting on another display ends the old one first
         byDisplay.values.filter { it.sharerId == player.uniqueId }.forEach { end(it, notifySharer = true) }
         byDisplay[displayId]?.let { end(it, notifySharer = true) }
@@ -67,9 +70,9 @@ object ScreenShareActions {
         val streamId = newStreamId()
         val share = Share(displayId, player.uniqueId, streamId, display.url, display.lang)
         byDisplay[displayId] = share
-        DisplayActions.applyVideo(display, live.relay_play_url.replace("{id}", streamId), "", player, persist = false)
+        DisplayActions.applyVideo(display, LiveStreamUrls.fromTemplate(live.relay_play_url, streamId), "", player, persist = false)
         logger.info("{} started sharing their screen to display {}.", player.name, display.id)
-        reply(player, displayId, active = true, publishUrl = live.relay_publish_url.replace("{id}", streamId))
+        reply(player, displayId, active = true, publishUrl = LiveStreamUrls.fromTemplate(live.relay_publish_url, streamId))
     }
 
     /** Why [player] may not share to [displayId] right now (a message for them), or null when they may. */

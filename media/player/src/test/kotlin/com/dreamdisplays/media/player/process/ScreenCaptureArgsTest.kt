@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.media.player.process.ScreenCapture.Encoder
 import com.dreamdisplays.media.player.process.ScreenCapture.Source
 import kotlin.test.Test
@@ -42,6 +43,24 @@ class ScreenCaptureArgsTest {
         assertEquals("Screen 2 1920x1080", ScreenCapture.label(screen))
         assertFalse("-init_hw_device" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.AMF, publish))
         assertFalse("-omit_video_pes_length" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.AMF, "rtmp://h/a"))
+    }
+
+    @Test
+    fun `an rtmps template with credentials in the query publishes flv to exactly that url`() {
+        val template = "rtmps://live.example.org:443/{id}?user=publish&pass=s3cr3t"
+        val url = LiveStreamUrls.fromTemplate(template, "ddabc123")
+        assertEquals("rtmps://live.example.org:443/ddabc123?user=publish&pass=s3cr3t", url)
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.X264, url)
+        assertEquals("flv", a[a.size - 2])
+        assertEquals(url, a.last(), "TLS, SNI host, port and the query reach FFmpeg untouched")
+        assertFalse("-omit_video_pes_length" in a)
+        // The same share on plain RTMP is a config change only
+        val plain = LiveStreamUrls.fromTemplate("rtmp://live.example.org:1935/{id}?user=publish&pass=s3cr3t", "ddabc123")
+        assertEquals(plain, ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.X264, plain).last())
+        assertEquals(
+            "rtmps://live.example.org:443/ddabc123?user=<redacted>&pass=<redacted>",
+            LiveStreamUrls.redactCredentials(url),
+        )
     }
 
     @Test

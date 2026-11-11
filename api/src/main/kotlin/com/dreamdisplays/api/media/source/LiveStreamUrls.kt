@@ -118,6 +118,47 @@ object LiveStreamUrls {
         return "$play&pkt_size=1316"
     }
 
+    /**
+     * The URL for stream [id] from a `[live]` relay URL [template]: every `{id}` replaced; scheme, host, port and any
+     * query (such as MediaMTX `?user=...&pass=...`) kept exactly as configured.
+     */
+    fun fromTemplate(template: String, id: String): String = template.trim().replace("{id}", id)
+
+    /**
+     * [text] with every credential a URL in it may carry replaced by `<redacted>`: the `user:pass@` part of any
+     * `scheme://` URL, the `user=` / `pass=` / `jwt=` / `passphrase=` query parameters (MediaMTX publish credentials,
+     * SRT encryption), and the `user:pass` tail of a MediaMTX `streamid=publish:<path>:<user>:<pass>`. For log lines,
+     * chat, command replies and error reports; everything else is left as is.
+     */
+    fun redactCredentials(text: String): String {
+        if (!text.contains("://") && !text.contains('=')) return text
+        var out = USERINFO.replace(text) { m -> "${m.groupValues[1]}$REDACTED@" }
+        out = SECRET_PARAM.replace(out) { m -> "${m.groupValues[1]}$REDACTED" }
+        out = STREAM_ID.replace(out) { m ->
+            val value = m.groupValues[2]
+            val parts = value.split(STREAM_ID_SEPARATOR)
+            if (parts.size < 4 || parts[0].lowercase(Locale.ROOT) !in setOf("read", "publish")) m.value
+            else {
+                // Keep "<action>:<path>" with the separator the URL used (plain or percent-encoded)
+                val kept = value.substring(0, value.indexOf(parts[1], parts[0].length) + parts[1].length)
+                "${m.groupValues[1]}$kept:$REDACTED"
+            }
+        }
+        return out
+    }
+
+    private const val REDACTED = "<redacted>"
+
+    /** `scheme://user[:pass]@`: the userinfo of any URL. */
+    private val USERINFO = Regex("""(?i)\b([a-z][a-z0-9+.-]*://)[^\s/?#@"'<>]+@""")
+
+    /** Credential query parameters: MediaMTX `user` / `pass` / `jwt`, SRT `passphrase`, generic passwords. */
+    private val SECRET_PARAM = Regex("""(?i)([?&](?:passphrase|password|passwd|pass|pwd|user|username|jwt|token)=)(?!<redacted>)[^&\s"'<>#]*""")
+
+    /** A `streamid` query parameter (its credentials, if any, are its third and later `:` parts). */
+    private val STREAM_ID = Regex("""(?i)([?&]streamid=)([^&\s"'<>#]*)""")
+    private val STREAM_ID_SEPARATOR = Regex("""(?i):|%3A""")
+
     /** A URL SRT latency in microseconds: a value up to [MAX_SRT_LATENCY_MS] is read as ms; clamped to the bounds. */
     internal fun latencyMicros(raw: Long): Long {
         val micros = if (raw <= MAX_SRT_LATENCY_MS) raw * 1_000L else raw

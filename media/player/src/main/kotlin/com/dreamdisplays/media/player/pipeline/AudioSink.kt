@@ -644,7 +644,8 @@ internal class AudioSink(private val debugLabel: String) {
         // first paced write. The learned target itself persists across sessions.
         paceStreaming = false
         paceCleanChunks = 0
-        if (live) paceTargetBytes = LIVE_PACE_START_BYTES
+        // A live session's short target would starve the next ordinary one: bring it back into the normal range
+        paceTargetBytes = if (live) LIVE_PACE_START_BYTES else paceTargetBytes.coerceIn(MIN_PACE_BYTES, MAX_PACE_BYTES)
         while (!terminated.get() && !stopFlag.get()) {
             if (parkIfRequested(ln, terminated, stopFlag)) break
             if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) output.discontinuity()
