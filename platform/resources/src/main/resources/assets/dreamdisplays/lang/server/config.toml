@@ -143,6 +143,13 @@ blocked_hosts = []
 # relay_play_url = "rtmps://relay.example.com:443/{id}"
 relay_publish_url = ""
 relay_play_url = ""
+# How sharers' clients encode. "auto": each client tests its own GPU encoders per screen and falls back to x264 by
+# itself. "software": x264 only, for everyone (if shares fail on many PCs). Sent with every share start, so changing
+# it needs no client update.
+share_encoder = "auto"
+# Caps for every share (0 = the client's default: 30 fps, 1080p). Lower them to lighten sharers' PCs and the relay.
+share_max_fps = 0
+share_max_height = 0
 
 [queue]
 # "Up next": players queue videos from the display menu and a synced / broadcast display moves on to the next

@@ -125,7 +125,7 @@ data class ClientErrorReport(
     @ProtoNumber(13) val timestampMs: Long = 0,
     /** Identical reports the client dropped since it last sent this one. */
     @ProtoNumber(14) val suppressed: Int = 0,
-    /** `error` or `hitch` (empty = `error`). */
+    /** `error`, `hitch` or `share` (a screen share failed, or needed a fallback) (empty = `error`). */
     @ProtoNumber(15) val type: String = "",
     /** Hitch: how long the picture was frozen (or, for `av_sync`, the worst lateness), in ms. */
     @ProtoNumber(16) val durationMs: Int = 0,
@@ -142,10 +142,15 @@ data class ClientErrorReport(
     @ProtoNumber(20) val metrics: Map<String, String> = emptyMap(),
 ) : DreamPacket {
     val isHitch: Boolean get() = type == TYPE_HITCH
+    val isShare: Boolean get() = type == TYPE_SHARE
+
+    /** [TYPE_ERROR], [TYPE_HITCH] or [TYPE_SHARE]; anything else counts as an error. */
+    val typeOrError: String get() = if (isHitch || isShare) type else TYPE_ERROR
 
     companion object {
         const val TYPE_ERROR = "error"
         const val TYPE_HITCH = "hitch"
+        const val TYPE_SHARE = "share"
     }
 }
 

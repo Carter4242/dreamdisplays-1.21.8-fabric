@@ -24,6 +24,18 @@ class ScreenShareWireTest {
     }
 
     @Test
+    fun `share limits travel and an old state without them decodes to the client defaults`() {
+        val state = ScreenShareState(id, active = true, publishUrl = "srt://r:8890?streamid=publish:dd1",
+            encoder = ScreenShareState.ENCODER_SOFTWARE, maxFps = 20, maxHeight = 720)
+        assertEquals(state, PacketRegistry.decode(PacketRegistry.encode(state), PacketDirection.SERVER_TO_CLIENT))
+        val old = ScreenShareState(id, active = true, publishUrl = "srt://r:8890?streamid=publish:dd1")
+        val decoded = PacketRegistry.decode(PacketRegistry.encode(old), PacketDirection.SERVER_TO_CLIENT) as ScreenShareState
+        assertEquals("", decoded.encoder)
+        assertEquals(0, decoded.maxFps)
+        assertEquals(0, decoded.maxHeight)
+    }
+
+    @Test
     fun `type ids stay put`() {
         assertEquals(80, PacketType.SCREEN_SHARE_REQUEST.id)
         assertEquals(81, PacketType.SCREEN_SHARE_STATE.id)

@@ -142,6 +142,12 @@ data class SettingsSection(
     data class LiveConfig(
         val relay_publish_url: String = "",
         val relay_play_url: String = "",
+        /** `auto` (each client picks its best encoder) or `software` (x264 only, for everyone). */
+        val share_encoder: String = "auto",
+        /** Frame rate cap for shares, 0 = the client's default (30). */
+        val share_max_fps: Int = 0,
+        /** Picture height cap for shares, 0 = the client's default (1080). */
+        val share_max_height: Int = 0,
     ) {
         val shareEnabled: Boolean get() = relay_publish_url.contains("{id}") && relay_play_url.contains("{id}")
     }
@@ -398,6 +404,10 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
         live = SettingsSection.LiveConfig(
             relay_publish_url = (t?.get("live.relay_publish_url") as? String)?.trim() ?: "",
             relay_play_url = (t?.get("live.relay_play_url") as? String)?.trim() ?: "",
+            share_encoder = (t?.get("live.share_encoder") as? String)?.trim()?.lowercase()
+                ?.takeIf { it == "auto" || it == "software" } ?: "auto",
+            share_max_fps = t.numberOrNull("live.share_max_fps")?.toInt()?.coerceIn(0, 60) ?: 0,
+            share_max_height = t.numberOrNull("live.share_max_height")?.toInt()?.coerceIn(0, 2160) ?: 0,
         ),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",

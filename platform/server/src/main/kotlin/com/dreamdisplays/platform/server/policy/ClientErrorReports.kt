@@ -54,8 +54,7 @@ object ClientErrorReports {
         val type: String
             get() = when {
                 report == null -> "command"
-                report.isHitch -> ClientErrorReport.TYPE_HITCH
-                else -> ClientErrorReport.TYPE_ERROR
+                else -> report.typeOrError
             }
     }
 

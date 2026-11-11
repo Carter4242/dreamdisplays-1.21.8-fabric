@@ -30,8 +30,20 @@ data class ScreenShareState(
     @ProtoNumber(2) val active: Boolean = false,
     @ProtoNumber(3) val publishUrl: String = "",
     @ProtoNumber(4) val error: String = "",
+    /** Server's encoder rule for this share: [ENCODER_AUTO] (empty: the client picks) or [ENCODER_SOFTWARE] (x264 only). */
+    @ProtoNumber(5) val encoder: String = "",
+    /** Frame rate cap for this share, 0 = the client's default. */
+    @ProtoNumber(6) val maxFps: Int = 0,
+    /** Picture height cap for this share (the width follows), 0 = the client's default. */
+    @ProtoNumber(7) val maxHeight: Int = 0,
 ) : DreamPacket {
+    companion object {
+        const val ENCODER_AUTO = "auto"
+        const val ENCODER_SOFTWARE = "software"
+    }
+
     /** Never prints [publishUrl]: it carries the relay's publish credentials. */
     override fun toString(): String =
-        "ScreenShareState(id=$id, active=$active, publishUrl=${if (publishUrl.isEmpty()) "" else "<redacted>"}, error=$error)"
+        "ScreenShareState(id=$id, active=$active, publishUrl=${if (publishUrl.isEmpty()) "" else "<redacted>"}, error=$error, " +
+            "encoder=$encoder, maxFps=$maxFps, maxHeight=$maxHeight)"
 }

@@ -127,7 +127,11 @@ object ScreenShareActions {
     }
 
     private fun reply(player: Player, displayId: UUID, active: Boolean, publishUrl: String = "", error: String = "") {
-        PaperV2Networking.send([player], ScreenShareState(displayId, active, publishUrl, error))
+        val live = PaperServer.config.settings.live
+        PaperV2Networking.send(
+            [player],
+            ScreenShareState(displayId, active, publishUrl, error, live.share_encoder, live.share_max_fps, live.share_max_height),
+        )
     }
 
     private fun isAdmin(player: Player) = player.hasPermission(PaperServer.config.permissions.deleteOthers)

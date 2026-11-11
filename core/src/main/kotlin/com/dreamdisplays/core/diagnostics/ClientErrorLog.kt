@@ -70,7 +70,7 @@ class ClientErrorLog(val path: Path, private val maxBytes: Long = DEFAULT_MAX_BY
             env: ClientEnvironment?,
             zone: ZoneId = ZoneId.systemDefault(),
         ): String = buildJsonObject {
-            put("type", if (report.isHitch) ClientErrorReport.TYPE_HITCH else ClientErrorReport.TYPE_ERROR)
+            put("type", report.typeOrError)
             put("time", time(receivedMs, zone))
             put("player", playerName)
             put("uuid", playerId.toString())
@@ -117,6 +117,11 @@ class ClientErrorLog(val path: Path, private val maxBytes: Long = DEFAULT_MAX_BY
                     put("positionMs", report.positionMs)
                     if (report.action.isNotEmpty()) put("action", report.action)
                     if (report.cause.isNotEmpty()) put("cause", report.cause)
+                    if (report.metrics.isNotEmpty()) {
+                        put("metrics", buildJsonObject { report.metrics.toSortedMap().forEach { (k, v) -> put(k, v) } })
+                    }
+                } else if (report.isShare) {
+                    if (report.action.isNotEmpty()) put("action", report.action)
                     if (report.metrics.isNotEmpty()) {
                         put("metrics", buildJsonObject { report.metrics.toSortedMap().forEach { (k, v) -> put(k, v) } })
                     }

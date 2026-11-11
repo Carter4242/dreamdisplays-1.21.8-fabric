@@ -688,6 +688,12 @@ message ScreenShareState {
   optional string publishUrl = 3;
   // WARNING: a default value decoded when value is missing
   optional string error = 4;
+  // WARNING: a default value decoded when value is missing
+  optional string encoder = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int32 maxFps = 6;
+  // WARNING: a default value decoded when value is missing
+  optional int32 maxHeight = 7;
 }
 
 message Uuid {

@@ -35,15 +35,16 @@ object ErrorsCommand {
     private val TYPES = mapOf(
         "errors" to ClientErrorReport.TYPE_ERROR, "error" to ClientErrorReport.TYPE_ERROR,
         "hitches" to ClientErrorReport.TYPE_HITCH, "hitch" to ClientErrorReport.TYPE_HITCH,
+        "shares" to ClientErrorReport.TYPE_SHARE, "share" to ClientErrorReport.TYPE_SHARE,
         "commands" to "command", "command" to "command", "all" to null,
     )
 
     /** Suggestions for the first argument: known players, displays, filters. */
     fun targetSuggestions(): List<String> =
         (Bukkit.getOnlinePlayers().map { it.name } + ClientErrorReports.knownPlayerNames() +
-            listOf("errors", "hitches", "commands")).distinct()
+            listOf("errors", "hitches", "shares", "commands")).distinct()
 
-    fun optionSuggestions(): List<String> = listOf("errors", "hitches", "commands", "all", "10", "25", "50")
+    fun optionSuggestions(): List<String> = listOf("errors", "hitches", "shares", "commands", "all", "10", "25", "50")
 
     fun execute(sender: CommandSender, args: List<String>) {
         var count = DEFAULT_COUNT
@@ -63,7 +64,7 @@ object ErrorsCommand {
                 return
             }
             if (index != 0) {
-                sender.sendMessage(text("Unknown option '${ReportLimits.forChat(token, 32)}'. Use errors, hitches, commands, all or a count.", NamedTextColor.RED))
+                sender.sendMessage(text("Unknown option '${ReportLimits.forChat(token, 32)}'. Use errors, hitches, shares, commands, all or a count.", NamedTextColor.RED))
                 return
             }
             val target = resolveTarget(token) ?: run {
@@ -78,6 +79,7 @@ object ErrorsCommand {
         val what = when (wanted) {
             ClientErrorReport.TYPE_ERROR -> "errors"
             ClientErrorReport.TYPE_HITCH -> "hitches"
+            ClientErrorReport.TYPE_SHARE -> "screen share reports"
             "command" -> "display commands"
             else -> "client reports"
         }
@@ -114,7 +116,10 @@ object ErrorsCommand {
                 .append(text(listOfNotNull(e.positionMs?.let { " at ${clock(it)}" }, e.commandDetail?.let { " $it" })
                     .joinToString("").let { safe(it, 160) }, NamedTextColor.GRAY))
 
-            else -> if (r.isHitch) {
+            else -> if (r.isShare) {
+                text("SHARE ${r.stage}${if (r.action.isNotEmpty()) " [${safe(r.action, 24)}]" else ""}", NamedTextColor.LIGHT_PURPLE)
+                    .append(text(": ${safe(r.message, 100)}", NamedTextColor.GRAY))
+            } else if (r.isHitch) {
                 text("HITCH ${r.stage}${if (r.cause.isNotEmpty()) "/${safe(r.cause, 24)}" else ""} ${r.durationMs}ms", NamedTextColor.YELLOW)
                     .append(text(" ${r.action} at ${clock(r.positionMs)}: ${safe(r.message, 100)}", NamedTextColor.GRAY))
             } else {
@@ -157,11 +162,15 @@ object ErrorsCommand {
                 appendLine(r.metrics.toSortedMap().entries.joinToString(" ") { "${safe(it.key, 32)}=${safe(it.value, 80)}" })
             }
         }
+        else if (r.isShare) {
+            if (r.action.isNotEmpty()) appendLine("outcome ${safe(r.action, 32)}")
+            r.metrics.toSortedMap().forEach { (k, v) -> appendLine("${safe(k, 32)}: ${safe(v, if (hover) 120 else 256)}") }
+        }
         else appendLine("retry ${r.retry}/${r.maxRetries} final=${r.final} fatal=${r.fatal}${if (r.positionMs > 0) " at ${clock(r.positionMs)}" else ""}")
         if (r.suppressed > 0) appendLine("(${r.suppressed} identical reports held back by the client before this one)")
         appendLine(safe(r.message, if (hover) 200 else 512))
         if (r.attempts.isNotEmpty()) {
-            appendLine("resolve steps (oldest first):")
+            appendLine(if (r.isShare) "pipeline tests (oldest first):" else "resolve steps (oldest first):")
             r.attempts.forEach { a ->
                 appendLine(
                     "  ${a.source}${if (a.client.isNotEmpty()) "[${a.client}]" else ""} " +

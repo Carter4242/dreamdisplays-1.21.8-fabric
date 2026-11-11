@@ -33,7 +33,7 @@ object ReportLimits {
         retry = r.retry.coerceIn(0, 999),
         maxRetries = r.maxRetries.coerceIn(0, 999),
         suppressed = r.suppressed.coerceIn(0, 1_000_000),
-        type = if (r.type == ClientErrorReport.TYPE_HITCH) ClientErrorReport.TYPE_HITCH else ClientErrorReport.TYPE_ERROR,
+        type = r.typeOrError,
         durationMs = r.durationMs.coerceIn(0, 86_400_000),
         positionMs = r.positionMs.coerceIn(0L, 1_000L * 86_400_000L),
         action = short(r.action),

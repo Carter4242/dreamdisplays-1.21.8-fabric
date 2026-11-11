@@ -75,6 +75,9 @@ object ConfigCommand {
             it.live.relay_publish_url.ifEmpty { null }?.let(LiveStreamUrls::redactCredentials)
         },
         Key("live.relay_play_url", RELAY_URL) { it.live.relay_play_url.ifEmpty { null } },
+        Key("live.share_encoder", PolicyPaths.Kind.Choice(listOf("auto", "software"))) { it.live.share_encoder },
+        Key("live.share_max_fps", PolicyPaths.Kind.Whole(0, 60)) { it.live.share_max_fps },
+        Key("live.share_max_height", PolicyPaths.Kind.Whole(0, 2160)) { it.live.share_max_height },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
