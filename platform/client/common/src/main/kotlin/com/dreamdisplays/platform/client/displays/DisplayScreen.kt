@@ -1541,7 +1541,9 @@ class DisplayScreen(
         DisplayQueues.forget(uuid)
         captureReplayCache()
         val currentPlayer = media.shutdown()
-        popoutManager.unregister(currentPlayer)
+        // A private stream's picture must not stay up through a close animation (disconnect, eviction, unload)
+        if (ScreenSharePrivacy.isPrivateStream(videoUrl)) popoutManager.closeImmediately(currentPlayer)
+        else popoutManager.unregister(currentPlayer)
         currentPlayer?.stop()
 
         textureResource.releaseAsync()
