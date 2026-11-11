@@ -66,6 +66,12 @@ class FullscreenOverlay(
     @Volatile
     private var frameFormat = UploadPixelFormat.RGB24
     private var uploadedVersion = 0L
+
+    /** Pixel layout of the frame currently in the texture, or null before the first upload. */
+    private var uploadedFormat: UploadPixelFormat? = null
+
+    /** Opacity of the immersive black backdrop: 1 behind an opaque video, eased to 0 behind a transparent one. */
+    private var backdropLevel = 1f
     private var dynamicTexture: DynamicTexture? = null
     private var textureId: Identifier? = null
     private var texW = 0
@@ -153,6 +159,18 @@ class FullscreenOverlay(
             setRgbaScratch = { rgbaUploadBuffer = it },
         )
         uploadedVersion = v
+        uploadedFormat = format
+    }
+
+    /**
+     * True when the video should be composited straight over the game: the player decodes it with alpha and the
+     * texture holds (or is about to receive) its RGBA frames. An opaque frame still on screen after the stream went
+     * alpha, or an RGBA frame from the opaque native path, keeps the backdrop.
+     */
+    private fun showsGameThrough(): Boolean {
+        if (!displayScreen.videoHasAlpha) return false
+        val format = uploadedFormat ?: return true
+        return format == UploadPixelFormat.RGBA32
     }
 
     /** Returns false when the close animation has finished; caller should discard. */
@@ -165,7 +183,8 @@ class FullscreenOverlay(
         partialTick: Float,
     ): Boolean {
         val now = System.nanoTime()
-        val dt = if (lastRenderNanos == 0L) 0.016f
+        val firstRender = lastRenderNanos == 0L
+        val dt = if (firstRender) 0.016f
         else ((now - lastRenderNanos) / 1e9f).coerceIn(0f, 0.1f)
         lastRenderNanos = now
 
@@ -180,9 +199,20 @@ class FullscreenOverlay(
         val sh = mc.window.guiScaledHeight
         val alpha = animProgress
 
-        // Backdrop: opaque black for immersive, translucent scrim for standard
-        val scrimAlpha = if (mode == FullscreenMode.IMMERSIVE) alpha else SCRIM_ALPHA * alpha
-        g.fill(0, 0, sw, sh, scaleAlpha(0xFF000000.toInt(), scrimAlpha))
+        // Backdrop: opaque black for immersive, translucent scrim for standard. An immersive transparent video drops
+        // the backdrop (letterbox areas included) so the game shows through; the switch eases rather than pops when
+        // the stream's alpha state changes mid-session.
+        val scrimAlpha = if (mode == FullscreenMode.IMMERSIVE) {
+            val backdropTarget = if (showsGameThrough()) 0f else 1f
+            backdropLevel = if (firstRender) backdropTarget
+            else backdropLevel + (backdropTarget - backdropLevel) * minOf(1f, dt * 10f)
+            if (backdropLevel < 0.005f) backdropLevel = 0f
+            if (backdropLevel > 0.995f) backdropLevel = 1f
+            alpha * backdropLevel
+        } else {
+            SCRIM_ALPHA * alpha
+        }
+        if (scrimAlpha > 0f) g.fill(0, 0, sw, sh, scaleAlpha(0xFF000000.toInt(), scrimAlpha))
 
         val id = textureId ?: return true
         val fw = texW

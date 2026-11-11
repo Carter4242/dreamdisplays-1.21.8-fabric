@@ -479,6 +479,12 @@ class DisplayScreen(
     private val frameUploader = DisplayFrameUploader(uuid)
     private val mediaPlayer: MediaPlayer? get() = media.player
 
+    /**
+     * True when the live video is decoded with its alpha channel (straight-alpha RGBA frames). False under a shader
+     * pack, where alpha video plays opaque.
+     */
+    val videoHasAlpha: Boolean get() = mediaPlayer?.videoHasAlpha == true
+
     /** Warm-parked out of render distance: decoder + audio open, instant resume. */
     @Volatile
     var isDormant: Boolean = false; private set
