@@ -94,8 +94,11 @@ object FullscreenBroadcastManager {
         TimelineManager.extraReceivers = ::timelineFollowers
     }
 
-    /** Far-away players who follow [displayId]'s timeline anyway: its fullscreen viewers and prepared clients. */
-    private fun timelineFollowers(displayId: UUID): Collection<UUID> {
+    /**
+     * Far-away players who follow real display [displayId] anyway: its fullscreen viewers and prepared clients. They
+     * hold it loaded at any distance and get its timeline, description and queue like players in range.
+     */
+    fun timelineFollowers(displayId: UUID): Collection<UUID> {
         val prepared = preparations[displayId]?.roster?.delivered
         val shown = sessions.values.firstOrNull { !it.virtual && it.display.id == displayId }?.shownTo
         if (prepared.isNullOrEmpty()) return shown?.toSet() ?: emptySet()

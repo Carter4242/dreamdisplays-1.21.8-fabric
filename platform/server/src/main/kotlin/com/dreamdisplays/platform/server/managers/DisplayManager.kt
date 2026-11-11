@@ -1,7 +1,9 @@
 package com.dreamdisplays.platform.server.managers
 
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
+import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
+import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.platform.server.PaperServer.Companion.config
 import com.dreamdisplays.platform.server.PaperServer.Companion.getInstance
 import com.dreamdisplays.platform.server.PaperSurfaces
@@ -235,7 +237,15 @@ object DisplayManager {
         } else {
             sendUpdate(display, getReceivers(display))
         }
+        // Far followers (fullscreen viewers, prepared clients) play it too: a new video or mode must reach them
+        val targets = DisplayFollowers.infoTargets(
+            com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.nearbyPlayerIds(display), FullscreenBroadcastManager.timelineFollowers(display.id), farPinners(display.id),
+        )
+        for ((playerId, forced) in targets) com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.sendDisplayInfo(playerId, display, forced)
     }
+
+    /** PiP pinners of [displayId] (none yet). */
+    private fun farPinners(@Suppress("UNUSED_PARAMETER") displayId: UUID): Collection<UUID> = emptyList()
 
     /** Broadcasts a display delete packet through the appropriate `Paper` / `Folia` player scheduler path. */
     @PaperOnly
@@ -247,6 +257,10 @@ object DisplayManager {
         } else {
             PacketUtil.sendDelete(getReceivers(display), display.id)
         }
+        val far = DisplayFollowers.farReceivers(
+            com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.nearbyPlayerIds(display), FullscreenBroadcastManager.timelineFollowers(display.id), farPinners(display.id),
+        )
+        for (playerId in far) com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.sendTo(playerId, DisplayDelete(display.id))
     }
 
     /** Refreshes all displays visible to every tracked player through each player's entity scheduler. */

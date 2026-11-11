@@ -89,6 +89,9 @@ object QueueManager {
      */
     var beforeStart: (display: DisplayData, item: QueueItem) -> Boolean = { _, _ -> true }
 
+    /** Far players who follow a display anyway (fullscreen viewers, prepared clients): they get its queue too. */
+    var farReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
+
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
     private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
 
@@ -407,7 +410,8 @@ object QueueManager {
         if (!settings().enabled) return
         val queue = queues[display.id] ?: return
         val state = synchronized(queue) { stateOf(display.id, queue) }
-        transport.nearbyPlayerIds(display).filter(::isCapable).forEach { transport.sendTo(it, state) }
+        val nearby = transport.nearbyPlayerIds(display)
+        (nearby + farReceivers(display.id).filter { it !in nearby }).filter(::isCapable).forEach { transport.sendTo(it, state) }
     }
 
     private fun stateOf(displayId: UUID, queue: DisplayQueue): QueueState {

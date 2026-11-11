@@ -244,9 +244,10 @@ object DisplayActions {
     fun requestSync(player: Player, displayId: UUID, knownMediaGen: Long = 0L) {
         if (!requestSyncThrottle.tryAcquire(displayId to player.uniqueId, REQUEST_SYNC_COOLDOWN_MS)) return
         resendInfoIfStale(player, displayId, knownMediaGen)
-        if (FullscreenBroadcastManager.sendCurrentTo(displayId, player.uniqueId)) return
+        // A fullscreen session or preparation answers with its own timeline; the queue and party state still go out
+        val fullscreen = FullscreenBroadcastManager.sendCurrentTo(displayId, player.uniqueId)
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
-        TimelineManager.sendCurrent(displayData, player.uniqueId)
+        if (!fullscreen) TimelineManager.sendCurrent(displayData, player.uniqueId)
         WatchPartyManager.sendCurrent(displayData, player.uniqueId)
         QueueManager.sendCurrent(displayData, player.uniqueId)
     }
