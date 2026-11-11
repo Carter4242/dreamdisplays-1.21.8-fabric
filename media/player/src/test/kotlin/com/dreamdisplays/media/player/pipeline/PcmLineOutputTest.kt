@@ -82,6 +82,59 @@ class PcmLineOutputTest {
         assertNull(PcmLineFormat.choose(listOf("a"), listOf("b")) { _, _ -> null })
     }
 
+    @Test
+    fun `advertised formats expand unspecified rates and channels and skip what we cannot produce`() {
+        val ns = javax.sound.sampled.AudioSystem.NOT_SPECIFIED
+        val any = javax.sound.sampled.AudioFormat(
+            javax.sound.sampled.AudioFormat.Encoding.PCM_SIGNED, ns.toFloat(), 24, ns, ns, ns.toFloat(), false,
+        )
+        val expanded = PcmLineFormat.fromAdvertised(any)
+        assertEquals(PcmLineFormat.STANDARD_RATES.size * 2, expanded.size)
+        assertTrue(PcmLineFormat(192_000, 24, 1, false) in expanded)
+        val float48 = javax.sound.sampled.AudioFormat(
+            javax.sound.sampled.AudioFormat.Encoding.PCM_FLOAT, 48_000f, 32, 2, 8, 48_000f, false,
+        )
+        assertEquals(listOf(PcmLineFormat(48_000, 32, 2, false, float = true)), PcmLineFormat.fromAdvertised(float48))
+        val ulaw = javax.sound.sampled.AudioFormat(
+            javax.sound.sampled.AudioFormat.Encoding.ULAW, 8_000f, 8, 1, 1, 8_000f, false,
+        )
+        assertTrue(PcmLineFormat.fromAdvertised(ulaw).isEmpty())
+        val eightBit = javax.sound.sampled.AudioFormat(44_100f, 8, 2, true, false)
+        assertTrue(PcmLineFormat.fromAdvertised(eightBit).isEmpty())
+        val sixChannel = javax.sound.sampled.AudioFormat(48_000f, 16, 6, true, false)
+        assertTrue(PcmLineFormat.fromAdvertised(sixChannel).isEmpty())
+    }
+
+    @Test
+    fun `advertised formats are ordered stereo, nearest standard rate, smallest depth first`() {
+        val ordered = PcmLineFormat.preferenceOrder(
+            listOf(
+                PcmLineFormat(192_000, 24, 2, false), PcmLineFormat(48_000, 32, 2, false, float = true),
+                PcmLineFormat(48_000, 24, 1, false), PcmLineFormat(48_000, 24, 2, false),
+                PcmLineFormat(48_000, 24, 2, false),
+            ),
+        )
+        assertEquals(
+            listOf(
+                PcmLineFormat(48_000, 24, 2, false), PcmLineFormat(48_000, 32, 2, false, float = true),
+                PcmLineFormat(192_000, 24, 2, false), PcmLineFormat(48_000, 24, 1, false),
+            ),
+            ordered,
+        )
+    }
+
+    @Test
+    fun `what a device advertises is tried before the generic fallbacks`() {
+        val advertised = PcmLineFormat(192_000, 24, 2, false)
+        val tried = ArrayList<PcmLineFormat>()
+        val r = PcmLineFormat.choose(listOf("umc"), emptyList(), { listOf(advertised) }) { _, f ->
+            tried += f
+            if (f == advertised || f == PcmLineFormat(48_000, 16, 2, false)) "line" else null
+        }
+        assertEquals(advertised, r?.second)
+        assertEquals(listOf(content, advertised), tried)
+    }
+
     // --- Conversion and clock mapping ---------------------------------------------------------------------
 
     @Test
@@ -192,6 +245,29 @@ class PcmLineOutputTest {
         fun s16(at: Int) = ((mono[at].toInt() and 0xFF) or (mono[at + 1].toInt() shl 8)).toShort().toInt()
         assertEquals(-1, s16(0)) // (32767 + -32768) / 2, rounded down
         assertEquals(2000, s16(2))
+    }
+
+    @Test
+    fun `packs 32-bit float`() {
+        val src = frame(16_384, -32_768)
+        val d = ByteArray(8)
+        PcmPacker.pack(src, 1, d, PcmLineFormat(48_000, 32, 2, false, float = true))
+        val bb = java.nio.ByteBuffer.wrap(d).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        assertEquals(0.5f, bb.getFloat(0))
+        assertEquals(-1f, bb.getFloat(4))
+        val be = ByteArray(8)
+        PcmPacker.pack(src, 1, be, PcmLineFormat(48_000, 32, 2, true, float = true))
+        assertEquals(0.5f, java.nio.ByteBuffer.wrap(be).getFloat(0))
+        val mono = ByteArray(4)
+        PcmPacker.pack(src, 1, mono, PcmLineFormat(48_000, 32, 1, false, float = true))
+        assertEquals(-0.25f, java.nio.ByteBuffer.wrap(mono).order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat(0))
+    }
+
+    @Test
+    fun `float output through the converter keeps content time`() {
+        val out = runSeconds(PcmLineFormat(48_000, 32, 2, false, float = true), 4)
+        val content = AudioSink.framesToNanos(out.frameMap.contentAt(out.outFramesWritten))
+        assertTrue(abs(content - 4_000_000_000L) < 1_000_000L, "content $content ns")
     }
 
     @Test

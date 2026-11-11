@@ -54,6 +54,12 @@ class Config(private val baseDir: File) {
     /** How many displays may play at once, nearest first; `0` is no limit. */
     var maxActiveDisplays: Int = 0
 
+    /**
+     * Display audio output: `auto` (Java Sound, OpenAL when Java Sound cannot play), `javasound` or `openal`. The
+     * `dreamdisplays.audioBackend` system property wins over it.
+     */
+    var audioBackend: String = "auto"
+
     init {
         load()
     }
@@ -97,6 +103,7 @@ class Config(private val baseDir: File) {
             ?: displayDistanceChunks
         maxActiveDisplays = data["max-active-displays"]?.toIntOrNull()?.coerceIn(0, MAX_ACTIVE_DISPLAYS)
             ?: maxActiveDisplays
+        audioBackend = data["audio-backend"]?.lowercase()?.takeIf { it in AUDIO_BACKENDS } ?: audioBackend
         audioBinauralOutput = when (data["audio-output-profile"]?.lowercase()) {
             "speakers" -> false
             "headphones", "auto" -> true
@@ -123,10 +130,14 @@ class Config(private val baseDir: File) {
             appendLine("new-display-quality: $newDisplayQuality")
             appendLine("display-distance-chunks: $displayDistanceChunks")
             appendLine("max-active-displays: $maxActiveDisplays")
+            appendLine("audio-backend: $audioBackend")
         })
     }
 
     companion object {
+        /** Accepted `audio-backend` values. */
+        val AUDIO_BACKENDS = setOf("auto", "javasound", "openal")
+
         const val DEFAULT_NEW_DISPLAY_VOLUME = 0.25
         const val DEFAULT_NEW_DISPLAY_QUALITY = "1080"
         const val MAX_DISTANCE_CHUNKS = 32

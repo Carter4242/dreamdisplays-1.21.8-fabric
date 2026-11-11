@@ -27,6 +27,64 @@ object AudioOutputHooks {
     @Volatile
     private var lastLogged: String? = null
 
+    /**
+     * Which output backend to use: `auto` (Java Sound, OpenAL when Java Sound cannot play), `javasound` or `openal`
+     * (forced, for testing). The `dreamdisplays.audioBackend` system property wins over this.
+     */
+    @Volatile
+    var backend: () -> String = { "auto" }
+
+    /**
+     * Opens an already-open line that plays [AudioSink]'s content format through OpenAL on the named device (null =
+     * default), or returns null. Set by the game side, which has OpenAL; absent elsewhere.
+     */
+    @Volatile
+    var openAlLine: ((deviceName: String?) -> SourceDataLine?)? = null
+
+    /** The backend in effect: the system property if set, else [backend]; always one of auto / javasound / openal. */
+    fun effectiveBackend(): String {
+        val raw = System.getProperty("dreamdisplays.audioBackend")?.takeIf { it.isNotBlank() }
+            ?: runCatching { backend() }.getOrNull()
+        return when (raw?.trim()?.lowercase(Locale.ROOT)) {
+            "openal" -> "openal"
+            "javasound", "java_sound", "java-sound" -> "javasound"
+            else -> "auto"
+        }
+    }
+
+    /** The game's output device name, if any (for OpenAL, which uses the same names). */
+    fun gameDeviceName(): String? = runCatching { preferredDeviceName() }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * One line per Java Sound mixer with every output line format it advertises, to see what a machine offers when
+     * opening the usual format fails.
+     */
+    fun describeMixers(): String = runCatching {
+        val mixers = AudioSystem.getMixerInfo()
+        if (mixers.isEmpty()) return@runCatching "no Java Sound mixers at all"
+        mixers.joinToString("\n") { info ->
+            val lines = runCatching {
+                AudioSystem.getMixer(info).sourceLineInfo.filterIsInstance<DataLine.Info>()
+                    .filter { SourceDataLine::class.java.isAssignableFrom(it.lineClass) }
+            }.getOrDefault(emptyList())
+            val formats = lines.flatMap { it.formats.toList() }.distinct()
+            "  \"${info.name}\" (${info.vendor}, ${info.description}): " +
+                    if (formats.isEmpty()) "no output lines" else formats.joinToString("; ")
+        }
+    }.getOrElse { "could not list mixers: $it" }
+
+    /** Formats the output [mixer] (null = every mixer, for the system default) advertises, as openable formats. */
+    internal fun advertisedFormats(mixer: Mixer.Info?): List<PcmLineFormat> = runCatching {
+        val infos = if (mixer == null) AudioSystem.getMixerInfo().toList() else listOf(mixer)
+        infos.flatMap { info ->
+            runCatching {
+                AudioSystem.getMixer(info).sourceLineInfo.filterIsInstance<DataLine.Info>()
+                    .filter { SourceDataLine::class.java.isAssignableFrom(it.lineClass) }
+                    .flatMap { it.formats.toList() }
+            }.getOrDefault(emptyList())
+        }.flatMap { PcmLineFormat.fromAdvertised(it) }
+    }.getOrDefault(emptyList())
+
     /** Current [masterVolume], guarded so a failing provider can never silence or break playback. */
     fun masterVolumeOrFull(): Double = runCatching { masterVolume() }.getOrDefault(1.0)
         .takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 1.0

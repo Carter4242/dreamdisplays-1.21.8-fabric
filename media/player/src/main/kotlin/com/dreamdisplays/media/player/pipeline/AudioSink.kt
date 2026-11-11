@@ -45,6 +45,10 @@ internal class AudioSink(private val debugLabel: String) {
         /** Largest rate change per PCM chunk (50 ms), so a new rate is reached smoothly: 1 % takes 1 s. */
         private const val RATE_STEP_PER_CHUNK = 0.0005
 
+        /** True once the Java Sound outputs were listed (see [logMixersOnce]); listed once per game session. */
+        @Volatile
+        private var mixersLogged = false
+
         /** Device + format that last had to be used instead of the content format; tried first next time. */
         @Volatile
         private var lastFallback: Pair<Mixer.Info?, PcmLineFormat>? = null
@@ -604,26 +608,42 @@ internal class AudioSink(private val debugLabel: String) {
     }
 
     /**
-     * Opens an output line, never giving up just because the device rejects the content format: 44.1 kHz / 16-bit
-     * stereo on the game's device (then the system default) as before, else a format that device does accept with
-     * conversion, else any other output. Retries the whole search a few times when nothing opens (a busy device).
+     * Opens an output line, never giving up just because the device rejects the content format. Java Sound first:
+     * 44.1 kHz / 16-bit stereo on the game's device (then the system default) exactly as before, else a format those
+     * devices advertise or accept (converted), else any other output device. When Java Sound cannot play at all,
+     * OpenAL on the game's device. The `audio-backend` setting can force either backend.
      */
     private fun openLine(): OpenedLine? {
+        val backend = AudioOutputHooks.effectiveBackend()
+        if (backend == "openal") {
+            openOpenAl("forced by the audio-backend setting")?.let { return it }
+            logger.warn("$debugLabel OpenAL output was requested but could not be opened; trying Java Sound.")
+        }
         var lastError: String? = null
         repeat(OPEN_RETRIES) { attempt ->
             val (preferred, other) = AudioOutputHooks.candidateMixers()
+            var firstTry = true
+            var firstTryFailed = false
             val tryOpen = { mixer: Mixer.Info?, format: PcmLineFormat ->
-                tryOpenLine(mixer, format).onFailure { lastError = it.message ?: it.javaClass.simpleName }.getOrNull()
+                val line = tryOpenLine(mixer, format).onFailure { lastError = it.message ?: it.javaClass.simpleName }
+                    .getOrNull()
+                if (firstTry && line == null) firstTryFailed = true
+                firstTry = false
+                line
             }
             val cached = lastFallback
             val chosen = cached?.takeIf { it.first in preferred }?.let { (mixer, format) ->
                 tryOpen(mixer, format)?.let { Triple(mixer, format, it) }
-            } ?: PcmLineFormat.choose(preferred, other, tryOpen)
+            } ?: PcmLineFormat.choose(preferred, other, AudioOutputHooks::advertisedFormats, tryOpen)
+            if (firstTryFailed || chosen == null) logMixersOnce(lastError)
             if (chosen != null) {
                 val (mixer, format, line) = chosen
                 lastFallback = if (format.isContent) null else mixer to format
-                logLineChoice(mixer, format)
+                logLineChoice("Java Sound", mixer?.name ?: "system default", format)
                 return OpenedLine(line, PcmLineOutput(format))
+            }
+            if (attempt == 0 && backend == "auto") {
+                openOpenAl("Java Sound could not open any output line ($lastError)")?.let { return it }
             }
             if (attempt == OPEN_RETRIES - 1) {
                 logger.warn("$debugLabel Line unavailable: $lastError.")
@@ -636,6 +656,26 @@ internal class AudioSink(private val debugLabel: String) {
             }
         }
         return null
+    }
+
+    /** Opens an OpenAL line on the game's device (content format, no conversion), or null when unavailable. */
+    private fun openOpenAl(why: String): OpenedLine? {
+        val factory = AudioOutputHooks.openAlLine ?: return null
+        val device = AudioOutputHooks.gameDeviceName()
+        val line = runCatching { factory(device) }
+            .onFailure { logger.warn("$debugLabel OpenAL output failed to open: $it.") }
+            .getOrNull() ?: return null
+        logLineChoice("OpenAL", device ?: "default device", PcmLineFormat.CONTENT, why)
+        return OpenedLine(line, PcmLineOutput(PcmLineFormat.CONTENT))
+    }
+
+    private fun logMixersOnce(error: String?) {
+        if (mixersLogged) return
+        mixersLogged = true
+        logger.info(
+            "Display audio: the usual output format did not open ({}). Java Sound outputs and the formats they " +
+                    "advertise:\n{}", error ?: "no error given", AudioOutputHooks.describeMixers(),
+        )
     }
 
     private fun tryOpenLine(mixer: Mixer.Info?, format: PcmLineFormat): Result<SourceDataLine> = runCatching {
@@ -659,12 +699,15 @@ internal class AudioSink(private val debugLabel: String) {
         return (bytes / format.bytesPerFrame * format.bytesPerFrame).toInt()
     }
 
-    private fun logLineChoice(mixer: Mixer.Info?, format: PcmLineFormat) {
-        val device = mixer?.name ?: "system default"
-        val message = if (format.isContent) "Display audio line: \"$device\", $format."
-        else "Display audio line: \"$device\" rejects ${PcmLineFormat.CONTENT}; playing $format with conversion."
-        // Every line is logged while converting (it is the unusual case worth seeing); the normal one only on change
-        if (!format.isContent || lastLineChoice != message) logger.info("$debugLabel $message")
+    private fun logLineChoice(backend: String, device: String, format: PcmLineFormat, why: String? = null) {
+        val message = when {
+            why != null -> "Display audio line: $backend on \"$device\", $format ($why)."
+            format.isContent -> "Display audio line: $backend on \"$device\", $format."
+            else -> "Display audio line: $backend on \"$device\" rejects ${PcmLineFormat.CONTENT}; " +
+                    "playing $format with conversion."
+        }
+        // Every unusual line (converted / OpenAL) is logged; the normal one only when it changes
+        if (why != null || !format.isContent || lastLineChoice != message) logger.info("$debugLabel $message")
         lastLineChoice = message
     }
 

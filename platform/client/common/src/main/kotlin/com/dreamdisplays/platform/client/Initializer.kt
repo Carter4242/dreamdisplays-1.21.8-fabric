@@ -54,6 +54,13 @@ object Initializer {
                 .getSoundSourceVolume(net.minecraft.sounds.SoundSource.MASTER).toDouble()
         }
         //?}
+        // Display audio backend (auto / javasound / openal) and the OpenAL output used when Java Sound cannot play
+        com.dreamdisplays.media.player.pipeline.AudioOutputHooks.backend = {
+            com.dreamdisplays.platform.client.managers.ClientStateManager.config.audioBackend
+        }
+        com.dreamdisplays.media.player.pipeline.AudioOutputHooks.openAlLine = { device ->
+            com.dreamdisplays.platform.client.audio.OpenAlSourceLine.open(device)
+        }
 
         logger.info("Starting Dream Displays...")
         ClientStartupManager.start()
