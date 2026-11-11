@@ -1,10 +1,7 @@
 package com.dreamdisplays.platform.client.ui
 
-import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenMode
-import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.platform.client.displays.DisplayScreen
-import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.platform.client.utils.MinecraftScreenUtil
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.PauseScreen
@@ -107,13 +104,7 @@ object FullscreenOverlayManager {
         // A pause screen opened while the window is unfocused is vanilla's pause-on-lost-focus (alt-tab), not Esc
         if (overlay != null && !screenWasOpen && screen is PauseScreen && mc.isWindowActive) {
             MinecraftScreenUtil.setScreen(mc, null)
-            if (overlay.forced) {
-                overlay.displayScreen.minimizeFullscreenToPip()
-                overlay.sessionId?.let { ProtocolRouter.send(FullscreenAck(it, FullscreenAckAction.MINIMIZED.wire)) }
-            } else {
-                overlay.displayScreen.deactivateFullscreen()
-                overlay.sessionId?.let { ProtocolRouter.send(FullscreenAck(it, FullscreenAckAction.DISMISSED.wire)) }
-            }
+            overlay.displayScreen.closeFullscreenByViewer()
         }
         screenWasOpen = screen != null
     }

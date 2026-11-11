@@ -47,6 +47,9 @@ class DisplayPopoutManager(
     /** True while the fullscreen overlay is active. */
     val isFullscreenActive: Boolean get() = fullscreenOverlay != null
 
+    /** The open fullscreen overlay (not one fading out), or null. */
+    val activeFullscreen: FullscreenOverlay? get() = fullscreenOverlay
+
     /** Re-attaches all active popout frame sinks to [player] after a player swap. */
     fun attachTo(player: MediaPlayer, contentAspect: () -> Double) {
         currentPlayer = player

@@ -1,8 +1,10 @@
 package com.dreamdisplays.platform.client.managers
 
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
+import com.dreamdisplays.shared.playback.FullscreenAckAction
 import java.util.UUID
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -34,5 +36,11 @@ class FullscreenViewerRulesTest {
     fun aDifferentStateIsAlwaysApplied() {
         assertFalse(FullscreenViewerRules.alreadyShown(state, state.copy(volume = 0.5f), fullscreenUp = true, pipUp = false))
         assertFalse(FullscreenViewerRules.alreadyShown(null, state, fullscreenUp = true, pipUp = false))
+    }
+
+    @Test
+    fun theViewerCanOnlyMinimizeAForcedBroadcast() {
+        assertEquals(FullscreenAckAction.MINIMIZED, FullscreenViewerRules.viewerCloseAction(forced = true))
+        assertEquals(FullscreenAckAction.DISMISSED, FullscreenViewerRules.viewerCloseAction(forced = false))
     }
 }

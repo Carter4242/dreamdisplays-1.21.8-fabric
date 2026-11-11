@@ -49,8 +49,12 @@ class DefaultPopoutManager : PopoutManager {
     }
 
     override fun close(displayId: DisplayId) {
+        val screen = DisplayRegistry.screens[displayId.uuid] ?: return
+        // A fullscreen overlay is what the viewer sees: closing it is Esc (a forced broadcast drops to PiP, the server
+        // is told), and any window or PiP behind it stays for the next close
+        if (screen.closeFullscreenByViewer()) return
         val wasPip = isPipOpen(displayId)
-        DisplayRegistry.screens[displayId.uuid]?.deactivatePopout()
+        screen.deactivatePopout()
         if (wasPip) {
             ClientSettingsStore.setPipOpen(displayId.uuid, false)
             Initializer.sendPacket(PipPin(displayId.uuid, pinned = false))

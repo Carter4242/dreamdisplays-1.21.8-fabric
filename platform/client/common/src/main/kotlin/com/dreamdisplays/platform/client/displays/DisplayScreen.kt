@@ -25,6 +25,7 @@ import com.dreamdisplays.core.display.policy.SyncSettings
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
+import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.shared.playback.PlaybackContext
@@ -37,11 +38,13 @@ import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.watchparty.WatchPartySession
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.*
+import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.core.share.ScreenShareViewerRules
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager
+import com.dreamdisplays.platform.client.managers.FullscreenViewerRules
 import com.dreamdisplays.platform.client.audio.ListenerPoseTracker
 import com.dreamdisplays.platform.client.audio.VoxelAcousticsProbe
 import com.dreamdisplays.platform.client.core.DreamServices
@@ -1327,7 +1330,10 @@ class DisplayScreen(
     fun activatePipMode(corner: PipCorner = PipCorner.BOTTOM_RIGHT) {
         if (!canPopoutHere) return
         val mp = mediaPlayer ?: return
+        val session = popoutManager.activeFullscreen?.sessionId
         popoutManager.activatePipMode(mp, corner) { videoContentAspect }
+        // It replaced a broadcast's fullscreen: the viewer goes on watching it, in PiP
+        if (session != null && !isFullscreenActive) ackFullscreen(session, FullscreenAckAction.MINIMIZED)
     }
 
     /** Closes whichever popout mode is active. */
@@ -1384,6 +1390,22 @@ class DisplayScreen(
         val changed = broadcast.clear()
         if (changed.volume) applyEffectiveVolume()
         if (changed.quality && effectiveQuality() != before) reloadQuality()
+    }
+
+    /**
+     * The viewer closed this display's fullscreen overlay themselves (Esc, or the menu's popout button): a forced
+     * broadcast drops to a PiP, anything else closes, and the server is told which. False when no overlay was open.
+     */
+    fun closeFullscreenByViewer(): Boolean {
+        val overlay = popoutManager.activeFullscreen ?: return false
+        val action = FullscreenViewerRules.viewerCloseAction(overlay.forced)
+        if (action == FullscreenAckAction.MINIMIZED) minimizeFullscreenToPip() else deactivateFullscreen()
+        overlay.sessionId?.let { ackFullscreen(it, action) }
+        return true
+    }
+
+    private fun ackFullscreen(sessionId: String, action: FullscreenAckAction) {
+        ProtocolRouter.send(FullscreenAck(sessionId, action.wire))
     }
 
     /** Swaps fullscreen to non-interactive PiP (forced-broadcast Esc behavior). */
