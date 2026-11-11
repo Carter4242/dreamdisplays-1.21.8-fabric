@@ -124,11 +124,10 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         if (screen.isQueueSwitchPending) return false
         if (head.url.isEmpty() || head.url == screen.videoUrl) return false
         if (!lookAhead) return true
-        if (!screen.videoStarted || screen.isLive) return false
-        val durationNanos = screen.mediaPlayerDurationNanos
-        if (durationNanos <= 0L) return false
-        val remainingNanos = durationNanos - screen.currentTimeNanos
-        return remainingNanos in 0..LEAD_NANOS
+        return queuePreloadStartsNow(
+            started = screen.videoStarted, live = screen.isLive, holding = screen.isPaused || screen.isWarmingUp,
+            durationNanos = screen.mediaPlayerDurationNanos, positionNanos = screen.currentTimeNanos, leadNanos = LEAD_NANOS,
+        )
     }
 
     private fun start(item: QueueItemWire) {
@@ -230,6 +229,18 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         private const val MAX_ACTIVE = 2
         private val ACTIVE = AtomicInteger()
     }
+}
+
+/**
+ * Whether a queue preload starts now: the current video plays and is within [leadNanos] of its end. Never while the
+ * display is paused or re-opening its stream ([holding], e.g. the start hold after a seek near the end): the preload
+ * would compete with that re-open for bandwidth and decoding and stretch the hold.
+ */
+internal fun queuePreloadStartsNow(
+    started: Boolean, live: Boolean, holding: Boolean, durationNanos: Long, positionNanos: Long, leadNanos: Long,
+): Boolean {
+    if (!started || live || holding || durationNanos <= 0L) return false
+    return durationNanos - positionNanos in 0..leadNanos
 }
 
 /**
