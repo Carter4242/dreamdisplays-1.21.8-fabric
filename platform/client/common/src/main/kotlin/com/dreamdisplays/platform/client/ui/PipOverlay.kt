@@ -422,6 +422,9 @@ class PipOverlay(
                     val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
                     Minecraft.getInstance().soundManager.play(s)
                     displayScreen.deactivatePopout()
+                    // Closing with the X must forget the PiP like the menu does, or it reopens on every join
+                    ClientSettingsStore.setPipOpen(displayScreen.uuid, false)
+                    Initializer.sendPacket(com.dreamdisplays.core.protocol.common.packets.PipPin(displayScreen.uuid, pinned = false))
                 }
 
                 pressedInBody -> if (interactive) DisplayMenu.open(displayScreen)
