@@ -62,7 +62,12 @@ object Initializer {
             com.dreamdisplays.platform.client.audio.OpenAlSourceLine.open(device)
         }
 
-        logger.info("Starting Dream Displays...")
+        logger.info(
+            "Starting Dream Displays {} (build {}{})...",
+            com.dreamdisplays.util.GeneralUtil.getModVersion(),
+            com.dreamdisplays.util.BuildInfo.commit,
+            com.dreamdisplays.util.BuildInfo.builtAt.takeIf { it.isNotEmpty() }?.let { ", built $it" }.orEmpty(),
+        )
         ClientStartupManager.start()
     }
 

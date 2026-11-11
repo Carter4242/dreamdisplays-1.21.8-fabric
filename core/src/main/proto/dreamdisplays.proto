@@ -66,6 +66,10 @@ message ClientHello {
   optional string lavUnavailableReason = 26;
   // WARNING: a default value decoded when value is missing
   optional int32 timeZoneOffsetMinutes = 27;
+  // WARNING: a default value decoded when value is missing
+  optional string buildCommit = 28;
+  // WARNING: a default value decoded when value is missing
+  optional int64 buildTimeMs = 29;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerHello'

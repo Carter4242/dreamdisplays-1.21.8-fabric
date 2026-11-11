@@ -40,6 +40,10 @@ data class ClientHello(
     @ProtoNumber(25) val nativeUnavailableReason: String = "",
     @ProtoNumber(26) val lavUnavailableReason: String = "",
     @ProtoNumber(27) val timeZoneOffsetMinutes: Int = 0,
+    /** Commit id the client jar was built from (`1a2b3c4d`, `-dev` for local builds); empty from older jars. */
+    @ProtoNumber(28) val buildCommit: String = "",
+    /** When the client jar was built, epoch ms; 0 from older jars. */
+    @ProtoNumber(29) val buildTimeMs: Long = 0,
 ) : DreamPacket
 
 /** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */
