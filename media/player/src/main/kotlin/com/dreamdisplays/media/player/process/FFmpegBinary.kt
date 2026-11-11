@@ -23,6 +23,13 @@ object FFmpegBinary {
     private const val WANTED_MAJOR = 9
     private const val OLDEST_MAJOR = 8
 
+    /**
+     * Kept in each build folder by [provision]: `<sha256 of the binary> ok|fails`. A cached binary that does not run is
+     * downloaded again only when it is not byte-for-byte that download, so a broken one is replaced once, not on
+     * every start, and a replacement that ran is not fetched again over a passing failure.
+     */
+    private const val DOWNLOAD_RECORD = ".download"
+
     /** How long a failed resolve is not retried (every playback start asks for the binary). */
     private const val RETRY_AFTER_FAILURE_MS = 10_000L
 
@@ -157,6 +164,13 @@ object FFmpegBinary {
         // Every cached build fails to run (quarantined, a libc it can't use, a no-exec game folder): a working system
         // FFmpeg beats downloading the same build again
         if (cached.isNotEmpty()) findSystemFfmpeg(quiet = true)?.let { return it }
+        cached.firstOrNull { downloadRecord(it) != null }?.let { dir ->
+            logger.warn(
+                "FFmpeg in {} is the build downloaded for it ({} when checked) and does not run now; not downloading it again.",
+                dir.name, downloadRecord(dir),
+            )
+            return bundled(File(dir, p.binaryName), dir)
+        }
         return runCatching { provision(p) }.getOrElse { e ->
             logger.error("Download failed, falling back to system ffmpeg", e)
             null
@@ -190,7 +204,9 @@ object FFmpegBinary {
                     SourceLoader.downloadAndExtract(candidate.url, dir.toPath(), "FFmpeg ${candidate.branch}", candidate.sha256, select)
                     if (!binary.isFile || binary.length() == 0L) throw IOException("Extracted binary is missing or empty.")
                     SourceLoader.makeExecutable(binary.toPath())
-                    if (runs(binary) == Run.FAILED) throw IOException("Downloaded FFmpeg ${candidate.branch} does not run here.")
+                    val ok = runs(binary) != Run.FAILED
+                    writeDownloadRecord(dir, binary, ok)
+                    if (!ok) throw IOException("Downloaded FFmpeg ${candidate.branch} does not run here.")
                     deleteStaleBuilds(p.key, dir.name)
                     logger.info("FFmpeg ${candidate.branch} ready from ${candidate.url}.")
                     return bundled(binary, dir)
@@ -203,6 +219,20 @@ object FFmpegBinary {
         }
         throw lastError ?: IOException("No FFmpeg build found for ${p.key}.")
     }
+
+    /** `ok` / `fails` when [dir]'s binary is still exactly the one [provision] downloaded and checked there, else null. */
+    internal fun downloadRecord(dir: File): String? = runCatching {
+        val (sha, result) = File(dir, DOWNLOAD_RECORD).readText().trim().split(' ', limit = 2)
+        result.takeIf { SourceLoader.sha256(File(dir, binaryNameIn(dir)).toPath()).equals(sha, ignoreCase = true) }
+    }.getOrNull()
+
+    internal fun writeDownloadRecord(dir: File, binary: File, ok: Boolean) {
+        runCatching {
+            File(dir, DOWNLOAD_RECORD).writeText("${SourceLoader.sha256(binary.toPath())} ${if (ok) "ok" else "fails"}")
+        }.onFailure { logger.debug("Could not record the FFmpeg download in {}: {}", dir, it.message) }
+    }
+
+    private fun binaryNameIn(dir: File): String = if (File(dir, "ffmpeg.exe").isFile) "ffmpeg.exe" else "ffmpeg"
 
     private enum class Run { OK, FAILED, SLOW }
 

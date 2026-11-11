@@ -120,7 +120,7 @@ object SourceLoader {
     private val SUM_LINE = Regex("""([0-9a-fA-F]{64})\s+\*?(\S.*)""")
     private val POWERSHELL_HASH = Regex("""(?m)^Hash\s*:\s*([0-9a-fA-F]{64})\s*\r?\n\s*Path\s*:\s*(\S[^\r\n]*)""")
 
-    internal fun sha256(file: Path): String {
+    fun sha256(file: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")
         Files.newInputStream(file).use { input ->
             val buf = ByteArray(64 * 1024)
