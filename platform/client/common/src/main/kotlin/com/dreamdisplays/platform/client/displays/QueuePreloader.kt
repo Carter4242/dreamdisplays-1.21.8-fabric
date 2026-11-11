@@ -124,7 +124,7 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
 
     /** Whether [head] should be (or stay) preloaded now; [lookAhead] = starting a new one, which waits for the end. */
     private fun wanted(head: QueueItemWire, lookAhead: Boolean): Boolean {
-        if (!DisplayQueues.supported) return false
+        if (!DisplayQueues.supported || !ServerOverrides.settings.queuePreload) return false
         if (screen.effectiveMode != PlaybackMode.SYNCED && screen.effectiveMode != PlaybackMode.BROADCAST) return false
         if (screen.isDormant || screen.virtual || screen.errored) return false
         // Switching to the previous preload at its scheduled start: the next one waits for that
