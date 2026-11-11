@@ -225,7 +225,9 @@ class PipOverlay(
         if (isFinished) {
             cleanup(mc); return false
         }
-        val id = textureId ?: return true
+        // No picture yet (still loading, failed, or blanked after a stalled share): the PiP is still drawn, as a black
+        // frame with its border and close button, so it can always be seen, moved and closed
+        val id = textureId
 
         val sw = mc.window.guiScaledWidth
         val sh = mc.window.guiScaledHeight
@@ -303,24 +305,28 @@ class PipOverlay(
         // On 1.21.1 the legacy blit draws with the POSITION_TEX shader (alpha comes from the shader
         // color) but does not enable blending, so the fade alpha is invisible without enableBlend.
         // 1.21.6+ uses a render pipeline that already blends, and bakes alpha into the blit color.
-        //? if >=1.21.6 {
-        g.blit(
-            RenderPipelines.GUI_TEXTURED,
-            id,
-            0,
-            0,
-            content.x.toFloat(),
-            content.y.toFloat(),
-            pipW,
-            pipH,
-            content.w,
-            content.h,
-            fw,
-            fh,
-            scaleAlpha(0xFFFFFFFF.toInt(), alpha),
-        )
-        //?} else
-        /*RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc(); g.setColor(1f, 1f, 1f, alpha); g.blit(id, 0, 0, pipW, pipH, content.x.toFloat(), content.y.toFloat(), content.w, content.h, fw, fh); g.setColor(1f, 1f, 1f, 1f)*/
+        if (id != null) {
+            //? if >=1.21.6 {
+            g.blit(
+                RenderPipelines.GUI_TEXTURED,
+                id,
+                0,
+                0,
+                content.x.toFloat(),
+                content.y.toFloat(),
+                pipW,
+                pipH,
+                content.w,
+                content.h,
+                fw,
+                fh,
+                scaleAlpha(0xFFFFFFFF.toInt(), alpha),
+            )
+            //?} else
+            /*RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc(); g.setColor(1f, 1f, 1f, alpha); g.blit(id, 0, 0, pipW, pipH, content.x.toFloat(), content.y.toFloat(), content.w, content.h, fw, fh); g.setColor(1f, 1f, 1f, 1f)*/
+        } else {
+            g.fill(0, 0, pipW, pipH, scaleAlpha(0xFF000000.toInt(), alpha))
+        }
 
         // Border
         val active = hovering || dragging || resizing
