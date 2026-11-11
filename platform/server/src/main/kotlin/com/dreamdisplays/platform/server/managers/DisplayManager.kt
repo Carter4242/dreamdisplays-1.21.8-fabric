@@ -352,12 +352,14 @@ object DisplayManager {
         displays.values.filterIsInstance<PaperDisplayData>().forEach(saveDisplay)
     }
 
-    /** Scans every display's bounding box for the configured base material; displays with none are removed from disk and registry. */
+    /**
+     * Scans every display's bounding box for the configured base material; displays with none are removed from disk and
+     * registry. Each display's chunks are loaded asynchronously and it is checked once they are in (on the main thread),
+     * so the first join after a restart does not load every display's chunks in one tick.
+     */
     @PaperOnly
-    fun validateDisplaysAndCleanup(): List<UUID> {
+    fun validateDisplaysAndCleanup() {
         val surface = PaperSurfaces.of(config.settings.baseMaterial)
-        val invalidDisplays = mutableListOf<PaperDisplayData>()
-
         displays.values.filterIsInstance<PaperDisplayData>().forEach { display ->
             // An unloaded world (e.g., a Multiverse world that loads later) is not an invalid display:
             // skip it this pass instead of wiping it from the database.
@@ -366,36 +368,38 @@ object DisplayManager {
                 getInstance().logger.warning("Skipping validation for display ${display.id}: world is not loaded.")
                 return@forEach
             }
-
-            var hasBaseMaterial = false
-            val minX = display.box.minX.toInt()
-            val minY = display.box.minY.toInt()
-            val minZ = display.box.minZ.toInt()
-            val maxX = display.box.maxX.toInt()
-            val maxY = display.box.maxY.toInt()
-            val maxZ = display.box.maxZ.toInt()
-
-            outerLoop@ for (x in minX until maxX) {
-                for (y in minY until maxY) {
-                    for (z in minZ until maxZ) {
-                        val type = world.getBlockAt(x, y, z).type
-                        if (!type.isAir && surface.accepts(type.name)) {
-                            hasBaseMaterial = true
-                            break@outerLoop
-                        }
+            val box = display.box
+            val chunks = ArrayList<java.util.concurrent.CompletableFuture<org.bukkit.Chunk>>()
+            for (cx in (box.minX.toInt() shr 4)..((box.maxX.toInt() - 1) shr 4)) {
+                for (cz in (box.minZ.toInt() shr 4)..((box.maxZ.toInt() - 1) shr 4)) chunks += world.getChunkAtAsync(cx, cz)
+            }
+            java.util.concurrent.CompletableFuture.allOf(*chunks.toTypedArray()).whenComplete { _, error ->
+                val check = Runnable {
+                    if (error != null) {
+                        getInstance().logger.warning("Skipping validation for display ${display.id}: its chunks did not load ($error).")
+                    } else if (displays[display.id] === display && !hasBaseMaterial(display, world, surface)) {
+                        val removed = removeDisplays(listOf(display)) { runAsync { getInstance().storage.deleteDisplay(it as PaperDisplayData) } }
+                        PacketUtil.sendClearCache(Bukkit.getOnlinePlayers().toList(), removed)
                     }
                 }
+                if (Bukkit.isPrimaryThread()) check.run() else runSync { check.run() }
             }
-            if (!hasBaseMaterial) invalidDisplays.add(display)
         }
+    }
 
-        val removed = removeDisplays(invalidDisplays) { display ->
-            runAsync { getInstance().storage.deleteDisplay(display as PaperDisplayData) }
+    /** True when [display]'s box (chunks loaded) holds a block [surface] accepts. */
+    @PaperOnly
+    private fun hasBaseMaterial(display: PaperDisplayData, world: org.bukkit.World, surface: com.dreamdisplays.shared.geometry.DisplaySurface): Boolean {
+        val box = display.box
+        for (x in box.minX.toInt() until box.maxX.toInt()) {
+            for (y in box.minY.toInt() until box.maxY.toInt()) {
+                for (z in box.minZ.toInt() until box.maxZ.toInt()) {
+                    val type = world.getBlockAt(x, y, z).type
+                    if (!type.isAir && surface.accepts(type.name)) return true
+                }
+            }
         }
-        if (removed.isNotEmpty()) {
-            PacketUtil.sendClearCache(Bukkit.getOnlinePlayers().toList(), removed)
-        }
-        return removed
+        return false
     }
 
     /** Returns the first display whose bounding box contains [blockPos] in [worldKey]. */

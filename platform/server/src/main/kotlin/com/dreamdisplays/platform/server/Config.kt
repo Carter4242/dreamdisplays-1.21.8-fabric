@@ -1,11 +1,12 @@
 package com.dreamdisplays.platform.server
 
+import com.dreamdisplays.core.config.ConfigLoads
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.bukkit.entity.Player
 import org.jspecify.annotations.NullMarked
 import org.slf4j.LoggerFactory
 import org.tomlj.Toml
-import org.tomlj.TomlTable
+import org.tomlj.TomlParseResult
 import java.io.File
 import java.nio.file.Files
 
@@ -50,11 +51,18 @@ class Config(private val plugin: PaperServer) {
     /** Config languages. */
     val languages get() = langStore.languages
 
+    /**
+     * True when the `config.toml` in effect was read with syntax errors at startup: keys on broken lines run on their
+     * defaults, so nothing destructive may act on it (the startup display check). Cleared by a clean reload.
+     */
+    @Volatile
+    var loadedWithErrors = false; private set
+
     /** Initializes the plugin's configuration. */
     init {
         createDefaultConfig()
         langStore.extractLangFiles()
-        load()
+        load(firstLoad = true)
         langStore.loadMessages(logger)
     }
 
@@ -67,11 +75,22 @@ class Config(private val plugin: PaperServer) {
         }
     }
 
-    private fun load() {
-        val t: TomlTable? = runCatching { Toml.parse(configFile.toPath()) }
-            .onFailure { logger.error("Failed to parse config.toml.", it) }
+    private fun load(firstLoad: Boolean) {
+        val result: TomlParseResult? = runCatching { Toml.parse(configFile.toPath()) }
+            .onFailure { logger.error("Failed to read config.toml.", it) }
             .getOrNull()
-        val parsed = parseServerConfig(t)
+        val errors = result?.errors().orEmpty()
+        errors.forEach { logger.error("config.toml: {}", it.toString()) }
+        when (ConfigLoads.decide(hasErrors = result == null || errors.isNotEmpty(), firstLoad = firstLoad)) {
+            ConfigLoads.Action.APPLY -> loadedWithErrors = false
+            ConfigLoads.Action.APPLY_DEGRADED -> {
+                loadedWithErrors = true
+                logger.error("config.toml has errors: the keys they hit run on their defaults until it is fixed and reloaded.")
+            }
+            ConfigLoads.Action.KEEP_PREVIOUS ->
+                throw IllegalStateException("config.toml has ${errors.size.coerceAtLeast(1)} error(s); the previous settings stay")
+        }
+        val parsed = parseServerConfig(result)
         language = parsed.language
         settings = parsed.settings
         storage = parsed.storage
@@ -79,9 +98,12 @@ class Config(private val plugin: PaperServer) {
         proxy = parsed.proxy
     }
 
-    /** Re-reads `config.toml`, re-extracts language files and refreshes the in-memory message map. */
+    /**
+     * Re-reads `config.toml`, re-extracts language files and refreshes the in-memory message map. A file with syntax
+     * errors changes nothing and throws (the reload is reported as failed).
+     */
     fun reload() {
-        load()
+        load(firstLoad = false)
         langStore.extractLangFiles()
         langStore.loadMessages(logger)
     }

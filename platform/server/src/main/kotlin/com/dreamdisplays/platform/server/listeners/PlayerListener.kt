@@ -59,7 +59,12 @@ class PlayerListener : Listener {
 
         if (!PlatformUtil.isFolia && !hasValidatedWorld && DisplayManager.getDisplays().isNotEmpty()) {
             hasValidatedWorld = true
-            Scheduler.runLater(40L) { DisplayManager.validateDisplaysAndCleanup() }
+            // A config with errors may name the wrong base material: checking against it would delete every display
+            if (config.loadedWithErrors) {
+                com.dreamdisplays.platform.server.PaperServer.logger.warn("Skipping the startup display check: config.toml has errors.")
+            } else {
+                Scheduler.runLater(40L) { DisplayManager.validateDisplaysAndCleanup() }
+            }
         }
 
         if (!config.settings.modDetectionEnabled) return
