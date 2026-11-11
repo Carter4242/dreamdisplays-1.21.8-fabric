@@ -5,7 +5,8 @@ import java.util.*
 
 /**
  * Server side of the karaoke track volume: while a display has singers its policy carries `audio.gain` =
- * `[karaoke] track_volume` (singers' clients ignore it on the display they sing on). Tracks which displays are
+ * `[karaoke] track_volume`, and `audio.singerGain` = `singer_track_volume`, which singers' clients use instead on the
+ * display they sing on. Tracks which displays are
  * ducked so their info is re-sent only when that flips.
  */
 class KaraokeTrackDuck {
@@ -26,11 +27,21 @@ class KaraokeTrackDuck {
     companion object {
         const val DEFAULT_TRACK_VOLUME = 1.0
 
-        /** [policy] with the track gain applied when [singing] (and [trackVolume] actually lowers it). */
-        fun apply(policy: DisplayPolicy, singing: Boolean, trackVolume: Double): DisplayPolicy {
+        const val DEFAULT_SINGER_TRACK_VOLUME = 1.25
+
+        /**
+         * [policy] with the track gains applied when [singing]: `audio.gain` = [trackVolume] when it lowers the
+         * track, and `audio.singerGain` = [singerTrackVolume] (0..2) for the singers when it isn't 1.
+         */
+        fun apply(
+            policy: DisplayPolicy, singing: Boolean, trackVolume: Double,
+            singerTrackVolume: Double = 1.0,
+        ): DisplayPolicy {
             if (!singing) return policy
             val volume = trackVolume.coerceIn(0.0, 1.0)
-            return if (volume >= 1.0) policy else policy.withGain(volume)
+            val ducked = if (volume >= 1.0) policy else policy.withGain(volume)
+            val singer = singerTrackVolume.coerceIn(0.0, 2.0)
+            return if (singer == 1.0) ducked else ducked.withSingerGain(singer)
         }
     }
 }

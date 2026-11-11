@@ -42,4 +42,22 @@ class KaraokeTrackDuckTest {
         assertEquals(1.0, KaraokeTrackDuck.DEFAULT_TRACK_VOLUME)
         assertSame(base, KaraokeTrackDuck.apply(base, singing = true, trackVolume = KaraokeTrackDuck.DEFAULT_TRACK_VOLUME))
     }
+
+    @Test
+    fun `singers get singer_track_volume while singing, restored after`() {
+        val base = DisplayPolicy(audio = DisplayPolicy.Audio(radiusBlocks = 32.0))
+        val sung = KaraokeTrackDuck.apply(base, singing = true, trackVolume = 0.8, singerTrackVolume = 1.25)
+        assertEquals(1.25, sung.audio?.singerGain)
+        assertEquals(0.8, sung.audio?.gain)
+        assertEquals(1.25, com.dreamdisplays.core.display.policy.PolicyGainRamp.targetFor(sung, singing = true))
+        assertEquals(0.8, com.dreamdisplays.core.display.policy.PolicyGainRamp.targetFor(sung, singing = false))
+        // Round trip as clients decode it
+        assertEquals(1.25, DisplayPolicy.decode(sung.encode())?.audio?.resolvedSingerGain)
+        assertNull(KaraokeTrackDuck.apply(base, singing = true, trackVolume = 1.0, singerTrackVolume = 1.0).audio?.singerGain)
+        assertEquals(2.0, KaraokeTrackDuck.apply(base, singing = true, trackVolume = 1.0, singerTrackVolume = 9.0).audio?.singerGain)
+        // No singers: nothing set, so a player who stops singing is back at the plain track
+        assertSame(base, KaraokeTrackDuck.apply(base, singing = false, trackVolume = 0.8, singerTrackVolume = 1.25))
+        assertEquals(1.0, com.dreamdisplays.core.display.policy.PolicyGainRamp.targetFor(base, singing = true))
+        assertEquals(1.25, KaraokeTrackDuck.DEFAULT_SINGER_TRACK_VOLUME)
+    }
 }

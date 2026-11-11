@@ -33,4 +33,11 @@ object KaraokeVoiceGain {
         if (isUnity(gain)) return
         for (i in pcm.indices) pcm[i] = sample(pcm[i], gain)
     }
+
+    /** [pcm] at a gain moving linearly from [from] to [to] across the frame, in place (no steps between frames). */
+    fun applyRamp(pcm: ShortArray, from: Double, to: Double) {
+        if (from == to || pcm.isEmpty()) return apply(pcm, to)
+        val step = (to - from) / pcm.size
+        for (i in pcm.indices) pcm[i] = sample(pcm[i], from + step * (i + 1))
+    }
 }

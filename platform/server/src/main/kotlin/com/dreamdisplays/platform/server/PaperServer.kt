@@ -102,7 +102,9 @@ class PaperServer : JavaPlugin() {
         QueueManager.applyVideo = QueueActions::applyVideo
         QueueManager.restore()
         KaraokeManager.settings = KaraokeManager::settingsFromConfig
-        DisplayPolicies.trackVolume = { if (KaraokeManager.isActive(it)) KaraokeManager.settings().trackVolume else null }
+        DisplayPolicies.trackVolume = {
+            if (KaraokeManager.isActive(it)) KaraokeManager.settings().let { s -> s.trackVolume to s.singerTrackVolume } else null
+        }
         KaraokeManager.init()
         ScheduledPlaybackManager.init(PaperPlaybackTransport)
         ScheduledPlaybackManager.restoreOnStartup()

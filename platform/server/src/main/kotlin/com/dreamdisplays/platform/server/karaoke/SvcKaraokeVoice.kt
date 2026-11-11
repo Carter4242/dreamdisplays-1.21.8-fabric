@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.karaoke
 
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import com.dreamdisplays.core.karaoke.BurstAnchor
+import com.dreamdisplays.core.karaoke.KaraokeCoSinger
 import com.dreamdisplays.core.karaoke.KaraokeRoute
 import com.dreamdisplays.core.karaoke.KaraokeRouting
 import com.dreamdisplays.core.karaoke.KaraokeTiming
@@ -30,8 +31,9 @@ import kotlin.math.sqrt
  * Karaoke's Simple Voice Chat add-on. Loaded by name from [KaraokeManager] only when voice chat is installed.
  *
  * Every mic packet of a singer in the display's range is taken out of voice chat's normal routing ([KaraokeRouting]
- * says who hears it how): the other singers get it at once from the singer like normal voice chat (re-encoded at
- * `co_singer_volume` while a song plays), and each listener gets the singer's voice (with `voice_source = singer` as
+ * says who hears it how): the other singers get it at once from the singer like normal voice chat (re-encoded per hearer at
+ * `co_singer_volume` / `co_singer_idle_volume` while a song plays, see [KaraokeCoSinger]), and each listener gets the
+ * singer's voice (with `voice_source = singer` as
  * entity sound from the singer on their own channel, so clients show their speaking icon; locational at the display
  * otherwise, or beyond voice chat's distance where the listener may not track the singer),
  * at the time that lands it on the beat for them: see [KaraokeTiming] for the math and [BurstAnchor] for how frames
@@ -42,6 +44,9 @@ class SvcKaraokeVoice : KaraokeVoice {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val emitter = VoiceEmitter()
     private val voices = ConcurrentHashMap<UUID, SingerVoice>()
+
+    /** When each singer's last voice frame arrived ([System.nanoTime]): whether they sing now, for co-singer volume. */
+    private val lastVoice = ConcurrentHashMap<UUID, Long>()
     private var service: BukkitVoicechatService? = null
     private val addon = Addon()
 
@@ -77,6 +82,7 @@ class SvcKaraokeVoice : KaraokeVoice {
         emitter.shutdown()
         voices.values.forEach { it.close() }
         voices.clear()
+        lastVoice.clear()
     }
 
     override fun isConnected(playerId: UUID): Boolean = api?.getConnectionOf(playerId)?.isConnected == true
@@ -85,6 +91,7 @@ class SvcKaraokeVoice : KaraokeVoice {
 
     override fun forget(singerId: UUID) {
         voices.remove(singerId)?.close()
+        lastVoice.remove(singerId)
     }
 
     private inner class Addon : VoicechatPlugin {
@@ -124,6 +131,7 @@ class SvcKaraokeVoice : KaraokeVoice {
         val singerId = event.senderConnection?.player?.uuid ?: return
         val stage = KaraokeManager.stageOfSinger(singerId) ?: return
         val singer = stage.singers[singerId] ?: return
+        if (event.packet.opusEncodedData.isNotEmpty()) lastVoice[singerId] = System.nanoTime()
         // Away from the display (or offline): voice chat routes them as usual
         if (!singer.present) return
         // Nobody hears a singer's raw voice; only the copies below
@@ -137,15 +145,17 @@ class SvcKaraokeVoice : KaraokeVoice {
         val voice = voices.computeIfAbsent(singerId) { SingerVoice() }
         val stop = mic.opusEncodedData.isEmpty()
 
-        // Other singers: at once and from the singer, like normal voice chat
-        val volume = KaraokeRouting.coSingerVolume(stage.songPlaying, stage.coSingerVolume)
-        var coSingerData: ByteArray? = null
+        // Other singers: at once and from the singer, like normal voice chat, each at a volume faded by whether
+        // they sing themselves right now
+        voice.retainCoSingers(singing)
         for (otherId in singing) {
-            if (otherId == singerId || volume <= 0.0) continue
+            if (otherId == singerId) continue
             val other = api.getConnectionOf(otherId) ?: continue
             val near = isNear(other.player, sender, proximity)
             if (KaraokeRouting.route(singerId, otherId, singing, false, near, stage.fromSinger) != KaraokeRoute.NORMAL) continue
-            val data = coSingerData ?: voice.coSinger.scaled(api, mic.opusEncodedData, volume).also { coSingerData = it }
+            val volume = KaraokeCoSinger.target(stage.songPlaying, lastVoice[otherId], now, stage.coSinger)
+            val stream = voice.coSinger(otherId)
+            val data = stream.faded(api, mic.opusEncodedData, volume, now, stage.coSinger) ?: continue
             val packet = entityPacket(mic, KaraokeVoiceSend.toCoSinger(singerId, mic.isWhispering, proximity), data)
             if (voice.startStream(otherId) && stage.debug) {
                 logger.info(
@@ -257,23 +267,27 @@ class SvcKaraokeVoice : KaraokeVoice {
     }
 
     /** One stream of a singer's frames at a volume: decode -> [KaraokeVoiceGain] -> encode. Thread-safe. */
-    private class GainCodec {
+    private open class GainCodec {
         private var decoder: OpusDecoder? = null
         private var encoder: OpusEncoder? = null
 
         /** [data] at [volume]; passes through at 1.0, and the empty end-of-burst frame passes and resets the codecs. */
+        fun scaled(api: VoicechatServerApi, data: ByteArray, volume: Double): ByteArray =
+            ramped(api, data, volume, volume)
+
+        /** [data] at a gain moving from [from] to [to] across the frame; see [scaled]. */
         @Synchronized
-        fun scaled(api: VoicechatServerApi, data: ByteArray, volume: Double): ByteArray {
-            if (KaraokeVoiceGain.isUnity(volume)) return data
+        fun ramped(api: VoicechatServerApi, data: ByteArray, from: Double, to: Double): ByteArray {
             if (data.isEmpty()) {
                 decoder?.resetState()
                 encoder?.resetState()
                 return data
             }
+            if (KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
             val dec = decoder ?: api.createDecoder().also { decoder = it }
             val enc = encoder ?: api.createEncoder().also { encoder = it }
             val pcm = dec.decode(data)
-            KaraokeVoiceGain.apply(pcm, volume)
+            KaraokeVoiceGain.applyRamp(pcm, from, to)
             return enc.encode(pcm)
         }
 
@@ -283,6 +297,22 @@ class SvcKaraokeVoice : KaraokeVoice {
             encoder?.close()
             decoder = null
             encoder = null
+        }
+    }
+
+    /** The copy one other singer hears, its gain faded per [KaraokeCoSinger.Ramp]. Thread-safe. */
+    private class CoSingerStream : GainCodec() {
+        private val ramp = KaraokeCoSinger.Ramp()
+
+        /** [data] faded toward [volume]; null when it would be silent anyway (not sent). */
+        @Synchronized
+        fun faded(
+            api: VoicechatServerApi, data: ByteArray, volume: Double, nowNanos: Long, levels: KaraokeCoSinger.Levels,
+        ): ByteArray? {
+            if (data.isEmpty()) return ramped(api, data, volume, volume)
+            val (from, to) = ramp.next(volume, nowNanos, levels)
+            if (from <= 0.0 && to <= 0.0) return null
+            return ramped(api, data, from, to)
         }
     }
 
@@ -301,14 +331,23 @@ class SvcKaraokeVoice : KaraokeVoice {
         @Synchronized
         fun startStream(receiverId: UUID): Boolean = streams.add(receiverId)
 
-        /** Re-encodes the copies other singers hear (`co_singer_volume`). */
-        val coSinger = GainCodec()
+        /** Re-encodes the copy each other singer hears (`co_singer_volume` / `co_singer_idle_volume`). */
+        private val coSingers = ConcurrentHashMap<UUID, CoSingerStream>()
 
-        /** Re-encodes the copies listeners hear (`singer_volume`); its own codec state, apart from [coSinger]. */
+        fun coSinger(hearerId: UUID): CoSingerStream = coSingers.computeIfAbsent(hearerId) { CoSingerStream() }
+
+        /** Drops the streams of hearers who no longer sing on the stage. */
+        fun retainCoSingers(singing: Set<UUID>) {
+            if (coSingers.keys.all { it in singing }) return
+            coSingers.keys.filter { it !in singing }.forEach { coSingers.remove(it)?.close() }
+        }
+
+        /** Re-encodes the copies listeners hear (`singer_volume`); its own codec state, apart from [coSinger]'s. */
         val listeners = GainCodec()
 
         fun close() {
-            coSinger.close()
+            coSingers.values.forEach { it.close() }
+            coSingers.clear()
             listeners.close()
         }
 

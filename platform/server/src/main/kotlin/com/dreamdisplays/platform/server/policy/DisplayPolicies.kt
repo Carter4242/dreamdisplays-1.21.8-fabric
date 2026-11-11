@@ -23,9 +23,12 @@ object DisplayPolicies {
     @Volatile
     var defaults: () -> DisplayPolicy = { DisplayPolicy.EMPTY }
 
-    /** Karaoke track volume for [display] while it has singers (`audio.gain`), else null; set by the platform. */
+    /**
+     * Karaoke track volumes for [display] while it has singers (`audio.gain` for everyone, `audio.singerGain` for the
+     * singers), else null; set by the platform.
+     */
     @Volatile
-    var trackVolume: (DisplayData) -> Double? = { null }
+    var trackVolume: (DisplayData) -> Pair<Double, Double>? = { null }
 
     /** Persists [DisplayData] and re-sends it to viewers after an override change; set by the platform. */
     @Volatile
@@ -38,7 +41,7 @@ object DisplayPolicies {
     fun effective(display: DisplayData): DisplayPolicy {
         val merged = (override(display) ?: DisplayPolicy.EMPTY).mergedOver(defaults())
         val track = trackVolume(display) ?: return merged
-        return KaraokeTrackDuck.apply(merged, singing = true, trackVolume = track)
+        return KaraokeTrackDuck.apply(merged, singing = true, trackVolume = track.first, singerTrackVolume = track.second)
     }
 
     /**

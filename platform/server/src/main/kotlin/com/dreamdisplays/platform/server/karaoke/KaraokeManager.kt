@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.server.karaoke
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.karaoke.KaraokeLatency
 import com.dreamdisplays.core.karaoke.KaraokeTiming
+import com.dreamdisplays.core.karaoke.KaraokeCoSinger
 import com.dreamdisplays.core.karaoke.KaraokeTrackDuck
 import com.dreamdisplays.core.karaoke.LeadResync
 import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
@@ -67,8 +68,9 @@ object KaraokeManager {
         val latency: KaraokeLatency = KaraokeLatency(),
         val skipAbsent: Boolean = true,
         val fromSinger: Boolean = true,
-        val coSingerVolume: Double = 0.15,
+        val coSinger: KaraokeCoSinger.Levels = KaraokeCoSinger.Levels(),
         val trackVolume: Double = KaraokeTrackDuck.DEFAULT_TRACK_VOLUME,
+        val singerTrackVolume: Double = KaraokeTrackDuck.DEFAULT_SINGER_TRACK_VOLUME,
         val singerVolume: Double = 1.4,
         val debug: Boolean = false,
     )
@@ -465,8 +467,8 @@ object KaraokeManager {
     private fun syncTrackVolume() {
         val active = states.filterValues { it.singers.isNotEmpty() }.keys
         val changed = duck.update(active)
-        // At 1.0 (the default) nothing is ducked, so there is nothing to re-send
-        if (settings().trackVolume >= 1.0) return
+        // At 1.0 nothing changes, so there is nothing to re-send
+        if (settings().trackVolume >= 1.0 && settings().singerTrackVolume == 1.0) return
         for (displayId in changed) {
             (DisplayManager.getDisplayData(displayId) as? PaperDisplayData)?.let(DisplayManager::broadcastUpdate)
         }
@@ -502,7 +504,7 @@ object KaraokeManager {
             fromSinger = s.fromSinger,
             songPlaying = timeline != null && !timeline.paused && timeline.serverTimeMs <= now &&
                     !TimelineManager.isHolding(display.id),
-            coSingerVolume = s.coSingerVolume,
+            coSinger = s.coSinger,
             singerVolume = s.singerVolume,
             debug = s.debug,
         )
@@ -565,8 +567,15 @@ object KaraokeManager {
             latency = KaraokeLatency(it.singer_output_capture_ms.toLong(), it.listener_buffer_output_ms.toLong()),
             skipAbsent = it.absent_singer != "play",
             fromSinger = it.voice_source != "display",
-            coSingerVolume = it.co_singer_volume,
+            coSinger = KaraokeCoSinger.Levels(
+                singing = it.co_singer_volume,
+                idle = it.co_singer_idle_volume,
+                idleAfterMs = it.co_singer_idle_after_ms.toLong(),
+                fadeDownMs = it.co_singer_fade_down_ms.toLong(),
+                fadeUpMs = it.co_singer_fade_up_ms.toLong(),
+            ),
             trackVolume = it.track_volume,
+            singerTrackVolume = it.singer_track_volume,
             singerVolume = it.singer_volume,
             debug = it.debug,
         )

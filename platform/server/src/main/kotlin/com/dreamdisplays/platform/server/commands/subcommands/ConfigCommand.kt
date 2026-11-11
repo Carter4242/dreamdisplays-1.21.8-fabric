@@ -61,6 +61,11 @@ object ConfigCommand {
         Key("karaoke.singer_volume", PolicyPaths.Kind.Decimal(0.0, 3.0)) { it.karaoke.singer_volume },
         Key("karaoke.voice_source", PolicyPaths.Kind.Choice(listOf("singer", "display"))) { it.karaoke.voice_source },
         Key("karaoke.co_singer_volume", PolicyPaths.Kind.Decimal(0.0, 1.0)) { it.karaoke.co_singer_volume },
+        Key("karaoke.co_singer_idle_volume", PolicyPaths.Kind.Decimal(0.0, 1.0)) { it.karaoke.co_singer_idle_volume },
+        Key("karaoke.co_singer_idle_after_ms", PolicyPaths.Kind.Whole(0, 60_000)) { it.karaoke.co_singer_idle_after_ms },
+        Key("karaoke.co_singer_fade_down_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.karaoke.co_singer_fade_down_ms },
+        Key("karaoke.co_singer_fade_up_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.karaoke.co_singer_fade_up_ms },
+        Key("karaoke.singer_track_volume", PolicyPaths.Kind.Decimal(0.0, 2.0)) { it.karaoke.singer_track_volume },
         Key("karaoke.debug", PolicyPaths.Kind.Bool) { it.karaoke.debug },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 

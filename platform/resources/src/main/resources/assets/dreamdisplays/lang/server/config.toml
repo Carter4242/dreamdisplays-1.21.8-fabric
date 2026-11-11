@@ -146,6 +146,8 @@ max_per_player = 10
 # latencies, the singer's capture -> server time is measured with synced clocks, and the singer's own client listens
 # to their singing against the track and slowly corrects their trim (the mic is analysed only on their client and
 # never sent; only the offset is). /display karaoke ... status shows all of it.
+#
+# Every key below applies live: /display config karaoke.<key> <value> (or edit this file and /display reload).
 
 # Lead for a new singer in ms; 0 = automatic: the singer's measured output + capture + network time, plus the slowest
 # listener's network + voice buffer, plus room for a negative trim and lead_margin_ms, kept within min..max_lead_ms
@@ -169,16 +171,27 @@ absent_singer = "skip"
 voice_source = "singer"
 
 # How loud singers hear each other (duets) while a song plays, 0.0-1.0; 0 = not at all. Their voices are re-encoded at
-# this volume. Between songs and while paused they hear each other normally.
+# co_singer_volume while the hearing singer is singing (sending voice), and at co_singer_idle_volume once they have
+# been quiet for co_singer_idle_after_ms. The change fades: down over co_singer_fade_down_ms (at once when they start
+# singing), up over co_singer_fade_up_ms. Between songs and while paused they hear each other normally.
 co_singer_volume = 0.15
+co_singer_idle_volume = 0.075
+co_singer_idle_after_ms = 3000
+co_singer_fade_down_ms = 200
+co_singer_fade_up_ms = 500
 
 # Volume of the singers' voices for listeners, 0.0-3.0 (1.0 = as voice chat plays them). Above 1.0 loud peaks are
 # softly limited instead of clipping. Singers hear each other at co_singer_volume instead.
 singer_volume = 1.4
 
 # Volume of the display's own audio (the track) while someone sings, 0.0-1.0, for everyone except the singers, who
-# hear it as normal. 1.0 = unchanged. Players' own volume settings are untouched; it eases back after the last singer.
+# hear it at singer_track_volume instead. 1.0 = unchanged. Players' own volume settings are untouched; it eases back
+# after the last singer.
 track_volume = 1.0
+
+# Volume of the track for the singers themselves while they sing, 0.0-2.0 (1.0 = unchanged; needs the client mod
+# version that knows it, older clients play it at 1.0). Loud peaks above full scale are softly limited.
+singer_track_volume = 1.25
 
 # Log every karaoke voice stream as it starts (recipient, distance, packet type)
 debug = false

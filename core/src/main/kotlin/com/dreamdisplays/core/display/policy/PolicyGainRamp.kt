@@ -10,7 +10,7 @@ class PolicyGainRamp(private val rampNanos: Long = DEFAULT_RAMP_NANOS, initial: 
     private var startNanos = 0L
     private var lastPolled = initial
 
-    /** The gain to target: 1 while this player sings on the display (singers hear the track as normal). */
+    /** The gain to target: `audio.singerGain` while this player sings on the display, else `audio.gain`. */
     val target: Double @Synchronized get() = to
 
     /** Starts ramping from the current value to [target] (clamped 0..2); no-op when it already heads there. */
@@ -47,8 +47,8 @@ class PolicyGainRamp(private val rampNanos: Long = DEFAULT_RAMP_NANOS, initial: 
     companion object {
         const val DEFAULT_RAMP_NANOS = 300_000_000L
 
-        /** The gain a player applies to a display with [policy]: none while they sing on it, else `audio.gain`. */
+        /** The gain a player applies to a display with [policy]: `audio.singerGain` while they sing on it, else `audio.gain`. */
         fun targetFor(policy: DisplayPolicy?, singing: Boolean): Double =
-            if (singing) 1.0 else policy?.audio?.resolvedGain ?: 1.0
+            (if (singing) policy?.audio?.resolvedSingerGain else policy?.audio?.resolvedGain) ?: 1.0
     }
 }

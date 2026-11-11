@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import com.dreamdisplays.core.karaoke.KaraokeCoSinger
 import com.dreamdisplays.core.karaoke.KaraokeLatency
 import com.dreamdisplays.core.karaoke.ListenerLatency
 import com.dreamdisplays.core.karaoke.SingerLatency
@@ -12,7 +13,7 @@ import java.util.*
  *
  * Singers' voices are re-sent as locational sound carrying at least [distance] blocks: from [x] / [y] / [z] (the
  * display's centre, like a PA) or, with [fromSinger], from wherever the singer is when each frame goes out.
- * [songPlaying]: the display's timeline runs, so singers hear each other at [coSingerVolume] (else normally).
+ * [songPlaying]: the display's timeline runs, so singers hear each other at the [coSinger] levels (else normally).
  */
 data class KaraokeStage(
     val displayId: UUID,
@@ -26,7 +27,7 @@ data class KaraokeStage(
     val listeners: List<StageListener>,
     val fromSinger: Boolean = true,
     val songPlaying: Boolean = false,
-    val coSingerVolume: Double = 1.0,
+    val coSinger: KaraokeCoSinger.Levels = KaraokeCoSinger.Levels(),
     /** Volume of the singers' voices for listeners (`singer_volume`, 0..3, soft-limited above 1). */
     val singerVolume: Double = 1.0,
     val debug: Boolean = false,

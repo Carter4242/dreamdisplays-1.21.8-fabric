@@ -77,6 +77,8 @@ data class DisplayPolicy(
          * changes. Set by the server, not by config: the karaoke track volume while someone sings.
          */
         val gain: Double? = null,
+        /** Like [gain], for the players singing karaoke on the display (instead of [gain]); server-set too. */
+        val singerGain: Double? = null,
     ) {
         fun mergedOver(base: Audio?): Audio = Audio(
             radiusBlocks = radiusBlocks ?: base?.radiusBlocks,
@@ -85,10 +87,14 @@ data class DisplayPolicy(
             startVolume = startVolume ?: base?.startVolume,
             maxVolume = maxVolume ?: base?.maxVolume,
             gain = gain ?: base?.gain,
+            singerGain = singerGain ?: base?.singerGain,
         )
 
         /** [gain] clamped to 0..2; 1 when unset. */
         val resolvedGain: Double get() = gain?.takeIf { !it.isNaN() }?.coerceIn(0.0, 2.0) ?: 1.0
+
+        /** [singerGain] clamped to 0..2; 1 when unset. */
+        val resolvedSingerGain: Double get() = singerGain?.takeIf { !it.isNaN() }?.coerceIn(0.0, 2.0) ?: 1.0
     }
 
     @Serializable
@@ -239,6 +245,12 @@ data class DisplayPolicy(
     /** This policy with `audio.gain` set to [gain] (null removes it). */
     fun withGain(gain: Double?): DisplayPolicy {
         val updated = (audio ?: Audio()).copy(gain = gain)
+        return copy(audio = updated.takeIf { it != Audio() })
+    }
+
+    /** This policy with `audio.singerGain` set to [gain] (null removes it). */
+    fun withSingerGain(gain: Double?): DisplayPolicy {
+        val updated = (audio ?: Audio()).copy(singerGain = gain)
         return copy(audio = updated.takeIf { it != Audio() })
     }
 

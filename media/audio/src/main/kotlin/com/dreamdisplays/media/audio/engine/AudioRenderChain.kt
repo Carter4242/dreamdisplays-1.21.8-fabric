@@ -24,6 +24,7 @@ internal class AudioRenderChain(
     private val engine: AcousticsEngine,
 ) : AudioDspStage {
     private companion object {
+        const val SOFT_KNEE = 0.7 * 32767.0
         const val TARGET_LUFS = -16f
         const val MAX_LOUDNESS_BOOST_DB = 12f
         const val MAX_LOUDNESS_CUT_DB = 12f
@@ -139,7 +140,8 @@ internal class AudioRenderChain(
         val userGain = if (st.muted) 0f else st.userVolume
         val makeupFrom = lastMakeup
         val makeupStep = (nextMakeup(normalize, dtBlock) - makeupFrom) / frames
-        val limit = advanced || normalize
+        // A boost above 1 (karaoke singer track volume, volume over 100 %) is limited too, never hard-clipped
+        val limit = advanced || normalize || userGain > 1f
 
         val env = st.environment
         val occ = env.occlusion.coerceIn(0f, 1f)
@@ -336,10 +338,21 @@ internal class AudioRenderChain(
             val lo = buf[i].toInt() and 0xFF
             val hi = buf[i + 1].toInt()
             val s = (hi shl 8) or lo
-            val scaled = (s * gain).toInt().coerceIn(-32768, 32767)
+            val scaled = if (gain > 1.0) softLimit(s * gain) else (s * gain).toInt().coerceIn(-32768, 32767)
             buf[i] = (scaled and 0xFF).toByte()
             buf[i + 1] = ((scaled shr 8) and 0xFF).toByte()
             i += 2
         }
+    }
+
+    /**
+     * A boosted sample (gain above 1) without hard clipping: exact below 70 % of full scale, louder peaks bent
+     * smoothly (tanh) toward full scale.
+     */
+    private fun softLimit(y: Double): Int {
+        val a = abs(y)
+        if (a <= SOFT_KNEE) return y.toInt()
+        val limited = SOFT_KNEE + (32767.0 - SOFT_KNEE) * tanh((a - SOFT_KNEE) / (32767.0 - SOFT_KNEE))
+        return (if (y < 0) -limited else limited).toInt().coerceIn(-32768, 32767)
     }
 }
