@@ -29,6 +29,7 @@ import com.dreamdisplays.media.player.policy.LoadRetrySchedule
 import com.dreamdisplays.media.player.policy.RetryPolicy
 import com.dreamdisplays.media.player.preparation.MediaPreparationService
 import com.dreamdisplays.media.player.preparation.PreparedMedia
+import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.HwAccelBackend
 import com.dreamdisplays.media.player.process.MediaProcess
 import com.dreamdisplays.media.player.readahead.ReadAhead
@@ -1323,7 +1324,8 @@ class MediaPlayer(
         ) {
             val failed = currentHwAccel()
             val backend = failed.name.lowercase()
-            if (HwAccelBackend.looksLikeNoDevice(stderr)) HwAccelBackend.markNoDevice(failed)
+            // Off for every later stream only once the device alone fails to open too: this one may be a passing failure
+            if (HwAccelBackend.looksLikeNoDevice(stderr)) HwAccelBackend.confirmNoDeviceAsync(failed) { FFmpegBinary.getPath() }
             hwAccelDisabled = true
             if (relayStream) ShareTiming.mark("view.hwfail", "$debugLabel $backend")
             logger.warn(

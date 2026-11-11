@@ -99,13 +99,41 @@ enum class HwAccelBackend(val ffmpegName: String?, val hwOutputFormat: String?, 
 
         internal fun forgetNoDevice() = noDevice.clear()
 
+        /** Backends a stream reported without a device, being checked by [confirmNoDeviceAsync]. */
+        private val confirming = java.util.concurrent.ConcurrentHashMap.newKeySet<HwAccelBackend>()
+
+        /** How long after a stream's report the device is opened on its own: a GPU reset (TDR) takes a few seconds. */
+        internal const val CONFIRM_DELAY_MS = 5_000L
+
         /**
-         * Opens the default backend's device once in [ffmpeg] (no stream involved) and records it as unusable when
-         * that fails for want of a device ([markNoDevice]). Run in the background at startup: otherwise the first
-         * stream of each player found out only after connecting and probing, and started over in software.
+         * A stream reported that [backend] has no device. It goes off for the session ([markNoDevice]) only when opening
+         * the device on its own, [CONFIRM_DELAY_MS] later, fails the same way: a GPU reset, a resume from sleep or a
+         * driver update fails one stream's device without the device being gone, and that stream already falls back
+         * to software on its own. One check per backend at a time, in the background.
          */
-        fun probeDevice(ffmpeg: String) {
-            val backend = detectDefault()
+        fun confirmNoDeviceAsync(backend: HwAccelBackend, ffmpeg: () -> String?) {
+            if (backend.ffmpegName == null || backend in noDevice || !confirming.add(backend)) return
+            Thread({
+                try {
+                    Thread.sleep(CONFIRM_DELAY_MS)
+                    ffmpeg()?.let { probeDevice(it, backend) }
+                } catch (_: InterruptedException) {
+                } finally {
+                    confirming.remove(backend)
+                }
+            }, "HwAccel-device-check").apply { isDaemon = true }.start()
+        }
+
+        /** True when a device-only `FFmpeg` run that exited with [exitCode] and printed [output] found no device. */
+        internal fun deviceMissing(exitCode: Int, output: String): Boolean = exitCode != 0 && looksLikeNoDevice(output)
+
+        /**
+         * Opens [backend]'s device (the default one unless given) once in [ffmpeg] (no stream involved) and records it
+         * as unusable when that fails for want of a device ([markNoDevice]). Run in the background at startup:
+         * otherwise the first stream of each player found out only after connecting and probing, and started over in
+         * software.
+         */
+        fun probeDevice(ffmpeg: String, backend: HwAccelBackend = detectDefault()) {
             val name = backend.ffmpegName ?: return
             val output = runCatching {
                 val p = ProcessBuilder(
@@ -121,14 +149,12 @@ enum class HwAccelBackend(val ffmpegName: String?, val hwOutputFormat: String?, 
                     return
                 }
                 reader.join(1_000)
-                if (p.exitValue() == 0) return
+                if (!deviceMissing(p.exitValue(), text.toString())) return
                 text.toString()
             }.getOrNull() ?: return
-            if (looksLikeNoDevice(output)) {
-                markNoDevice(backend)
-                org.slf4j.LoggerFactory.getLogger(HwAccelBackend::class.java)
-                    .info("Hardware decoding ({}) has no device here; decoding in software: {}", name, output.trim().take(160))
-            }
+            markNoDevice(backend)
+            org.slf4j.LoggerFactory.getLogger(HwAccelBackend::class.java)
+                .info("Hardware decoding ({}) has no device here; decoding in software: {}", name, output.trim().take(160))
         }
     }
 }

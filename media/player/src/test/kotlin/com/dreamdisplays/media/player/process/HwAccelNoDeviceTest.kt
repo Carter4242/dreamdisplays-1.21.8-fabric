@@ -20,6 +20,21 @@ class HwAccelNoDeviceTest {
     }
 
     @Test
+    fun `only a device-only run that fails for want of a device counts as no device`() {
+        assertTrue(HwAccelBackend.deviceMissing(1, "Device creation failed: -542398533."))
+        assertFalse(HwAccelBackend.deviceMissing(0, "Device creation failed: -542398533."))
+        assertFalse(HwAccelBackend.deviceMissing(1, "Error opening output files: Invalid argument"))
+    }
+
+    @Test
+    fun `a stream's report alone does not turn a backend off, and nothing is checked without an FFmpeg`() {
+        HwAccelBackend.confirmNoDeviceAsync(HwAccelBackend.VAAPI) { null }
+        assertEquals(HwAccelBackend.VAAPI, HwAccelBackend.usable(HwAccelBackend.VAAPI))
+        Thread.sleep(HwAccelBackend.CONFIRM_DELAY_MS + 500)
+        assertEquals(HwAccelBackend.VAAPI, HwAccelBackend.usable(HwAccelBackend.VAAPI))
+    }
+
+    @Test
     fun `a backend without a device stays off for the session`() {
         assertEquals(HwAccelBackend.VAAPI, HwAccelBackend.usable(HwAccelBackend.VAAPI))
         HwAccelBackend.markNoDevice(HwAccelBackend.VAAPI)
