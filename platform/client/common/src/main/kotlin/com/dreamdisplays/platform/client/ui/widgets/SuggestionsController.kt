@@ -93,6 +93,18 @@ class SuggestionsController {
         data class Related(val videoId: String) : MoreMode()
     }
 
+    /**
+     * The display moved on to [videoId] without this player picking it (someone else changed the video). An active
+     * search keeps its results; clearing the search then shows [videoId]'s related videos.
+     */
+    fun followVideo(videoId: String?) {
+        if (lastQuery != null && !videoId.isNullOrEmpty()) {
+            currentVideoId = videoId
+            return
+        }
+        setRelatedTo(videoId)
+    }
+
     /** Shows videos related to [videoId]; clears the panel when null/empty; no-op if already shown. */
     fun setRelatedTo(videoId: String?) {
         if (videoId.isNullOrEmpty()) {

@@ -138,6 +138,9 @@ class SuggestionsPanel(
     /** Shows videos related to [videoId]; clears the panel when null. */
     fun setRelatedTo(videoId: String?) = controller.setRelatedTo(videoId)
 
+    /** See [SuggestionsController.followVideo]. */
+    fun followVideo(videoId: String?) = controller.followVideo(videoId)
+
     private fun searchRowY(): Int = y + 10 + HEADER_H + 6
     private fun stripTop(): Int = searchRowY() + SEARCH_H + 8
     private fun stripBottom(): Int = y + height - 10

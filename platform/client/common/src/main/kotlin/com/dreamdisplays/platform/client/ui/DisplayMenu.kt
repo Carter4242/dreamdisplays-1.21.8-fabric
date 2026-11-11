@@ -865,8 +865,11 @@ class DisplayMenu private constructor(
         val ds = displayScreen
         val currentId = DreamServices.registry.getOrNull(MediaServices.SEARCH)?.extractVideoId(ds.videoUrl ?: "")
         if (currentId != null && currentId != lastSuggestedVideoId) {
+            // While the menu is open a video change is someone else's (own picks set lastSuggestedVideoId first):
+            // keep the search being typed / browsed. On opening, the search box is empty, so show related.
+            val opening = lastSuggestedVideoId == null
             lastSuggestedVideoId = currentId
-            suggestions.setRelatedTo(currentId)
+            if (opening) suggestions.setRelatedTo(currentId) else suggestions.followVideo(currentId)
         }
     }
 
