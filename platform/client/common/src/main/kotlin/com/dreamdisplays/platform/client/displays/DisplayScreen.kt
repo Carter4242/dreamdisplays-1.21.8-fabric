@@ -652,6 +652,8 @@ class DisplayScreen(
 
     /** Sizes the GPU texture buffers for the current dimensions and quality before the first frame. */
     internal fun prepareTextureDimensions() {
+        // A new player starts out opaque; it switches the texture over once it knows its video has alpha
+        textureResource.alphaMode = false
         textureResource.prepareDimensions(width, height, parseQualityOrDefault())
     }
 
@@ -870,7 +872,31 @@ class DisplayScreen(
     /** Uploads the latest decoded frame to the GPU texture(s). Called on the render thread once per frame. */
     fun fitTexture() {
         val mp = mediaPlayer ?: return
+        matchAlphaTexture(mp)
         frameUploader.upload(mp, textureResource, onRendered)
+    }
+
+    /** The player the live texture was last switched to alpha for. */
+    private var alphaTexturePlayer: MediaPlayer? = null
+
+    /**
+     * Reallocates the texture when the player's video output and the texture disagree about alpha: an alpha video is
+     * drawn from a capped RGBA texture whatever the render path, an opaque one from the usual texture. Render thread.
+     */
+    private fun matchAlphaTexture(mp: MediaPlayer) {
+        val alpha = mp.videoHasAlpha
+        if (alpha == textureResource.alphaMode && (!textureResource.hasTexture || alpha == textureResource.isAlpha)) return
+        val leavingAlpha = textureResource.isAlpha && !alpha
+        textureResource.alphaMode = alpha
+        createTexture()
+        if (alpha) {
+            alphaTexturePlayer = mp
+        } else if (leavingAlpha && alphaTexturePlayer === mp) {
+            // The same player went opaque (a new stream set): its decode is still sized for the capped alpha
+            // texture, so reopen it at the full size
+            alphaTexturePlayer = null
+            mp.restartVideoPipeline()
+        }
     }
 
     private val onRendered: () -> Unit = ::markRendered

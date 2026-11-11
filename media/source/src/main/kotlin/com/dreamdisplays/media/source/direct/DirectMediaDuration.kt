@@ -30,6 +30,27 @@ internal object DirectMediaDuration {
         }
     }.onFailure { logger.debug("Duration probe failed for {}: {}", url.take(120), it.message) }.getOrNull()
 
+    /** What one header read says about a file: its duration and, for Matroska / WebM, its first video track. */
+    data class Header(val durationNanos: Long?, val video: MatroskaTracks.Video?)
+
+    /**
+     * Like [probe], but a Matroska / WebM file ([extension] or [contentType] says which) also has its video track read
+     * from the same header fetch. [wantDuration] false skips the duration (a file served without range support has no
+     * usable one), so only a Matroska header is fetched at all.
+     */
+    fun probeHeader(
+        url: String, extension: String?, contentType: String?, contentLength: Long?, wantDuration: Boolean,
+    ): Header {
+        val matroska = extension == "webm" || extension == "mkv" ||
+                contentType == "video/webm" || contentType == "video/x-matroska"
+        if (!matroska) return Header(if (wantDuration) probe(url, extension, contentLength) else null, null)
+        return runCatching {
+            val head = range(url, 0, MATROSKA_HEAD_BYTES - 1L) ?: return Header(null, null)
+            Header(if (wantDuration) matroskaDuration(head) else null, MatroskaTracks.firstVideo(head))
+        }.onFailure { logger.debug("Header probe failed for {}: {}", url.take(120), it.message) }
+            .getOrDefault(Header(null, null))
+    }
+
     private fun isoBmff(url: String, contentLength: Long?): Long? {
         var offset = 0L
         repeat(MAX_BOX_HOPS) {
@@ -101,8 +122,9 @@ internal object DirectMediaDuration {
         return (duration.toDouble() / timescale * NANOS_PER_SECOND).toLong()
     }
 
-    private fun matroska(url: String): Long? {
-        val head = range(url, 0, MATROSKA_HEAD_BYTES - 1L) ?: return null
+    private fun matroska(url: String): Long? = range(url, 0, MATROSKA_HEAD_BYTES - 1L)?.let(::matroskaDuration)
+
+    private fun matroskaDuration(head: ByteArray): Long? {
         val infoAt = indexOf(head, byteArrayOf(0x15, 0x49.toByte(), 0xA9.toByte(), 0x66)) ?: return null
 
         var cursor = infoAt + 4

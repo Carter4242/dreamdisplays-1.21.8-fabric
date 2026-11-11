@@ -19,16 +19,28 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Producer-consumer frame buffer and `FFmpeg` video reader loop (pure-JVM pipeline). The reader thread parses raw
- * frames from the process's stdout into [FrameSurface].
+ * frames from the process's stdout into [FrameSurface]: PPM (RGB24) by default, or headerless RGBA
+ * ([MediaProcess.VideoTransport.RAW_RGBA]) for a video with an alpha channel.
  */
 internal class VideoFramePipe(
     private val debugLabel: String,
     uploaderFactory: FrameUploaderFactory,
+    private val transport: MediaProcess.VideoTransport = MediaProcess.VideoTransport.PPM,
 ) : FramePipe {
+    init {
+        require(transport != MediaProcess.VideoTransport.RAW_NV12) { "NV12 frames are read by the native pipe." }
+    }
+
+    private val rgba = transport == MediaProcess.VideoTransport.RAW_RGBA
+    private val pixelFormat = if (rgba) FramePixelFormat.RGBA32 else FramePixelFormat.RGB24
+
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private companion object {
         const val PARK_POLL_MS = 10L
+
+        /** Read granularity for headerless RGBA frames (a PPM frame is read a row at a time instead). */
+        const val RAW_READ_CHUNK = 256 * 1024
     }
 
     override val lastFrameReceivedNanos = AtomicLong(0)
@@ -50,7 +62,7 @@ internal class VideoFramePipe(
     @Volatile
     var expectedH = 0; private set
 
-    private val surface = FrameSurface(debugLabel, uploaderFactory)
+    private val surface = FrameSurface(debugLabel, uploaderFactory, pixelFormat)
 
     @Volatile
     private var activePrebuffer: FramePrebuffer? = null
@@ -88,7 +100,7 @@ internal class VideoFramePipe(
         val frameNs = (1_000_000_000.0 / MediaProcess.outputFps(sourceFps)).toLong()
         val prebuffer = FramePrebuffer.create(
             surface, frameNs, getAudioClock, onFirstFrame, terminated, stopFlag, debugLabel, presentPreview,
-            tolerateLateness, parkFlag, frameBytes = w * h * 3,
+            tolerateLateness, parkFlag, frameBytes = w * h * pixelFormat.bytesPerPixel,
         ).also { activePrebuffer = it }
         // Feed the popout / PiP sink from the prebuffer's paced consumer so it stays in sync with the
         // in-world display; feeding at decode time would run the popout ahead by the buffer depth.
@@ -107,7 +119,7 @@ internal class VideoFramePipe(
         onEos: (stderr: String, normalEos: Boolean) -> Unit, prebuffer: FramePrebuffer,
     ) {
         // Dimensions are fixed per session (mismatched frames are skipped in the loop), so the size never changes.
-        val frameSize = w * h * 3
+        val frameSize = w * h * pixelFormat.bytesPerPixel
         var spare = surface.allocateFrameBuffer(frameSize)
         surface.recycleFrameBuffer(surface.allocateFrameBuffer(frameSize))
 
@@ -132,7 +144,7 @@ internal class VideoFramePipe(
 
         runCatching {
             proc.inputStream.use { input ->
-                val rowBuf = ByteArray(w * 3)
+                val rowBuf = ByteArray(if (rgba) RAW_READ_CHUNK else w * 3)
                 while (!terminated.get() && !stopFlag.get()) {
                     // Parked (warm pause / out of render distance): idle without reading; the full pipe
                     // back-pressures FFmpeg into a standstill, keeping the decode and connection warm.
@@ -148,12 +160,13 @@ internal class VideoFramePipe(
                         lastFrameReceivedNanos.set(System.nanoTime())
                         continue
                     }
-                    if (!skipToP6(input)) {
+                    // Raw RGBA has no header: the stream is a plain run of fixed-size frames
+                    if (!rgba && !skipToP6(input)) {
                         normalEos = true; break
                     }
-                    val pw = readAsciiInt(input)
-                    val ph = readAsciiInt(input)
-                    val maxVal = readAsciiInt(input)
+                    val pw = if (rgba) w else readAsciiInt(input)
+                    val ph = if (rgba) h else readAsciiInt(input)
+                    val maxVal = if (rgba) 255 else readAsciiInt(input)
                     if (pw != w || ph != h || maxVal != 255) {
                         logger.warn("$debugLabel PPM header mismatch: ${pw}x$ph max=$maxVal (expected ${w}x$h max=255).")
                         val skip = pw.toLong() * ph * 3
@@ -227,8 +240,8 @@ internal class VideoFramePipe(
 
     private fun feedSink(buf: ByteBuffer, w: Int, h: Int) {
         val sink = popoutFrameSink ?: return
-        lastFrame.store(buf, w, h, w * h * 3, FramePixelFormat.RGB24)
-        sink(buf, w, h, FramePixelFormat.RGB24)
+        lastFrame.store(buf, w, h, w * h * pixelFormat.bytesPerPixel, pixelFormat)
+        sink(buf, w, h, pixelFormat)
         buf.rewind()
     }
 
@@ -299,6 +312,8 @@ internal class VideoFramePipe(
         val savedLimit = buf.limit()
         buf.flip()
         for (i in 0 until size) {
+            // Brightness scales color only; an RGBA frame's alpha byte is left as decoded
+            if (rgba && i and 3 == 3) continue
             val value = ((buf.get(i).toInt() and 0xFF) * factor).toInt().coerceIn(0, 255)
             buf.put(i, value.toByte())
         }

@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.client.render
 
 import com.dreamdisplays.platform.client.utils.identifier
+import com.dreamdisplays.media.player.process.AlphaVideo
 //? if >=1.21.11 {
 import net.minecraft.client.renderer.rendertype.RenderType
 //?} else
@@ -17,7 +18,11 @@ import net.minecraft.client.renderer.texture.AbstractTexture
 import net.minecraft.client.renderer.texture.DynamicTexture
 import java.util.*
 
-/** Owns the per-display GPU resources and their allocation / release lifecycle. Depending on the pipeline mode this is either one RGBA texture or three YUV planes. */
+/**
+ * Owns the per-display GPU resources and their allocation / release lifecycle. Depending on the pipeline mode this is
+ * either one RGBA texture or three YUV planes. In [alphaMode] it is always one RGBA texture, capped to
+ * [AlphaVideo.MAX_HEIGHT] like the alpha decode that fills it.
+ */
 class DisplayTextureResource(private val uuid: UUID) {
     private class Allocation(
         val width: Int,
@@ -30,6 +35,7 @@ class DisplayTextureResource(private val uuid: UUID) {
         val planeIds: List<Identifier>,
         val renderType: RenderType,
         val fallbackRenderType: RenderType,
+        val isAlpha: Boolean,
     ) {
         /** If YUV is active, the Y plane is always present. */
         val isYuv: Boolean get() = yPlane != null
@@ -64,6 +70,13 @@ class DisplayTextureResource(private val uuid: UUID) {
     @Volatile
     private var current: Allocation? = null
 
+    /**
+     * Whether the next allocation is for a video with an alpha channel. Set by the display before it (re)allocates;
+     * the allocation that is live may still be of the other kind until then (see [isAlpha]).
+     */
+    @Volatile
+    var alphaMode: Boolean = false
+
     @Volatile
     private var pending: Allocation? = null
 
@@ -93,6 +106,9 @@ class DisplayTextureResource(private val uuid: UUID) {
 
     /** True when the GPU-side YUV path backs this display (three planes instead of one RGBA texture). */
     val isYuv: Boolean get() = current?.isYuv == true
+
+    /** True when the live allocation was made for an alpha video. */
+    val isAlpha: Boolean get() = current?.isAlpha == true
 
     /** True once either texture flavor has been allocated and the display can be drawn. */
     val hasTexture: Boolean get() = current != null
@@ -132,7 +148,9 @@ class DisplayTextureResource(private val uuid: UUID) {
 
     private fun textureDimensions(blockWidth: Int, blockHeight: Int, qualityHeight: Int): Pair<Int, Int> {
         val width = ((blockWidth / blockHeight.toDouble()) * qualityHeight).toInt()
-        return width.toEvenDimension() to qualityHeight.toEvenDimension()
+        val dims = width.toEvenDimension() to qualityHeight.toEvenDimension()
+        // The alpha decode applies the same cap to the same size, so the two always agree
+        return if (alphaMode) AlphaVideo.capDims(dims.first, dims.second) else dims
     }
 
     private fun Int.toEvenDimension(): Int = (this and 1.inv()).coerceAtLeast(2)
@@ -190,11 +208,11 @@ class DisplayTextureResource(private val uuid: UUID) {
 
     private fun build(w: Int, h: Int): Allocation =
         //? if >=1.21.6 {
-        if (DisplayYuvRenderTypes.active) buildYuv(w, h) else buildRgba(w, h)
+        if (!alphaMode && DisplayYuvRenderTypes.active) buildYuv(w, h) else buildRgba(w, h, alphaMode)
     //?} else
-    /*buildRgba(w, h)*/
+    /*buildRgba(w, h, alphaMode)*/
 
-    private fun buildRgba(w: Int, h: Int): Allocation {
+    private fun buildRgba(w: Int, h: Int, alpha: Boolean): Allocation {
         //? if >=1.21.5 {
         val newTexture = DynamicTexture(
             { UUID.randomUUID().toString() },
@@ -212,7 +230,7 @@ class DisplayTextureResource(private val uuid: UUID) {
         return Allocation(
             width = w, height = h, texture = newTexture, textureId = newId,
             yPlane = null, uPlane = null, vPlane = null, planeIds = [],
-            renderType = rt, fallbackRenderType = rt,
+            renderType = rt, fallbackRenderType = rt, isAlpha = alpha,
         )
     }
 
@@ -242,6 +260,7 @@ class DisplayTextureResource(private val uuid: UUID) {
             yPlane = y, uPlane = u, vPlane = v, planeIds = ids,
             renderType = DisplayYuvRenderTypes.create(ids[0], ids[1], ids[2]),
             fallbackRenderType = DisplayYuvRenderTypes.createFallback(),
+            isAlpha = false,
         )
     }
     //?}
