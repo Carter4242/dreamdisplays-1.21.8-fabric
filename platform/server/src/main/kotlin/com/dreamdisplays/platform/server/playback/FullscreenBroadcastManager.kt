@@ -119,6 +119,15 @@ object FullscreenBroadcastManager {
         sessions.values.filter { !it.virtual && !it.loop && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it) }
     }
 
+    /**
+     * Real display [displayId]'s video was cleared: every fullscreen session of it is over, looping or not (its viewers
+     * would keep an empty overlay, a forced one closable only by `/display fullscreen stop`). Call after the display's
+     * empty description went out, so far viewers drop the video before the overlay closes.
+     */
+    fun endSessionsOf(displayId: UUID) {
+        sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it) }
+    }
+
     /** True if a session with [sessionId] is currently live. */
     fun hasSession(sessionId: String): Boolean = sessions.containsKey(sessionId)
 

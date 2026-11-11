@@ -129,7 +129,8 @@ object DisplayActions {
     /**
      * Takes [displayData]'s video off, with no permission checks (callers check; [actor] is logged): its URL becomes
      * empty and is saved, and everyone who gets its updates (in range, far fullscreen viewers, PiP pinners) is told. Its
-     * clock and length go, a screen share there ends without bringing anything back, and karaoke there stops. The queue
+     * clock and length go, a screen share there ends without bringing anything back, karaoke there stops and its
+     * fullscreen sessions end. The queue
      * keeps its entries but does not start them: a skip or a play does. The command form calls this.
      */
     fun clearVideo(displayData: PaperDisplayData, actor: Player?) {
@@ -145,6 +146,7 @@ object DisplayActions {
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         TimelineManager.onVideoCleared(displayData)
         DisplayManager.broadcastUpdate(displayData)
+        FullscreenBroadcastManager.endSessionsOf(displayData.id)
         QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
     }
