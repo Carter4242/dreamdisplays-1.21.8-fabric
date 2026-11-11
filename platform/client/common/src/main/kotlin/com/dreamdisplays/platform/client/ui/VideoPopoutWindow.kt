@@ -284,7 +284,8 @@ class VideoPopoutWindow(
             }
             shownMeta = null
             frames.clear()
-            onClose()
+            // Nothing to report for a window that was never open (a close with no window, or one closed already)
+            if (handle != 0L) onClose()
         }
 
         private fun toggleFullscreen(handle: Long) {
@@ -579,12 +580,26 @@ class VideoPopoutWindow(
 
     private class AwtBackend(private val onClose: () -> Unit) : PopoutBackend {
 
+        /**
+         * Frames from the decode thread, only copied there: the per-pixel conversion runs on the EDT when it paints, so
+         * it never holds up the in-world picture, and the image it paints is never rewritten while being drawn.
+         */
+        private val frames = FrameHandoff<OverlayFrame>()
+
+        /** The converted picture and its description: EDT only. */
+        private var image: BufferedImage? = null
+        private var shownVersion = 0L
+        private var contentAspect = 0.0
+        private var scratch = ByteArray(0)
+
+        /** Open asked for and not closed since: frames are kept from then on, even before the window exists. */
         @Volatile
-        private var currentImage: BufferedImage? = null
+        private var wanted = false
 
         @Volatile
-        private var contentAspect = 0.0
         private var frame: JFrame? = null
+
+        @Volatile
         private var panel: VideoPanel? = null
         private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -593,36 +608,28 @@ class VideoPopoutWindow(
         override val height: Int get() = frame?.height ?: 0
 
         override fun updateFrame(buf: ByteBuffer, w: Int, h: Int, aspect: Double, format: UploadPixelFormat) {
-            if (!isOpen || w <= 0 || h <= 0 || buf.remaining() < w * h * format.bytesPerPixel) return
-            val img = currentImage?.takeIf { it.width == w && it.height == h }
-                ?: BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
-            val pixels = (img.raster.dataBuffer as DataBufferInt).data
-            val src = buf.duplicate()
-            for (i in pixels.indices) {
-                val r = src.get().toInt() and 0xFF
-                val g = src.get().toInt() and 0xFF
-                val b = src.get().toInt() and 0xFF
-                if (format == UploadPixelFormat.RGBA32) src.get()
-                pixels[i] = (r shl 16) or (g shl 8) or b
-            }
-            contentAspect = aspect
-            currentImage = img
-            panel?.repaint()
+            // Also while the window is still being created: the frame a paused video replays on attach is its only one
+            if (!wanted || w <= 0 || h <= 0 || format.bytesPerPixel < 3) return
+            if (frames.publish(buf, w * h * format.bytesPerPixel, OverlayFrame(w, h, format, aspect))) panel?.repaint()
         }
 
         override fun renderFrame() = Unit
 
         override fun open(videoW: Int, videoH: Int) {
+            wanted = true
             SwingUtilities.invokeLater {
                 val existing = frame
                 if (existing != null && existing.isDisplayable) {
                     existing.toFront(); existing.requestFocus(); return@invokeLater
                 }
+                // Closed again before the EDT got here (cleared display, ended share): never open late
+                if (!wanted) return@invokeLater
                 createFrame(videoW, videoH)
             }
         }
 
         override fun close() {
+            wanted = false
             SwingUtilities.invokeLater { destroyFrame() }
         }
 
@@ -662,15 +669,55 @@ class VideoPopoutWindow(
                 }
             }.onFailure { e ->
                 logger.error("Failed to create AWT popout window.", e)
+                wanted = false
                 frame = null
                 panel = null
+                frames.clear()
                 onClose()
             }
         }
 
         private fun destroyFrame() {
-            frame?.dispose(); frame = null; panel = null; currentImage = null
-            onClose()
+            wanted = false
+            val f = frame
+            frame = null
+            panel = null
+            image = null
+            frames.clear()
+            f?.dispose()
+            // Nothing to report when it never opened (closed while its creation was still queued)
+            if (f != null) onClose()
+        }
+
+        /** Converts the newest frame, if a new one came, into [image]. EDT. */
+        private fun takeNewestFrame() {
+            val f = frames.borrowNewest(shownVersion) ?: return
+            try {
+                val meta = f.meta
+                val w = meta.width
+                val h = meta.height
+                val bpp = meta.format.bytesPerPixel
+                val size = w * h * bpp
+                if (w <= 0 || h <= 0 || bpp < 3 || f.buffer.remaining() < size) return
+                val img = image?.takeIf { it.width == w && it.height == h }
+                    ?: BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+                if (scratch.size < size) scratch = ByteArray(size)
+                val src = scratch
+                f.buffer.duplicate().get(src, 0, size)
+                val pixels = (img.raster.dataBuffer as DataBufferInt).data
+                var s = 0
+                for (i in 0 until w * h) {
+                    pixels[i] = ((src[s].toInt() and 0xFF) shl 16) or
+                            ((src[s + 1].toInt() and 0xFF) shl 8) or
+                            (src[s + 2].toInt() and 0xFF)
+                    s += bpp
+                }
+                image = img
+                contentAspect = meta.aspect
+                shownVersion = f.version
+            } finally {
+                frames.release()
+            }
         }
 
         inner class VideoPanel : JPanel() {
@@ -680,7 +727,8 @@ class VideoPopoutWindow(
 
             override fun paintComponent(g: Graphics) {
                 super.paintComponent(g)
-                val img = currentImage ?: return
+                takeNewestFrame()
+                val img = image ?: return
                 val aspect = contentAspect
                 val vw = width
                 val vh = height

@@ -100,10 +100,7 @@ class DisplayPopoutManager(
         }
 
         runCatching {
-            val newWin = win ?: VideoPopoutWindow(displayScreen.uuid.toString()) {
-                windowActive = false
-                rewireSink()
-            }.also { created ->
+            val newWin = win ?: createWindow().also { created ->
                 popoutWindow = created
                 created.on { event -> emit(event) }
             }
@@ -118,6 +115,29 @@ class DisplayPopoutManager(
         }
     }
 
+    /**
+     * A new OS window. Its close is reported from the window's own thread, possibly after this manager already let it
+     * go (a cleared display, an ended share) and opened another: only the current window's close counts.
+     */
+    private fun createWindow(): VideoPopoutWindow {
+        lateinit var created: VideoPopoutWindow
+        created = VideoPopoutWindow(displayScreen.uuid.toString()) {
+            Minecraft.getInstance().execute {
+                if (popoutWindow === created) {
+                    windowActive = false
+                    rewireSink()
+                }
+            }
+        }
+        return created
+    }
+
+    /** Closes the OS window, including one whose creation is still queued (it then never opens). */
+    private fun closeWindow() {
+        popoutWindow?.close()
+        windowActive = false
+    }
+
     /** Opens an in-game PiP overlay at [corner], closing any open window and fullscreen overlay first. */
     fun activatePipMode(
         player: MediaPlayer,
@@ -129,8 +149,7 @@ class DisplayPopoutManager(
         currentPlayer = player
         this.contentAspect = contentAspect
         pipFromFullscreen = false
-        popoutWindow?.let { win -> if (win.isOpen) win.close() }
-        windowActive = false
+        closeWindow()
         closeFullscreenOverlay()
         closePipOverlay()
         val overlay = PipOverlay(displayScreen, corner, interactive, initialSizeFraction)
@@ -190,8 +209,7 @@ class DisplayPopoutManager(
     /** Closes every popout mode and detaches the frame sink. */
     fun deactivate(player: MediaPlayer?) {
         player?.setPopoutSink(null)
-        popoutWindow?.let { if (it.isOpen) it.close() }
-        windowActive = false
+        closeWindow()
         closeFullscreenOverlay()
         closePipOverlay()
     }
@@ -202,9 +220,8 @@ class DisplayPopoutManager(
      * window holds its last frame in its own buffers, so it is closed (a later popout gets a new window).
      */
     fun blankPrivatePicture() {
-        popoutWindow?.let { if (it.isOpen) it.close() }
+        closeWindow()
         popoutWindow = null
-        windowActive = false
         rewireSink()
         val mc = Minecraft.getInstance()
         val blank = {
@@ -222,10 +239,9 @@ class DisplayPopoutManager(
         player?.setPopoutSink(null)
         currentPlayer?.setPopoutSink(null)
         val hadOverlay = pipOverlay != null || fullscreenOverlay != null
-        popoutWindow?.let { if (it.isOpen) it.close() }
+        closeWindow()
         // The window holds its last frame in its buffers: a later popout gets a new window, never this one
         popoutWindow = null
-        windowActive = false
         PipOverlayManager.removeNow(displayScreen)
         FullscreenOverlayManager.removeNow(displayScreen)
         pipOverlay = null
@@ -236,8 +252,8 @@ class DisplayPopoutManager(
     /** Tears down all popout state when the display is unregistered. */
     fun unregister(player: MediaPlayer?) {
         player?.setPopoutSink(null)
-        popoutWindow?.let { if (it.isOpen) it.close() }
-        windowActive = false
+        closeWindow()
+        popoutWindow = null
         PipOverlayManager.remove(displayScreen)
         FullscreenOverlayManager.remove(displayScreen)
         fullscreenOverlay = null
