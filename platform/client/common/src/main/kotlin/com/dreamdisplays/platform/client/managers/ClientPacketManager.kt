@@ -62,7 +62,7 @@ object ClientPacketManager {
 
             is FullscreenState -> FullscreenController.handle(packet)
             is FullscreenPrepare -> FullscreenPrepareController.handle(packet)
-            is RemotePlaybackToggle -> DisplayRegistry.screens[packet.id]?.setPaused(packet.paused)
+            is RemotePlaybackToggle -> DisplayRegistry.screens[packet.id]?.applyScheduledPaused(packet.paused)
             is DisplayDelete -> handleDelete(packet)
             is ClearCache -> handleClearCache(packet)
             is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)

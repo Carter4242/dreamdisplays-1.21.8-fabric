@@ -1283,6 +1283,14 @@ class DisplayScreen(
     /** Applies the server's pause state without emitting any upstream intent (timeline-follower path). */
     internal fun applyServerPaused(paused: Boolean) = applyPausedLocal(paused)
 
+    /**
+     * A server-scheduled play / pause of a Local display (`RemotePlaybackToggle`): applied for every viewer, whatever
+     * they may control themselves, and never echoed upstream. Ignored while a timeline or watch party drives it.
+     */
+    internal fun applyScheduledPaused(paused: Boolean) {
+        if (scheduledToggleApplies(effectiveMode)) applyPausedLocal(paused)
+    }
+
     private fun applyPausedLocal(paused: Boolean) {
         if (!videoStarted) {
             this.paused = paused
@@ -1660,3 +1668,6 @@ class DisplayScreen(
         }
     }
 }
+
+/** Whether a server-scheduled play / pause applies to a display in [effectiveMode]: only one each viewer plays locally. */
+internal fun scheduledToggleApplies(effectiveMode: PlaybackMode): Boolean = effectiveMode == PlaybackMode.LOCAL
