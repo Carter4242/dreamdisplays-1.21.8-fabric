@@ -103,8 +103,10 @@ object ScreenShareActions {
             val share = byDisplay[displayId]
             val own = share != null && share.sharerId == player.uniqueId
             // The sharer's stop for an earlier share on this display must not end the one that replaced it
-            if (share != null && ((own && ScreenShareServerRules.sameShare(share.nonce, nonce)) || (!own && isAdmin(player)))) {
+            if (share != null && own && ScreenShareServerRules.sameShare(share.nonce, nonce)) {
                 end(share, EndReason.REQUESTED)
+            } else if (share != null && !own && isAdmin(player)) {
+                end(share, EndReason.REQUESTED, error = OPERATOR_STOPPED)
             } else {
                 reply(player, displayId, active = false, nonce = nonce)
             }
@@ -237,14 +239,29 @@ object ScreenShareActions {
      * Returns the sharer's name, or null when nothing is shared there.
      */
     fun adminStop(displayId: UUID): String? {
-        val share = byDisplay[displayId] ?: return null
-        val name = Bukkit.getPlayer(share.sharerId)?.name ?: Bukkit.getOfflinePlayer(share.sharerId).name ?: share.sharerId.toString()
-        end(share, EndReason.ADMIN_STOP, error = "An operator stopped your screen share.")
+        val share = byDisplay[displayId]
+        if (share == null) {
+            // Still waiting for its relay lease: called off before it starts
+            val pending = starting[displayId] ?: return null
+            if (!starting.remove(displayId, pending)) return null
+            syncRelay()
+            Bukkit.getPlayer(pending.sharerId)?.let {
+                reply(it, displayId, active = false, error = OPERATOR_STOPPED, nonce = pending.nonce)
+            }
+            return nameOf(pending.sharerId)
+        }
+        val name = nameOf(share.sharerId)
+        end(share, EndReason.ADMIN_STOP, error = OPERATOR_STOPPED)
         return name
     }
 
-    /** Displays with a share running now, for command suggestions. */
-    fun sharedDisplays(): Set<UUID> = byDisplay.keys.toSet()
+    private fun nameOf(playerId: UUID): String =
+        Bukkit.getPlayer(playerId)?.name ?: Bukkit.getOfflinePlayer(playerId).name ?: playerId.toString()
+
+    private const val OPERATOR_STOPPED = "An operator stopped your screen share."
+
+    /** Displays with a share running now or about to start (waiting for its relay lease), for commands. */
+    fun sharedDisplays(): Set<UUID> = byDisplay.keys + starting.keys
 
     /**
      * Everyone a share's latency is measured between: each sharer and the players reporting on their display. They
