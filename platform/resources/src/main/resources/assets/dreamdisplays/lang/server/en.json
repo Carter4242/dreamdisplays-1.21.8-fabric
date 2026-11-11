@@ -304,5 +304,10 @@
   "viewerStatsSummary": "&7D |&f %s viewers, %s in sync, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring, %s buffering",
   "viewerStatsNone": "&7D |&f No viewer reports for display &e%s&f (clients report every few seconds while it is loaded)",
   "viewerStatsAllHeader": "&7D |&f Displays with viewer reports: %s",
-  "viewerStatsAllLine": "&7D | &e%s&f: %s viewers, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring"
+  "viewerStatsAllLine": "&7D | &e%s&f: %s viewers, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring",
+  "suggestClients": "List online players with the mod and their client build",
+  "clientsHeader": "&7D |&f Players with the mod: %s (latest build &e%s&f, &c%s&f on another build)",
+  "clientsLine": "&7D | &f%s &7%s &fbuild &a%s",
+  "clientsLineOutdated": "&7D | &f%s &7%s &fbuild &c%s &7(not latest)",
+  "clientsNone": "&7D |&f No online player has the mod"
 }

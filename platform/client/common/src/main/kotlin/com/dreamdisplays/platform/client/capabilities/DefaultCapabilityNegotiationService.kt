@@ -6,6 +6,7 @@ import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
 import com.dreamdisplays.platform.client.net.ProtocolRouter
+import com.dreamdisplays.util.BuildInfo
 import com.dreamdisplays.util.GeneralUtil
 import org.slf4j.LoggerFactory
 
@@ -26,7 +27,11 @@ class DefaultCapabilityNegotiationService(
             cachedLocal?.let { return it }
             // Sample before detecting: a probe finishing mid-detect must not get a "probing" hello cached
             val final = NativeMedia.probesFinished
-            return detector.detect().copy(modVersion = GeneralUtil.getModVersion())
+            return detector.detect().copy(
+                modVersion = GeneralUtil.getModVersion(),
+                buildCommit = BuildInfo.commit,
+                buildTimeMs = BuildInfo.builtAtEpochMs,
+            )
                 .also { if (final) cachedLocal = it }
         }
 

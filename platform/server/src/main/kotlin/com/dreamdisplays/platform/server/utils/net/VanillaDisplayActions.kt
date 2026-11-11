@@ -9,6 +9,7 @@ import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
+import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.api.ServerApiHost
 import com.dreamdisplays.platform.server.datatypes.display.VanillaDisplayData
@@ -52,7 +53,9 @@ object VanillaDisplayActions {
     }
 
     /** Records the player's reported mod version and runs the mod / plugin update checks. */
-    fun recordVersionAndCheckUpdates(player: ServerPlayer, version: String) {
+    fun recordVersionAndCheckUpdates(player: ServerPlayer, version: String, buildCommit: String? = null) {
+        val build = ClientBuild.of(buildCommit)?.let { "build $it" } ?: "build unknown, older jar"
+        logger.info("${player.name.string} joined with Dream Displays ${version.take(64).filter { !it.isISOControl() }} ($build).")
         val parsedVersion = VersionUtil.parseOrNull(version)
         PlayerManager.setVersion(player.uuid, parsedVersion)
 

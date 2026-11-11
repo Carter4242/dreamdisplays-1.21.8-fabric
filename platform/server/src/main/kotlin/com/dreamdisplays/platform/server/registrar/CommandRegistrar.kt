@@ -49,6 +49,7 @@ object CommandRegistrar {
             scheduleBranch()
             fullscreenBranch()
             statsBranch()
+            clientsBranch()
             reloadBranch()
             policyBranch()
             configBranch()
@@ -102,6 +103,13 @@ object CommandRegistrar {
                 requires { PolicyCommand.allowed(it.sender) }
                 executesCommand { ctx -> ViewerStatsCommand.execute(ctx.source.sender, target(ctx)) }
             }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.clientsBranch() {
+        literal("clients", tip("suggestClients")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            executesCommand { ctx -> ClientsCommand.execute(ctx.source.sender) }
         }
     }
 

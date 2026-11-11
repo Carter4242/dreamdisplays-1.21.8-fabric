@@ -42,6 +42,10 @@ data class ClientHello(
     @ProtoNumber(27) val timeZoneOffsetMinutes: Int = 0,
     /** True when the client handles [FullscreenPrepare]; older clients leave it false and never get one. */
     @ProtoNumber(28) val supportsFullscreenPrepare: Boolean = false,
+    /** Commit id the client jar was built from (`1a2b3c4d`, `-dev` for local builds); empty from older jars. */
+    @ProtoNumber(30) val buildCommit: String = "",
+    /** When the client jar was built, epoch ms; 0 from older jars. */
+    @ProtoNumber(31) val buildTimeMs: Long = 0,
 ) : DreamPacket
 
 /** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */

@@ -29,6 +29,7 @@ data class SettingsSection(
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
     val policy: DisplayPolicy = DisplayPolicy.EMPTY,
+    val clients: ClientsConfig = ClientsConfig(),
 ) {
     // Reports
     val webhookUrl get() = reports.webhook_url
@@ -134,6 +135,11 @@ data class SettingsSection(
         val enabled: Boolean = true,
         val allowed_hosts: List<String> = [],
         val blocked_hosts: List<String> = [],
+    )
+
+    /** Clients section: [latest_build] is the build id `/display clients` compares players against (empty = none). */
+    data class ClientsConfig(
+        val latest_build: String = "",
     )
 
     /** Fullscreen broadcast section. */
@@ -299,6 +305,9 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             allow_forced = t?.getBoolean("fullscreen.allow_forced") ?: true,
             quality_cap = t?.getLong("fullscreen.quality_cap")?.toInt() ?: 1080,
             prepare_timeout_seconds = t?.getLong("fullscreen.prepare_timeout_seconds")?.toInt()?.coerceIn(10, 86_400) ?: 600,
+        ),
+        clients = SettingsSection.ClientsConfig(
+            latest_build = (t?.get("clients.latest_build") as? String)?.trim() ?: "",
         ),
     ),
     storage = StorageSection(

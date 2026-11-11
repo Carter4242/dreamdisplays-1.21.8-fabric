@@ -130,6 +130,11 @@ quality_cap = 1080
 # How long /display fullscreen prepare keeps clients holding a broadcast ready before letting go (10..86400)
 prepare_timeout_seconds = 600
 
+[clients]
+# Build id (commit, as in the "joined with Dream Displays" log line) of the current client jar.
+# /display clients marks players on any other build; unset = mark nobody.
+# latest_build = "1a2b3c4d"
+
 [reports]
 # Report settings
 # webhook_url is a discord webhook URL for sending reports

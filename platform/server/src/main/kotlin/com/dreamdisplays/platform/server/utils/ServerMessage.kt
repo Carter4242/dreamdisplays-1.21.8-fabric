@@ -2,6 +2,10 @@ package com.dreamdisplays.platform.server.utils
 
 /** Every localized server message the code addresses by name. */
 enum class ServerMessage(val key: String) {
+    CLIENTS_HEADER("clientsHeader"),
+    CLIENTS_LINE("clientsLine"),
+    CLIENTS_LINE_OUTDATED("clientsLineOutdated"),
+    CLIENTS_NONE("clientsNone"),
     COMMAND_PLAYERS_ONLY("commandPlayersOnly"),
     CONFIG_BAD_VALUE("configBadValue"),
     CONFIG_HEADER("configHeader"),

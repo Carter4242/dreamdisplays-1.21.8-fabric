@@ -32,6 +32,11 @@ object PolicyPaths {
         data class Choice(val values: List<String>) : Kind() {
             override fun parse(raw: String): Any? = raw.lowercase(Locale.ROOT).takeIf { it in values }
         }
+
+        /** Free text matching [pattern]; [description] is shown as the hint. */
+        class Text(val pattern: Regex, val description: String) : Kind() {
+            override fun parse(raw: String): Any? = raw.takeIf { pattern.matches(it) }
+        }
     }
 
     /** One settable field. [get] reads it from a policy (null = unset). */
@@ -46,6 +51,7 @@ object PolicyPaths {
                 is Kind.Whole -> "${kind.min}..${kind.max}"
                 is Kind.Decimal -> "${fmt(kind.min)}..${fmt(kind.max)}"
                 is Kind.Choice -> kind.values.joinToString("|")
+                is Kind.Text -> kind.description
             }
     }
 
