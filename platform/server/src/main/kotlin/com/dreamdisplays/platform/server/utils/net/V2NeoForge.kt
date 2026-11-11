@@ -136,7 +136,7 @@ object NeoForgeV2Networking {
                 maxDisplays = VanillaDisplayActions.maxDisplaysFor(player),
             ),
         )
-        VanillaDisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion)
+        VanillaDisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)
         VanillaDisplayActions.sendAllDisplays(player, server)
         FullscreenBroadcastManager.onPlayerJoin(player.uuid)
         PipPinManager.onPlayerJoin(player.uuid)

@@ -52,13 +52,13 @@ object ViewerStatsCommand {
         val age = (e.ageMs(now) / 1_000L).toString()
         if (e.erroring) {
             ServerMessage.VIEWER_STATS_ERROR.sendTo(
-                sender, e.playerName, r.errorKind.ifEmpty { "ERROR" }, r.errorMessage.ifEmpty { "-" }, age,
+                sender, withBuild(e), r.errorKind.ifEmpty { "ERROR" }, r.errorMessage.ifEmpty { "-" }, age,
             )
             return
         }
         ServerMessage.VIEWER_STATS_LINE.sendTo(
             sender,
-            e.playerName,
+            withBuild(e),
             e.state.label,
             if (r.syncing) signedMs(r.driftMs) else "-",
             if (r.syncing) String.format(Locale.ROOT, "%.4f", r.rate) else "-",
@@ -71,6 +71,10 @@ object ViewerStatsCommand {
             age,
         )
     }
+
+    /** The viewer's name with its client build (`Steve [1a2b3c4d]`, `[older]` for jars without one). */
+    private fun withBuild(e: ViewerEntry): String =
+        ClientsCommand.buildLabel(e.playerId)?.let { "${e.playerName} [$it]" } ?: e.playerName
 
     private fun summary(sender: CommandSender, s: ViewerSummary) {
         ServerMessage.VIEWER_STATS_SUMMARY.sendTo(

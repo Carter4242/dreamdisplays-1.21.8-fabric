@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.core.config.TomlLineEditor
 import com.dreamdisplays.core.display.policy.PolicyPaths
+import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.SettingsSection
 import com.dreamdisplays.platform.server.utils.ServerMessage
@@ -15,8 +16,8 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys and every `[policy.*]` default), then reloads the config the
- * way `/display reload` does.
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build` and every `[policy.*]` default), then
+ * reloads the config the way `/display reload` does.
  *
  * The file is edited in place, one line at a time ([TomlLineEditor]), so comments and layout survive; the
  * result is parsed before it replaces the old file, and a reset comments the line out again so the built-in
@@ -44,7 +45,10 @@ object ConfigCommand {
         Key("display.auto_pause_when_empty_seconds", PolicyPaths.Kind.Whole(0, 86_400)) {
             it.display.auto_pause_when_empty_seconds
         },
-    ) + PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
+        Key("clients.latest_build", PolicyPaths.Kind.Text(ClientBuild.LATEST_PATTERN, "<commit, e.g. 1a2b3c4d>")) {
+            it.clients.latest_build.ifEmpty { null }
+        },
+    ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
 

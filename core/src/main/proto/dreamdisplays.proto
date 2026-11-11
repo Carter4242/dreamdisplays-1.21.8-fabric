@@ -70,6 +70,10 @@ message ClientHello {
   optional bool supportsFullscreenPrepare = 28;
   // WARNING: a default value decoded when value is missing
   optional bool supportsReadiness = 29;
+  // WARNING: a default value decoded when value is missing
+  optional string buildCommit = 30;
+  // WARNING: a default value decoded when value is missing
+  optional int64 buildTimeMs = 31;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerHello'

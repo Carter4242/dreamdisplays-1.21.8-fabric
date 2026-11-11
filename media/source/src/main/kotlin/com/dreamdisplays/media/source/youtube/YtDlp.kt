@@ -125,11 +125,13 @@ object YtDlp {
 
     @Throws(IOException::class)
     private suspend fun fetchUncached(videoUrl: String): List<YtStream> {
+        val plan = YtStreamRefusals.plan(videoUrl)
+        if (plan.escalated) return fetchEscalated(videoUrl, plan)
         val ytProcesses = CopyOnWriteArrayList<Process>()
         val abandoned = AbandonFlag()
         val ytdlp = DreamCoroutines.clientIo.async {
             if (abandoned.isAbandoned) return@async []
-            clientRace.resolve(videoUrl) { proc ->
+            clientRace.resolve(videoUrl, plan) { proc ->
                 ytProcesses.add(proc)
                 if (abandoned.isAbandoned) Processes.destroyTree(proc)
             } ?: []
@@ -188,5 +190,36 @@ object YtDlp {
             else -> throw YtDlpErrors.classify(clientRace.takeLastError(videoUrl))
                 ?: IOException("All yt-dlp clients failed for $videoUrl.")
         }
+    }
+
+    /**
+     * Resolve after YouTube refused this video's stream URLs more than once: `yt-dlp` with the clients [plan] picks,
+     * NewPipe (whose URLs were the refused kind) only if `yt-dlp` has nothing at all, so a broken `yt-dlp` install
+     * still leaves the display something to try.
+     */
+    @Throws(IOException::class)
+    private suspend fun fetchEscalated(videoUrl: String, plan: YtResolvePlan): List<YtStream> {
+        logger.warn(
+            "YouTube refused the stream URLs of {} {} time(s); resolving with yt-dlp ({}) instead of NewPipe.",
+            videoUrl, YtStreamRefusals.count(videoUrl), listOfNotNull(plan.primaryClient).plus(plan.fallbackClients),
+        )
+        val processes = CopyOnWriteArrayList<Process>()
+        val viaYtDlp = try {
+            withTimeoutOrNull((YtDlpClientRace.FETCH_TIMEOUT_SECONDS * 2 + 15).seconds) {
+                clientRace.resolve(videoUrl, plan) { processes.add(it) }
+            }.orEmpty()
+        } finally {
+            processes.forEach { runCatching { Processes.destroyTree(it) } }
+        }
+        if (YtStreams.usable(viaYtDlp)) return viaYtDlp
+        val lastError = clientRace.takeLastError(videoUrl)
+        val viaNewPipe = runCatching { NewPipeResolver.fetch(videoUrl) }
+            .onFailure { e -> if (e is CancellationException) throw e }
+            .getOrElse { [] }
+        if (viaNewPipe.isNotEmpty()) {
+            logger.warn("yt-dlp could not resolve {}; falling back to NewPipe's stream URLs.", videoUrl)
+            return viaNewPipe
+        }
+        throw YtDlpErrors.classify(lastError) ?: IOException("All yt-dlp clients failed for $videoUrl.")
     }
 }

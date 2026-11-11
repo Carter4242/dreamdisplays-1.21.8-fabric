@@ -6,11 +6,14 @@ import com.dreamdisplays.media.source.youtube.binary.YtDlpOutputParser
 import com.dreamdisplays.media.source.youtube.cookie.YtCookieManager
 import com.dreamdisplays.media.source.youtube.model.YtStream
 import com.dreamdisplays.media.source.youtube.model.YtStreams
+import com.dreamdisplays.media.source.youtube.YtResolvePlan
 import com.dreamdisplays.util.DreamCoroutines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
@@ -34,18 +37,23 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         /** Per-invocation `yt-dlp` wait (keep short to surface failures fast). */
         const val FETCH_TIMEOUT_SECONDS: Long = 25L
 
-        private const val PRIMARY_CLIENT = "visionos"
-        private val FALLBACK_CLIENTS: List<String?> = ["android_vr", "ios", "tv", "android"]
         private const val MAX_REMEMBERED_ERRORS = 64
+        private const val MAX_WARNED_VIDEOS = 256
     }
 
     /** Last `yt-dlp` error output per video, so a total failure can say why (see [YtDlpErrors]). */
     private val lastErrors = ConcurrentHashMap<String, String>()
 
+    /** Videos whose first `yt-dlp` failure was already logged at WARN; later ones stay at DEBUG. */
+    private val warnedVideos = ConcurrentHashMap.newKeySet<String>()
+
     /** Takes (and forgets) the last error `yt-dlp` printed for [videoUrl]. */
     fun takeLastError(videoUrl: String): String? = lastErrors.remove(videoUrl)
 
-    private fun rememberError(videoUrl: String, e: Throwable) {
+    private fun rememberError(videoUrl: String, client: String?, e: Throwable, abandoned: Boolean) {
+        // A process killed because another source already won is not a failure worth a warning
+        if (abandoned) return
+        logFailure(videoUrl, client, e)
         val message = e.message ?: return
         if (lastErrors.size >= MAX_REMEMBERED_ERRORS) lastErrors.clear()
         // Keep an error that explains the failure over a later, vaguer one from another client
@@ -54,27 +62,43 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         }
     }
 
+    /** Logs a client failure: the first one per video at WARN (so a broken `yt-dlp` shows up in any log), later ones at DEBUG. */
+    private fun logFailure(videoUrl: String, client: String?, e: Throwable) {
+        val message = e.message?.take(300)
+        if (warnedVideos.size >= MAX_WARNED_VIDEOS) warnedVideos.clear()
+        if (warnedVideos.add(videoUrl)) {
+            logger.warn("yt-dlp client {} failed for {}: {}", client ?: "cookies", videoUrl, message)
+        } else {
+            logger.debug("yt-dlp client {} failed for {}: {}", client ?: "cookies", videoUrl, message)
+        }
+    }
+
     /**
-     * Resolves [videoUrl] via `yt-dlp`. Tries [PRIMARY_CLIENT] alone first (one request, fast, the only client that
-     * isn't PO-token gated), then races [FALLBACK_CLIENTS] in parallel if that fails. [onProcess] receives every
-     * spawned subprocess so the caller can kill stragglers once it no longer needs this branch.
+     * Resolves [videoUrl] via `yt-dlp` following [plan]: its primary client alone first (one request, fast; by default
+     * `visionos`, the only client that isn't PO-token gated), then its fallback clients in parallel if that fails.
+     * [onProcess] receives every spawned subprocess so the caller can kill stragglers once it no longer needs this branch.
      */
-    suspend fun resolve(videoUrl: String, onProcess: (Process) -> Unit): List<YtStream>? {
+    suspend fun resolve(
+        videoUrl: String,
+        plan: YtResolvePlan = YtResolvePlan.DEFAULT,
+        onProcess: (Process) -> Unit,
+    ): List<YtStream>? {
         lastErrors.remove(videoUrl) // an earlier fetch's errors must not explain this one
         if (!cookies.disabledByConfig()) {
             return runCatchingClient(videoUrl, null, onProcess)?.takeIf { YtStreams.usable(it) }
         }
-        runCatchingClient(videoUrl, PRIMARY_CLIENT, onProcess)?.takeIf { YtStreams.usable(it) }?.let { return it }
-        return raceParallel(videoUrl, FALLBACK_CLIENTS, onProcess)
+        plan.primaryClient?.let { primary ->
+            runCatchingClient(videoUrl, primary, onProcess)?.takeIf { YtStreams.usable(it) }?.let { return it }
+        }
+        if (plan.fallbackClients.isEmpty()) return null
+        return raceParallel(videoUrl, plan.fallbackClients, onProcess)
     }
 
-    private fun runCatchingClient(videoUrl: String, client: String?, onProcess: (Process) -> Unit): List<YtStream>? =
-        runCatching {
-            runClientFetch(videoUrl, client, onProcess)
-        }.onFailure { e ->
-            rememberError(videoUrl, e)
-            logger.debug("yt-dlp client {} failed for {}: {}.", client ?: "cookies", videoUrl, e.message?.take(200))
-        }.getOrNull()
+    private suspend fun runCatchingClient(videoUrl: String, client: String?, onProcess: (Process) -> Unit): List<YtStream>? {
+        val result = runCatching { runClientFetch(videoUrl, client, onStarted = onProcess) }
+        result.exceptionOrNull()?.let { e -> rememberError(videoUrl, client, e, abandoned = !currentCoroutineContext().isActive) }
+        return result.getOrNull()
+    }
 
     private suspend fun raceParallel(
         videoUrl: String,
@@ -103,13 +127,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                             }
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            rememberError(videoUrl, e)
-                            logger.debug(
-                                "yt-dlp client {} failed for {}: {}",
-                                client ?: "cookies",
-                                videoUrl,
-                                e.message?.take(200)
-                            )
+                            rememberError(videoUrl, client, e, abandoned = !isActive || winner.isCompleted)
                         }.also { result ->
                             if (result.exceptionOrNull() is CancellationException) return@launch
 
@@ -142,9 +160,15 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         ) ?: []
 
     @Throws(IOException::class)
-    private fun runClientFetch(videoUrl: String, client: String?, onStarted: (Process) -> Unit): List<YtStream> {
+    private fun runClientFetch(
+        videoUrl: String,
+        client: String?,
+        retriedOnBinary: Boolean = false,
+        onStarted: (Process) -> Unit,
+    ): List<YtStream> {
+        val base = YtDlpBinary.resolveCommand()
         val cmd = ArrayList<String>()
-        cmd.addAll(YtDlpBinary.resolveCommand())
+        cmd.addAll(base)
         val tempCookies = cookies.appendArgs(cmd)
 
         val hasCookieArg = cmd.any { it == "--cookies" || it == "--cookies-from-browser" }
@@ -191,7 +215,15 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
             if (tempCookies != null) runCatching { Files.deleteIfExists(tempCookies) }
         }
         if (process.exitValue() != 0) {
-            throw IOException("Exited with code ${process.exitValue()}: ${stderr.toString().trim()}.")
+            val output = stderr.toString().trim()
+            // The zipapp's Python can't run this yt-dlp (too old, broken install): every call would fail the same
+            // way within a second, so switch to the standalone binary for the session and try this one again on it.
+            if (!retriedOnBinary && YtDlpBinary.isZipapp(base) && YtDlpBinary.looksLikeInterpreterFailure(output) &&
+                YtDlpBinary.abandonZipapp(base, output)
+            ) {
+                return runClientFetch(videoUrl, client, retriedOnBinary = true, onStarted = onStarted)
+            }
+            throw IOException("Exited with code ${process.exitValue()}: $output.")
         }
         return YtDlpOutputParser.parseFormats(stdout.toString())
     }

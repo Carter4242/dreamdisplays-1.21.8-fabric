@@ -139,7 +139,7 @@ object PaperV2Networking : PluginMessageListener {
         if (V2PlayerTracker.isV2(player.uniqueId)) return
         V2PlayerTracker.markV2(player.uniqueId, hello)
         send([player], buildServerHello(player))
-        DisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion)
+        DisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)
         DisplayActions.sendAllDisplays(player)
         FullscreenBroadcastManager.onPlayerJoin(player.uniqueId)
         PipPinManager.onPlayerJoin(player.uniqueId)

@@ -15,6 +15,7 @@ class PolicyPathsTest {
                 is PolicyPaths.Kind.Whole -> kind.max.toString()
                 is PolicyPaths.Kind.Decimal -> kind.max.toString()
                 is PolicyPaths.Kind.Choice -> kind.values.last()
+                is PolicyPaths.Kind.Text -> "x"
             }
             val set = assertNotNull(PolicyPaths.apply(null, path, sample), path.name)
             assertEquals(path.kind.parse(sample), path.get(set), path.name)

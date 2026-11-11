@@ -4,6 +4,7 @@ plugins {
     id("net.neoforged.moddev") apply false
     id("net.neoforged.moddev.legacyforge") apply false
     id("dreamdisplays.kotlin-conventions")
+    id("dreamdisplays.build-info")
 }
 
 repositories {
