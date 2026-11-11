@@ -184,4 +184,19 @@ class KaraokeTimingTest {
         assertEquals(0, sync.karaokeLeadMs)
         assertEquals(420, KaraokeTiming.withLead(sync, 420).karaokeLeadMs)
     }
+
+    @Test
+    fun aFrameNumberJumpedFarAheadIsNeverScheduled() {
+        val ms = 1_000_000L
+        val anchor = BurstAnchor()
+        val now = 5_000 * ms
+        val burst = anchor.onFrame(now, 100)
+        // The largest lead plus generous latency terms is still sent
+        val honest = anchor.estimate(burst, 100, lock = true)!! + 3_000 * ms + 1_000 * ms
+        assertFalse(KaraokeTiming.emitTooFar(honest, now))
+        // A client that numbers its next frame a billion frames on lands it about 231 days out
+        val jumped = anchor.onFrame(now + 20 * ms, 100 + 1_000_000_000L)
+        assertEquals(burst, jumped)
+        assertTrue(KaraokeTiming.emitTooFar(anchor.estimate(jumped, 100 + 1_000_000_000L, lock = false)!!, now + 20 * ms))
+    }
 }

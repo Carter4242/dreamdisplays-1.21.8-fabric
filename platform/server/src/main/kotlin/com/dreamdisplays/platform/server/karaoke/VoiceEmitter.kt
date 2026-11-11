@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import com.dreamdisplays.core.karaoke.KaraokeTiming
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -29,7 +30,7 @@ class VoiceEmitter : Thread("DreamDisplays Karaoke") {
     @Volatile
     private var running = true
 
-    /** Tasks dropped because the queue was full. */
+    /** Tasks dropped because the queue was full or they were due implausibly far ahead ([KaraokeTiming.emitTooFar]). */
     @Volatile
     var dropped: Long = 0
         private set
@@ -39,10 +40,10 @@ class VoiceEmitter : Thread("DreamDisplays Karaoke") {
         priority = MAX_PRIORITY
     }
 
-    /** Runs [task] at [atNanos] (at once when that has passed). */
+    /** Runs [task] at [atNanos] (at once when that has passed); dropped when that is implausibly far ahead. */
     fun schedule(atNanos: Long, task: Task) {
         lock.withLock {
-            if (queue.size >= MAX_QUEUED) {
+            if (queue.size >= MAX_QUEUED || KaraokeTiming.emitTooFar(atNanos, System.nanoTime())) {
                 dropped++
                 return
             }
@@ -75,6 +76,10 @@ class VoiceEmitter : Thread("DreamDisplays Karaoke") {
                 null
             }
             if (again != null) {
+                if (KaraokeTiming.emitTooFar(again, System.nanoTime())) {
+                    lock.withLock { dropped++ }
+                    continue
+                }
                 lock.withLock {
                     entry.atNanos = again
                     queue.add(entry)

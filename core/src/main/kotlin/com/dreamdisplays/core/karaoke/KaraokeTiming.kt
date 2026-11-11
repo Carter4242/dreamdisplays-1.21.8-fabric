@@ -75,6 +75,16 @@ object KaraokeTiming {
     /** An audio output latency nobody reported. */
     const val DEFAULT_OUTPUT_MS = 20L
 
+    /**
+     * The furthest ahead of now a voice frame is ever sent: several times the largest lead (`karaoke.max_lead_ms` stops
+     * at 3 s) plus every latency term. The grid takes the frame number from the singer's client, so a client that jumps
+     * it far ahead would otherwise park frames for days in the queue every singer's frames share.
+     */
+    const val MAX_EMIT_AHEAD_MS = 10_000L
+
+    /** True when a frame due at [atNanos] is further than [MAX_EMIT_AHEAD_MS] after [nowNanos]: it is dropped. */
+    fun emitTooFar(atNanos: Long, nowNanos: Long): Boolean = atNanos - nowNanos > MAX_EMIT_AHEAD_MS * 1_000_000L
+
     /** `E_i - A`: how long after a frame's (jitter-free) arrival it is sent to a listener (constants and pings only). */
     fun emitDelayMs(leadMs: Long, singerPingMs: Long, listenerPingMs: Long, trimMs: Long, latency: KaraokeLatency): Long =
         emitDelayMs(leadMs, singerPingMs, null, listenerPingMs, null, trimMs, latency)
