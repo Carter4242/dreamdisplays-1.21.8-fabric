@@ -253,7 +253,9 @@ object QueueManager {
 
     /** A client's preload progress for the head entry of [display]. */
     fun onPreload(display: DisplayData, playerId: UUID, itemId: String, state: FullscreenPrepareState) {
-        if (!preloadThrottle.tryAcquire(playerId to display.id, PRELOAD_COOLDOWN_MS)) return
+        // Throttles repeats of one state only: LOADING then READY can come within a tick (a cached stream, or a lagging
+        // server handling both at once), and a client sends each state once, so a dropped READY never came back
+        if (!preloadThrottle.tryAcquire(Triple(playerId, display.id, state), PRELOAD_COOLDOWN_MS)) return
         val queue = queues[display.id] ?: return
         val head = synchronized(queue) { queue.head() } ?: return
         if (head.itemId != itemId) return
