@@ -84,6 +84,15 @@ object ReportKind {
  * stale; any other value must equal the current one.
  */
 object MediaGen {
+    /**
+     * Next generation to hand out. Starts at a random point per process, so a plugin reload never hands a client a
+     * generation it already holds for another video; always positive and small enough for a short varint.
+     */
+    private val counter = java.util.concurrent.atomic.AtomicLong(java.util.concurrent.ThreadLocalRandom.current().nextLong(1L, 1L shl 40))
+
+    /** A generation no display of this process held before. */
+    fun next(): Long = counter.incrementAndGet()
+
     /** True when [reported] (from a packet) does not contradict the display's [current] generation. */
     fun matches(reported: Long, current: Long): Boolean = reported == 0L || current == 0L || reported == current
 }

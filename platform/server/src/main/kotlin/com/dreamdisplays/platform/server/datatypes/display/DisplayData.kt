@@ -22,6 +22,12 @@ interface DisplayData {
     var url: String
     val customData: MutableMap<String, ByteArray>
     var lang: String
+
+    /**
+     * Which video the display holds: changes whenever [url] or [lang] does (`DisplayInfo.mediaGen`). Clients echo it,
+     * so a command, report or timeline about the previous video is told apart from one about this one.
+     */
+    val mediaGen: Long
     var name: String?
     var mode: PlaybackMode
     var access: DisplayAccess
@@ -51,9 +57,20 @@ interface DisplayData {
 val DisplayData.shortLabel: String get() = name ?: id.toString().take(8)
 
 abstract class BaseDisplayData(override val virtual: Boolean = false) : DisplayData {
+    override var mediaGen: Long = com.dreamdisplays.core.protocol.common.packets.MediaGen.next()
+        protected set
+
     override var url: String = ""
+        set(value) {
+            if (field != value) mediaGen = com.dreamdisplays.core.protocol.common.packets.MediaGen.next()
+            field = value
+        }
     override val customData: MutableMap<String, ByteArray> = ConcurrentHashMap()
     override var lang: String = ""
+        set(value) {
+            if (field != value) mediaGen = com.dreamdisplays.core.protocol.common.packets.MediaGen.next()
+            field = value
+        }
     override var name: String? = null
     override var mode: PlaybackMode = PlaybackMode.LOCAL
     override var access: DisplayAccess = DisplayAccess.DEFAULT

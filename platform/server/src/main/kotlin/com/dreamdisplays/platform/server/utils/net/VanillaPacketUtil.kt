@@ -39,6 +39,7 @@ object VanillaPacketUtil {
                 access = display.access.wire,
                 depth = display.depth, conforming = display.conforming,
                 customData = DisplayPolicies.wireCustomData(display),
+                mediaGen = display.mediaGen,
             ),
         )
     }

@@ -79,6 +79,7 @@ object PacketUtil {
         depth: Int = 1,
         conforming: Boolean = false,
         customData: Map<String, ByteArray> = emptyMap(),
+        mediaGen: Long = 0L,
     ) {
         val isVertical = facing == BlockFace.UP || facing == BlockFace.DOWN
         val recipients = v2Players(players).filter { canReceive(it.uniqueId, isVertical, conforming) }
@@ -95,6 +96,7 @@ object PacketUtil {
             access = access.wire, inRegion = inRegion,
             depth = depth.coerceAtLeast(1), conforming = conforming,
             customData = customData,
+            mediaGen = mediaGen,
         )
         if (access == DisplayAccess.REGION && isRegionMember != null) {
             recipients.forEach { player ->

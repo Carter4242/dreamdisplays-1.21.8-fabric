@@ -213,6 +213,7 @@ object DisplayManager {
             isRegionMember = { WorldGuardRegions.isRegionMember(it, display.pos1) },
             depth = display.depth, conforming = display.conforming,
             customData = DisplayPolicies.wireCustomData(display),
+            mediaGen = display.mediaGen,
         )
     }
 

@@ -99,8 +99,10 @@ object PaperV2Networking : PluginMessageListener {
 
         when (packet) {
             is ClientHello -> handleHello(player, packet)
-            is RequestSync -> DisplayActions.requestSync(player, packet.id)
-            is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs, packet.url)
+            is RequestSync -> DisplayActions.requestSync(player, packet.id, packet.knownMediaGen)
+            is ReportDuration -> DisplayActions.reportDuration(
+                player, packet.id, packet.durationMs, packet.url, packet.mediaGen,
+            )
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
             is QueueAction -> QueueActions.onAction(player, packet)
             is QueuePreload -> QueueActions.onPreload(player, packet)
@@ -114,11 +116,12 @@ object PaperV2Networking : PluginMessageListener {
                 player,
                 packet.id,
                 PlaybackMode.fromWire(packet.mode),
-                packet.positionMs
+                packet.positionMs,
+                packet.mediaGen,
             )
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
-                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
+                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate, packet.mediaGen)
             }
 
             is WatchPartyStart -> DisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)

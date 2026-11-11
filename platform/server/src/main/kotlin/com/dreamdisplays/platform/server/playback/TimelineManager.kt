@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.playback
 
+import com.dreamdisplays.core.protocol.common.packets.MediaGen
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
@@ -420,10 +421,11 @@ object TimelineManager {
      * below it, never shrinking); the timeline runs [QueueTiming.scheduledDurationMs] of it, so its end (and the
      * queue's switch) never comes before the media's.
      */
-    fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "") {
+    fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         if (durationMs !in MIN_DURATION_MS..MAX_DURATION_MS) return
         if (url.isNotEmpty() && url != display.url) return
+        if (!MediaGen.matches(mediaGen, display.mediaGen)) return
         if (senderId !in transport.nearbyPlayerIds(display)) return
         // Report cooldowns start afresh with each video ([VideoDurations])
         val mediaMs = durations.report(
@@ -592,7 +594,7 @@ object TimelineManager {
      * The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`); per-player
      * sends move it by their lead through [shiftedFor].
      */
-    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now)
+    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now, display.mediaGen)
 
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()

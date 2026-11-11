@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.server.utils.net
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.ClientBuild
+import com.dreamdisplays.core.protocol.common.packets.MediaGen
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
@@ -141,9 +142,11 @@ object DisplayActions {
     }
 
     /** A client's request to switch a display's persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`). */
-    fun setMode(player: Player, displayId: UUID, mode: PlaybackMode, positionMs: Long) {
+    fun setMode(player: Player, displayId: UUID, mode: PlaybackMode, positionMs: Long, mediaGen: Long = 0L) {
         if (!PlaybackMode.isBaseMode(mode)) return
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
+        // A position on the video the display held before is no place to start this one
+        val position = if (MediaGen.matches(mediaGen, displayData.mediaGen)) positionMs else -1L
         if (!PlaybackPermissions.canSetMode(context(displayData, player))) return
         // Local takes a display off the shared clock for everyone. The menu no longer offers a mode switch
         // (`/display mode` does it), so only an op's client may still ask for Local.
@@ -159,7 +162,7 @@ object DisplayActions {
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
 
-        applyMode(displayData, mode, positionMs, player)
+        applyMode(displayData, mode, position, player)
     }
 
     /**
@@ -181,8 +184,15 @@ object DisplayActions {
     }
 
     /** Applies a playback intent (play / pause / seek / restart / speed) to a `SYNCED` display's server clock. */
-    fun playbackCommand(player: Player, displayId: UUID, action: PlaybackAction, positionMs: Long, rate: Double = 1.0) {
+    fun playbackCommand(
+        player: Player, displayId: UUID, action: PlaybackAction, positionMs: Long, rate: Double = 1.0, mediaGen: Long = 0L,
+    ) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
+        // Meant for the video the display held before (it changed while the command was on its way)
+        if (!MediaGen.matches(mediaGen, displayData.mediaGen)) {
+            logger.debug("Dropped a {} for display {}: it was meant for its previous video.", action, displayId)
+            return
+        }
         val before = TimelineManager.timelineOf(displayData.id)
         val atMs = System.currentTimeMillis()
         if (!TimelineManager.onCommand(displayData, player.uniqueId, action, positionMs, rate)) return
@@ -231,8 +241,9 @@ object DisplayActions {
     }
 
     /** Replies to a client's catch-up request with the current timeline and any live session. */
-    fun requestSync(player: Player, displayId: UUID) {
+    fun requestSync(player: Player, displayId: UUID, knownMediaGen: Long = 0L) {
         if (!requestSyncThrottle.tryAcquire(displayId to player.uniqueId, REQUEST_SYNC_COOLDOWN_MS)) return
+        resendInfoIfStale(player, displayId, knownMediaGen)
         if (FullscreenBroadcastManager.sendCurrentTo(displayId, player.uniqueId)) return
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
         TimelineManager.sendCurrent(displayData, player.uniqueId)
@@ -240,10 +251,29 @@ object DisplayActions {
         QueueManager.sendCurrent(displayData, player.uniqueId)
     }
 
+    /**
+     * A protocol-12 client holds another description of [displayId] than the server's ([knownMediaGen] differs; 0 = it
+     * holds none): send it the current one before the timeline, so it plays the right video. Only to players the
+     * display is for: in range, or following it from afar (fullscreen, preparation).
+     */
+    private fun resendInfoIfStale(player: Player, displayId: UUID, knownMediaGen: Long) {
+        if ((V2PlayerTracker.helloOf(player.uniqueId)?.protocolVersion ?: 0) < MEDIA_GEN_PROTOCOL) return
+        val display = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
+        if (knownMediaGen == display.mediaGen) return
+        when {
+            DisplayManager.isPlayerInRange(player, display) -> DisplayManager.sendUpdate(display, [player])
+            player.uniqueId in TimelineManager.extraReceivers(displayId) ->
+                DisplayManager.sendUpdate(display, [player], forced = true)
+        }
+    }
+
+    /** First protocol whose clients echo `mediaGen` and say which one they hold in `RequestSync`. */
+    private const val MEDIA_GEN_PROTOCOL = 12
+
     /** Applies a client-reported media duration to the display's server timeline (SYNCED / BROADCAST only). */
-    fun reportDuration(player: Player, displayId: UUID, durationMs: Long, url: String = "") {
+    fun reportDuration(player: Player, displayId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
-        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs, url)
+        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs, url, mediaGen)
     }
 
     private fun context(display: PaperDisplayData, player: Player) =
@@ -307,29 +337,8 @@ object DisplayActions {
     }
 
     private fun sendDisplayBatch(player: Player, displays: List<PaperDisplayData>) {
-        displays.forEach { display ->
-            PacketUtil.sendDisplayInfo(
-                [player],
-                display.id,
-                display.ownerId,
-                display.box.min,
-                display.width,
-                display.height,
-                display.url,
-                display.lang,
-                display.facing,
-                display.isSync,
-                display.isLocked,
-                display.access,
-                display.mode,
-                display.qualityCap,
-                display.rotation,
-                inRegion = WorldGuardRegions.isProtectedTerritory(display.pos1),
-                isRegionMember = { WorldGuardRegions.isRegionMember(it, display.pos1) },
-                depth = display.depth, conforming = display.conforming,
-                customData = DisplayPolicies.wireCustomData(display),
-            )
-        }
+        // The same description the periodic refresh sends (generation, schedule and all)
+        displays.forEach { display -> DisplayManager.sendUpdate(display, [player]) }
     }
 
     private fun checkModUpdate(player: Player, userVersion: Semver) {
