@@ -118,6 +118,8 @@ object ClientSettingsStore : ClientSettingsStorage {
 
     /** Saves the resume position [nanos] together with the video [url] it is a position in. */
     fun setSavedTime(displayUuid: UUID, nanos: Long, url: String?) {
+        // A replay shows the same displays as the server it was recorded on: it must not move their resume positions
+        if (com.dreamdisplays.platform.client.replay.ReplayHooks.inReplay()) return
         val s = getSettings(displayUuid)
         s.savedTimeNanos = nanos
         s.savedTimeUrl = url?.takeIf { it.isNotEmpty() }

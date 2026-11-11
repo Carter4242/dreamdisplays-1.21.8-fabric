@@ -36,6 +36,7 @@ object ClientPacketManager {
 
     /** Sends a raw payload through the platform networking implementation. */
     fun send(packet: CustomPacketPayload) {
+        if (com.dreamdisplays.platform.client.replay.ReplayHooks.interceptSend(packet)) return
         mod.sendPacket(packet)
     }
 

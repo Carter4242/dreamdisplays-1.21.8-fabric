@@ -31,6 +31,8 @@ import com.dreamdisplays.platform.client.net.LegacyProbe
 import com.dreamdisplays.platform.client.net.V2Payload
 import com.dreamdisplays.platform.client.platform.FabricPlatformIntegrationProvider
 import com.dreamdisplays.platform.client.render.ScreenRenderer
+import com.dreamdisplays.platform.client.replay.ReplayHooks
+import com.dreamdisplays.platform.client.compat.flashback.FlashbackCompat
 import com.dreamdisplays.platform.client.render.UnshadedDisplayPass
 import com.mojang.blaze3d.vertex.PoseStack
 import com.mojang.blaze3d.vertex.VertexConsumer
@@ -66,6 +68,7 @@ class Client : ClientModInitializer, Mod {
         // can host the ClientApplication on top of it during bootstrap.
         DreamServices.registry.register(PlatformServices.PLATFORM, FabricPlatformIntegrationProvider.create())
         Initializer.onModInit(this)
+        FlashbackCompat.initIfInstalled()
 
         // Note: PayloadTypeRegistry registrations are done in platform/server/ (it's a main entrypoint)
         // which runs on both integrated and dedicated servers, before the client entrypoint.
@@ -73,7 +76,7 @@ class Client : ClientModInitializer, Mod {
         //? if >=1.20.5 {
         // Protocol v2: every packet arrives as one opaque envelope payload
         ClientPlayNetworking.registerGlobalReceiver(V2Payload.TYPE) { payload, _ ->
-            Initializer.onV2Packet(payload.bytes)
+            if (!ReplayHooks.dropServerPacket(payload.bytes)) Initializer.onV2Packet(payload.bytes)
         }
 
         // Protocol v1 is unsupported; a v1 reply only tells us the server is outdated

@@ -107,7 +107,12 @@ object ScreenRenderer {
         val h = displayScreen.height
         val lift = if (replay) REPLAY_LIFT else 0f
 
-        if (displayScreen.isVideoStarted && displayScreen.hasTexture && displayScreen.renderType != null) {
+        val replayCard = com.dreamdisplays.platform.client.replay.ReplayHooks.card(displayScreen.uuid)
+        if (replayCard != null) {
+            drawLayer(stack, facing, w, h, lift) {
+                drawQuad(replayCard) { pose, builder -> appendQuad(pose, builder, 255, 255, 255, displayScreen.rotation) }
+            }
+        } else if (displayScreen.isVideoStarted && displayScreen.hasTexture && displayScreen.renderType != null) {
             drawLayer(stack, facing, w, h, lift) {
                 renderGpuTexture(drawQuad, displayScreen)
             }
