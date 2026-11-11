@@ -28,6 +28,8 @@ object TimelineManager {
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
+    private const val RESYNC_HOLD_MS = 5_000L
+    private val RESYNC_PARAM = Regex("""([?&])ddsync=(\d+)""")
 
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
 
@@ -60,9 +62,49 @@ object TimelineManager {
             PlaybackAction.SEEK -> current.seekedTo(clampSeek(positionMs, display), now)
             PlaybackAction.RESTART -> Timeline.start(now)
         }
+        // a resume, seek or restart reloads every viewer at the new position and holds it paused until
+        // they have all buffered, so they start together instead of each correcting its own drift.
+        val resumes = action == PlaybackAction.PLAY && current.paused
+        val jumps = action == PlaybackAction.SEEK || action == PlaybackAction.RESTART
+        if (resumes || jumps) {
+            resyncAndHold(display, updated, now, holdThenPlay = resumes || action == PlaybackAction.RESTART || !current.paused)
+            return true
+        }
         timelines[display.id] = updated
         broadcast(display, updated)
         return true
+    }
+
+    /**
+     * resync. The stock client only corrects drift above 1.5 s behind / 3.5 s ahead and backs off after slow
+     * seeks, so viewers drift apart and stay there. Changing a display's URL makes every client drop its player,
+     * request the timeline and open the video already positioned at it, so: park the timeline paused at
+     * [target], bump a harmless `ddsync` query parameter so clients reload, then (when [holdThenPlay]) release
+     * the hold after [RESYNC_HOLD_MS] through the existing start-hold tick, starting everyone from the same frame.
+     */
+    private fun resyncAndHold(display: DisplayData, target: Timeline, now: Long, holdThenPlay: Boolean) {
+        val held = target.withPaused(true, now)
+        timelines[display.id] = held
+        if (holdThenPlay) startHolds[display.id] = now + RESYNC_HOLD_MS
+        bumpResyncMarker(display)
+        broadcast(display, held)
+    }
+
+    private fun bumpResyncMarker(display: DisplayData) {
+        val url = display.url
+        if (url.isBlank()) return
+        val hashAt = url.indexOf('#')
+        val base = if (hashAt >= 0) url.substring(0, hashAt) else url
+        val fragment = if (hashAt >= 0) url.substring(hashAt) else ""
+        val next = if (RESYNC_PARAM.find(base)?.groupValues?.get(2) == "1") 2 else 1
+        val stripped = base.replace(RESYNC_PARAM) { m -> if (m.groupValues[1] == "?") "?" else "" }
+            .replace("?&", "?").removeSuffix("?")
+        val separator = if ('?' in stripped) "&" else "?"
+        display.url = "$stripped${separator}ddsync=$next$fragment"
+        transport.runOnMainThread {
+            transport.saveDisplay(display)
+            transport.nearbyPlayerIds(display).forEach { transport.sendDisplayInfo(it, display, forced = false) }
+        }
     }
 
     /**
