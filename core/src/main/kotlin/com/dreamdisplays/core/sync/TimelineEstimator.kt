@@ -51,9 +51,12 @@ class TimelineEstimator(
     /**
      * Records a packet that says the server was at [positionMs] ([paused] or not), handled at local monotonic
      * time [nowMs]. Returns true when it started a new segment, i.e. the previous estimate no longer applies.
+     * [newSegment]: the sender moved the timeline itself by less than [jumpMs] (a karaoke lead lowered), so this packet
+     * replaces the earlier ones rather than joining them.
      */
     fun onPacket(
         positionMs: Long, paused: Boolean, nowMs: Double, latencyCompMs: Double, rate: Double = 1.0,
+        newSegment: Boolean = false,
     ): Boolean {
         val rateChanged = rate != this.rate
         this.rate = rate
@@ -66,15 +69,15 @@ class TimelineEstimator(
             return changed
         }
         val offset = positionMs + (latencyCompMs - nowMs) * rate
-        val newSegment = !hasTimeline || this.paused || observations.isEmpty() || rateChanged ||
+        val starts = newSegment || !hasTimeline || this.paused || observations.isEmpty() || rateChanged ||
                 abs(offset - bestOffset()) > jumpMs * rate.coerceAtLeast(1.0)
-        if (newSegment) observations.clear()
+        if (starts) observations.clear()
         observations.addLast(Observation(offset, nowMs))
         while (observations.size > 1 && nowMs - observations.first().atMs > windowMs) observations.removeFirst()
         while (observations.size > maxObservations) observations.removeFirst()
         this.paused = false
         hasTimeline = true
-        return newSegment
+        return starts
     }
 
     /** The estimated server position at local time [nowMs] (unwrapped; the caller applies looping). */

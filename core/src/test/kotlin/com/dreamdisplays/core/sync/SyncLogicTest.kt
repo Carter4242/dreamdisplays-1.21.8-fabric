@@ -179,4 +179,16 @@ class DriftControllerTest {
         }
         assertTrue(maxAfter <= 45.0, "drift after settling reached $maxAfter ms")
     }
+
+    @Test
+    fun `a timeline moved back by the sender replaces the earlier, further-ahead packets at once`() {
+        val e = TimelineEstimator()
+        e.onPacket(10_500, false, 1_000.0, 0.0) // 500 ms karaoke lead
+        // The lead is dropped: the server's timeline is 500 ms further back; as plain drift the old packet would win
+        assertFalse(e.onPacket(10_000, false, 1_000.0, 0.0))
+        assertEquals(10_500.0, e.targetMs(1_000.0))
+        assertTrue(e.onPacket(10_000, false, 1_000.0, 0.0, newSegment = true))
+        assertEquals(10_000.0, e.targetMs(1_000.0))
+    }
 }
+

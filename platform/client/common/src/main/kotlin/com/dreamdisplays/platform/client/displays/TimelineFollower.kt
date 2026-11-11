@@ -194,15 +194,19 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         scheduledStart?.cancel(false)
         scheduledStart = null
         val word = applyWord.incrementAndGet()
-        synchronized(lock) {
+        val leadChanged = synchronized(lock) {
             // A singer's lead changed (they started or stopped singing): a jump of that size is not drift to close
             // slowly at a percent of speed, so the next evaluation seeks there in place at once (one seek, no pause)
-            if (leadMs != karaokeLeadMs && !paused && abs(leadMs - karaokeLeadMs) >= LEAD_JUMP_MIN_MS) jumpToLead = true
+            val changed = leadMs != karaokeLeadMs
+            if (changed && !paused && abs(leadMs - karaokeLeadMs) >= LEAD_JUMP_MIN_MS) jumpToLead = true
             karaokeLeadMs = leadMs
             this.serverDurationMs = serverDurationMs
+            changed
         }
         if (paused || startInMs == 0) {
-            applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate)
+            // A changed lead moves the timeline itself (back, for a lower one): the estimate starts over from this
+            // packet, or the earlier, further-ahead packets would keep it at the old lead for half a minute
+            applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate, leadChanged)
             return
         }
         // A start scheduled ahead: the packet left the server startInMs before the start and took one-way latency to
@@ -237,14 +241,17 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     /** Counts [apply] calls: a scheduled start only plays if no newer timeline arrived meanwhile. */
     private val applyWord = java.util.concurrent.atomic.AtomicLong()
 
-    private fun applyNow(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, comp: Double, rate: Double) {
+    private fun applyNow(
+        targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, comp: Double, rate: Double,
+        newSegment: Boolean = false,
+    ) {
         val packet = synchronized(lock) {
             if (isStaleTimeline(serverTimeMs, lastServerTimeMs)) return
             if (serverTimeMs > 0L) lastServerTimeMs = serverTimeMs
             val now = System.nanoTime()
             latencyCompMs = comp
             this.loop = loop
-            if (estimator.onPacket(targetMs, paused, now / NANOS_PER_MS, comp, rate)) controller.resetMeasurement()
+            if (estimator.onPacket(targetMs, paused, now / NANOS_PER_MS, comp, rate, newSegment)) controller.resetMeasurement()
             Pending(++nextSeq, targetMs, serverTimeMs, paused, loop, now, comp, rate).also { pending = it }
         }
         applyPending(packet)
