@@ -75,8 +75,14 @@ object KaraokeManager {
         val debug: Boolean = false,
     )
 
-    /** A singer on a display. [itemId]: the queue entry they sing, when they came from the line. */
-    data class Singer(val playerId: UUID, val name: String, val leadMs: Long, val trimMs: Long, val itemId: String?)
+    /**
+     * A singer on a display. [itemId]: the queue entry they sing, when they came from the line. [autoLead]: their lead
+     * is the automatic one and follows what is needed ([KaraokeTiming.autoLeadChange]); a lead set by hand stays.
+     */
+    data class Singer(
+        val playerId: UUID, val name: String, val leadMs: Long, val trimMs: Long, val itemId: String?,
+        val autoLead: Boolean = false,
+    )
 
     /** A line entry: [playerId] sings queue entry [itemId] when it comes up. */
     data class LineEntry(val playerId: UUID, val name: String, val itemId: String)
@@ -205,9 +211,9 @@ object KaraokeManager {
         if (previous == null) KaraokeMeasurements.onSingingStarted(playerId)
         val wanted = leadMs ?: autoLeadMs(display, playerId)
         // Already singing with about this lead: keep it, and spare them a paused resync
-        val unchanged = previous != null && abs(wanted - previous.leadMs) < LEAD_DEADBAND_MS
+        val unchanged = previous != null && abs(wanted - previous.leadMs) < KaraokeTiming.LEAD_DEADBAND_MS
         val lead = if (unchanged) previous!!.leadMs else wanted
-        state.singers[playerId] = Singer(playerId, name, lead, previous?.trimMs ?: 0L, itemId)
+        state.singers[playerId] = Singer(playerId, name, lead, previous?.trimMs ?: 0L, itemId, autoLead = leadMs == null)
         singerDisplay[playerId] = display.id
         refresh()
         if (resend && !unchanged) resendTimeline(display, playerId)
@@ -379,6 +385,8 @@ object KaraokeManager {
     private fun beforeStart(display: DisplayData, item: QueueItem): Boolean {
         val state = states[display.id] ?: return true
         state.singers.values.filter { it.itemId != null }.forEach { removeSinger(display, it.playerId, resend = false) }
+        // Singers who stay (added by hand) start the new song with the automatic lead it needs now
+        followAutoLeads(display, state, playing = false, resend = false)
         val entry = state.line.remove(item.itemId) ?: return true
         val player = Bukkit.getPlayer(entry.playerId)
         if (player == null || !isPresent(display, player)) {
@@ -426,7 +434,11 @@ object KaraokeManager {
             }
             endFinishedSongs(display, state)
             state.singers.keys.filter { Bukkit.getPlayer(it) == null }.forEach { removeSinger(display, it, resend = false) }
-            if (slow) pruneLine(display, state)
+            if (slow) {
+                pruneLine(display, state)
+                // Not while a start is held for readiness: singers are waited for at their lead's position
+                if (!TimelineManager.isHolding(displayId)) followAutoLeads(display, state, songPlaying(displayId), resend = true)
+            }
             if (state.singers.isEmpty() && state.line.isEmpty() && state.trimMs == 0L) states.remove(displayId)
         }
         refresh()
@@ -458,6 +470,32 @@ object KaraokeManager {
     private fun onLoopRestart(display: DisplayData) {
         val state = states[display.id] ?: return
         endFinishedSongs(display, state, restartedAtEnd = true)
+    }
+
+    /**
+     * Moves automatic leads to what [autoLeadMs] needs now (a learned trim, measured latencies and listeners in range
+     * change it), within [KaraokeTiming.autoLeadChange]'s limits; [resend] sends a changed singer their timeline.
+     */
+    private fun followAutoLeads(display: DisplayData, state: State, playing: Boolean, resend: Boolean) {
+        for (singer in state.singers.values.toList()) {
+            if (!singer.autoLead) continue
+            val lead = KaraokeTiming.autoLeadChange(singer.leadMs, autoLeadMs(display, singer.playerId), playing) ?: continue
+            state.singers.computeIfPresent(singer.playerId) { _, s -> s.copy(leadMs = lead) } ?: continue
+            if (settings().debug) {
+                logger.info(
+                    "Karaoke on display {}: {}'s automatic lead {} -> {} ms{}.",
+                    display.id, singer.name, singer.leadMs, lead, if (playing) " (mid-song)" else "",
+                )
+            }
+            refresh()
+            if (resend) resendTimeline(display, singer.playerId)
+        }
+    }
+
+    /** [displayId]'s timeline runs (not paused, started, not held for readiness). */
+    private fun songPlaying(displayId: UUID): Boolean {
+        val timeline = TimelineManager.timelineOf(displayId) ?: return false
+        return !timeline.paused && timeline.serverTimeMs <= PaperPlaybackTransport.nowMs() && !TimelineManager.isHolding(displayId)
     }
 
     private fun pruneLine(display: DisplayData, state: State) {
@@ -512,8 +550,6 @@ object KaraokeManager {
             )
         }
         val halfDiagonal = sqrt(box.widthX * box.widthX + box.height * box.height + box.widthZ * box.widthZ) / 2.0
-        val timeline = TimelineManager.timelineOf(display.id)
-        val now = PaperPlaybackTransport.nowMs()
         return KaraokeStage(
             displayId = display.id,
             displayLabel = display.shortLabel,
@@ -523,8 +559,7 @@ object KaraokeManager {
             singers = singers,
             listeners = listenersOf(display, singers.keys, everyone = s.fromSinger),
             fromSinger = s.fromSinger,
-            songPlaying = timeline != null && !timeline.paused && timeline.serverTimeMs <= now &&
-                    !TimelineManager.isHolding(display.id),
+            songPlaying = songPlaying(display.id),
             coSinger = s.coSinger,
             singerVolume = s.singerVolume,
             debug = s.debug,
@@ -604,8 +639,6 @@ object KaraokeManager {
     }
 
     private const val DEFAULT_AUDIO_RADIUS = 96.0
-    /** A singer's lead changes by at least this much, or not at all. */
-    private const val LEAD_DEADBAND_MS = 30L
     private const val MAX_PING_FOR_LEAD_MS = 400L
     /** Under the queue's own early advance (250 ms), so a queued next song takes over first. */
     private const val SONG_END_MS = 100L

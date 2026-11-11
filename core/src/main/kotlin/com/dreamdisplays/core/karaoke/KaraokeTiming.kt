@@ -139,6 +139,28 @@ object KaraokeTiming {
     }
 
     /**
+     * The next value of a singer's automatic lead, now at [currentMs], when [autoLeadMs] now says [wantedMs] (their
+     * learned trim, their measured latencies and the listeners in range move it); null = keep it. While the song plays
+     * a change makes the singer's client jump its track in place, so the lead only goes up there, and only once the
+     * voice would be late by [MID_SONG_RAISE_MS] or more less the margin: below that, keeping the singer's track
+     * undisturbed is better. Otherwise (paused, between songs) any change of [LEAD_DEADBAND_MS] or more is taken.
+     */
+    fun autoLeadChange(currentMs: Long, wantedMs: Long, playing: Boolean): Long? {
+        val change = wantedMs - currentMs
+        return when {
+            playing -> wantedMs.takeIf { change >= MID_SONG_RAISE_MS }
+            kotlin.math.abs(change) >= LEAD_DEADBAND_MS -> wantedMs
+            else -> null
+        }
+    }
+
+    /** A singer's lead changes by at least this much, or not at all. */
+    const val LEAD_DEADBAND_MS = 30L
+
+    /** An automatic lead is raised mid-song once it is this far under what is needed (see [autoLeadChange]). */
+    const val MID_SONG_RAISE_MS = 100L
+
+    /**
      * [sync] as a singer with [leadMs] gets it: the position moved ahead by the lead (see [leadPosition]). Pause state,
      * server time, speed and a scheduled start stay, so a paused display shows the singer the paused frame plus the
      * lead, and a scheduled start starts them that far ahead at the same moment. [DisplaySync.karaokeLeadMs] tells the

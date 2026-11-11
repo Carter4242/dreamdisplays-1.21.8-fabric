@@ -6,6 +6,7 @@ import com.dreamdisplays.core.protocol.common.ZERO_UUID
 import com.dreamdisplays.core.protocol.common.toSync
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -198,5 +199,21 @@ class KaraokeTimingTest {
         val jumped = anchor.onFrame(now + 20 * ms, 100 + 1_000_000_000L)
         assertEquals(burst, jumped)
         assertTrue(KaraokeTiming.emitTooFar(anchor.estimate(jumped, 100 + 1_000_000_000L, lock = false)!!, now + 20 * ms))
+    }
+
+    @Test
+    fun anAutomaticLeadOnlyRisesMidSongAndOnlyWhenFarShort() {
+        // A learned negative trim asks for 60 ms more: not worth a jump in the singer's track mid-song
+        assertNull(KaraokeTiming.autoLeadChange(280, 340, playing = true))
+        assertEquals(400L, KaraokeTiming.autoLeadChange(280, 400, playing = true))
+        // Never lowered mid-song
+        assertNull(KaraokeTiming.autoLeadChange(500, 300, playing = true))
+    }
+
+    @Test
+    fun anAutomaticLeadFollowsTheNeedWhileNotPlaying() {
+        assertEquals(340L, KaraokeTiming.autoLeadChange(280, 340, playing = false))
+        assertEquals(300L, KaraokeTiming.autoLeadChange(500, 300, playing = false))
+        assertNull(KaraokeTiming.autoLeadChange(280, 300, playing = false))
     }
 }
