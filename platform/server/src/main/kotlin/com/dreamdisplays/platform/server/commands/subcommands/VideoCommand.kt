@@ -157,6 +157,10 @@ object VanillaVideoCommand {
             return 0
         }
 
+        if (urlRaw.equals(com.dreamdisplays.core.command.DisplayCommands.CLEAR_VIDEO, ignoreCase = true)) {
+            return clear(ctx, player, token)
+        }
+
         val requestedUrl = canonicalUrl(urlRaw)
             ?: return ServerMessage.INVALID_URL.sendTo(player).let { 0 }
 
@@ -200,6 +204,34 @@ object VanillaVideoCommand {
         ServerApiHost.current?.urlChanged(data)
 
         ServerMessage.SETTED_URL.sendTo(player)
+        return 1
+    }
+
+    /**
+     * `/display video <display> clear`: takes the video off the display for everyone, with the same ownership rule as
+     * setting one. Its clock, length and fullscreen sessions go; queued entries stay and wait for a skip or a play.
+     */
+    private fun clear(ctx: CommandContext<CommandSourceStack>, player: ServerPlayer, token: String): Int {
+        val data = resolveVanillaDisplayTarget(player, token) as? VanillaDisplayData ?: return 0
+        if (!PlaybackPermissions.canSetVideo(PlaybackContexts.of(data, player.uuid, VanillaDisplayActions.isAdmin(player)))) {
+            ServerMessage.DISPLAY_VIDEO_NOT_OWNER.sendTo(player)
+            return 0
+        }
+        ServerApiHost.current?.askSetUrl(data, "", "", player.uuid)?.let { reason ->
+            if (reason.isNotEmpty()) MessageUtil.sendColoredMessage(player, reason)
+            return 0
+        }
+        data.url = ""
+        data.lang = ""
+        ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(data) }
+        TimelineManager.onVideoCleared(data)
+        VanillaPacketUtil.sendDisplayInfo(DisplayManager.getReceivers(data, ctx.source.server), data)
+        com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager.endSessionsOf(data.id)
+        QueueManager.onVideoSetByHand(data)
+        ServerApiHost.current?.urlChanged(data)
+        MessageUtil.sendColoredMessage(
+            player, MessageUtil.formatIndexed(player, "cmd.video.cleared", data.name ?: data.id.toString().take(8)),
+        )
         return 1
     }
 }
