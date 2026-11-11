@@ -316,6 +316,9 @@ object ScreenShare {
             val current = running
             if (current != null && current.displayId == state.id && !current.stopped && same(current.nonce)) {
                 pending.remove(state.id) // Already encoding to it
+                // The server shares screens without sound now: a share that may be sending sound ends (its capture
+                // cannot drop the sound in place); the sharer can share again, silent
+                if (state.noSound && current.withAudio) fail(current, "the server turned off screen share sound")
                 return
             }
             val asked = pending[state.id]?.takeIf { same(it.nonce) }
