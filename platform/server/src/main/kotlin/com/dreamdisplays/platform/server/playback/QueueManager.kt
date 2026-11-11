@@ -250,11 +250,16 @@ object QueueManager {
         return Result.OK
     }
 
-    /** Turns looping on or off; owner or admin. */
-    fun setLoop(display: DisplayData, ctx: PlaybackContext, enabled: Boolean): Result {
+    /**
+     * Turns looping on or off; owner or admin. A change from a client ([actorId]) is throttled like every other queue
+     * edit, since each one sends the whole queue to every viewer.
+     */
+    fun setLoop(display: DisplayData, ctx: PlaybackContext, enabled: Boolean, actorId: UUID? = null): Result {
         if (!settings().enabled) return Result.DISABLED
         if (!PlaybackPermissions.canManageQueue(ctx)) return Result.NOT_ALLOWED
         val queue = queues.computeIfAbsent(display.id) { DisplayQueue() }
+        if (synchronized(queue) { queue.loop == enabled }) return Result.OK
+        if (actorId != null && !editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
         if (synchronized(queue) { queue.setLoop(enabled) }) changed(display)
         return Result.OK
     }

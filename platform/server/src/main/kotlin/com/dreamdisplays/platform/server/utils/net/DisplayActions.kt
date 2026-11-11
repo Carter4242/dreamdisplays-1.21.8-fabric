@@ -190,6 +190,8 @@ object DisplayActions {
         if (!player.hasPermission(PaperServer.config.permissions.lock)) return
         if (!PlaybackPermissions.canToggleLock(lockContext(displayData, player))) return
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Already so: nothing to save or tell everyone, only the asker (whose menu may be behind)
+        if (displayData.access == access) return DisplayManager.sendUpdate(displayData, [player])
 
         displayData.access = access
 
@@ -217,6 +219,8 @@ object DisplayActions {
             return
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Already in that mode: the clock carries on as it is anyway, so only the asker is told
+        if (displayData.mode == mode) return DisplayManager.sendUpdate(displayData, [player])
 
         applyMode(displayData, mode, position, player)
     }

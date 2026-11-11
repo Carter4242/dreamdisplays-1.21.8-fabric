@@ -189,6 +189,8 @@ object VanillaDisplayActions {
             return
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Already so: nothing to save or tell everyone, only the asker (whose menu may be behind)
+        if (displayData.access == access) return VanillaPacketUtil.sendDisplayInfo([player], displayData)
 
         displayData.access = access
         ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(displayData) }
@@ -220,6 +222,8 @@ object VanillaDisplayActions {
             return
         }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Already in that mode: the clock carries on as it is anyway, so only the asker is told
+        if (displayData.mode == mode) return VanillaPacketUtil.sendDisplayInfo([player], displayData)
 
         displayData.mode = mode
         ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(displayData) }
