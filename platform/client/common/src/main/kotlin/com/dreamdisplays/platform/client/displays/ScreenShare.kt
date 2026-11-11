@@ -83,6 +83,9 @@ object ScreenShare {
         /** The sharer was told this share runs without the sound they picked. */
         @Volatile
         var toldNoSound = false
+
+        /** The share's [ScreenShareRequest.nonce], on its heartbeats and stop (see [ScreenShareServerRules.sameShare]). */
+        var nonce: Long = 0L
     }
 
     private val lock = Any()
@@ -90,8 +93,20 @@ object ScreenShare {
     @Volatile
     private var running: Running? = null
 
-    /** What was asked for per display, until the server answers. */
-    private data class Pick(val target: ScreenCapture.Target, val audio: ShareAudio.Choice, val urlBefore: String?)
+    /** What was asked for per display, until the server answers; [nonce] names that start. */
+    private data class Pick(
+        val target: ScreenCapture.Target, val audio: ShareAudio.Choice, val urlBefore: String?, val nonce: Long,
+    )
+
+    /** A fresh non-zero share nonce. */
+    private fun newNonce(): Long {
+        while (true) java.util.concurrent.ThreadLocalRandom.current().nextLong().takeIf { it != 0L }?.let { return it }
+    }
+
+    /** The server's last word: it shares screens without sound ([ScreenShareState.noSound]). The picker offers none. */
+    @Volatile
+    var soundOffByServer: Boolean = false
+        private set
 
     private val pending = Collections.synchronizedMap(HashMap<UUID, Pick>())
 
@@ -219,8 +234,9 @@ object ScreenShare {
     /** Asks the server to let this client share [target] with [audio] to [displayId]; capture starts once it agrees. */
     fun start(displayId: UUID, target: ScreenCapture.Target, audio: ShareAudio.Choice) {
         if (!available) return
-        pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl)
-        Initializer.sendPacket(ScreenShareRequest(displayId, start = true))
+        val nonce = newNonce()
+        pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl, nonce)
+        Initializer.sendPacket(ScreenShareRequest(displayId, start = true, nonce = nonce))
     }
 
     /** Stops sharing: the capture is killed first, then the server ends the share. */
@@ -231,34 +247,50 @@ object ScreenShare {
 
     /** The server's answer or a change it made (share ended, replaced, display gone). */
     fun onState(state: ScreenShareState) {
+        soundOffByServer = state.noSound
+        // A nonce of 0 is an older server: everything about the display is about this share, as before
+        fun same(nonce: Long) = ScreenShareServerRules.sameShare(nonce, state.nonce)
         if (state.active && state.publishUrl.isNotEmpty()) {
             val current = running
-            if (current != null && current.displayId == state.id && !current.stopped) {
+            if (current != null && current.displayId == state.id && !current.stopped && same(current.nonce)) {
                 pending.remove(state.id) // Already encoding to it
                 return
             }
-            val asked = pending.remove(state.id)
+            val asked = pending[state.id]?.takeIf { same(it.nonce) }
             if (asked == null) {
                 // A share nobody here asked for (any more): end it on the server instead of leaving it waiting
-                Initializer.sendPacket(ScreenShareRequest(state.id, start = false))
+                Initializer.sendPacket(ScreenShareRequest(state.id, start = false, nonce = state.nonce))
                 return
             }
+            pending.remove(state.id)
             current?.let { stop(it, StopReason.SERVER_ENDED) }
             val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight)
+            // The server's sound lever wins over the sharer's pick
+            val audio = if (state.noSound) ShareAudio.Choice.Off else asked.audio
+            if (state.noSound && asked.audio != ShareAudio.Choice.Off) {
+                notify(ClientMessage.SHARE_AUDIO_SERVER_OFF.component().withStyle(ChatFormatting.YELLOW))
+            }
             launch(
-                Running(state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings, asked.audio),
+                Running(state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings, audio)
+                    .also { it.nonce = asked.nonce },
                 state.publishUrl,
             )
             return
         }
-        pending.remove(state.id)
-        running?.takeIf { it.displayId == state.id }?.let { stop(it, StopReason.SERVER_ENDED) }
+        // An "inactive" about an earlier share (the answer to its stop or to a heartbeat in flight) leaves a newer
+        // start or capture on the same display alone
+        val askedHere = pending[state.id]?.takeIf { same(it.nonce) }
+        val runningHere = running?.takeIf { it.displayId == state.id && same(it.nonce) }
+        if (askedHere == null && runningHere == null && state.nonce != 0L) return
+        if (askedHere != null) pending.remove(state.id)
+        runningHere?.let { stop(it, StopReason.SERVER_ENDED) }
         if (state.error.isNotEmpty()) notify(ClientMessage.SHARE_REFUSED.component(state.error).withStyle(ChatFormatting.RED))
     }
 
     /** Disconnected or switched server: the capture dies now; the server ends the share on its own. */
     fun onServerLeft() {
         pending.clear()
+        soundOffByServer = false
         running?.let { stop(it, StopReason.SERVER_LEFT) }
         ScreenCaptureProcesses.killAll()
     }
@@ -322,7 +354,7 @@ object ScreenShare {
             ClientPacketManager.serverSnapshot.hasFeature(ServerFeature.SCREEN_SHARE_HEARTBEAT)
         ) {
             r.lastHeartbeatMs = now
-            Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false, heartbeat = true))
+            Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false, heartbeat = true, nonce = r.nonce))
         }
     }
 
@@ -598,7 +630,7 @@ object ScreenShare {
         val handles = proc?.let(ScreenCaptureProcesses::kill)
         stopAudio(r)
         if (ScreenShareCaptureRules.tellServer(reason)) {
-            runCatching { Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false)) }
+            runCatching { Initializer.sendPacket(ScreenShareRequest(r.displayId, start = false, nonce = r.nonce)) }
         }
         logger.info("Screen share to display {} stopped ({}).", r.displayId, reason.name.lowercase(Locale.ROOT))
         if (proc != null && handles != null && reason != StopReason.SHUTDOWN) {
@@ -626,6 +658,8 @@ object ScreenShare {
         val font = mc.font
         val sound = when {
             r == null -> ""
+            // The server shares screens without sound
+            r.audioChoice == ShareAudio.Choice.Off && soundOffByServer -> " · " + ClientMessage.SHARE_AUDIO_SERVER_OFF_BADGE.text()
             r.audio != null -> " · " + ClientMessage.SHARE_AUDIO_ON.text()
             else -> " · " + ClientMessage.SHARE_AUDIO_OFF.text()
         }

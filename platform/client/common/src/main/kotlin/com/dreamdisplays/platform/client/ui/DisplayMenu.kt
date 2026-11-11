@@ -986,6 +986,7 @@ class DisplayMenu private constructor(
             windows.forEach { w -> add(ShareRow.Item(ScreenCapture.label(w)) { shareAudioRows(w) }) }
         }
         if (os == ShareAudio.Os.MAC) add(ShareRow.Note(ClientMessage.SHARE_AUDIO_MAC.text()))
+        else if (ScreenShare.soundOffByServer) add(ShareRow.Note(ClientMessage.SHARE_AUDIO_SERVER_OFF.text()))
     }
 
     /**
@@ -995,7 +996,8 @@ class DisplayMenu private constructor(
     private fun shareAudioRows(target: ScreenCapture.Target): List<ShareRow>? {
         val os = ScreenShare.audioOs
         val start = { choice: ShareAudio.Choice -> ScreenShare.start(displayScreen.uuid, target, choice); null }
-        if (os == ShareAudio.Os.MAC) return start(ShareAudio.Choice.Off)
+        // Nothing to pick: macOS has no share sound, and a server may share screens without it
+        if (os == ShareAudio.Os.MAC || ScreenShare.soundOffByServer) return start(ShareAudio.Choice.Off)
         val perApp = ScreenShare.processLoopback
         val windowApp = (target as? ScreenCapture.Window)?.let(ScreenShare::windowApp)
         val default = ShareAudio.defaultChoice(os, perApp, windowApp)

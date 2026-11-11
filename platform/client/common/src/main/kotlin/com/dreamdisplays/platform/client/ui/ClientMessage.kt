@@ -106,6 +106,8 @@ enum class ClientMessage(val key: String) {
     SHARE_AUDIO_ON("dreamdisplays.share.audio.on"),
     SHARE_AUDIO_THIS_APP("dreamdisplays.share.audio.this_app"),
     SHARE_AUDIO_UNAVAILABLE("dreamdisplays.share.audio.unavailable"),
+    SHARE_AUDIO_SERVER_OFF("dreamdisplays.share.audio.server_off"),
+    SHARE_AUDIO_SERVER_OFF_BADGE("dreamdisplays.share.audio.server_off.badge"),
     SHARE_AUDIO_WHOLE_PC("dreamdisplays.share.audio.whole_pc"),
     SHARE_BUTTON("dreamdisplays.share.button"),
     SHARE_FAILED("dreamdisplays.share.failed"),
