@@ -27,6 +27,8 @@ run {
 repositories {
     mavenCentral()
     maven("https://maven.fabricmc.net/")
+    // Simple Voice Chat API: compile-only, for the shared server sources' @PaperOnly karaoke voice (stripped here)
+    maven("https://maven.maxhenkel.de/repository/public")
     maven("https://maven.parchmentmc.org")
     maven("https://maven.quiltmc.org/repository/release/")
     maven("https://maven.quiltmc.org/repository/snapshot/")
@@ -146,6 +148,7 @@ dependencies {
     javaNewerCompileApis(libs.platformweaverAnnotations)
     compileOnly(files(javaNewerCompileApis))
     compileOnly(libs.luckpermsApi)
+    compileOnly("de.maxhenkel.voicechat:voicechat-api:2.5.36")
     javaNewerCompileApis(libs.worldguardApi) {
         exclude(group = "com.google.guava", module = "guava")
         exclude(group = "com.google.code.gson", module = "gson")

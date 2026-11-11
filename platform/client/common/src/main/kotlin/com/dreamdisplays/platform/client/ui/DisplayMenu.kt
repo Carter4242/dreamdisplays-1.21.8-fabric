@@ -16,11 +16,9 @@ import com.dreamdisplays.api.media.search.MediaSearchResult
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.DisplayAccess
-import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.core.services.keys.PlaybackServices
 import com.dreamdisplays.core.runtime.get
-import com.dreamdisplays.core.services.keys.WatchPartyServices
 import com.dreamdisplays.media.source.youtube.cache.VideoMetadataCache
 import com.dreamdisplays.media.source.youtube.cache.VideoTitleCache
 import com.dreamdisplays.platform.client.core.DreamServices
@@ -97,7 +95,6 @@ class DisplayMenu private constructor(
     private lateinit var brightness: ValueSlider
     private lateinit var speed: SpeedField
     private lateinit var audio3d: ModeSlider<AcousticQuality>
-    private lateinit var sync: ModeSlider<PlaybackMode>
     private lateinit var access: ModeSlider<DisplayAccess>
     private lateinit var progress: SeekBar
     private lateinit var suggestions: SuggestionsPanel
@@ -127,7 +124,6 @@ class DisplayMenu private constructor(
         // the DisplayScreen directly, so the UI no longer reaches into the live screen for these actions.
         val displayId = DisplayId(ds.uuid)
         val playback = DreamServices.registry.get(PlaybackServices.PLAYBACK)
-        val watchParty = DreamServices.registry.get(WatchPartyServices.WATCH_PARTY)
         val displays = DreamServices.registry.get(DisplayServices.DISPLAY)
         val videoReady = { ds.isVideoStarted && !ds.errored }
         val notErrored = { !ds.errored }
@@ -196,31 +192,6 @@ class DisplayMenu private constructor(
         audio3d.visibleWhen = notErrored
         audio3d.enabledWhen = { !ServerOverrides.settings.acousticsForced }
 
-        sync = addUi(
-            ModeSlider(
-                modes = SYNC_MODES,
-                initial = ds.effectiveMode,
-                current = { ds.effectiveMode },
-                enabledFor = {
-                    if (ds.watchParty != null) {
-                        it == PlaybackMode.LOCAL && ds.canCloseWatchPartyHere
-                    } else {
-                        it != PlaybackMode.WATCH_PARTY && ds.canSetModeHere
-                    }
-                },
-                label = { translatableText(syncModeLabel(it)) },
-            ) { mode ->
-                when {
-                    mode == ds.effectiveMode -> Unit
-                    ds.watchParty != null && mode == PlaybackMode.LOCAL -> watchParty.close(displayId)
-                    PlaybackMode.isBaseMode(mode) -> playback.setMode(displayId, mode)
-                }
-            })
-        sync.enabledWhen = {
-            ds.canSetModeHere || (ds.watchParty != null && ds.canCloseWatchPartyHere)
-        }
-        sync.visibleWhen = notErrored
-
         access = addUi(
             ModeSlider(
                 modes = accessModesFor(ds),
@@ -260,12 +231,6 @@ class DisplayMenu private constructor(
         })
         audio3dReset.enabledWhen = { ClientStateManager.config.audioAcoustics != AUDIO_3D_DEFAULT }
         audio3dReset.visibleWhen = notErrored
-
-        val syncReset = addUi(IconButton("refresh") {
-            if (ds.canSetModeHere) playback.setMode(displayId, PlaybackMode.LOCAL)
-        })
-        syncReset.enabledWhen = { ds.canSetModeHere && ds.effectiveMode != PlaybackMode.LOCAL }
-        syncReset.visibleWhen = notErrored
 
         val accessReset = addUi(IconButton("refresh") {
             if (ds.canToggleLockHere) displays.setAccess(displayId, ds.defaultAccess)
@@ -403,7 +368,7 @@ class DisplayMenu private constructor(
                 upNext = { if (ds.queueRunsHere) DisplayQueues.next(ds.uuid)?.let(QueueSection::titleOf) else null },
             )
         settings = SettingsSection(
-            rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, syncReset, accessReset),
+            rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, accessReset),
             ownerActions = [reportButton, deleteButton],
             buttonTooltips = [
                 deleteButton to { buttonTooltip(ClientMessage.BUTTON_DELETE.key) },
@@ -415,7 +380,7 @@ class DisplayMenu private constructor(
 
     private fun settingsRows(
         qualityReset: IconButton,
-        brightnessReset: IconButton, speedReset: IconButton, audio3dReset: IconButton, syncReset: IconButton,
+        brightnessReset: IconButton, speedReset: IconButton, audio3dReset: IconButton,
         accessReset: IconButton,
     ): List<SettingsSection.Row> {
         val ds = displayScreen
@@ -464,21 +429,6 @@ class DisplayMenu private constructor(
                     tooltipValue(
                         ClientMessage.BUTTON_AUDIO3D_TOOLTIP_6.key,
                         translatableText(audio3dModeLabel(audio3d.mode)),
-                    ),
-                ]
-            },
-            SettingsSection.Row(ClientMessage.BUTTON_SYNCHRONIZATION.key, sync, syncReset, extraGapBefore = 6) {
-                [
-                    tooltipTitle(ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_1.key),
-                    tooltipBody(ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_2.key),
-                    literalText(""),
-                    tooltipModeBullet(ClientMessage.MODE_LOCAL.key, ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_3.key),
-                    tooltipModeBullet(ClientMessage.MODE_SYNCED.key, ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_4.key),
-                    tooltipModeBullet(ClientMessage.MODE_BROADCAST.key, ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_6.key),
-                    literalText(""),
-                    tooltipValue(
-                        ClientMessage.BUTTON_SYNCHRONIZATION_TOOLTIP_5.key,
-                        translatableText(syncModeLabel(sync.mode)),
                     ),
                 ]
             },
@@ -845,7 +795,6 @@ class DisplayMenu private constructor(
     }
 
     private fun resyncModeSlider() {
-        sync.syncToCurrent()
         access.syncToCurrent()
     }
 
@@ -1052,13 +1001,6 @@ class DisplayMenu private constructor(
         private const val MIN_CONTENT_W = 640
         private const val MIN_CONTENT_H = 410
 
-        private fun syncModeLabel(mode: PlaybackMode): String = when (mode) {
-            PlaybackMode.LOCAL -> ClientMessage.MODE_LOCAL.key
-            PlaybackMode.SYNCED -> ClientMessage.MODE_SYNCED.key
-            PlaybackMode.WATCH_PARTY -> ClientMessage.MODE_WATCH_PARTY.key
-            PlaybackMode.BROADCAST -> ClientMessage.MODE_BROADCAST.key
-        }
-
         private val AUDIO_3D_MODES = [AcousticQuality.OFF, AcousticQuality.ADVANCED, AcousticQuality.ULTRA]
         private val AUDIO_3D_DEFAULT = AcousticQuality.ADVANCED
 
@@ -1067,8 +1009,6 @@ class DisplayMenu private constructor(
             AcousticQuality.ULTRA -> ClientMessage.MODE_AUDIO_ADVANCED.key
             else -> ClientMessage.MODE_AUDIO_ENHANCED.key
         }
-
-        private val SYNC_MODES = [PlaybackMode.LOCAL, PlaybackMode.SYNCED, PlaybackMode.BROADCAST]
 
         private fun accessModesFor(ds: DisplayScreen): List<DisplayAccess> =
             if (ds.supportsRegionAccess || ds.access == DisplayAccess.REGION) {

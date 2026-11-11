@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import io.github.arnodoelinger.platformweaver.PaperOnly
 import de.maxhenkel.voicechat.api.BukkitVoicechatService
 import de.maxhenkel.voicechat.api.VoicechatApi
 import de.maxhenkel.voicechat.api.VoicechatPlugin
@@ -21,6 +22,7 @@ import java.util.function.Consumer
  * Same approach as the hot swap of our voicechat-discord fork. Written against voice chat 2.5.36 (bukkit); re-check
  * the field names if it is ever updated.
  */
+@PaperOnly
 internal class VoicechatHotSwap private constructor(service: BukkitVoicechatService) {
     private val svcLoader: ClassLoader = service.javaClass.classLoader
 

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import io.github.arnodoelinger.platformweaver.PaperOnly
 import com.dreamdisplays.core.karaoke.BurstAnchor
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import de.maxhenkel.voicechat.api.BukkitVoicechatService
@@ -23,6 +24,7 @@ import java.util.function.Consumer
  * the display, at the time that lands it on the beat for that listener: see [KaraokeTiming] for the math and
  * [BurstAnchor] for how frames are put on a jitter-free grid. Sends are scheduled per listener on [VoiceEmitter].
  */
+@PaperOnly
 class SvcKaraokeVoice : KaraokeVoice {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val emitter = VoiceEmitter()

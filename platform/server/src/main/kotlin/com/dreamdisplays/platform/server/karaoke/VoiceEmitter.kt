@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.karaoke
 
+import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.locks.ReentrantLock
@@ -11,6 +12,7 @@ import kotlin.concurrent.withLock
  *
  * A task returns null when done, or a later deadline to run again then (its target moved).
  */
+@PaperOnly
 class VoiceEmitter : Thread("DreamDisplays Karaoke") {
     fun interface Task {
         fun run(nowNanos: Long): Long?
