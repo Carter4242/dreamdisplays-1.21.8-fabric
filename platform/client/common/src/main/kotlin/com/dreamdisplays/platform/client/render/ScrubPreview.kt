@@ -160,15 +160,15 @@ object ScrubPreview {
                 async(Dispatchers.IO) { runCatching { proc.inputStream.use { it.readBytes() } }.getOrNull() }
 
             val result = runCatching {
-                val exited = withTimeoutOrNull(EXTRACT_TIMEOUT) {
-                    withContext(Dispatchers.IO) { proc.waitFor() }
-                }
+                // A blocking waitFor() inside withTimeoutOrNull never times out (the block can't be cancelled), so a
+                // stalled read held its ffmpeg and a concurrency permit forever
+                val exited = ProcessExit.awaitOrKill(proc, EXTRACT_TIMEOUT.inWholeMilliseconds)
 
                 val bytes = stdoutDeferred.await()
                 stderrDeferred.await()
 
                 when {
-                    exited == null -> {
+                    !exited -> {
                         logger.warn("Scrub frame extraction timed out for $key@$offsetNanos.")
                         null
                     }
@@ -199,8 +199,14 @@ object ScrubPreview {
         }.getOrNull() ?: return null
 
         val latch = java.util.concurrent.CountDownLatch(1)
+        // Claimed by whichever side gets there first: the render task (registers) or a timed-out wait (abandons)
+        val claimed = java.util.concurrent.atomic.AtomicBoolean(false)
         var result: Identifier? = null
         Minecraft.getInstance().execute {
+            if (!claimed.compareAndSet(false, true)) {
+                runCatching { image.close() }
+                return@execute
+            }
             runCatching {
                 val texKey = "$key@$timestampNanos"
                 //? if >=1.21.5 {
@@ -218,7 +224,9 @@ object ScrubPreview {
                 latch.countDown()
             }
         }
-        latch.await(5, TimeUnit.SECONDS)
+        if (!latch.await(5, TimeUnit.SECONDS) && claimed.compareAndSet(false, true)) return null
+        // The task has started (or finished): wait for it, so a texture it registers is never orphaned
+        latch.await()
         return result
     }
 
