@@ -14,6 +14,7 @@ import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.sync.DisplayFollowers
+import com.dreamdisplays.core.sync.ModeChanges
 import com.dreamdisplays.core.sync.TimelineRecords
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -385,19 +386,19 @@ object TimelineManager {
 
     /** Re-initializes the clock after a base-mode change and broadcasts the result. */
     fun onModeChanged(display: DisplayData, positionMs: Long = -1) {
-        timelines.remove(display.id)
-        startHolds.remove(display.id)
+        val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
+        // Synced <-> Broadcast run the same clock: it carries on as it is (paused, speed, a start hold)
+        val existing = timelines[display.id]?.takeIf { shared }
+        if (existing == null) {
+            timelines.remove(display.id)
+            startHolds.remove(display.id)
+        }
         val now = transport.nowMs()
         // The length viewers reported for the video it holds now (in any mode: it may have changed while Local), not
         // whatever the display last ran in a shared mode
         val durationMs = QueueTiming.scheduledDurationMs(durations.mediaMsOf(display.id, display.url))
         display.duration = durationMs.takeIf { it > 0L }?.let { it * 1_000_000L }
-        val timeline = when (display.mode) {
-            PlaybackMode.SYNCED, PlaybackMode.BROADCAST ->
-                Timeline(positionMs.coerceAtLeast(0), now, paused = false, durationMs = durationMs, loop = true)
-
-            else -> null
-        }
+        val timeline = ModeChanges.timelineAfter(existing, shared, positionMs, now, durationMs)
         if (timeline != null) {
             timelines[display.id] = timeline
             broadcast(display, timeline)
