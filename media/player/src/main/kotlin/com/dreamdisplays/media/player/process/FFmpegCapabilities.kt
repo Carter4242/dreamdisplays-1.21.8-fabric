@@ -34,6 +34,14 @@ internal object FFmpegCapabilities {
             listsOption(output, "stats_mux_pre").also { if (!it) logger.info("FFmpeg has no -stats_mux_pre; live frame stamps off.") }
         }
 
+    private val encoderOptionCache = ConcurrentHashMap<String, Boolean>()
+
+    /** True when [ffmpeg]'s [encoder] has option [name] (`-h encoder=<encoder>`, read once per binary and encoder). */
+    fun encoderHasOption(ffmpeg: String, encoder: String, name: String): Boolean =
+        encoderOptionCache.computeIfAbsent("$ffmpeg|$encoder|$name") {
+            listing(ffmpeg, "-h", "encoder=$encoder")?.let { listsOption(it, name) } ?: false
+        }
+
     /** True when FFmpeg's help [output] lists option [name] (as `-name` at the start of a line). */
     internal fun listsOption(output: String, name: String): Boolean =
         output.lineSequence().any { line ->

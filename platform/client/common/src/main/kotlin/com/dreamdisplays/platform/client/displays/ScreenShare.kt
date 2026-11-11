@@ -280,6 +280,7 @@ object ScreenShare {
                                 val plan = ScreenCapture.choose(ffmpeg, screen)?.plan ?: return@runCatching
                                 // The 60 fps encode test too (~2 s once per encoder), so the first share starts at once
                                 ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, ScreenCapture.Settings().maxHeight, 0)
+                                ScreenCapture.prepareEncoder(ffmpeg, plan.encoder)
                             }
                         }
                     } finally {
@@ -288,7 +289,7 @@ object ScreenShare {
                 }
                 ScreenCapture.windowCapture(ffmpeg)
             } else {
-                ScreenCapture.pickEncoder(ffmpeg)
+                ScreenCapture.prepareEncoder(ffmpeg, ScreenCapture.pickEncoder(ffmpeg))
             }
         }
     }

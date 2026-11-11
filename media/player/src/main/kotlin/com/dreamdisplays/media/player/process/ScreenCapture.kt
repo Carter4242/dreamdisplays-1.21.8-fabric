@@ -654,6 +654,7 @@ object ScreenCapture {
         windowCapture: WindowCapture = WindowCapture(Source.GFXCAPTURE, dupFrames = false),
         audioStartMicros: Long = clockBaseMicros,
     ): List<String> = buildList {
+        val forcedIdr = forcedIdrOption(ffmpeg, encoder)
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
         // A window without sound still carries a silent track: a still window sends no frames, and without any packets
@@ -679,9 +680,11 @@ object ScreenCapture {
         // A keyframe every second (a viewer joining waits at most that long) and no B-frames (each one is a frame
         // of delay at the encoder)
         addAll(["-g", fps, "-keyint_min", fps, "-bf", "0"])
-        // A window sends frames only as it draws: keyframes by time, so a viewer joining still waits at most a second
-        // (relative to the last one: t is the capture clock, not zero at the start)
-        if (target is Window) addAll(["-force_key_frames", KEYFRAME_EVERY_SECOND])
+        // Keyframes by time too: four a second while the share starts (every viewer connects then, and waits for one),
+        // then one a second (a window sends frames only as it draws). Forced ones must be IDR frames: the relay only
+        // starts a viewer on those
+        addAll(["-force_key_frames", keyframes(settings.fps)])
+        forcedIdr?.let { addAll([it, "1"]) }
         val dest = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
         val muxer = publishMuxer(dest)
         addAll(["-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0"])
@@ -839,8 +842,30 @@ object ScreenCapture {
      */
     const val UNCLOCKED_START_MICROS = 2_500_000L
 
-    /** `-force_key_frames`: the first frame, then one a second after the last forced one (any clock origin). */
-    internal const val KEYFRAME_EVERY_SECOND = "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,1))"
+    /**
+     * `-force_key_frames`: the first frame, then one every [EARLY_KEYFRAME_SECONDS] for the first [EARLY_SECONDS] of
+     * frames at [fps], then one a second after the last forced one (any clock origin: t is the capture clock).
+     */
+    internal fun keyframes(fps: Int): String =
+        "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,if(lt(n,${EARLY_SECONDS * fps.coerceAtLeast(1)}),$EARLY_KEYFRAME_SECONDS,1)))"
+
+    internal const val EARLY_SECONDS = 3
+    internal const val EARLY_KEYFRAME_SECONDS = "0.25"
+
+    /** Reads ahead of the first share whether [ffmpeg]'s [encoder] can force IDR frames (one short `FFmpeg` run). */
+    fun prepareEncoder(ffmpeg: String, encoder: Encoder) {
+        forcedIdrOption(ffmpeg, encoder)
+    }
+
+    /** The option making [encoder]'s forced keyframes IDR frames, where this [ffmpeg] has one (VideoToolbox needs none). */
+    private fun forcedIdrOption(ffmpeg: String, encoder: Encoder): String? {
+        val option = when (encoder) {
+            Encoder.X264, Encoder.NVENC -> "forced-idr"
+            Encoder.AMF, Encoder.QSV -> "forced_idr"
+            Encoder.VIDEOTOOLBOX -> return null
+        }
+        return "-$option".takeIf { FFmpegCapabilities.encoderHasOption(ffmpeg, encoder.ffmpegName, option) }
+    }
 
     /** Default bitrates (kbps): measured on scrolling text, 4000 -> 6000 lifts x264's SSIM 0.946 -> 0.959. */
     const val DEFAULT_KBPS_30 = 6_000

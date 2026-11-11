@@ -384,10 +384,11 @@ object MediaProcess {
      * screen, past the live player's 6 s startup watchdog, which then reconnected and started over.
      *
      * The limits must still let a stream with sound see its first keyframe: the relay sends sound at once but
-     * pictures only from the next keyframe (a second apart), so before it come up to a second of sound (~22 kB at
-     * the share's 160 kbit/s AAC). With less, the picture had no stream of its own and failed.
+     * pictures only from the next keyframe (a second apart; a quarter second while a share starts), so before it
+     * come up to a second of sound (~22 kB at the share's 160 kbit/s AAC). With less, the picture had no stream of its
+     * own and failed. 32 kB is 0.26 s of a 1 Mbit/s picture-only share.
      */
-    internal const val LIVE_PROBE_SIZE = "65536"
+    internal const val LIVE_PROBE_SIZE = "32768"
 
     /** See [LIVE_PROBE_SIZE]: above the share's keyframe interval (1 s) with room to spare. */
     internal const val LIVE_ANALYZE_MICROS = "1500000"
