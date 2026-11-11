@@ -288,6 +288,41 @@ object ScreenCapture {
         RegexOption.IGNORE_CASE,
     )
 
+    /** How a capture's publish to the relay failed (see [relayFailure]). */
+    enum class RelayFailure {
+        /** The relay turned this publisher away (its key or credentials, an ended share): retrying cannot help. */
+        REFUSED,
+
+        /** The relay could not be reached, or dropped the connection: may be passing. */
+        UNREACHABLE,
+    }
+
+    /**
+     * What `FFmpeg`'s [output] says about the relay, or null when the relay is not what failed (the capture or the
+     * encoder did, which a different plan can fix). Neither relay case says anything about the screen's plan.
+     */
+    fun relayFailure(output: String): RelayFailure? = when {
+        isEncoderOpenFailure(output) || CAPTURE_FAILURE.containsMatchIn(output) -> null
+        RELAY_REFUSED.containsMatchIn(output) -> RelayFailure.REFUSED
+        RELAY_UNREACHABLE.containsMatchIn(output) -> RelayFailure.UNREACHABLE
+        else -> null
+    }
+
+    /** A capture source's own error line (`[Parsed_ddagrab_0 @ ...]`, `[gdigrab @ ...]`, ...). */
+    private val CAPTURE_FAILURE = Regex("""(?i)\[(?:Parsed_)?(?:ddagrab|gfxcapture|gdigrab|x11grab|avfoundation)""")
+
+    /** The relay said no: an RTMP status error (MediaMTX rejecting the publish), HTTP-style auth codes, SRT rejection. */
+    private val RELAY_REFUSED = Regex(
+        """(?i)Server error|unauthori[sz]ed|authentication failed|auth(?:entication)? error|\b401\b|\b403\b|forbidden|""" +
+            """Connect\.Rejected|Publish\.BadName|connection rejected|rejected by the server""",
+    )
+
+    private val RELAY_UNREACHABLE = Regex(
+        """(?i)Connection refused|Connection reset|Connection timed out|timed out|Network is unreachable|No route to host|""" +
+            """Failed to resolve|Name or service not known|getaddrinfo|Broken pipe|Input/output error|End of file|""" +
+            """Error opening output|Error writing trailer|Cannot open connection|handshake|\btls\b""",
+    )
+
     // ---- Windows ----
 
     /**

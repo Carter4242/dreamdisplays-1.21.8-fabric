@@ -84,6 +84,10 @@ object ScreenShare {
         @Volatile
         var toldNoSound = false
 
+        /** The relay could not be reached at once and the same plan already got its one more try. */
+        @Volatile
+        var relayRetried = false
+
         /** The share's [ScreenShareRequest.nonce], on its heartbeats and stop (see [ScreenShareServerRules.sameShare]). */
         var nonce: Long = 0L
     }
@@ -386,8 +390,9 @@ object ScreenShare {
             report(r, choice, choice.plan, "", "planned_fallback", final = false,
                 "screen share needed a fallback: ${choice.plan} after ${choice.attempts.count { !it.ok }} failed test(s)")
         }
-        val first = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return
+        val started = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return
         if (r.stopped) return
+        val first = afterRelay(r, ffmpeg, choice.monitor, choice.plan, publishUrl, started) ?: return
         // Died at once because of the sound input: the same plan again, without sound
         if (retryWithoutSound(r, first)) {
             val again = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = false) ?: return
@@ -432,8 +437,9 @@ object ScreenShare {
         WinWindows.unminimize(window)
         val plan = ScreenCapture.windowPlan(ffmpeg, r.softwareOnly)
         if (r.stopped) return
-        val first = runShare(r, ffmpeg, window, plan, publishUrl, announce = true) ?: return
+        val started = runShare(r, ffmpeg, window, plan, publishUrl, announce = true) ?: return
         if (r.stopped) return
+        val first = afterRelay(r, ffmpeg, window, plan, publishUrl, started) ?: return
         val retryPlan = when {
             retryWithoutSound(r, first) -> plan
             first.ranMs < EARLY_EXIT_MS && plan.encoder != ScreenCapture.Encoder.X264 ->
@@ -448,6 +454,39 @@ object ScreenShare {
         val retry = runShare(r, ffmpeg, window, retryPlan, publishUrl, announce = false) ?: return
         if (r.stopped) return
         fail(r, retry.reason)
+    }
+
+    /**
+     * [ended] as the run to judge the plan by, once the relay is ruled out; null when that settled the share. The relay
+     * says nothing about this screen's plan, so it never leads to a fallback or a remembered plan: a refused publish
+     * (the relay's per-share key, a share it already ended) ends the share saying so; one that could not reach the
+     * relay at once gets the same plan once more.
+     */
+    private fun afterRelay(
+        r: Running, ffmpeg: String, target: ScreenCapture.Target, plan: ScreenCapture.Plan, publishUrl: String, ended: Ended,
+    ): Ended? {
+        when (ScreenCapture.relayFailure(ended.output)) {
+            null -> return ended
+            ScreenCapture.RelayFailure.REFUSED -> {
+                logger.warn("The relay refused the screen share: {}", ended.reason)
+                fail(r, "the relay refused the stream")
+                return null
+            }
+            ScreenCapture.RelayFailure.UNREACHABLE -> {
+                if (ended.ranMs >= EARLY_EXIT_MS || r.relayRetried) {
+                    logger.warn("Screen share lost the relay: {}", ended.reason)
+                    fail(r, "lost the connection to the relay")
+                    return null
+                }
+                r.relayRetried = true
+                logger.warn("Screen share could not reach the relay ({}); trying {} once more.", ended.reason, plan)
+                runCatching { Thread.sleep(1_000L) }
+                if (r.stopped) return null
+                val again = runShare(r, ffmpeg, target, plan, publishUrl, announce = false) ?: return null
+                if (r.stopped) return null
+                return afterRelay(r, ffmpeg, target, plan, publishUrl, again)
+            }
+        }
     }
 
     /** True (and sound turned off for the rest of [r]) when the run with sound died at once on its sound input. */

@@ -155,6 +155,23 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `relay failures are told apart from capture and encoder failures`() {
+        val refused = ScreenCapture.RelayFailure.REFUSED
+        val unreachable = ScreenCapture.RelayFailure.UNREACHABLE
+        // MediaMTX rejecting a publish key answers the RTMP publish with an error status
+        assertEquals(refused, ScreenCapture.relayFailure("[rtmp @ 0x1] Server error: Authentication failed"))
+        assertEquals(refused, ScreenCapture.relayFailure("[https @ 0x1] HTTP error 401 Unauthorized"))
+        assertEquals(refused, ScreenCapture.relayFailure("[srt @ 0x1] Connection setup failure: connection rejected"))
+        assertEquals(unreachable, ScreenCapture.relayFailure("[tcp @ 0x1] Connection to tcp://relay:1935 failed: Connection refused"))
+        assertEquals(unreachable, ScreenCapture.relayFailure("[tls @ 0x1] Error in the pull function.\n<relay-url>: Input/output error"))
+        assertEquals(unreachable, ScreenCapture.relayFailure("[out#0/flv @ 0x1] Error opening output <relay-url>: Connection timed out"))
+        // Not the relay: a different plan may well work
+        assertEquals(null, ScreenCapture.relayFailure("[Parsed_ddagrab_0 @ 0x1] DuplicateOutput failed: 80070005\nError opening output files: Input/output error"))
+        assertEquals(null, ScreenCapture.relayFailure("[h264_amf @ 0x1] Failed to create derived AMF device context: No such device"))
+        assertEquals(null, ScreenCapture.relayFailure("Conversion failed!"))
+    }
+
+    @Test
     fun `screens are named by their place on the desktop`() {
         fun m(x: Int, dev: String) = ScreenCapture.Monitor(0, "", x, 0, 1920, 1080, adapter = 0, deviceName = dev)
         val named = ScreenCapture.named([m(1920, "B"), m(0, "A"), m(-1920, "C")])
