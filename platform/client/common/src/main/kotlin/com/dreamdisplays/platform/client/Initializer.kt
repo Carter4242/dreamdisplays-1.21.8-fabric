@@ -76,6 +76,9 @@ object Initializer {
      */
     fun onServerJoined(serverId: String) {
         ClientStateManager.connectedServerId = serverId
+        val config = ClientStateManager.config
+        ClientStateManager.displaysEnabled =
+            DisplaysSwitch.enabledOn(config.displaysEnabled, config.displaysDisabledServers, serverId)
         DisplayRegistry.loadScreensForServer(serverId)
         NewPipeResolver.warmConnection()
         DreamServices.registry.getOrNull<ClientApplication>()

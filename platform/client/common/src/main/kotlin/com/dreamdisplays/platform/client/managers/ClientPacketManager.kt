@@ -5,6 +5,7 @@ import com.dreamdisplays.core.services.DisplaySystem
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.core.services.DisplayStorage
+import com.dreamdisplays.platform.client.DisplaysSwitch
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.Mod
 import com.dreamdisplays.platform.client.capabilities.CapabilityNegotiationService
@@ -87,10 +88,17 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
     }
 
+    /** The server switched displays on or off for this player: for this server only (see [DisplaysSwitch]). */
     private fun applyDisplaysEnabled(enabled: Boolean) {
         ClientStateManager.displaysEnabled = enabled
-        ClientStateManager.config.displaysEnabled = enabled
-        ClientStateManager.config.save()
+        val config = ClientStateManager.config
+        val (global, disabled) = DisplaysSwitch.afterServerSet(
+            config.displaysEnabled, config.displaysDisabledServers, ClientStateManager.connectedServerId, enabled,
+        )
+        if (global == config.displaysEnabled && disabled == config.displaysDisabledServers) return
+        config.displaysEnabled = global
+        config.displaysDisabledServers = disabled
+        config.save()
     }
 
     private fun handleDelete(packet: DisplayDelete) {

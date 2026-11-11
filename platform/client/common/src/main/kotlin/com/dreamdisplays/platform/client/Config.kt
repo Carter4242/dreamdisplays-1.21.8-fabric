@@ -19,8 +19,11 @@ class Config(private val baseDir: File) {
     /** Default volume for new displays, in range `0.0`..`1.0`. */
     var defaultDisplayVolume: Double = 0.5
 
-    /** Whether displays are enabled at all. */
+    /** Whether displays are enabled at all (on every server; a server's own switch is [displaysDisabledServers]). */
     var displaysEnabled: Boolean = true
+
+    /** Servers (address, lowercase) that switched displays off for this player (`/display off`); see [DisplaysSwitch]. */
+    var displaysDisabledServers: Set<String> = emptySet()
 
     /** Browser to import `yt-dlp` cookies from, or [CookieSource.NONE] to disable. */
     var ytdlpCookieSource: CookieSource = CookieSource.NONE
@@ -87,6 +90,7 @@ class Config(private val baseDir: File) {
         defaultDistance = ((rawDistance / 16.0).roundToInt().coerceIn(2, 12)) * 16
         defaultDisplayVolume = data["default-default-display-volume"]?.toDoubleOrNull() ?: defaultDisplayVolume
         displaysEnabled = data["displays-enabled"]?.toBooleanStrictOrNull() ?: displaysEnabled
+        displaysDisabledServers = data["displays-disabled-servers"]?.let(DisplaysSwitch::parseServers) ?: displaysDisabledServers
         ytdlpCookieSource = data["ytdlp-cookies-from-browser"]
             ?.let { CookieSource.fromConfig(it) }
             ?: ytdlpCookieSource
@@ -119,6 +123,7 @@ class Config(private val baseDir: File) {
             appendLine("default-render-distance: $defaultDistance")
             appendLine("default-default-display-volume: $defaultDisplayVolume")
             appendLine("displays-enabled: $displaysEnabled")
+            appendLine("displays-disabled-servers: ${DisplaysSwitch.formatServers(displaysDisabledServers).yamlQuoted()}")
             appendLine("ytdlp-cookies-from-browser: ${ytdlpCookieSource.configToken.yamlQuoted()}")
             appendLine("ytdlp-proxy: ${ytdlpProxy.yamlQuoted()}")
             appendLine("use-hw-accel: $useHwAccel")
