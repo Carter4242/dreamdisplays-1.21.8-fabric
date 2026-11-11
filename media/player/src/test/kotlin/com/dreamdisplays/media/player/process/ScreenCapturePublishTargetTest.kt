@@ -7,7 +7,7 @@ class ScreenCapturePublishTargetTest {
     @Test
     fun `a server cannot aim the screen capture at a file or a non-relay protocol`() {
         for (url in [
-            "C:\Users\Public\x.ts",
+            "C:\\Users\\Public\\x.ts",
             "/tmp/x.ts",
             "file:///C:/Users/Public/x.ts",
             "tcp://192.168.1.20:9100",

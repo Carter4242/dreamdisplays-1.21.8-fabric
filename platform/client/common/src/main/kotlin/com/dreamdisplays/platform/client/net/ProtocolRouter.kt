@@ -61,7 +61,9 @@ object ProtocolRouter {
             v2Negotiated = true
             logger.info("Protocol v2 negotiated (server protocol ${packet.protocolVersion}).")
         }
-        dispatchGuarded(packet::class.simpleName, logger) { ClientPacketManager.handle(packet) }
+        dispatchGuarded({ ClientPacketManager.handle(packet) }) { e ->
+            logger.error("Failed to handle server packet {}; ignoring it.", packet::class.simpleName, e)
+        }
         if (answer) {
             logger.info("Server greeted this client again (plugin reloaded?); answering with a hello.")
             sendHello()
