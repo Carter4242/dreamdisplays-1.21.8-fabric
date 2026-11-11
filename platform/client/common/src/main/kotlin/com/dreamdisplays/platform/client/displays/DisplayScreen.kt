@@ -621,6 +621,14 @@ class DisplayScreen(
     /** True while a PiP or window popout is open for this display. */
     val isPopoutActive: Boolean; get() = popoutManager.isActive
 
+    /**
+     * True for a virtual display (a URL broadcast) that was shown and has no popout left: dismissed, out of the
+     * broadcast's radius, or its PiP closed. Nothing else can show it again, so it is dropped (see
+     * [VirtualDisplayLifetime]); the server re-describes it if the broadcast reaches this player again.
+     */
+    val isVirtualAndDone: Boolean
+        get() = VirtualDisplayLifetime.isDone(virtual, popoutManager.wasEverActive, isPopoutActive, isPrepared)
+
     /** True for a fullscreen broadcast's synthetic display. */
     var virtual: Boolean = false
 

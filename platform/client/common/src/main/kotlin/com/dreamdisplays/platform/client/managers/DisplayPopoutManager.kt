@@ -33,6 +33,10 @@ class DisplayPopoutManager(
     val isActive: Boolean
         get() = windowActive || (popoutWindow?.isOpen == true) || (pipOverlay != null) || (fullscreenOverlay != null)
 
+    /** True once any popout surface of this display has been opened. */
+    var wasEverActive: Boolean = false
+        private set
+
     /** True while this display has a PiP overlay (not one that is fading out). */
     val isPipActive: Boolean get() = pipOverlay != null
 
@@ -102,6 +106,7 @@ class DisplayPopoutManager(
             newWin.open(w, h)
         }.onSuccess {
             windowActive = true
+            wasEverActive = true
             rewireSink()
         }.onFailure { e ->
             logger.warn("Could not open window: ${e.message}.")
@@ -128,6 +133,7 @@ class DisplayPopoutManager(
         val added = PipOverlayManager.add(overlay)
         if (added) {
             pipOverlay = overlay
+            wasEverActive = true
             rewireSink()
             emit(PopoutEvent.Opened(displayScreen.uuid.toString()))
         } else {
@@ -149,6 +155,7 @@ class DisplayPopoutManager(
         closePipOverlay()
         closeFullscreenOverlay()
         fullscreenOverlay = FullscreenOverlayManager.open(displayScreen, mode, forced, sessionId)
+        wasEverActive = true
         rewireSink()
         emit(PopoutEvent.Opened(displayScreen.uuid.toString()))
     }

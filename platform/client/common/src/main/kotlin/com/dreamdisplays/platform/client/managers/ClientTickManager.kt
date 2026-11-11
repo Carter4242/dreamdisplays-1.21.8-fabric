@@ -130,6 +130,10 @@ object ClientTickManager {
 
         val overBudget = DisplayLifecycleManager.overBudget(playerPos)
         for (displayScreen in DisplayRegistry.getScreens()) {
+            if (displayScreen.isVirtualAndDone) {
+                DisplayRegistry.unregisterScreen(displayScreen)
+                continue
+            }
             // Hysteresis
             val threshold = if (displayScreen.isDormant) {
                 displayScreen.renderDistance - DORMANT_HYSTERESIS_BLOCKS
