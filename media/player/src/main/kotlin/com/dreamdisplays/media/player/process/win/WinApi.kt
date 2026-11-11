@@ -148,11 +148,43 @@ internal object WinApi {
     val IID_ACTIVATE_COMPLETION_HANDLER = guid("41D949AB-9862-444A-80F6-C261334DA5EB")
 
     /**
+     * A COM reference count starting at 1 (its creator's reference); [onZero] runs once when the last one is released.
+     */
+    class ComRefCount(private val onZero: () -> Unit) {
+        private val count = java.util.concurrent.atomic.AtomicInteger(1)
+
+        fun addRef(): Int = count.incrementAndGet()
+
+        fun release(): Int = count.decrementAndGet().also { if (it == 0) onZero() }
+    }
+
+    /**
      * A minimal free-threaded COM object implementing IActivateAudioInterfaceCompletionHandler (and IAgileObject, which
-     * ActivateAudioInterfaceAsync insists on). [onCompleted] gets the async operation. Keep the instance reachable until
-     * the callback ran: its vtable points at JNA callbacks.
+     * ActivateAudioInterfaceAsync insists on). [onCompleted] gets the async operation. Its vtable points at JNA
+     * callbacks, so it stays strongly reachable (in [live]) for as long as anyone holds a COM reference to it: Windows
+     * keeps one until the activation completed and the operation is gone, which can be long after a caller gave up
+     * waiting. The creator holds the first reference and gives it back with [releaseOwn].
      */
     class CompletionHandler(private val onCompleted: (Pointer) -> Unit) {
+        private val refs = ComRefCount { live.remove(this) }
+
+        /** Native memory the activation reads (its parameters), kept as long as this handler. */
+        private val kept = ArrayList<Any>()
+
+        init {
+            live.add(this)
+        }
+
+        /** Keeps [things] reachable as long as this handler. */
+        fun keep(vararg things: Any) {
+            kept.addAll(things)
+        }
+
+        /** The creator's reference, given back once it no longer waits for the completion. */
+        fun releaseOwn() {
+            refs.release()
+        }
+
         private interface QueryInterface : Callback {
             fun invoke(self: Pointer, riid: Pointer, out: Pointer): Int
         }
@@ -170,15 +202,15 @@ internal object WinApi {
                 val known = sameGuid(riid, IID_IUNKNOWN) || sameGuid(riid, IID_IAGILE_OBJECT) ||
                         sameGuid(riid, IID_ACTIVATE_COMPLETION_HANDLER)
                 out.setPointer(0, if (known) self else null)
+                if (known) refs.addRef()
                 return if (known) S_OK else E_NOINTERFACE
             }
         }
-        // Lifetime is this Kotlin object's, so the count only has to look plausible
         private val addRef = object : RefCount {
-            override fun invoke(self: Pointer): Int = 1
+            override fun invoke(self: Pointer): Int = refs.addRef()
         }
         private val release = object : RefCount {
-            override fun invoke(self: Pointer): Int = 1
+            override fun invoke(self: Pointer): Int = refs.release()
         }
         private val completed = object : Completed {
             override fun invoke(self: Pointer, operation: Pointer): Int {
@@ -196,5 +228,10 @@ internal object WinApi {
 
         /** The COM object: a pointer to the vtable. */
         val pointer: Memory = Memory(Native.POINTER_SIZE.toLong()).apply { setPointer(0, vtable) }
+
+        private companion object {
+            /** Handlers some COM reference still points at. */
+            val live: MutableSet<CompletionHandler> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+        }
     }
 }

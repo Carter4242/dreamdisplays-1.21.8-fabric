@@ -233,22 +233,48 @@ object WinAudio {
             setPointer(if (Native.POINTER_SIZE == 8) 16L else 12L, params)
         }
         val done = CountDownLatch(1)
-        var operation: Pointer? = null
+        // WAITING -> COMPLETED (the callback took the operation) or ABANDONED (the caller gave up first): a completion
+        // after the caller gave up takes no reference, so nothing is leaked and nothing is used after this returns
+        val state = java.util.concurrent.atomic.AtomicInteger(WAITING)
+        val operation = java.util.concurrent.atomic.AtomicReference<Pointer?>()
         val handler = WinApi.CompletionHandler { op ->
-            call(op, 1) // AddRef: kept past the callback
-            operation = op
-            done.countDown()
+            if (state.compareAndSet(WAITING, COMPLETED)) {
+                call(op, 1) // AddRef: kept past the callback
+                operation.set(op)
+                done.countDown()
+            }
         }
+        handler.keep(params, variant)
         val opOut = PointerByReference()
-        check(
-            WinApi.mmdevapi.ActivateAudioInterfaceAsync(
-                WString("VAD\\Process_Loopback"), WinApi.IID_IAUDIO_CLIENT, variant, handler.pointer, opOut,
-            ),
-            "ActivateAudioInterfaceAsync",
-        )
         try {
-            if (!done.await(3, TimeUnit.SECONDS)) throw IllegalStateException("process loopback activation timed out")
-            val op = operation!!
+            check(
+                WinApi.mmdevapi.ActivateAudioInterfaceAsync(
+                    WString("VAD\\Process_Loopback"), WinApi.IID_IAUDIO_CLIENT, variant, handler.pointer, opOut,
+                ),
+                "ActivateAudioInterfaceAsync",
+            )
+            return finishActivation(done, state, operation::get, opOut)
+        } finally {
+            // Windows holds its own reference until it is done with the handler; this was only ours
+            handler.releaseOwn()
+        }
+    }
+
+    private const val WAITING = 0
+    private const val COMPLETED = 1
+    private const val ABANDONED = 2
+
+    private fun finishActivation(
+        done: CountDownLatch, state: java.util.concurrent.atomic.AtomicInteger, operation: () -> Pointer?,
+        opOut: PointerByReference,
+    ): Pointer {
+        try {
+            if (!done.await(3, TimeUnit.SECONDS)) {
+                if (state.compareAndSet(WAITING, ABANDONED)) throw IllegalStateException("process loopback activation timed out")
+                // Completed just now: the callback is about to count down
+                done.await(1, TimeUnit.SECONDS)
+            }
+            val op = operation() ?: throw IllegalStateException("process loopback gave no operation")
             try {
                 val hr = IntByReference()
                 val unk = PointerByReference()
@@ -260,9 +286,6 @@ object WinAudio {
             }
         } finally {
             release(opOut.value)
-            // The handler's callbacks must outlive the activation
-            java.lang.ref.Reference.reachabilityFence(handler)
-            java.lang.ref.Reference.reachabilityFence(params)
         }
     }
 
