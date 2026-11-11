@@ -317,6 +317,9 @@ internal class PreloadHost(private val screen: DisplayScreen) : PlaybackHost {
 
     override val uuid: UUID = UUID.randomUUID()
 
+    /** Reports and log labels name the display: once adopted this is its player, and a failed preload is its problem. */
+    override val reportId: UUID get() = screen.uuid
+
     override val quality: VideoQuality get() = display.quality
 
     override val textureWidth: Int get() = display.textureWidth

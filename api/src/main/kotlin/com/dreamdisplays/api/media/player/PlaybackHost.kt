@@ -14,6 +14,12 @@ interface PlaybackHost {
     /** Stable identifier of this display, used for log labels. */
     val uuid: UUID
 
+    /**
+     * The display this player plays for, as named in log labels, error and hitch reports. Same as [uuid] except for a
+     * player loaded in the background for a display, whose own [uuid] keeps its buffers apart.
+     */
+    val reportId: UUID get() = uuid
+
     /** Viewer-selected target quality used to seed stream resolution. */
     val quality: VideoQuality
 

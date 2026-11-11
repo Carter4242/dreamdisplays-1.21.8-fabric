@@ -57,7 +57,7 @@ class MediaPlayer(
     @Volatile private var replayBootstrap: ReplayBootstrap? = null,
     private val audioStage: AudioDspStage? = null,
 ) {
-    private val debugLabel = "${host.uuid}/${Integer.toHexString(System.identityHashCode(this))}"
+    private val debugLabel = "${host.reportId}/${Integer.toHexString(System.identityHashCode(this))}"
     private val terminated = AtomicBoolean(false)
     private val clock = PlaybackClock()
     private val startedFromReplay = replayBootstrap != null
@@ -967,7 +967,7 @@ class MediaPlayer(
         if (!PlaybackDiagnostics.enabled || terminated.get()) return
         PlaybackDiagnostics.emit(
             PlaybackFailure(
-                displayId = host.uuid,
+                displayId = host.reportId,
                 url = url,
                 kind = kind,
                 message = message,
@@ -987,7 +987,7 @@ class MediaPlayer(
     /** Notes why the picture is about to stop, for the client's hitch report of the freeze that follows. */
     private fun noteHitch(stage: String, action: String, message: String, stderr: String = "", frozenBeforeMs: Long = 0L) {
         if (!PlaybackDiagnostics.collectingHitches) return
-        PlaybackDiagnostics.noteHitchCause(host.uuid, HitchCause(stage, action, message, stderr, frozenBeforeMs))
+        PlaybackDiagnostics.noteHitchCause(host.reportId, HitchCause(stage, action, message, stderr, frozenBeforeMs))
     }
 
     /** Surfaces [e] on the display, unless this player was already replaced (a stale error must not paint the new one). */
