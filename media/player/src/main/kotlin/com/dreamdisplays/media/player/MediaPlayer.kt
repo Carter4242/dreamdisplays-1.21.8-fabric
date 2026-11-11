@@ -1242,10 +1242,15 @@ class MediaPlayer(
             if (onEnd == EndOfStreamPolicy.Action.LOOP) {
                 restartFromBeginning()
             } else {
+                val heard = sessionManager.currentPacingNanos()
+                val endNanos = if (heard >= 0L) heard else clock.currentTime()
                 stopSession()
                 lifecycle = PlayerState.Ended
                 // A server timeline decides what follows; until then the last frame stays up
                 heldAtEnd = onEnd == EndOfStreamPolicy.Action.HOLD
+                // ...and the position with it: a stopped session reports the clock's origin, which would otherwise
+                // still be where this session opened (0, or the last seek), not the frame on screen
+                if (heldAtEnd) clock.reset(endNanos)
                 if (heldAtEnd) logger.debug("$debugLabel Stream ended ahead of the server timeline; holding the last frame.")
                 host.onPlaybackEnded(durationHintNanos)
             }
