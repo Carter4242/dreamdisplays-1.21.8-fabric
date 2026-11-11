@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils
 
+import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.platform.server.utils.net.VanillaDisplayActions
 import net.minecraft.server.level.ServerPlayer
 import java.util.*
@@ -19,9 +20,12 @@ object VanillaPermissions {
     @Volatile
     private var luckPermsState = UNKNOWN
 
-    /** True if [player] holds [node], consulting `LuckPerms` first and [fallback] otherwise. */
+    /**
+     * True if [player] holds [node], consulting `LuckPerms` first (with the [Perm.ADMIN] and [Perm.LEGACY] grants that
+     * Paper's descriptor gives as children) and [fallback] otherwise.
+     */
     fun has(player: ServerPlayer, node: String, fallback: Fallback): Boolean =
-        checkLuckPerms(player.uuid, node) ?: when (fallback) {
+        Perm.resolve(node) { checkLuckPerms(player.uuid, it) } ?: when (fallback) {
             Fallback.EVERYONE -> true
             Fallback.OP -> VanillaDisplayActions.isOpLevel2(player)
             Fallback.NOBODY -> false

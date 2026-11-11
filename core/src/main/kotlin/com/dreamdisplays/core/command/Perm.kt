@@ -85,4 +85,18 @@ object Perm {
         "dreamdisplays.reload" to listOf(ADMIN_CONFIG, ADMIN_POLICY, DIAG),
         "dreamdisplays.stats" to listOf(DIAG),
     )
+
+    /**
+     * Resolves [node] on a platform without Bukkit's permission children (Fabric / NeoForge with LuckPerms): the node's
+     * own setting first, then a [LEGACY] node that grants it, then [ADMIN]. [lookup] gives a node's explicit setting
+     * (null when unset). Null when none of them is set, so the caller's default applies.
+     */
+    fun resolve(node: String, lookup: (String) -> Boolean?): Boolean? {
+        lookup(node)?.let { return it }
+        for ((legacy, grants) in LEGACY) {
+            if (node in grants) lookup(legacy)?.let { return it }
+        }
+        if (node != ADMIN && (node in ALL || LEGACY.values.any { node in it })) lookup(ADMIN)?.let { return it }
+        return null
+    }
 }
