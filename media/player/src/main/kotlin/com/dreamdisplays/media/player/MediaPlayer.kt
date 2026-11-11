@@ -1535,6 +1535,13 @@ class MediaPlayer(
         if (trackUrl == ss.currentAudio.url) return
         val newSs = MediaStreamSelector.switchAudioTrack(ss, trackUrl) ?: return
         streams = newSs
+        if (WarmPausePolicy.audioTrackChangeReopens(isPausedWarm())) {
+            // Neither switch runs on a parked session, and resuming it would play the old track on: drop it, so
+            // the resume opens the new track at the paused position
+            freezePausedWarmSession()
+            refreshWarmAudioTracks()
+            return
+        }
         audioTrackSwitching = true
         val seamless = sessionManager.beginAudioTrackSwitch(newSs)
         refreshWarmAudioTracks()
