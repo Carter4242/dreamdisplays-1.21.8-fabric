@@ -905,10 +905,14 @@ class DisplayScreen(
 
             paused = false
             if (packet.url != previousUrl) savedTimeNanos = 0L
-            loadVideo(packet.url, ds.audioTrackLang ?: packet.lang)
+            loadVideo(packet.url, loadLang(packet.lang))
             sendRequestSyncPacket()
         }
     }
+
+    /** The audio language a server-set video loads with: the viewer's saved track language here, else [serverLang]. */
+    internal fun loadLang(serverLang: String): String =
+        ClientSettingsStore.getSettings(uuid).audioTrackLang ?: serverLang
 
     private fun sendRequestSyncPacket() {
         Initializer.sendPacket(RequestSync(uuid, ServerMediaGens.of(uuid)))

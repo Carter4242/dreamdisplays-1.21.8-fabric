@@ -93,7 +93,9 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         val current = preload ?: return null
         preload = null
         current.release()
-        if (current.item.url != url || current.phase == Phase.FAILED || current.host.mediaError != null) {
+        if (!preloadMatches(current.item.url, current.lang, url, lang) || current.phase == Phase.FAILED ||
+            current.host.mediaError != null
+        ) {
             current.player.stop()
             return null
         }
@@ -134,7 +136,8 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
     }
 
     private fun start(item: QueueItemWire) {
-        val lang = item.lang
+        // The language the display will ask for when the server switches to this entry, so the preload can be taken
+        val lang = screen.loadLang(item.lang)
         val host = PreloadHost(screen)
         val player = runCatching {
             MediaPlayer(item.url, lang, host, DreamPlaybackEnvironment, null, null)
@@ -249,6 +252,13 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         private val ACTIVE = AtomicInteger()
     }
 }
+
+/**
+ * Whether a preload of [preUrl] resolved with audio language [preLang] can become the player for a load of [url] in
+ * [lang]: the language picked the audio track at resolve, so another one needs a fresh load.
+ */
+internal fun preloadMatches(preUrl: String, preLang: String, url: String, lang: String): Boolean =
+    preUrl == url && preLang == lang
 
 /**
  * Whether a queue preload starts now: the current video plays and is within [leadNanos] of its end. Never while the

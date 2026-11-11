@@ -31,4 +31,11 @@ class QueuePreloaderTest {
         assertFalse(starts(false, false, false, 220 * s, 210 * s))
         assertFalse(starts(true, false, false, 0L, 0L))
     }
+
+    @Test
+    fun `a preload is taken only for the same link in the same audio language`() {
+        assertTrue(preloadMatches("https://a", "en", "https://a", "en"))
+        assertFalse(preloadMatches("https://a", "en", "https://a", "fr"), "The French request would play English.")
+        assertFalse(preloadMatches("https://a", "en", "https://b", "en"))
+    }
 }
