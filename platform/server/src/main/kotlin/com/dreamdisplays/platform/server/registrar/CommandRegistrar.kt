@@ -53,6 +53,7 @@ object CommandRegistrar {
             clientsBranch()
             reloadBranch()
             policyBranch()
+            speedBranch()
             configBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
@@ -144,6 +145,23 @@ object CommandRegistrar {
                                 StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.speedBranch() {
+        literal("speed", tip("suggestSpeed")) {
+            requires { SpeedCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> SpeedCommand.execute(ctx.source.sender, target(ctx), null) }
+                argument("rate", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        SpeedCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
                     }
                 }
             }
@@ -396,6 +414,14 @@ object CommandRegistrar {
             literal("list", tip("suggestFullscreenList")) {
                 requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenList) }
                 executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
+            }
+        }
+        // In-world events: the same preparation without a fullscreen broadcast; alone it lists preparations
+        literal("prepare", tip("suggestPrepare")) {
+            requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
+            executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
+            fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                DisplaySuggestions.targets(typed, remote(ctx.source))
             }
         }
     }

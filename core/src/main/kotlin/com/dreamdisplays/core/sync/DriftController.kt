@@ -57,16 +57,23 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
         return next
     }
 
-    /** [observe]s the sample, then decides. */
-    fun update(rawDriftMs: Double, nowMs: Double): Decision {
+    /**
+     * [observe]s the sample, then decides. [cheapSeeks]: a seek lands within a frame or two (an in-place seek on an
+     * in-process decoder), so drift past [CHEAP_SEEK_THRESHOLD_MS] is seeked away instead of rate-corrected for a
+     * minute, with a cooldown of at most [CHEAP_SEEK_COOLDOWN_MS].
+     */
+    fun update(rawDriftMs: Double, nowMs: Double, cheapSeeks: Boolean = false): Decision {
         observe(rawDriftMs, nowMs)
-        return decide(nowMs)
+        return decide(nowMs, cheapSeeks)
     }
 
     /** Decides from the current smoothed drift. */
-    fun decide(nowMs: Double): Decision {
+    fun decide(nowMs: Double, cheapSeeks: Boolean = false): Decision {
         val drift = filteredMs ?: return Decision(1.0, false).also { ratio = 1.0 }
-        if (abs(drift) > settings.seekThresholdMs && nowMs - lastSeekMs >= currentCooldownMs()) {
+        val threshold = if (cheapSeeks) minOf(settings.seekThresholdMs.toDouble(), CHEAP_SEEK_THRESHOLD_MS)
+        else settings.seekThresholdMs.toDouble()
+        val cooldown = if (cheapSeeks) minOf(currentCooldownMs(), CHEAP_SEEK_COOLDOWN_MS) else currentCooldownMs()
+        if (abs(drift) > threshold && nowMs - lastSeekMs >= cooldown) {
             seekStreak = if (nowMs - lastSeekMs < STREAK_RESET_MS) (seekStreak + 1).coerceAtMost(MAX_STREAK) else 0
             lastSeekMs = nowMs
             resetMeasurement()
@@ -107,6 +114,12 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
 
         /** Smallest rate offset used while correcting, so the last few ms still close in seconds. */
         const val MIN_RATE = 0.001
+
+        /** Seek threshold while seeks are cheap: rate correction at 1 % would need over 30 s for more than this. */
+        const val CHEAP_SEEK_THRESHOLD_MS = 300.0
+
+        /** Longest cooldown between cheap seeks. */
+        const val CHEAP_SEEK_COOLDOWN_MS = 4_000.0
 
         /** Seeks further apart than this reset the cooldown stretch. */
         const val STREAK_RESET_MS = 30_000.0

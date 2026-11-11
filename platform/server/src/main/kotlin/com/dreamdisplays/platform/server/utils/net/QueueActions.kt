@@ -20,6 +20,7 @@ import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.bukkit.entity.Player
 import org.jspecify.annotations.NullMarked
+import java.util.UUID
 
 /**
  * `Paper` side of the "Up next" queue: client queue packets (checked like [DisplayActions.setVideo]: display rules,
@@ -30,18 +31,18 @@ import org.jspecify.annotations.NullMarked
 object QueueActions {
     /** The `[queue]` config as [QueueManager] wants it. */
     fun settings(): QueueManager.Settings = PaperServer.config.settings.queue.let {
-        QueueManager.Settings(it.enabled, it.max_items, it.max_per_player, it.ready_hold_ms.toLong())
+        QueueManager.Settings(it.enabled, it.max_items, it.max_per_player)
     }
 
-    /** Switches [display] to queue entry [item] exactly like a player-set video, with start hold [holdMs]. */
-    fun applyVideo(display: DisplayData, item: QueueItem, holdMs: Long?): Boolean {
+    /** Switches [display] to queue entry [item] exactly like a player-set video; [readyPlayers] preloaded it. */
+    fun applyVideo(display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>): Boolean {
         val paper = display as? PaperDisplayData ?: return false
         if (ServerApiHost.current?.askSetUrl(paper, item.url, item.lang, item.addedBy) != null) return false
         paper.url = item.url
         paper.lang = item.lang
         runAsync { PaperServer.getInstance().storage.saveDisplay(paper) }
         DisplayManager.broadcastUpdate(paper)
-        if (holdMs == null) TimelineManager.onVideoChanged(paper) else TimelineManager.onVideoChanged(paper, holdMs)
+        TimelineManager.onVideoChanged(paper, readyPlayers)
         ServerApiHost.current?.urlChanged(paper)
         return true
     }

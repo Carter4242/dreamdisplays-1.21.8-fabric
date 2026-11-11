@@ -23,6 +23,42 @@ object MediaProcess {
     fun outputFps(sourceFps: Double?): Double =
         sourceFps?.takeIf { it.isFinite() && it > 1.0 && it <= 240.0 } ?: DEFAULT_OUTPUT_FPS
 
+    /** Most pictures per real second a sped-up session decodes into frames (see [speedFps]). */
+    const val MAX_SPEED_FPS = 60.0
+
+    /**
+     * The content frame rate a session playing at [tempo] x keeps: [fps] while that shows at most [MAX_SPEED_FPS]
+     * pictures a second, otherwise fewer, so a fast session drops frames in FFmpeg (before they are scaled,
+     * converted and uploaded) instead of falling behind.
+     */
+    fun speedFps(fps: Double, tempo: Double): Double =
+        if (tempo <= 1.0 || fps * tempo <= MAX_SPEED_FPS) fps else MAX_SPEED_FPS / tempo
+
+    /**
+     * Pitch-preserving tempo filter for [tempo] x, or null at normal speed. `atempo` (WSOLA, as browsers use for
+     * playback speed) only blends cleanly between 0.5 and 2 per instance, so other speeds are a chain of
+     * instances inside that range whose product is [tempo]. Never a resample: the pitch stays put.
+     */
+    fun tempoFilter(tempo: Double): String? {
+        if (!tempo.isFinite() || tempo <= 0.0 || tempo == 1.0) return null
+        val stages = ArrayList<Double>()
+        var rest = tempo
+        while (rest > 2.0) { stages += 2.0; rest /= 2.0 }
+        while (rest < 0.5) { stages += 0.5; rest /= 0.5 }
+        if (kotlin.math.abs(rest - 1.0) > 1e-9) stages += rest
+        return stages.joinToString(",") { "atempo=" + String.format(Locale.US, "%.6f", it) }
+    }
+
+    /** Output half of an audio session: s16le stereo at [sampleRate], time-stretched to [tempo] x. */
+    fun audioOutputArgs(sampleRate: Int, tempo: Double = 1.0): List<String> {
+        val filter = tempoFilter(tempo)
+        return buildList {
+            add("-vn")
+            if (filter != null) addAll(["-af", filter])
+            addAll(["-f", "s16le", "-ar", sampleRate.toString(), "-ac", "2", "-"])
+        }
+    }
+
     /** True when [stderr] is `FFmpeg` reporting that the input simply has no audio track, rather than any kind of real failure. */
     fun indicatesNoAudioStream(stderr: String): Boolean {
         return stderr.contains("does not contain any stream") && NO_AUDIO_DISQUALIFIERS.none { stderr.contains(it, ignoreCase = true) }
@@ -86,11 +122,12 @@ object MediaProcess {
     @Throws(IOException::class)
     fun buildVideo(
         ffmpeg: String, url: String, w: Int, h: Int, offsetNanos: Long, hwAccel: HwAccelBackend, fps: Double,
-        alreadyResolved: Boolean = false, seekByDecoding: Boolean = false,
+        alreadyResolved: Boolean = false, seekByDecoding: Boolean = false, dropToFps: Boolean = false,
     ): Process =
         ProcessBuilder(
             videoArgs(
                 ffmpeg, url, w, h, offsetNanos, hwAccel, VideoTransport.PPM, fps, alreadyResolved, seekByDecoding,
+                dropToFps,
             ),
         ).start()
 
@@ -98,7 +135,7 @@ object MediaProcess {
     fun videoArgs(
         ffmpeg: String, url: String, w: Int, h: Int, offsetNanos: Long, hwAccel: HwAccelBackend,
         transport: VideoTransport, fps: Double, alreadyResolved: Boolean = false,
-        seekByDecoding: Boolean = false,
+        seekByDecoding: Boolean = false, dropToFps: Boolean = false,
     ): List<String> {
         val nv12 = transport == VideoTransport.RAW_NV12
         val outFormat = if (nv12) "nv12" else "rgb24"
@@ -115,8 +152,10 @@ object MediaProcess {
             val fitSw = "min($w/iw\\,$h/ih)"
             "${swPrefix}scale=w=min($w\\,iw*$fitSw):h=min($h\\,ih*$fitSw):flags=bilinear$scaleExtra,$pad"
         }
+        // A sped-up session thins frames out first, so the dropped ones are never scaled or converted
+        val filters = if (dropToFps) "fps=${String.format(Locale.US, "%.6f", outputFps(fps))},$vf" else vf
         return baseCommand(ffmpeg, url, offsetNanos, hwAccel, alreadyResolved, seekByDecoding).apply {
-            addAll(["-an", "-vf", vf])
+            addAll(["-an", "-vf", filters])
             addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
             addAll(if (nv12) ["-f", "rawvideo", "-"] else ["-f", "image2pipe", "-c:v", "ppm", "-"])
         }
@@ -151,17 +190,19 @@ object MediaProcess {
     }
 
     /**
-     * Builds an `FFmpeg` process to read audio samples from [url] at the given [offsetNanos], resampled to [sampleRate] Hz.
+     * Builds an `FFmpeg` process to read audio samples from [url] at the given [offsetNanos], resampled to [sampleRate] Hz
+     * and played at [tempo] x (each PCM frame then carries [tempo] frames of content).
      * @throws IOException if the process fails to start. The caller is responsible for destroying the process when done.
      */
     @Throws(IOException::class)
     fun buildAudio(
         ffmpeg: String, url: String, offsetNanos: Long, sampleRate: Int, seekByDecoding: Boolean = false,
+        tempo: Double = 1.0,
     ): Process {
         val cmd = baseCommand(
             ffmpeg, url, offsetNanos, HwAccelBackend.NONE, seekByDecoding = seekByDecoding,
         ).apply {
-            addAll(["-vn", "-f", "s16le", "-ar", sampleRate.toString(), "-ac", "2", "-"])
+            addAll(audioOutputArgs(sampleRate, tempo))
         }
         return ProcessBuilder(cmd).start()
     }

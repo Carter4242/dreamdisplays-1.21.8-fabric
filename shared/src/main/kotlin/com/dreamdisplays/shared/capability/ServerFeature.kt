@@ -20,12 +20,18 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      */
     REGION_ACCESS("region_access"),
 
+    /** Server keeps a playback speed on shared timelines and accepts the `SPEED` playback action. */
+    PLAYBACK_SPEED("playback_speed"),
+
+    /** Server gates start holds on clients' `DisplayReadiness` reports and schedules starts (`DisplaySync.startInMs`). */
+    DISPLAY_READINESS("display_readiness"),
+
     /** Server runs per-display "Up next" queues (QueueState / QueueAction / QueuePreload). */
     QUEUE("queue");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
-        val playbackFeatures: List<ServerFeature> = [MODES, WATCH_PARTY, BROADCAST]
+        val playbackFeatures: List<ServerFeature> = [MODES, WATCH_PARTY, BROADCAST, PLAYBACK_SPEED, DISPLAY_READINESS]
 
         /** Playback-related feature tokens for string-based wire protocols. */
         val playbackFeatureWires: List<String> = playbackFeatures.toWire()

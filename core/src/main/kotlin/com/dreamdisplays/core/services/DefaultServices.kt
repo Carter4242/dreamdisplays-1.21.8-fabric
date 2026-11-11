@@ -48,6 +48,7 @@ class DefaultPlaybackService(
     override fun getMode(displayId: DisplayId): PlaybackMode = playback.getMode(displayId)
     override fun setMode(displayId: DisplayId, mode: PlaybackMode) = playback.setMode(displayId, mode)
     override fun retry(displayId: DisplayId) = playback.retry(displayId)
+    override fun setSpeed(displayId: DisplayId, rate: Double) = playback.setSpeed(displayId, rate)
 }
 
 /** Default core implementation of [WatchPartyService]. */

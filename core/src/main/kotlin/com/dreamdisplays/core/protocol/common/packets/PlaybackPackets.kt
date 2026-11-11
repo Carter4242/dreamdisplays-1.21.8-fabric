@@ -15,6 +15,8 @@ data class PlaybackCommand(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
     @ProtoNumber(2) val action: Int = 0,
     @ProtoNumber(3) val positionMs: Long = 0,
+    /** Requested playback speed for the `SPEED` action. */
+    @ProtoNumber(4) val rate: Double = 1.0,
 ) : DreamPacket
 
 /** Client sets a display's persistent base mode. */

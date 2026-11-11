@@ -133,6 +133,10 @@ class DefaultDisplaySystem(
         apply(commands.retry(displayId))
     }
 
+    override fun setSpeed(displayId: DisplayId, rate: Double) {
+        apply(commands.setSpeed(displayId, rate))
+    }
+
     override fun start(displayId: DisplayId, url: String?): Boolean {
         val display = commands.startWatchParty(displayId, url) ?: return false
         recordDisplay(display)

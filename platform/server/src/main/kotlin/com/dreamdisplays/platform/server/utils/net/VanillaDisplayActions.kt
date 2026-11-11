@@ -221,10 +221,12 @@ object VanillaDisplayActions {
         TimelineManager.onModeChanged(displayData, positionMs)
     }
 
-    /** Applies a playback intent (play / pause / seek / restart) to a `SYNCED` display's server clock. */
-    fun playbackCommand(player: ServerPlayer, displayId: java.util.UUID, action: PlaybackAction, positionMs: Long) {
+    /** Applies a playback intent (play / pause / seek / restart / speed) to a `SYNCED` display's server clock. */
+    fun playbackCommand(
+        player: ServerPlayer, displayId: java.util.UUID, action: PlaybackAction, positionMs: Long, rate: Double = 1.0,
+    ) {
         val displayData = DisplayManager.getDisplayData(displayId) as? VanillaDisplayData ?: return
-        TimelineManager.onCommand(displayData, player.uuid, action, positionMs)
+        TimelineManager.onCommand(displayData, player.uuid, action, positionMs, rate)
     }
 
     /** Starts a watch-party session with [player] as host. */

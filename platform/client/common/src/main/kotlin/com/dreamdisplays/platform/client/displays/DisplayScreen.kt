@@ -28,6 +28,7 @@ import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.shared.playback.PlaybackContext
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.api.playback.model.WatchPartySessionState
 import com.dreamdisplays.shared.playback.PlaybackPermissions
@@ -205,6 +206,46 @@ class DisplayScreen(
 
     /** True if the local player may seek here. */
     val canSeekHere: Boolean get() = PlaybackPermissions.canSeek(ctx())
+
+    /** Speed this viewer picked for a Local display (not saved; a shared timeline carries its own). */
+    private var localSpeed: Double = PlaybackSpeed.NORMAL
+
+    /** Speed of the server timeline this display follows (1 until a timeline says otherwise). */
+    private var serverSpeed: Double = PlaybackSpeed.NORMAL
+
+    /** The speed this display plays at: its shared timeline's, the viewer's own when Local, 1 in a watch party. */
+    val playbackSpeed: Double
+        get() = when {
+            watchParty != null -> PlaybackSpeed.NORMAL
+            requiresServerTimeline() -> serverSpeed
+            else -> localSpeed
+        }
+
+    /**
+     * True if the local player may change the speed here: whoever may play / pause, never in a watch party or on a
+     * live stream, and on a shared timeline only when the server keeps a speed for it.
+     */
+    val canChangeSpeedHere: Boolean
+        get() = PlaybackPermissions.canChangeSpeed(ctx()) && !isLive &&
+                (!requiresServerTimeline() || ClientPacketManager.serverSnapshot.hasFeature(ServerFeature.PLAYBACK_SPEED))
+
+    /** Asks for playback at [rate] x: applied here for a Local display, sent to the server for a Synced one. */
+    fun requestSpeed(rate: Double) {
+        if (!canChangeSpeedHere) return
+        val speed = PlaybackSpeed.clamp(rate)
+        if (requiresServerTimeline()) {
+            if (speed != serverSpeed) emitPlaybackIntent(PlaybackAction.SPEED, rate = speed)
+            return
+        }
+        localSpeed = speed
+        syncPlaybackSpeed()
+        DisplayRegistry.recordScreen(this)
+    }
+
+    /** Hands [playbackSpeed] to the player; cheap when it already plays at it. */
+    internal fun syncPlaybackSpeed() {
+        mediaPlayer?.setPlaybackSpeed(playbackSpeed)
+    }
 
     /** True if the (personal) quality may be changed — false for Broadcast's hard cap. */
     val canChangeQualityHere: Boolean get() = PlaybackPermissions.canChangeQuality(ctx())
@@ -415,7 +456,7 @@ class DisplayScreen(
     @Volatile
     var isHiddenForBroadcast: Boolean = false; private set
 
-    /** Silenced by a preparation: hidden, or opening its paused stream to hold it ready. */
+    /** Silenced while hidden by a preparation, or while opening its paused stream to hold it ready. */
     @Volatile
     private var prepareMuted: Boolean = false
 
@@ -788,7 +829,16 @@ class DisplayScreen(
     /** Applies the authoritative server timeline: matches pause state and corrects drift. */
     fun updateData(packet: DisplaySync) {
         if (watchParty != null) return
-        timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, packet.isPaused, packet.loop)
+        serverSpeed = PlaybackSpeed.clamp(packet.rate)
+        // A speed change normally comes as a hold (paused): pause first, so the player is only retimed while it is
+        // stopped. A playing packet retimes first, so the resume or seek the follower triggers runs at the new speed.
+        if (packet.isPaused) {
+            timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, true, packet.loop, serverSpeed)
+            syncPlaybackSpeed()
+        } else {
+            syncPlaybackSpeed()
+            timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs)
+        }
     }
 
     /** Applies watch-party snapshot: tracks session, loads host video, follows timeline. */
@@ -986,12 +1036,16 @@ class DisplayScreen(
     /** True when paused and parked on a decoded start-up cushion by [holdReadyForBroadcast]: a resume plays at once. */
     internal val isHeldReady: Boolean get() = mediaPlayer?.isHeldReady() == true
 
+    /** True when a seek now lands within a frame or two (see [MediaPlayer.seeksCheaply]). */
+    internal val seeksCheaply: Boolean get() = mediaPlayer?.seeksCheaply() == true
+
     /** True while [holdReadyForBroadcast] is opening the paused stream. */
     internal val isWarmingUp: Boolean get() = mediaPlayer?.isWarmingUp() == true
 
     /**
-     * Opens the paused stream at the server's paused position and parks it on its decoded first frame, so the
-     * broadcast's resume plays at once instead of opening the stream then (see [MediaPlayer.warmUpPaused]).
+     * Opens the paused stream at the server's paused position and parks it on its decoded first frame, so the next
+     * resume plays at once instead of opening the stream then (see [MediaPlayer.warmUpPaused]). Driven by
+     * [com.dreamdisplays.platform.client.managers.DisplayWarmup].
      */
     internal fun holdReadyForBroadcast() {
         val mp = mediaPlayer ?: return
@@ -1006,7 +1060,8 @@ class DisplayScreen(
         lastPrepareDistance = distance
         val prepared = isPrepared
         isHiddenForBroadcast = prepared && !isPopoutActive && (virtual || distance > renderDistance)
-        val silenced = isHiddenForBroadcast || (prepared && !isPopoutActive && isWarmingUp)
+        // Opening a paused stream to hold it ready may release a moment of sound: never let it be heard
+        val silenced = isHiddenForBroadcast || (!isPopoutActive && isWarmingUp)
         if (silenced == prepareMuted) return
         prepareMuted = silenced
         applyEffectiveVolume()
@@ -1108,21 +1163,25 @@ class DisplayScreen(
         DisplayRegistry.recordScreen(this)
     }
 
-    private fun emitPlaybackIntent(action: PlaybackAction, positionMs: Long = currentTimeNanos / 1_000_000L) {
+    private fun emitPlaybackIntent(
+        action: PlaybackAction, positionMs: Long = currentTimeNanos / 1_000_000L, rate: Double = PlaybackSpeed.NORMAL,
+    ) {
         when (effectiveMode) {
-            PlaybackMode.SYNCED -> Initializer.sendPacket(PlaybackCommand(uuid, action.wire, positionMs))
-            PlaybackMode.WATCH_PARTY -> if (watchParty?.isHost == true)
-                Initializer.sendPacket(WatchPartyControl(uuid, action.toWatchPartyAction().wire, positionMs))
+            PlaybackMode.SYNCED -> Initializer.sendPacket(PlaybackCommand(uuid, action.wire, positionMs, rate))
+            PlaybackMode.WATCH_PARTY -> if (watchParty?.isHost == true) action.toWatchPartyAction()?.let {
+                Initializer.sendPacket(WatchPartyControl(uuid, it.wire, positionMs))
+            }
 
             else -> {}
         }
     }
 
-    private fun PlaybackAction.toWatchPartyAction(): WatchPartyAction = when (this) {
+    private fun PlaybackAction.toWatchPartyAction(): WatchPartyAction? = when (this) {
         PlaybackAction.PLAY -> WatchPartyAction.RESUME
         PlaybackAction.PAUSE -> WatchPartyAction.PAUSE
         PlaybackAction.SEEK -> WatchPartyAction.SEEK
         PlaybackAction.RESTART -> WatchPartyAction.RESTART
+        PlaybackAction.SPEED -> null // Watch parties play at normal speed
     }
 
     /** Seeks [seconds] seconds relative to the current playback position (negative = backward). */
@@ -1320,6 +1379,7 @@ class DisplayScreen(
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
+        syncPlaybackSpeed() // Follows mode / watch-party changes
         timelineFollower.tick()
         queuePreloader.tick()
         restoreAudioTrackIfPending()

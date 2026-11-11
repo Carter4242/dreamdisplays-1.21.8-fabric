@@ -66,6 +66,9 @@ interface DisplayExecutor {
     /** Re-resolves and reloads the current video after a load failure (local recovery). */
     fun retry(displayId: DisplayId): DisplayInfo? = null
 
+    /** Requests playback at [rate] x (see `PlaybackService.setSpeed`). */
+    fun setSpeed(displayId: DisplayId, rate: Double): DisplayInfo? = null
+
     /** Start a `Watch party` session. */
     fun startWatchParty(displayId: DisplayId, url: String?): DisplayInfo? = null
 

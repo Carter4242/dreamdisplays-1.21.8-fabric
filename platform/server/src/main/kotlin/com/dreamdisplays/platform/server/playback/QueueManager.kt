@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Clients get the queue ([QueueState]) and preload its head shortly before the end, reporting progress per player in a
  * [FullscreenPrepareRoster] keyed by the head's item id (the bookkeeping fullscreen preparation uses). Once every
- * nearby client is READY the next video starts after [Settings.readyHoldMs] instead of the normal start hold. A
+ * client READY on it starts the next video without waiting for it ([TimelineManager.onVideoChanged]'s readiness-gated
+ * hold): instantly when every nearby viewer is, otherwise as soon as the rest report it ready. A
  * client without the queue (`ClientHello.supportsQueue` unset) gets no queue packets and just sees the video change.
  * All queue edits run under the queue's own lock.
  */
@@ -43,7 +44,6 @@ object QueueManager {
         val enabled: Boolean = true,
         val maxItems: Int = 50,
         val maxPerPlayer: Int = 10,
-        val readyHoldMs: Long = 300L,
     )
 
     /** Outcome of a queue edit, for command / chat feedback. */
@@ -72,9 +72,10 @@ object QueueManager {
 
     /**
      * Switches [display] to [item] the way a player-set video would (addon veto, save, broadcast, timeline reset with
-     * a start hold of [holdMs], or the default hold when null). Returns false when the change was refused.
+     * a start held until every viewer is ready, [readyPlayers] counted ready already). Returns false when refused.
      */
-    var applyVideo: (display: DisplayData, item: QueueItem, holdMs: Long?) -> Boolean = { _, _, _ -> false }
+    var applyVideo: (display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>) -> Boolean =
+        { _, _, _ -> false }
 
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
     private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
@@ -299,15 +300,14 @@ object QueueManager {
                 changed(display)
                 return null
             }
-            val hold = holdFor(display, next)
+            val ready = readyFor(display, next)
             rosters.remove(display.id)
-            val applied = runCatching { applyVideo(display, next, hold) }
+            val applied = runCatching { applyVideo(display, next, ready) }
                 .onFailure { logger.warn("Could not switch display {} to its next queued video.", display.id, it) }
                 .getOrDefault(false)
             if (applied) {
                 logger.info(
-                    "Display {} moved on to its next queued video{}.", display.id,
-                    if (hold != null) " (every viewer had it ready, ${hold} ms hold)" else "",
+                    "Display {} moved on to its next queued video ({} viewer(s) had it preloaded).", display.id, ready.size,
                 )
                 changed(display)
                 return next
@@ -317,17 +317,12 @@ object QueueManager {
         return null
     }
 
-    /**
-     * The short hold when every nearby queue client reported [next] READY, else null (the normal start hold). A nearby
-     * client that never reported counts as still loading; one that walked away no longer counts.
-     */
-    private fun holdFor(display: DisplayData, next: QueueItem): Long? {
-        val roster = rosters[display.id]?.takeIf { it.prepareId == next.itemId } ?: return null
-        val nearby = transport.nearbyPlayerIds(display).filter(::isCapable).toSet()
-        roster.delivered.filter { it !in nearby }.forEach(roster::forget)
-        val now = transport.nowMs()
-        nearby.forEach { roster.onDelivered(it, now) }
-        return if (roster.tally().allReady) settings().readyHoldMs else null
+    /** The nearby queue clients that reported [next] READY: they hold it ready at 0 and need not be waited for. */
+    private fun readyFor(display: DisplayData, next: QueueItem): List<UUID> {
+        val roster = rosters[display.id]?.takeIf { it.prepareId == next.itemId } ?: return emptyList()
+        return transport.nearbyPlayerIds(display).filter {
+            isCapable(it) && roster.stateOf(it) == FullscreenPrepareState.READY
+        }
     }
 
     private fun changed(display: DisplayData) {

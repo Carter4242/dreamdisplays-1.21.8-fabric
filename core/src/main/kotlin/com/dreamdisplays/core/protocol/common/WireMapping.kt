@@ -2,6 +2,7 @@ package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
@@ -14,6 +15,21 @@ fun ServerHello.hasFeature(feature: ServerFeature): Boolean =
 
 /** Builds the wire [DisplaySync] for [id] in [mode], stamped with the current [nowMs] anchor. */
 fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: PlaybackMode, nowMs: Long): DisplaySync {
+    // A start scheduled ahead of now: say where it starts and how long until then
+    if (!paused && serverTimeMs > nowMs) {
+        return DisplaySync(
+            id = id,
+            isSync = mode == PlaybackMode.SYNCED,
+            isPaused = false,
+            currentTimeMs = positionMs,
+            durationMs = durationMs,
+            serverTimeMs = nowMs,
+            loop = loop,
+            mode = mode.wire,
+            rate = rate,
+            startInMs = (serverTimeMs - nowMs).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+        )
+    }
     val anchored = anchoredAt(nowMs)
     return DisplaySync(
         id = id,
@@ -24,6 +40,7 @@ fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: Playbac
         serverTimeMs = anchored.serverTimeMs,
         loop = anchored.loop,
         mode = mode.wire,
+        rate = anchored.rate,
     )
 }
 
@@ -34,4 +51,5 @@ fun DisplaySync.toTimeline(): Timeline = Timeline(
     paused = isPaused,
     durationMs = durationMs,
     loop = loop,
+    rate = PlaybackSpeed.clamp(rate),
 )

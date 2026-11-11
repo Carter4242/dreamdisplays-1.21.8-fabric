@@ -21,6 +21,9 @@ object PlaybackPermissions {
     /** Seek the shared timeline (same authority as play / pause). */
     fun canSeek(c: PlaybackContext): Boolean = canPlayPause(c)
 
+    /** Change the playback speed (same authority as play / pause; watch parties always play at normal speed). */
+    fun canChangeSpeed(c: PlaybackContext): Boolean = c.mode != WATCH_PARTY && canPlayPause(c)
+
     /** Change the display's video URL. */
     fun canSetVideo(c: PlaybackContext): Boolean = when (c.mode) {
         WATCH_PARTY -> c.isPartyHost

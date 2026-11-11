@@ -8,6 +8,7 @@ import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.protocol.common.packets.ClientHello
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
+import com.dreamdisplays.core.protocol.common.packets.DisplayReadiness
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
@@ -98,6 +99,7 @@ object PacketRegistry {
         Entry(
             PacketType.FULLSCREEN_PREPARE_STATUS, FullscreenPrepareStatus::class, FullscreenPrepareStatus.serializer(),
         ),
+        Entry(PacketType.DISPLAY_READINESS, DisplayReadiness::class, DisplayReadiness.serializer()),
         Entry(PacketType.QUEUE_STATE, QueueState::class, QueueState.serializer()),
         Entry(PacketType.QUEUE_ACTION, QueueAction::class, QueueAction.serializer()),
         Entry(PacketType.QUEUE_PRELOAD, QueuePreload::class, QueuePreload.serializer()),

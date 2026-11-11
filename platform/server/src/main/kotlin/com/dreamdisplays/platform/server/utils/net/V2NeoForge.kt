@@ -15,6 +15,7 @@ import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.proxy.VanillaProxyBridge
 import com.dreamdisplays.platform.server.utils.RegionUtil
@@ -93,7 +94,7 @@ object NeoForgeV2Networking {
             )
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
-                VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs)
+                VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
             }
 
             is WatchPartyStart -> VanillaDisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)
@@ -106,6 +107,7 @@ object NeoForgeV2Networking {
                 packet.sessionId, player.uuid, FullscreenAckAction.fromWire(packet.action),
             )
 
+            is DisplayReadiness -> ReadinessTracker.onReport(player.uuid, packet)
             is FullscreenPrepareStatus -> FullscreenBroadcastManager.onPrepareStatus(
                 player.uuid, packet.prepareId, packet.displayId, FullscreenPrepareState.fromWire(packet.state),
             )

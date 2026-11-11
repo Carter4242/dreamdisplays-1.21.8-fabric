@@ -14,8 +14,9 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Holds displays ready ahead of a fullscreen broadcast ([FullscreenPrepare]): the display stays loaded whatever the
- * distance, hidden and silent while out of sight, and is kept where the broadcast will start, so the broadcast's
+ * Holds displays ready ahead of a broadcast or event ([FullscreenPrepare]): the display stays loaded whatever the
+ * distance, hidden and silent while out of sight, and is kept where the broadcast will start ([DisplayWarmup] holds
+ * it), so the broadcast's
  * [com.dreamdisplays.core.protocol.common.packets.FullscreenState] shows a picture that is already playing (or plays
  * on the spot from a held, buffered pause). Reports how far it got to the server ([FullscreenPrepareStatus]).
  */
@@ -25,12 +26,6 @@ object FullscreenPrepareController {
     /** Extra time past the server's ttl before giving up on a preparation the server never cancelled. */
     private const val TTL_GRACE_MS = 15_000L
 
-    /** Gap between two attempts to hold a paused display ready. */
-    private const val WARM_RETRY_MS = 3_000L
-
-    /** Re-open a held stream this often, so a connection left idle for minutes is not the one the start reads from. */
-    private const val WARM_REFRESH_MS = 60_000L
-
     private class Entry(
         val prepareId: String,
         var quality: String,
@@ -38,11 +33,6 @@ object FullscreenPrepareController {
     ) {
         var qualityApplied = false
         var reported: FullscreenPrepareState? = null
-        var lastWarmAttemptMs = 0L
-        var heldSinceMs = 0L
-
-        /** Re-opening a held stream on schedule; it stays reported ready meanwhile. */
-        var refreshing = false
     }
 
     private val entries = ConcurrentHashMap<UUID, Entry>()
@@ -100,7 +90,7 @@ object FullscreenPrepareController {
                     FullscreenPrepareState.LOADING
                 }
             } else {
-                progress(screen, entry, now)
+                progress(screen, entry)
             }
             if (state != entry.reported) {
                 entry.reported = state
@@ -109,7 +99,7 @@ object FullscreenPrepareController {
         }
     }
 
-    private fun progress(screen: DisplayScreen, entry: Entry, now: Long): FullscreenPrepareState {
+    private fun progress(screen: DisplayScreen, entry: Entry): FullscreenPrepareState {
         if (!entry.qualityApplied) {
             entry.qualityApplied = true
             // Open at the broadcast's quality now, so starting it does not switch streams
@@ -121,36 +111,14 @@ object FullscreenPrepareController {
         if (screen.errored) return FullscreenPrepareState.FAILED
         if (!screen.videoStarted || screen.isWaitingForInitialTimeline) return FullscreenPrepareState.LOADING
         if (!screen.isPaused) {
-            entry.heldSinceMs = 0L
-            entry.refreshing = false
             // Playing hidden along the timeline: the overlay only has to appear
             return if (screen.isClockRunning()) FullscreenPrepareState.READY else FullscreenPrepareState.LOADING
         }
         // A paused live stream or an unseekable file cannot be held any closer than it is
         if (screen.isLive || !screen.canSeek()) return FullscreenPrepareState.READY
-
-        if (screen.isWarmingUp) {
-            // Re-opening a held stream keeps it counted ready: a start still finds it open or opening
-            return if (entry.refreshing) FullscreenPrepareState.READY else FullscreenPrepareState.LOADING
-        }
-        if (screen.isHeldReady) {
-            entry.refreshing = false
-            if (entry.heldSinceMs == 0L) entry.heldSinceMs = now
-            if (now - entry.heldSinceMs >= WARM_REFRESH_MS) {
-                entry.refreshing = true
-                entry.heldSinceMs = 0L
-                entry.lastWarmAttemptMs = now
-                screen.holdReadyForBroadcast()
-            }
-            return FullscreenPrepareState.READY
-        }
-        entry.refreshing = false
-        entry.heldSinceMs = 0L
-        if (now - entry.lastWarmAttemptMs >= WARM_RETRY_MS) {
-            entry.lastWarmAttemptMs = now
-            screen.holdReadyForBroadcast()
-        }
-        return FullscreenPrepareState.LOADING
+        // DisplayWarmup holds every prepared display; ready once it is held (or re-opening a held stream)
+        val held = DisplayWarmup.holdOf(screen) == DisplayWarmup.Hold.HELD || DisplayWarmup.isRefreshing(screen)
+        return if (held) FullscreenPrepareState.READY else FullscreenPrepareState.LOADING
     }
 
     private fun release(displayId: UUID, prepareId: String) {

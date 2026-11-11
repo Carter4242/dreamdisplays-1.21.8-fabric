@@ -106,5 +106,6 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.DisplayQueues.reset()
         FullscreenController.reset()
         FullscreenPrepareController.reset()
+        DisplayWarmup.reset()
     }
 }

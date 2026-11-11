@@ -18,6 +18,10 @@ import kotlin.math.roundToLong
  *
  * Seeks and cold starts land late by the time the stream takes to restart; that time is learned per kind
  * ([seekLeadMs], [coldLeadMs]) from where previous ones landed and added to the next one.
+ *
+ * Off normal speed the server position runs at the timeline's rate; positions stay in content ms, while drift is
+ * judged in real-time ms (content drift / rate: how far apart viewers are in what they see now), so the dead band,
+ * seek threshold and learned restart leads mean the same at every speed.
  */
 internal class TimelineFollower(private val screen: DisplayScreen) {
     private val lock = Any()
@@ -46,7 +50,15 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private var reportAction = Action.NONE
     private var reportSeeks = 0
 
-    private enum class LeadKind { SEEK, COLD }
+    /**
+     * What a landing follows: a seek that restarts the stream ([SEEK]), an in-place seek on an in-process decoder
+     * ([QUICK_SEEK]), a resume that restarts the stream ([COLD]), or a resume of a session held open ([WARM], nothing to
+     * learn: it starts where it stood). Each restart kind learns its own lead.
+     */
+    private enum class LeadKind { SEEK, QUICK_SEEK, COLD, WARM }
+
+    /** The next landing that is off may be corrected by one seek at once, outside the controller's cooldown. */
+    private var correctAfterLanding = false
 
     /** What the follower did, in order of significance for the periodic log line. */
     private enum class Action(val label: String) { NONE("none"), RATE("rate"), SNAP("snap"), SEEK("seek") }
@@ -59,10 +71,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val loop: Boolean,
         val receivedAtNanos: Long,
         val latencyCompMs: Double,
+        val rate: Double,
     )
 
     /** Clears follow state when a new video loads. */
     fun reset() {
+        scheduledStart?.cancel(false)
+        scheduledStart = null
         synchronized(lock) {
             lastServerTimeMs = Long.MIN_VALUE
             pending = null
@@ -96,22 +111,51 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
      * Takes the server's [targetMs] / [paused] for the current media, wrapping by the locally known duration when
      * [loop] (Broadcast). Pause state is matched right away; position is corrected here and on every [tick].
      */
-    fun apply(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean) {
+    fun apply(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, rate: Double = 1.0, startInMs: Int = 0) {
+        // Any newer word from the server replaces a start still waiting for its moment
+        scheduledStart?.cancel(false)
+        scheduledStart = null
+        if (paused || startInMs <= 0) {
+            applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate)
+            return
+        }
+        // A start scheduled ahead: the packet left the server startInMs before the start and took one-way latency to
+        // get here. Hold paused on the start frame until then, so every viewer begins on it together.
+        val owl = oneWayLatencyMs()
+        val waitMs = startInMs - owl
+        if (waitMs < MIN_SCHEDULE_MS) {
+            // Too late to wait: play from where the start has got to by now
+            applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
+            return
+        }
+        applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
+        val startServerTimeMs = serverTimeMs + startInMs
+        scheduledStart = START_SCHEDULER.schedule({
+            // The player is told on the client thread like every other packet: at most a frame later
+            Minecraft.getInstance().execute {
+                applyNow(targetMs, startServerTimeMs, false, loop, 0.0, rate)
+            }
+        }, (waitMs * 1_000.0).toLong(), java.util.concurrent.TimeUnit.MICROSECONDS)
+    }
+
+    @Volatile
+    private var scheduledStart: java.util.concurrent.ScheduledFuture<*>? = null
+
+    private fun applyNow(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, comp: Double, rate: Double) {
         val packet = synchronized(lock) {
             if (serverTimeMs in 1..<lastServerTimeMs) return
             if (serverTimeMs > 0L) lastServerTimeMs = serverTimeMs
             val now = System.nanoTime()
-            val comp = if (paused) 0.0 else oneWayLatencyMs()
             latencyCompMs = comp
             this.loop = loop
-            if (estimator.onPacket(targetMs, paused, now / NANOS_PER_MS, comp)) controller.resetMeasurement()
-            Pending(++nextSeq, targetMs, serverTimeMs, paused, loop, now, comp).also { pending = it }
+            if (estimator.onPacket(targetMs, paused, now / NANOS_PER_MS, comp, rate)) controller.resetMeasurement()
+            Pending(++nextSeq, targetMs, serverTimeMs, paused, loop, now, comp, rate).also { pending = it }
         }
         applyPending(packet)
     }
 
     private fun applyPending(packet: Pending) {
-        val startMs = projectTargetMs(packet) + if (packet.paused) 0L else coldLeadMs
+        val startMs = projectTargetMs(packet) + if (packet.paused) 0L else contentMs(coldLeadMs, packet.rate)
         screen.primeTimelineStart(wrapForStart(startMs, packet.loop) * 1_000_000L)
         val generation = screen.mediaGeneration
         screen.waitForMFInit {
@@ -186,8 +230,10 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val durationMs = screen.mediaPlayerDurationNanos / 1_000_000L
         val target = wrap(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, durationMs)
         val localMs = screen.syncPositionNanos / 1_000_000L
-        val drift = signedDrift(target - localMs, loop, durationMs)
-        // drift > 0: this client is behind the server; < 0: ahead
+        val contentDrift = signedDrift(target - localMs, loop, durationMs)
+        // drift > 0: this client is behind the server; < 0: ahead. Judged in real time, so a given content gap
+        // counts for less at high speed (it passes sooner) and more at low speed.
+        val drift = estimator.toRealMs(contentDrift.toDouble()).roundToLong()
         lastDriftMs = drift.toDouble()
 
         if (estimator.paused) {
@@ -197,8 +243,10 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             if (!screen.isPaused) return // The pause itself is still being applied
             // Being opened warm at the server position for a broadcast: a snap now would only close it again
             if (screen.isWarmingUp) return
-            // A display held ready for a broadcast tolerates a little offset rather than drop its warm stream
-            val tolerance = if (screen.isPrepared || warmAdopted) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
+            // A display held ready (prepared, held by DisplayWarmup, or a queue preload just adopted) tolerates a little
+            // offset rather than drop its open stream
+            val held = screen.isPrepared || screen.isHeldReady || warmAdopted
+            val tolerance = if (held) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
             if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
                 screen.seekVideoTo(target * 1_000_000L)
                 lastSnapNanos = now
@@ -218,15 +266,24 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         landing?.let { kind ->
             if (landingRunningSinceNanos == 0L) landingRunningSinceNanos = now
             val filtered = controller.observe(drift.toDouble(), now / NANOS_PER_MS)
-            if (now - landingRunningSinceNanos < LANDING_SETTLE_NANOS) {
+            val settle = if (kind == LeadKind.WARM || kind == LeadKind.QUICK_SEEK) QUICK_SETTLE_NANOS else LANDING_SETTLE_NANOS
+            if (now - landingRunningSinceNanos < settle) {
                 pushRatio(1.0, now)
                 return
             }
-            learnLead(kind, filtered)
+            if (kind != LeadKind.WARM) learnLead(kind, filtered)
             landing = null
+            // Landed off after a start or resume: one seek fixes it in a frame or two where rate correction at 1 %
+            // would take a minute. Only once per start, so a seek that lands off again is left to the controller.
+            if (correctAfterLanding && abs(filtered) > POST_START_SEEK_MS && screen.seeksCheaply) {
+                correctAfterLanding = false
+                seekPlaying(target, durationMs, now)
+                return
+            }
+            correctAfterLanding = false
         }
 
-        val decision = controller.update(drift.toDouble(), now / NANOS_PER_MS)
+        val decision = controller.update(drift.toDouble(), now / NANOS_PER_MS, cheapSeeks = screen.seeksCheaply)
         if (decision.seek) {
             seekPlaying(target, durationMs, now)
         } else {
@@ -245,21 +302,26 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // ahead by the learned restart time instead.
             val durationMs = screen.mediaPlayerDurationNanos / 1_000_000L
             val now = System.nanoTime()
-            val target = estimator.targetMs(now / NANOS_PER_MS).roundToLong() + coldLeadMs
+            val target = estimator.targetMs(now / NANOS_PER_MS).roundToLong() + contentMs(coldLeadMs, estimator.rate)
             screen.seekVideoTo(clampSeek(target, loop, durationMs) * 1_000_000L)
             expectLanding(LeadKind.COLD)
+        } else if (!screen.isLive && screen.canSeek()) {
+            expectLanding(LeadKind.WARM)
         }
+        correctAfterLanding = true
         controller.resetMeasurement()
         screen.applyServerPaused(false)
     }
 
     private fun seekPlaying(targetMs: Long, durationMs: Long, now: Long) {
+        // An in-place seek keeps the last frame up and lands within a frame or two; a restart fades back in
+        val quick = screen.seeksCheaply
         // Overshoot by the learned restart cost so the post-restart position lands on the live point
-        val seekMs = clampSeek(targetMs + seekLeadMs, loop, durationMs)
+        val seekMs = clampSeek(targetMs + contentMs(if (quick) quickSeekLeadMs else seekLeadMs, estimator.rate), loop, durationMs)
         pushRatio(1.0, now)
-        screen.clearRenderedFrameForTimeline()
+        if (!quick) screen.clearRenderedFrameForTimeline()
         screen.seekVideoTo(seekMs * 1_000_000L)
-        expectLanding(LeadKind.SEEK)
+        expectLanding(if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK)
         note(Action.SEEK)
     }
 
@@ -275,11 +337,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val step = (landingDriftMs * LEAD_GAIN).roundToLong().coerceIn(-MAX_LEAD_STEP_MS, MAX_LEAD_STEP_MS)
         when (kind) {
             LeadKind.SEEK -> seekLeadMs = (seekLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
+            LeadKind.QUICK_SEEK -> quickSeekLeadMs = (quickSeekLeadMs + step).coerceIn(0L, MAX_QUICK_LEAD_MS)
             LeadKind.COLD -> coldLeadMs = (coldLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
+            LeadKind.WARM -> return
         }
         logger.info(
-            "[dd-sync] {} landed {}ms after {}; leads seek={}ms cold={}ms",
-            shortId(), signed(landingDriftMs), kind.name.lowercase(), seekLeadMs, coldLeadMs,
+            "[dd-sync] {} landed {}ms after {}; leads seek={}ms quick={}ms cold={}ms",
+            shortId(), signed(landingDriftMs), kind.name.lowercase(), seekLeadMs, quickSeekLeadMs, coldLeadMs,
         )
     }
 
@@ -343,8 +407,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private fun projectTargetMs(packet: Pending): Long {
         if (packet.paused) return packet.targetMs
         val elapsedMs = (System.nanoTime() - packet.receivedAtNanos) / 1_000_000L
-        return packet.targetMs + elapsedMs + packet.latencyCompMs.roundToLong()
+        return packet.targetMs + contentMs((elapsedMs + packet.latencyCompMs).roundToLong(), packet.rate)
     }
+
+    /** Content ms that pass in [realMs] at playback [rate] (leads and latencies are real time). */
+    private fun contentMs(realMs: Long, rate: Double): Long =
+        if (rate == 1.0) realMs else (realMs * rate).roundToLong()
 
     private fun wrapForStart(ms: Long, loop: Boolean): Long =
         clampSeek(ms, loop, screen.mediaPlayerDurationNanos / 1_000_000L)
@@ -365,22 +433,40 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         return ((rawDiff % durationMs) + durationMs + half) % durationMs - half
     }
 
-    /** Half the local player's round trip as the server last reported it, in ms. */
-    private fun oneWayLatencyMs(): Double = runCatching {
-        val mc = Minecraft.getInstance()
-        val player = mc.player ?: return@runCatching 0.0
-        val rtt = mc.connection?.getPlayerInfo(player.uuid)?.latency ?: 0
-        (rtt.coerceIn(0, MAX_RTT_MS) / 2.0)
-    }.getOrDefault(0.0)
+    private fun oneWayLatencyMs(): Double = Companion.oneWayLatencyMs()
 
     companion object {
         private val logger = LoggerFactory.getLogger(TimelineFollower::class.java)
+
+        /** A scheduled start closer than this is played at once instead. */
+        private const val MIN_SCHEDULE_MS = 2.0
+
+        private val START_SCHEDULER: java.util.concurrent.ScheduledExecutorService =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+                Thread(r, "DreamDisplays-ScheduledStart").apply { isDaemon = true }
+            }
+
+        /** Half the local player's round trip as the server last reported it, in ms. */
+        fun oneWayLatencyMs(): Double = runCatching {
+            val mc = Minecraft.getInstance()
+            val player = mc.player ?: return@runCatching 0.0
+            val rtt = mc.connection?.getPlayerInfo(player.uuid)?.latency ?: 0
+            (rtt.coerceIn(0, MAX_RTT_MS) / 2.0)
+        }.getOrDefault(0.0)
 
         private const val NANOS_PER_MS = 1_000_000.0
         private const val END_MARGIN_MS = 500L
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
         private const val PREPARED_SNAP_TOLERANCE_MS = 250
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L
+
+        /** A warm resume or an in-place seek settles fast: it measures after this long. */
+        private const val QUICK_SETTLE_NANOS = 700_000_000L
+
+        /** Off by more than this after a start or resume: correct it with one seek at once. */
+        private const val POST_START_SEEK_MS = 100.0
+
+        private const val MAX_QUICK_LEAD_MS = 1_500L
         private const val RATIO_REFRESH_NANOS = 1_000_000_000L
         private const val MAX_LEAD_MS = 8_000L
         private const val MAX_RTT_MS = 2_000
@@ -394,5 +480,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** Learned restart time of a stream start from a cold pause. */
         @Volatile
         private var coldLeadMs = 600L
+
+        /** Learned landing offset of an in-place seek (decoder kept open; a prefill and the sound to line up). */
+        @Volatile
+        private var quickSeekLeadMs = 150L
     }
 }
