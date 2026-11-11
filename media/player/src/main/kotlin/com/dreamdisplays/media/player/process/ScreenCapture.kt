@@ -89,11 +89,23 @@ object ScreenCapture {
     /** The [Plan] chosen for a screen, the exact [monitor] variant it runs on, and the tests behind it. */
     data class Choice(val monitor: Monitor, val plan: Plan, val attempts: List<Attempt>)
 
-    /** The capture source on this OS, or null where there is none (e.g. Linux under Wayland only). */
+    /** The capture source on this OS, or null where there is none (Linux under Wayland: see [linuxSource]). */
     fun sourceForThisOs(): Source? = when {
         OsInfo.isWindows -> Source.DDAGRAB
         OsInfo.isMac -> Source.AVFOUNDATION
-        OsInfo.isLinux && !System.getenv("DISPLAY").isNullOrBlank() -> Source.X11GRAB
+        OsInfo.isLinux -> linuxSource(System::getenv)
+        else -> null
+    }
+
+    /**
+     * Linux's capture source given the environment [env]: x11grab under X11 only. A Wayland session sets `DISPLAY`
+     * too (for XWayland, which the game itself runs on), but x11grab there sees only X11 windows: every native
+     * Wayland window would be shared as black.
+     */
+    internal fun linuxSource(env: (String) -> String?): Source? = when {
+        !env("WAYLAND_DISPLAY").isNullOrBlank() -> null
+        env("XDG_SESSION_TYPE").equals("wayland", ignoreCase = true) -> null
+        !env("DISPLAY").isNullOrBlank() -> Source.X11GRAB
         else -> null
     }
 

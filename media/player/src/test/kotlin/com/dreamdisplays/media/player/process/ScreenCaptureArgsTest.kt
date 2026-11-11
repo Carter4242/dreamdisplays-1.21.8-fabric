@@ -180,6 +180,15 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `linux shares with x11grab under x11 only, never under wayland where it would be black`() {
+        fun env(vararg kv: Pair<String, String>): (String) -> String? = mapOf(*kv)::get
+        assertEquals(Source.X11GRAB, ScreenCapture.linuxSource(env("DISPLAY" to ":0", "XDG_SESSION_TYPE" to "x11")))
+        assertEquals(null, ScreenCapture.linuxSource(env("DISPLAY" to ":0", "WAYLAND_DISPLAY" to "wayland-0")))
+        assertEquals(null, ScreenCapture.linuxSource(env("DISPLAY" to ":1", "XDG_SESSION_TYPE" to "wayland")))
+        assertEquals(null, ScreenCapture.linuxSource(env()))
+    }
+
+    @Test
     fun `desktop duplication losing its screen is told apart from other ends`() {
         assertTrue(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] AcquireNextFrame failed: 887a0026"))
         assertFalse(ScreenCapture.isCaptureLost("[Parsed_ddagrab_0 @ 0x1] DuplicateOutput failed: 80070005"))
