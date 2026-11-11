@@ -21,6 +21,26 @@ internal object FFmpegCapabilities {
     /** True when [ffmpeg] supports filter [name] (e.g. `scale_vt`). */
     fun hasFilter(ffmpeg: String, name: String): Boolean = probedFilters(ffmpeg).contains(name)
 
+    private val liveStampsCache = ConcurrentHashMap<String, Boolean>()
+
+    /**
+     * True when [ffmpeg] can write per-frame mux stats (`-stats_mux_pre`, FFmpeg 6.1+), which live sessions use for
+     * share latency (see [com.dreamdisplays.media.player.pipeline.LiveFrameStamps]). An older system FFmpeg rejects the
+     * whole command line ("Unrecognized option"), so the stamps are only asked of a binary that lists the option.
+     */
+    fun hasLiveStamps(ffmpeg: String): Boolean =
+        liveStampsCache.computeIfAbsent(ffmpeg) { bin ->
+            val output = listing(bin, "-h", "long") ?: return@computeIfAbsent false
+            listsOption(output, "stats_mux_pre").also { if (!it) logger.info("FFmpeg has no -stats_mux_pre; live frame stamps off.") }
+        }
+
+    /** True when FFmpeg's help [output] lists option [name] (as `-name` at the start of a line). */
+    internal fun listsOption(output: String, name: String): Boolean =
+        output.lineSequence().any { line ->
+            val t = line.trimStart()
+            t.startsWith("-$name") && t.getOrNull(name.length + 1).let { it == null || it == ' ' || it == '[' || it == '\t' }
+        }
+
     /** True when [ffmpeg] has decoder [name]; only the optional ones in [PROBED_DECODERS] are probed. */
     fun hasDecoder(ffmpeg: String, name: String): Boolean = probedDecoders(ffmpeg).contains(name)
 
@@ -42,18 +62,18 @@ internal object FFmpegCapabilities {
             .mapNotNull { line -> line.trim().split(WHITESPACE).getOrNull(1) }
             .filterTo(HashSet()) { it in wanted }
 
-    private fun listing(bin: String, flag: String): String? = runCatching {
-        val proc = ProcessBuilder(bin, "-hide_banner", flag).redirectErrorStream(true).start()
+    private fun listing(bin: String, vararg flag: String): String? = runCatching {
+        val proc = ProcessBuilder(bin, "-hide_banner", *flag).redirectErrorStream(true).start()
         runCatching { proc.outputStream.close() }
         val output = proc.inputStream.bufferedReader().use { it.readText() }
         if (!proc.waitFor(10, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
-            logger.warn("FFmpeg $flag probe timed out.")
+            logger.warn("FFmpeg ${flag.joinToString(" ")} probe timed out.")
             return null
         }
         output
     }.getOrElse { e ->
-        logger.warn("FFmpeg $flag probe failed (${e.message}).")
+        logger.warn("FFmpeg ${flag.joinToString(" ")} probe failed (${e.message}).")
         null
     }
 

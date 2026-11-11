@@ -96,6 +96,7 @@ object FFmpegBinary {
                 if (path != null) {
                     FFmpegCapabilities.hasFilter(path, "scale_vt")
                     FFmpegCapabilities.hasDecoder(path, "libvpx-vp9")
+                    FFmpegCapabilities.hasLiveStamps(path)
                 }
             }.onFailure { e -> logger.warn("Prewarm failed", e) }
         }, "FFmpeg-prewarm").start()

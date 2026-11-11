@@ -190,7 +190,9 @@ internal class PlaybackSessionManager(
                 process = null; thread = lavThread; inProcess = true; return
             }
             if (nativePipe != null) {
-                val stamps = if (liveEdge) LiveFrameStamps(debugLabel.substringBefore('/')) else null
+                val stamps = if (liveEdge && FFmpegCapabilities.hasLiveStamps(ffmpeg)) {
+                    LiveFrameStamps(debugLabel.substringBefore('/'))
+                } else null
                 val args = MediaProcess.videoArgs(
                     ffmpeg, safeUrl, w, h, offsetNanos, hwAccel, MediaProcess.VideoTransport.RAW_NV12, fps,
                     alreadyResolved = true, seekByDecoding = seekByDecoding, dropToFps = dropToFps,
