@@ -233,6 +233,12 @@ object ScreenShareServerRules {
     fun sameShare(shareNonce: Long, requestNonce: Long): Boolean =
         shareNonce == 0L || requestNonce == 0L || shareNonce == requestNonce
 
+    /**
+     * Whether the server waits for heartbeats from a share started with [startNonce]: only clients that name their
+     * share (a nonzero nonce) send them; an older client's share is watched by presence and range alone.
+     */
+    fun expectsHeartbeat(startNonce: Long): Boolean = startNonce != 0L
+
     /** Whether the sharer's client is told to stop for [reason] (it already knows when it asked, or it is gone). */
     fun notifiesSharer(reason: EndReason): Boolean = reason != EndReason.SHARER_QUIT
 }

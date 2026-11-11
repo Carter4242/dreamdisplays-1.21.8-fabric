@@ -171,6 +171,13 @@ class ScreenShareRulesTest {
     }
 
     @Test
+    fun `only shares started with a nonce are expected to heartbeat`() {
+        assertFalse(ScreenShareServerRules.expectsHeartbeat(0L))
+        assertTrue(ScreenShareServerRules.expectsHeartbeat(42L))
+        assertTrue(ScreenShareServerRules.expectsHeartbeat(-7L))
+    }
+
+    @Test
     fun `previous video comes back unless someone replaced it or the display is gone`() {
         for (reason in EndReason.entries) {
             val expected = reason != EndReason.VIDEO_SET_BY_HAND && reason != EndReason.DISPLAY_REMOVED

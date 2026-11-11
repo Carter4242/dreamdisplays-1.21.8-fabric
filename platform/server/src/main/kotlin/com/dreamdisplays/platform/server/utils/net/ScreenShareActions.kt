@@ -290,7 +290,8 @@ object ScreenShareActions {
             }
             val reason = ScreenShareServerRules.endReason(
                 ScreenShareServerRules.SharerState(
-                    online = online, sameWorld = sameWorld, inRange = inRange, heartbeatExpected = true,
+                    online = online, sameWorld = sameWorld, inRange = inRange,
+                    heartbeatExpected = ScreenShareServerRules.expectsHeartbeat(share.nonce),
                     lastHeartbeatMs = share.lastHeartbeatMs, nowMs = now,
                 ),
             ) ?: continue
