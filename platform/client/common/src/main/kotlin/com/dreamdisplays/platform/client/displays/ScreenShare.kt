@@ -327,7 +327,12 @@ object ScreenShare {
 
     private fun tickChecks(mc: Minecraft) {
         val r = running
-        ScreenCaptureProcesses.reap(sharing = r != null && !r.stopped, current = r?.process)
+        // Under the lock a capture is started, registered and made current under: a process started meanwhile is
+        // never taken for an orphan
+        synchronized(lock) {
+            val now = running
+            ScreenCaptureProcesses.reap(sharing = now != null && !now.stopped, current = now?.process)
+        }
         // Sound capture that outlived its share (it lives in this process, not FFmpeg's)
         if ((r == null || r.stopped) && audioCaptures.isNotEmpty()) audioCaptures.toList().forEach(::stopCapture)
         if (r == null || r.stopped) return
