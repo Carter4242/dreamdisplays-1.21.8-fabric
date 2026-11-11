@@ -133,6 +133,29 @@ enabled = true
 max_items = 50
 max_per_player = 10
 
+[karaoke]
+# Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). Singers get the display's
+# timeline this far ahead, so they hear the track and see the lyrics early; their voice is held back per listener so
+# it lands on the beat for everyone in the display's audio range (policy audio.radius_blocks). While karaoke is on,
+# a singer's voice reaches only players in that range.
+
+# Lead for a new singer in ms; 0 = automatic: singer ping / 2 + singer_output_capture_ms + the slowest listener's
+# ping / 2 + listener_buffer_output_ms + lead_margin_ms, kept within min_lead_ms..max_lead_ms
+default_lead_ms = 0
+lead_margin_ms = 40
+min_lead_ms = 260
+max_lead_ms = 1500
+
+# What the alignment can't measure: the singer's audio output + mic capture, and a listener's voice chat jitter
+# buffer + audio output (Simple Voice Chat buffers 5 frames = 100 ms by default). /display karaoke ... trim fixes
+# the rest by ear.
+singer_output_capture_ms = 60
+listener_buffer_output_ms = 120
+
+# A queued karaoke song whose singer is offline or away from the display when it comes up: "skip" it, or "play"
+# it without a singer
+absent_singer = "skip"
+
 [fullscreen]
 # Default visual sub-mode when /display fullscreen start omits one: "STANDARD" or "IMMERSIVE"
 default_mode = "STANDARD"
@@ -189,6 +212,8 @@ schedule = "dreamdisplays.schedule"                             # Default: every
 name_others = "dreamdisplays.name.others"                       # Default: operator
 schedule_others = "dreamdisplays.schedule.others"               # Default: operator
 queue = "dreamdisplays.queue"                                   # Default: operator (the /display queue command)
+karaoke = "dreamdisplays.karaoke"                               # Default: operator (/display karaoke, except the line below)
+karaoke_join = "dreamdisplays.karaoke.join"                     # Default: operator (/display karaoke join, leave, line)
 delete_others = "dreamdisplays.delete.others"                   # Default: operator
 list = "dreamdisplays.list"                                     # Default: operator
 stats = "dreamdisplays.stats"                                   # Default: operator

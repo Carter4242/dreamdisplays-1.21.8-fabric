@@ -5,6 +5,7 @@ import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.playback.model.Timeline
+import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -49,6 +50,12 @@ object TimelineManager {
      * for a broadcast); every timeline change reaches them at once, not only through the periodic resend.
      */
     var extraReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
+
+    /**
+     * Players who get [displayId]'s timeline ahead of everyone, by ms of wall time (karaoke singers and their lead);
+     * they are also waited for at that shifted position. Empty for nearly every display, which keeps the broadcast.
+     */
+    var playerLeadsMs: (displayId: UUID) -> Map<UUID, Long> = { emptyMap() }
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
@@ -140,8 +147,17 @@ object TimelineManager {
     }
 
     /** The viewers a start of [display] at [positionMs] still waits for (empty = it can start now). */
-    fun waitingFor(display: DisplayData, positionMs: Long): List<UUID> =
-        ReadinessTracker.waitingFor(display.id, positionMs, viewersOf(display))
+    fun waitingFor(display: DisplayData, positionMs: Long): List<UUID> {
+        val viewers = viewersOf(display)
+        val leads = playerLeadsMs(display.id)
+        if (leads.isEmpty()) return ReadinessTracker.waitingFor(display.id, positionMs, viewers)
+        val timeline = timelines[display.id]
+        return viewers.groupBy { leads[it] ?: 0L }.flatMap { (lead, players) ->
+            val at = if (lead == 0L || timeline == null) positionMs
+            else KaraokeTiming.leadPosition(positionMs, lead, timeline.rate, timeline.durationMs, timeline.loop)
+            ReadinessTracker.waitingFor(display.id, at, players)
+        }
+    }
 
     private fun viewersOf(display: DisplayData): Collection<UUID> =
         transport.nearbyPlayerIds(display) + extraReceivers(display.id)
@@ -248,7 +264,7 @@ object TimelineManager {
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */
     fun sendCurrent(display: DisplayData, playerId: UUID) {
         val timeline = ensureTimeline(display) ?: return
-        transport.sendTo(playerId, syncPacket(display, timeline, transport.nowMs()))
+        transport.sendTo(playerId, syncPacket(display, timeline, transport.nowMs(), playerLeadsMs(display.id)[playerId]))
     }
 
     /** Re-initializes the clock after a base-mode change and broadcasts the result. */
@@ -413,17 +429,30 @@ object TimelineManager {
         }
     }
 
-    /** The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`). */
-    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now)
+    /**
+     * The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`), moved
+     * [leadMs] ahead for a player who gets it early (a karaoke singer, see [playerLeadsMs]).
+     */
+    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long, leadMs: Long? = null) =
+        timeline.toSync(display.id, display.mode, now).let { if (leadMs == null) it else KaraokeTiming.withLead(it, leadMs) }
 
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()
         lastBroadcast[display.id] = now
         val sync = syncPacket(display, timeline, now)
-        transport.broadcast(display, sync)
+        val leads = playerLeadsMs(display.id)
+        if (leads.isEmpty()) {
+            transport.broadcast(display, sync)
+        } else {
+            for (playerId in transport.nearbyPlayerIds(display)) {
+                transport.sendTo(playerId, leads[playerId]?.let { syncPacket(display, timeline, now, it) } ?: sync)
+            }
+        }
         val extra = extraReceivers(display.id)
         if (extra.isEmpty()) return
         val nearby = transport.nearbyPlayerIds(display).toSet()
-        for (playerId in extra) if (playerId !in nearby) transport.sendTo(playerId, sync)
+        for (playerId in extra) {
+            if (playerId !in nearby) transport.sendTo(playerId, leads[playerId]?.let { syncPacket(display, timeline, now, it) } ?: sync)
+        }
     }
 }
