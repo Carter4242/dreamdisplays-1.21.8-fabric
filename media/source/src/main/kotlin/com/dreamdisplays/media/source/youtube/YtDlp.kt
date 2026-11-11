@@ -50,13 +50,21 @@ object YtDlp {
     private val clientRace = YtDlpClientRace(cookies)
     private val formatCache = YtFormatCache(resolve = ::fetchUncached)
 
-    /** Returns stream list for videoUrl (in-memory -> disk -> `yt-dlp`). */
+    /**
+     * Returns stream list for videoUrl (in-memory -> disk -> `yt-dlp`). [owner] is who waits (a resolve passes its
+     * source): see [cancelFetch].
+     */
     @Throws(IOException::class)
-    fun fetch(videoUrl: String): List<YtStream> {
+    fun fetch(videoUrl: String, owner: Any = Any()): List<YtStream> {
         if (!MediaUrlPolicy.isAllowed(videoUrl)) {
             return []
         }
-        return formatCache.fetch(videoUrl)
+        waiters.join(videoUrl, owner)
+        try {
+            return formatCache.fetch(videoUrl)
+        } finally {
+            waiters.leave(videoUrl, owner)
+        }
     }
 
     /** Resolves the binary path, cookie browser, and cookie header in the background to reduce first-fetch latency. */
@@ -123,14 +131,23 @@ object YtDlp {
     }
 
     /**
-     * Stops the resolve of [videoUrl] in flight, if any, and kills its `yt-dlp` processes: another resolver already
-     * played it. Nothing is cached for it, so a later fetch starts afresh.
+     * Stops the resolve of [videoUrl] in flight and kills its `yt-dlp` processes when [owner] (whose race another
+     * resolver won) is the only caller waiting on it: a Twitch or Vimeo metadata lookup, or another display's resolve,
+     * waiting on the same fetch keeps it. Nothing is cached for a stopped fetch, so a later one starts afresh.
      */
-    fun cancelFetch(videoUrl: String) {
-        formatCache.cancel(videoUrl)
+    fun cancelFetch(videoUrl: String, owner: Any) {
+        var abandon: (() -> Unit)? = null
+        waiters.stopIfOnly(videoUrl, owner) {
+            formatCache.cancel(videoUrl)
+            // Taken under the lock: a fetch started right after this one is stopped registers its own
+            abandon = abandoners.remove(videoUrl)
+        }
         // A canceled coroutine only stops at its next suspension, and NewPipe / the first client block: kill now
-        abandoners.remove(videoUrl)?.invoke()
+        abandon?.invoke()
     }
+
+    /** Callers waiting on each URL's fetch, for [cancelFetch]. */
+    private val waiters = FetchWaiters()
 
     /** Kills the `yt-dlp` work of each fetch in flight, by URL, for [cancelFetch]. */
     private val abandoners = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()

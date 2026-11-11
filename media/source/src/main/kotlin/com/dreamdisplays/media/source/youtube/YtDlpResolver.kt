@@ -9,8 +9,6 @@ import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.media.source.RaceAware
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Subprocess-backed [MediaResolverService] wrapping the [YtDlp] orchestrator. This is the slow, robust
@@ -30,12 +28,10 @@ object YtDlpResolver : MediaResolverService, RaceAware {
         return true
     }
 
-    /** [resolve] calls in progress per URL: they share one fetch, which [cancel] stops only for a lone caller. */
-    private val resolving = ConcurrentHashMap<String, AtomicInteger>()
-
+    /** The fetch [resolve] waits on for [source] stops only when nothing else waits on it ([YtDlp.cancelFetch]). */
     override fun cancel(source: MediaSource) {
         val url = source.toResolvableUrl() ?: return
-        if (resolving[url]?.get() == 1) YtDlp.cancelFetch(url)
+        YtDlp.cancelFetch(url, owner = source)
     }
 
     override fun resolve(source: MediaSource): ResolvedMedia {
@@ -43,13 +39,11 @@ object YtDlpResolver : MediaResolverService, RaceAware {
             ?: throw UnsupportedOperationException("$source has no resolvable URL.")
         // The format cache wraps every failure in an IOException; unwrap a typed one so its message and fatality reach
         // the player instead of a generic "fetch failed"
-        resolving.computeIfAbsent(url) { AtomicInteger() }.incrementAndGet()
         val streams = try {
-            YtDlp.fetch(url)
+            // The source is this resolve's identity: the race that runs it cancels with the same one
+            YtDlp.fetch(url, owner = source)
         } catch (e: IOException) {
             throw (e.cause as? DreamMediaException) ?: e
-        } finally {
-            resolving.computeIfPresent(url) { _, n -> if (n.decrementAndGet() <= 0) null else n }
         }
         check(streams.isNotEmpty()) { "yt-dlp returned no playable streams for $url." }
 
