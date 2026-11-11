@@ -112,6 +112,21 @@ object Initializer {
         }
     }
 
+    /**
+     * A proxy moved the player to another backend on the same connection. That is no disconnect (Fabric only ends the
+     * old play session's receivers), so [onServerLeft] never runs: reset everything that belongs to the old backend
+     * here, as leaving would, except the displays (carried popouts wait for the new backend to reconfirm them) and the
+     * server address. Client thread, before the hello to the new backend.
+     */
+    fun onBackendSwitched() {
+        logger.info("Moved to another server behind the proxy; resetting per-server state.")
+        com.dreamdisplays.platform.client.displays.ScreenShare.onServerLeft()
+        ClientStateManager.isPremium = false
+        ClientStateManager.isAdmin = false
+        ProtocolRouter.reset()
+        ClientPacketManager.reset()
+    }
+
     /** A v1-only reply arrived: the server's `Dream Displays` is too old to use. */
     fun onLegacyServerDetected() {
         ProtocolRouter.onLegacyServerDetected()

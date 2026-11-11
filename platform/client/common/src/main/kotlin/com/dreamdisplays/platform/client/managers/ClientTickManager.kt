@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.client.managers
 import com.dreamdisplays.api.display.model.property.DisplayId
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.core.runtime.getOrNull
+import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.audio.ListenerPoseTracker
 import com.dreamdisplays.platform.client.capabilities.CapabilityNegotiationService
 import com.dreamdisplays.platform.client.core.ClientApplication
@@ -68,8 +69,8 @@ object ClientTickManager {
             if (lastLevel == null) {
                 lastLevel = level
                 if (newBackend) {
-                    FullscreenPrepareController.reset()
-                    DisplayWarmup.reset()
+                    // Before the hello below, so the new backend is negotiated from scratch
+                    Initializer.onBackendSwitched()
                     DisplayRegistry.unloadAllForServerSwitch(newBackend = true)
                     hoveredDisplayScreen = null
                 }
@@ -79,10 +80,7 @@ object ClientTickManager {
                 lastLevel = level
                 // Another dimension or another backend: a running screen share ends here
                 ScreenShare.onLevelChanged()
-                if (newBackend) {
-                    FullscreenPrepareController.reset()
-                    DisplayWarmup.reset()
-                }
+                if (newBackend) Initializer.onBackendSwitched()
                 DisplayRegistry.unloadAllForServerSwitch(newBackend)
                 hoveredDisplayScreen = null
                 checkVersionAndSendPacket()
