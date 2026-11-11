@@ -44,4 +44,22 @@ class TimelineFollowerTest {
         assertFalse(isStaleTimeline(0, 10_000))
         assertFalse(isStaleTimeline(10_001, 10_000))
     }
+
+    @Test
+    fun `a resolving player is re-primed on a running timeline only`() {
+        assertTrue(reprimesBeforeOpen(hasPlayer = true, videoStarted = false, hasTimeline = true, paused = false))
+        assertFalse(reprimesBeforeOpen(hasPlayer = true, videoStarted = true, hasTimeline = true, paused = false))
+        assertFalse(reprimesBeforeOpen(hasPlayer = true, videoStarted = false, hasTimeline = true, paused = true))
+        assertFalse(reprimesBeforeOpen(hasPlayer = true, videoStarted = false, hasTimeline = false, paused = false))
+        assertFalse(reprimesBeforeOpen(hasPlayer = false, videoStarted = false, hasTimeline = true, paused = false))
+    }
+
+    @Test
+    fun `a joining player's first start is a cold landing unless its stream already runs`() {
+        assertTrue(expectsJoinLanding(initialTimeline = true, paused = false, clockRunning = false, landingPending = false))
+        assertFalse(expectsJoinLanding(initialTimeline = true, paused = false, clockRunning = true, landingPending = false))
+        assertFalse(expectsJoinLanding(initialTimeline = false, paused = false, clockRunning = false, landingPending = false))
+        assertFalse(expectsJoinLanding(initialTimeline = true, paused = true, clockRunning = false, landingPending = false))
+        assertFalse(expectsJoinLanding(initialTimeline = true, paused = false, clockRunning = false, landingPending = true))
+    }
 }

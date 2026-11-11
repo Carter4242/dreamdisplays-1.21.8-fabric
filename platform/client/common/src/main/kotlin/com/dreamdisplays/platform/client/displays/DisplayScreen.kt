@@ -788,6 +788,9 @@ class DisplayScreen(
         waitingSinceNanos = 0L
     }
 
+    /** True while the display has a media player (resolving or playing). */
+    internal val hasPlayer: Boolean get() = mediaPlayer != null
+
     /** Primes the player to begin at [positionNanos] so the first frame lands on the synced position. */
     internal fun primeTimelineStart(positionNanos: Long) {
         mediaPlayer?.primeStartPosition(positionNanos.coerceAtLeast(0L))

@@ -204,6 +204,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 if (!screen.videoStarted) {
                     screen.beginPlaybackPaused(packet.paused)
                     if (!packet.paused) expectLanding(LeadKind.COLD)
+                } else if (expectsJoinLanding(initialTimeline, packet.paused, screen.isClockRunning(), landing != null)) {
+                    // A fresh player already started by its own init (joining, back in range, a retry): its stream is
+                    // opening at the primed position, a cold start like any other, so its landing is judged and fixed
+                    expectLanding(LeadKind.COLD)
+                    correctAfterLanding = true
                 }
 
                 // Pause-state matching is cheap and is never gated by any cooldown
@@ -252,9 +257,20 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 pushRatio(1.0, System.nanoTime())
                 return
             }
+            reprimeBeforeOpen(System.nanoTime())
             evaluate(System.nanoTime())
             logIfDue(System.nanoTime())
         }
+    }
+
+    /**
+     * Until a fresh player has resolved, keeps its primed start on the live position: the stream opens where the
+     * server is when it opens, not where it was when the timeline packet arrived (a resolve can take seconds).
+     */
+    private fun reprimeBeforeOpen(now: Long) {
+        if (!reprimesBeforeOpen(screen.hasPlayer, screen.videoStarted, estimator.hasTimeline, estimator.paused)) return
+        val startMs = estimator.targetMs(now / NANOS_PER_MS).roundToLong() + contentMs(coldLeadMs, estimator.rate)
+        screen.primeTimelineStart(wrapForStart(startMs, loop) * 1_000_000L)
     }
 
     /** A long gap between ticks is a game stall: timeline packets queued behind it arrive late and stale. */
@@ -650,3 +666,18 @@ internal fun heldEndRestarts(targetMs: Long, durationMs: Long, endHoldMs: Long):
  * unstamped one (0) is always taken; one with the same stamp (a scheduled start firing) too.
  */
 internal fun isStaleTimeline(serverTimeMs: Long, lastServerTimeMs: Long): Boolean = serverTimeMs in 1..<lastServerTimeMs
+
+/**
+ * Whether a player that has not resolved yet ([videoStarted] false; it reads its primed start when it opens) gets its
+ * primed start moved to the live position: a running (not paused) timeline is known.
+ */
+internal fun reprimesBeforeOpen(hasPlayer: Boolean, videoStarted: Boolean, hasTimeline: Boolean, paused: Boolean): Boolean =
+    hasPlayer && !videoStarted && hasTimeline && !paused
+
+/**
+ * Whether the first timeline of a player its own init already started is a cold landing to judge (and fix): the screen
+ * still waits for that first timeline, it plays, and the stream has not run yet (one already running opened before
+ * any timeline was known, so its offset is no restart cost). Not when a landing is already expected.
+ */
+internal fun expectsJoinLanding(initialTimeline: Boolean, paused: Boolean, clockRunning: Boolean, landingPending: Boolean): Boolean =
+    initialTimeline && !paused && !clockRunning && !landingPending
