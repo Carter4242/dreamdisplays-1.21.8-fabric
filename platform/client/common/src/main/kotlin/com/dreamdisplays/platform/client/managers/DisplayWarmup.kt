@@ -102,8 +102,17 @@ object DisplayWarmup {
         val reports = ClientPacketManager.serverSnapshot.hasFeature(ServerFeature.DISPLAY_READINESS)
         val player = Minecraft.getInstance().player
         val screens = DisplayRegistry.getScreens().filter { !it.isDormant && (it.followsServerTimeline || it.isPrepared) }
+        for (screen in screens) {
+            val track = tracks.getOrPut(screen.uuid) { Track() }
+            if (!screen.isPaused) track.pausedSinceMs = 0L else if (track.pausedSinceMs == 0L) track.pausedSinceMs = now
+        }
+        // Only displays paused recently compete for the automatic slots: two left paused for good must not take them
+        // from one that pauses now for a start hold
         val autoHeld = if (reports && player != null && ServerOverrides.settings.autoWarm) {
-            screens.filter { it.followsServerTimeline && it.isPaused && !it.isPrepared }
+            screens.filter {
+                it.followsServerTimeline && it.isPaused && !it.isPrepared &&
+                    autoHoldable(now - (tracks[it.uuid]?.pausedSinceMs ?: now), AUTO_MAX_MS)
+            }
                 .sortedBy { it.getDistanceToScreen(player.blockPosition()) }
                 .take(AUTO_HELD)
                 .mapTo(HashSet()) { it.uuid }
@@ -115,9 +124,8 @@ object DisplayWarmup {
             seen += screen.uuid
             reportedAbsent.remove(screen.uuid)
             val track = tracks.getOrPut(screen.uuid) { Track() }
-            if (!screen.isPaused) track.pausedSinceMs = 0L else if (track.pausedSinceMs == 0L) track.pausedSinceMs = now
             val persistent = screen.isPrepared || screen.uuid in requested
-            val auto = screen.uuid in autoHeld && now - track.pausedSinceMs < AUTO_MAX_MS
+            val auto = screen.uuid in autoHeld
             if (persistent || auto) maintain(screen, track, now)
             if (reports) report(screen, track, holds = persistent || auto)
         }
@@ -242,3 +250,9 @@ internal fun readinessOf(
     paused && !holds -> ReadinessState.UNHOLDABLE
     else -> ReadinessState.NOT_READY
 }
+
+/**
+ * Whether a display paused [pausedForMs] ago competes for [DisplayWarmup]'s automatic hold slots: only for [maxMs] after
+ * it paused, so displays left paused for good never keep the slots from one paused now for a start hold.
+ */
+internal fun autoHoldable(pausedForMs: Long, maxMs: Long): Boolean = pausedForMs < maxMs

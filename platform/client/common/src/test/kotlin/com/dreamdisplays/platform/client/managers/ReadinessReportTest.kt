@@ -32,4 +32,12 @@ class ReadinessReportTest {
         assertEquals(ReadinessState.NOT_READY, state()) // held by a rule, still warming
         assertEquals(ReadinessState.NOT_READY, state(paused = false, holds = false)) // playing: a hold pauses it first
     }
+
+    @Test
+    fun `only recently paused displays compete for the automatic hold slots`() {
+        assertEquals(true, autoHoldable(pausedForMs = 0, maxMs = 600_000))
+        assertEquals(true, autoHoldable(pausedForMs = 599_999, maxMs = 600_000))
+        assertEquals(false, autoHoldable(pausedForMs = 600_000, maxMs = 600_000))
+    }
 }
+
