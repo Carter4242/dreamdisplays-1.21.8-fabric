@@ -211,10 +211,12 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
             Phase.READY -> if (!p.player.isLive() && p.player.canSeek() && !p.player.isHeldReady() &&
                 !p.player.isWarmingUp()
             ) {
-                // The held session was dropped (it went stale): open it again
+                // The held session was dropped (it went stale): open it again, and say it is not ready meanwhile, or
+                // the server may switch to it gaplessly and it would start cold
                 p.phase = Phase.WARMING
                 p.lastWarmAttemptNanos = now
                 warm(p)
+                report(p, FullscreenPrepareState.LOADING)
             }
 
             Phase.FAILED -> {}
