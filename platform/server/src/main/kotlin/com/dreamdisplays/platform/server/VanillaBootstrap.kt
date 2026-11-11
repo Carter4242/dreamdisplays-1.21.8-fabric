@@ -23,6 +23,9 @@ import kotlin.time.Duration.Companion.milliseconds
  */
 @ModLoaderOnly
 object VanillaBootstrap {
+    /** How often loop ends are checked; the restart is sent up to this early (Paper runs them every 2 ticks too). */
+    private const val END_TICK_MS = 100L
+
     /** Connects storage, loads displays, binds playback, and starts the repeating tasks. */
     fun onServerStarted(server: MinecraftServer, dataDir: File) {
         val s = VanillaServerState.config.storage
@@ -90,8 +93,21 @@ object VanillaBootstrap {
                         TimelineManager.tick()
                         WatchPartyManager.tick()
                         FullscreenBroadcastManager.tick()
-                        FullscreenBroadcastManager.tickEnds()
                         VanillaProxyBridge.tick(server)
+                    }
+                }
+            }
+        }
+
+        // As on Paper: a video with nothing queued restarts for everyone at its end, and a clock already past an end
+        // (a length that came down below it) restarts at once; without this it would never loop again
+        ServerCoroutines.io.launch {
+            while (!server.isStopped) {
+                delay(END_TICK_MS.milliseconds)
+                runCatching {
+                    server.execute {
+                        TimelineManager.tickEnds()
+                        FullscreenBroadcastManager.tickEnds()
                     }
                 }
             }
