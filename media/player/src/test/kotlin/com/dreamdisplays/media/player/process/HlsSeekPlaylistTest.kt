@@ -76,4 +76,46 @@ class HlsSeekPlaylistTest {
             "MPEG-TS seeks correctly on its own and must not pay for this.",
         )
     }
+
+    @Test
+    fun `an encrypted playlist is left to FFmpeg's own reader`() {
+        val encrypted = fmp4().replace(
+            "#EXT-X-PLAYLIST-TYPE:VOD\n",
+            "#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\",IV=0x0123456789abcdef0123456789abcdef\n",
+        )
+        assertNull(HlsSeekPlaylist.trimText(encrypted, base, 14_000_000_000L))
+        val clear = fmp4().replace("#EXT-X-PLAYLIST-TYPE:VOD\n", "#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-KEY:METHOD=NONE\n")
+        assertNotNull(HlsSeekPlaylist.trimText(clear, base, 14_000_000_000L))
+    }
+
+    @Test
+    fun `implicit byte ranges get the offset of the range they continued`() {
+        // Single-file fMP4: only the first media range carries an offset, the rest follow on from it
+        val playlist = buildString {
+            appendLine("#EXTM3U")
+            appendLine("#EXT-X-TARGETDURATION:6")
+            appendLine("#EXT-X-MAP:URI=\"main.mp4\",BYTERANGE=\"100@0\"")
+            appendLine("#EXTINF:1.0,")
+            appendLine("#EXT-X-BYTERANGE:1000@100")
+            appendLine("main.mp4")
+            repeat(4) {
+                appendLine("#EXTINF:1.0,")
+                appendLine("#EXT-X-BYTERANGE:1000")
+                appendLine("main.mp4")
+            }
+            appendLine("#EXT-X-ENDLIST")
+        }
+        val text = decode(assertNotNull(HlsSeekPlaylist.trimText(playlist, base, 3_000_000_000L)))
+        assertEquals(
+            listOf("#EXT-X-BYTERANGE:1000@3100", "#EXT-X-BYTERANGE:1000@4100"),
+            text.lines().filter { it.startsWith("#EXT-X-BYTERANGE") },
+        )
+    }
+
+    @Test
+    fun `a byte range written before its duration is kept too`() {
+        val playlist = fmp4().replace(Regex("(#EXTINF:[^\n]*\n)(#EXT-X-BYTERANGE:[^\n]*\n)"), "$2$1")
+        val text = decode(assertNotNull(HlsSeekPlaylist.trimText(playlist, base, 14_000_000_000L)))
+        assertContains(text, "#EXT-X-BYTERANGE:100000@200721")
+    }
 }

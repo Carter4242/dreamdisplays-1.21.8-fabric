@@ -53,6 +53,9 @@ internal object HlsSeekPlaylist {
     fun trimText(text: String, playlistUrl: String, offsetNanos: Long): Trimmed? {
         if (offsetNanos <= 0L) return null
         if (!text.contains("#EXT-X-MAP")) return null // Only fMP4 needs this; TS seeks correctly
+        // Keys and their IVs (by default the media sequence number) do not survive a rewrite; FFmpeg's own reader of
+        // the original playlist decrypts correctly, if more slowly
+        if (text.lineSequence().any { isEncryptionKey(it.trim()) }) return null
 
         val header = StringBuilder()
         val kept = StringBuilder()
@@ -60,28 +63,42 @@ internal object HlsSeekPlaylist {
         var residualNanos = 0L
         var started = false
         var segments = 0
-        var pending: MutableList<String>? = null
+        var pendingInf: String? = null
+        var pendingRange: String? = null
+        // Where each resource's next implicit byte range starts (`#EXT-X-BYTERANGE:<n>` continues the previous one)
+        val nextRangeStart = HashMap<String, Long>()
 
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             when {
                 line.isEmpty() -> {}
-                line.startsWith("#EXTINF") -> pending = mutableListOf(line)
-                line.startsWith("#EXT-X-BYTERANGE") -> pending?.add(line)
+                line.startsWith("#EXTINF") -> pendingInf = line
+                line.startsWith("#EXT-X-BYTERANGE") -> pendingRange = line
                 line.startsWith("#EXT-X-ENDLIST") -> kept.append(line).append('\n')
                 line.startsWith("#") -> headerLine(line, playlistUrl)?.let { header.append(it).append('\n') }
 
                 else -> {
-                    val tags = pending ?: continue
-                    pending = null
-                    val durationNanos = extInfNanos(tags[0]) ?: continue
+                    val inf = pendingInf
+                    val rangeTag = pendingRange
+                    pendingInf = null
+                    pendingRange = null
+                    val segmentUrl = absolute(playlistUrl, line)
+                    // Every kept range is written with its offset: the segment it continued may be trimmed away
+                    val range = rangeTag?.let { tag ->
+                        val (explicit, end) = explicitRange(tag, nextRangeStart[segmentUrl]) ?: return null
+                        nextRangeStart[segmentUrl] = end
+                        explicit
+                    }
+                    if (inf == null) continue
+                    val tags = listOfNotNull(inf, range)
+                    val durationNanos = extInfNanos(inf) ?: continue
                     if (!started && elapsedNanos + durationNanos > offsetNanos) {
                         started = true
                         residualNanos = offsetNanos - elapsedNanos
                     }
                     if (started) {
                         tags.forEach { kept.append(it).append('\n') }
-                        kept.append(absolute(playlistUrl, line)).append('\n')
+                        kept.append(segmentUrl).append('\n')
                         segments++
                     }
                     elapsedNanos += durationNanos
@@ -107,6 +124,21 @@ internal object HlsSeekPlaylist {
         if (HEADER_TAGS.none { line == it || line.startsWith("$it:") }) return null
         if (!line.startsWith("#EXT-X-MAP")) return line
         return URI_ATTRIBUTE.replace(line) { m -> """URI="${absolute(baseUrl, m.groupValues[1])}"""" }
+    }
+
+    private fun isEncryptionKey(line: String): Boolean =
+        line.startsWith("#EXT-X-KEY:") && !line.substringAfter("METHOD=", "NONE").startsWith("NONE")
+
+    /**
+     * [tag] (`#EXT-X-BYTERANGE:<length>[@<offset>]`) with its offset written out, and the offset its resource's next
+     * implicit range starts at; null when the tag is unreadable or continues a range that was never given.
+     */
+    private fun explicitRange(tag: String, implicitStart: Long?): Pair<String, Long>? {
+        val spec = tag.substringAfter(':', "").trim()
+        val length = spec.substringBefore('@').trim().toLongOrNull()?.takeIf { it > 0 } ?: return null
+        val offset = if ('@' in spec) spec.substringAfter('@').trim().toLongOrNull() ?: return null
+        else implicitStart ?: return null
+        return "#EXT-X-BYTERANGE:$length@$offset" to offset + length
     }
 
     private fun extInfNanos(line: String): Long? {
