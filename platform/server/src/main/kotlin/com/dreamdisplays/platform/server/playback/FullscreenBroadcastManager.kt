@@ -65,6 +65,8 @@ object FullscreenBroadcastManager {
         val radius: FullscreenRadiusTarget?,
         val timeline: Timeline?,
         val createdAtMs: Long,
+        /** It rewound a playing real display: if no broadcast takes it over, that display plays on. */
+        val resumeAfter: Boolean = false,
         var reporter: ((FullscreenPrepareInfo) -> Unit)?,
         var reportedOnce: Boolean = false,
         var lastTimelineResend: Long = 0,
@@ -480,6 +482,7 @@ object FullscreenBroadcastManager {
     ): FullscreenPrepareInfo? {
         if (!virtual && sessionIdForDisplay(display.id) != null) return null
         val previous = preparations.remove(display.id)
+        val wasPlaying = !virtual && TimelineManager.savedPlaybackOf(display.id)?.wasPlaying == true
         if (rewind && !virtual) TimelineManager.parkAtStart(display)
         val now = transport.nowMs()
         val preparation = Preparation(
@@ -494,6 +497,7 @@ object FullscreenBroadcastManager {
             timeline = if (virtual) Timeline.start(now, paused = true, loop = true) else null,
             createdAtMs = now,
             reporter = reporter,
+            resumeAfter = previous?.resumeAfter == true || rewind && wasPlaying,
         )
         preparations[display.id] = preparation
         reconcilePreparation(preparation, now)
@@ -532,6 +536,7 @@ object FullscreenBroadcastManager {
     private fun cancelPreparation(preparation: Preparation) {
         if (!preparations.remove(preparation.display.id, preparation)) return
         forgetVirtualLength(preparation.display)
+        if (preparation.resumeAfter) TimelineManager.resumeAfterPreparation(preparation.display)
         for (playerId in preparation.roster.delivered) withdrawPrepare(preparation, playerId)
         logger.info("Cancelled fullscreen preparation ${preparation.prepareId}.")
     }

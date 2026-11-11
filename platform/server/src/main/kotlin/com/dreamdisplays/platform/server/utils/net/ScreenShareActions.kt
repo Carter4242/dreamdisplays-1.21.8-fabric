@@ -160,7 +160,7 @@ object ScreenShareActions {
         val live = PaperServer.config.settings.live
         val share = Share(
             displayId, player.uniqueId, streamId, display.url, display.lang,
-            SavedPlayback.of(TimelineManager.timelineOf(display.id), System.currentTimeMillis()),
+            TimelineManager.savedPlaybackOf(display.id),
             QueueManager.playingEntry(display),
             display.duration,
             nonce,

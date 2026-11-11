@@ -13,7 +13,7 @@ class PlaybackRestoreTest {
         // Playing since wall 1 000 from 60 s at 1.5x: at wall 11 000 it is at 60 s + 15 s
         val playing = Timeline(60_000, 1_000, paused = false, durationMs = 600_000, loop = true, rate = 1.5)
         val saved = SavedPlayback.of(playing, 11_000)!!
-        assertEquals(SavedPlayback(75_000, 1.5), saved)
+        assertEquals(SavedPlayback(75_000, 1.5, wasPlaying = true), saved)
         // The share ran for ten minutes: nothing moved meanwhile
         val restored = saved.restoredTimeline(nowMs = 611_000, durationMs = 600_000)
         assertTrue(restored.paused)
@@ -26,9 +26,13 @@ class PlaybackRestoreTest {
     @Test
     fun `a paused video stays paused at its position`() {
         val paused = Timeline(42_000, 1_000, paused = true, durationMs = 90_000, loop = true)
-        val restored = SavedPlayback.of(paused, 50_000)!!.restoredTimeline(70_000, 90_000)
+        val saved = SavedPlayback.of(paused, 50_000)!!
+        val restored = saved.restoredTimeline(70_000, 90_000)
         assertTrue(restored.paused)
         assertEquals(42_000, restored.positionMs)
+        assertEquals(false, saved.wasPlaying)
+        // Paused only for a start hold: it was about to play
+        assertEquals(true, SavedPlayback.of(paused, 50_000, holding = true)!!.wasPlaying)
     }
 
     @Test

@@ -354,6 +354,20 @@ object TimelineManager {
         return true
     }
 
+    /** Where [displayId] stands now, to put it back later ([onVideoChanged] `restore`); null without a timeline. */
+    fun savedPlaybackOf(displayId: UUID): SavedPlayback? =
+        SavedPlayback.of(timelines[displayId], transport.nowMs(), holding = startHolds.containsKey(displayId))
+
+    /**
+     * A preparation that rewound [display] ([parkAtStart]) ended without a broadcast taking it over: a display that
+     * was playing before plays on from there, once its viewers are ready.
+     */
+    fun resumeAfterPreparation(display: DisplayData) {
+        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
+        if (WatchPartyManager.hasSession(display.id)) return
+        startWhenReady(display, transport.nowMs() + resumeHoldMs())
+    }
+
     /** True when [display]'s server timeline is paused (or held before starting). */
     fun isPaused(display: DisplayData): Boolean =
         startHolds.containsKey(display.id) || timelines[display.id]?.paused == true
@@ -438,7 +452,8 @@ object TimelineManager {
      * and anyone not ready joins late.
      *
      * [restore] (a screen share ended): the video the display had before comes back paused where it was, at its speed,
-     * with no start hold; someone presses play.
+     * with no start hold; someone presses play. Nobody can on a Broadcast display: one that was playing resumes there
+     * once its viewers are ready (a resume hold).
      */
     fun onVideoChanged(
         display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null,
@@ -458,7 +473,11 @@ object TimelineManager {
             ReadinessTracker.forgetHeldStates(display.id)
             val restored = restore.restoredTimeline(now, knownMs)
             timelines[display.id] = restored
-            broadcast(display, restored)
+            if (display.mode == PlaybackMode.BROADCAST && restore.wasPlaying) {
+                startWhenReady(display, now + resumeHoldMs())
+            } else {
+                broadcast(display, restored)
+            }
             return
         }
         // The display keeps its speed across videos
