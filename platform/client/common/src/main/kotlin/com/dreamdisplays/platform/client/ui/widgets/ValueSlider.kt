@@ -169,8 +169,9 @@ class ValueSlider(
     }
 
     companion object {
-        private val TRACK = vanillaIdentifier("widget/slider")
-        private val TRACK_HIGHLIGHTED = vanillaIdentifier("widget/slider_highlighted")
+        /** The slider track; other settings-row controls ([SpeedField]) draw it too so every row looks alike. */
+        internal val TRACK = vanillaIdentifier("widget/slider")
+        internal val TRACK_HIGHLIGHTED = vanillaIdentifier("widget/slider_highlighted")
         private val HANDLE = vanillaIdentifier("widget/slider_handle")
         private val HANDLE_HIGHLIGHTED = vanillaIdentifier("widget/slider_handle_highlighted")
     }
