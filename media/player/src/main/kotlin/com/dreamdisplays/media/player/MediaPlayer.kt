@@ -534,13 +534,14 @@ class MediaPlayer(
 
     /**
      * True when a live relay stream's last picture must not be shown: stopped, off the air, reconnecting, or no new
-     * frame for [maxAgeNanos] while playing. A relay stream may be someone's screen share, and its last frame is a
-     * moment of their desktop that has to vanish when the share ends. Always false for any other stream.
+     * frame for [maxAgeNanos], paused or not. A relay stream may be someone's screen share, and its last frame is a
+     * moment of their desktop that has to vanish when the share ends; a paused one would otherwise hold it for as long
+     * as it stays paused (out of range, where the share's end never reaches this client). Always false for any other
+     * stream.
      */
     fun isRelayPictureStale(maxAgeNanos: Long): Boolean {
         if (!relayStream) return false
         if (terminated.get() || waitingForStream) return true
-        if (pauseRequested) return false
         val last = sessionManager.lastFrameNanos.get()
         return last <= 0L || System.nanoTime() - last > maxAgeNanos
     }
