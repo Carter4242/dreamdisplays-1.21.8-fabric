@@ -217,6 +217,49 @@ class AudioMasterClockTest {
     }
 
     @Test
+    fun `a pause during a stall takeover does not count the paused time as content`() {
+        val fake = FakeNanos()
+        val clock = AudioMasterClock("test", fake::now)
+        var wall = 10 * second
+        clock.nanos(sample(10 * second), wall, suspended = false) { null }
+        // The line sticks long enough for wall time to take over, which carries the clock 200 ms further
+        fake.advance(second)
+        wall += second
+        clock.nanos(sample(10 * second), wall, suspended = false) { null }
+        fake.advance(200 * ms)
+        wall += 200 * ms
+        assertEquals(10 * second + 200 * ms, clock.nanos(sample(10 * second), wall, suspended = false) { null })
+
+        // Paused for a minute: the position holds
+        clock.nanos(sample(10 * second), wall, suspended = true) { null }
+        fake.advance(60 * second)
+        assertEquals(10 * second + 200 * ms, clock.nanos(sample(10 * second), wall, suspended = true) { null })
+
+        // Resumed: it carries on from the paused position, not a minute past it
+        fake.advance(5 * second) // no read while parked (the pipes do not pace a parked session)
+        assertEquals(10 * second + 200 * ms, clock.nanos(sample(10 * second), wall, suspended = false) { null })
+        fake.advance(100 * ms)
+        assertEquals(10 * second + 300 * ms, clock.nanos(sample(10 * second), wall, suspended = false) { null })
+    }
+
+    @Test
+    fun `a line moving again right after a paused takeover is not asked to skip the paused time`() {
+        val fake = FakeNanos()
+        val skips = ArrayList<Long>()
+        val clock = AudioMasterClock("test", fake::now, requestAudioResync = { skips.add(it) })
+        var wall = 10 * second
+        clock.nanos(sample(10 * second), wall, suspended = false) { null }
+        fake.advance(second)
+        wall += second
+        clock.nanos(sample(10 * second), wall, suspended = false) { null } // takeover engages
+        clock.nanos(sample(10 * second), wall, suspended = true) { null } // parked
+        fake.advance(30 * second)
+        // Un-parked: the line restarts and its first new position is read
+        assertEquals(10 * second + 10 * ms, clock.nanos(sample(10 * second + 10 * ms), wall, suspended = false) { null })
+        assertTrue(skips.isEmpty(), "Asked to skip ${skips.map { it / 1_000_000 }} ms after a pause.")
+    }
+
+    @Test
     fun `a line reporting in buffer steps is smoothed between them`() {
         val fake = FakeNanos()
         val clock = AudioMasterClock("test", fake::now)

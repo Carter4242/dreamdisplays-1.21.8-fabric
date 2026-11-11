@@ -40,6 +40,7 @@ internal class AudioMasterClock(
     private var lastOut = Long.MIN_VALUE
     private var lastOutAdvanceNanos = 0L
     private var lastResyncRequestNanos = Long.MIN_VALUE / 2
+    private var lastSuspended = false
 
     /**
      * Returns the master clock position in content nanos, or -1 when neither the audio line nor the wall clock
@@ -62,6 +63,14 @@ internal class AudioMasterClock(
             val now = nowNanos()
             if (sample.epoch != epoch) beginEpoch(sample, wallNanos, now)
             if (!sample.originKnown && !streamAnchored) alignToStream(exactBias)
+
+            // Wall time only drives a takeover while playback runs: a pause or park (and the first read after one)
+            // re-anchors it where it stands, so the suspended interval never counts as content
+            if (takeover && (suspended || lastSuspended) && lastOut != Long.MIN_VALUE) {
+                takeoverAnchorOut = lastOut
+                takeoverAnchorWall = now
+            }
+            lastSuspended = suspended
 
             if (sample.nanos != lastRaw) {
                 val interval = now - lastRawChangeNanos
