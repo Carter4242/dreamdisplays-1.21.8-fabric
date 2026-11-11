@@ -5,6 +5,7 @@ import com.dreamdisplays.media.player.process.ShareAudio.Os
 import com.dreamdisplays.media.player.process.ShareAudio.Plan
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ShareAudioTest {
@@ -178,5 +179,12 @@ class ShareWindowsTest {
         assertEquals("Google Chrome", ShareWindows.appName(" Google Chrome ", "C:\\Program Files\\Google\\chrome.exe"))
         assertEquals("chrome", ShareWindows.appName(null, "C:\\Program Files\\Google\\chrome.exe"))
         assertEquals("App", ShareWindows.appName("", null))
+    }
+
+    @Test
+    fun `a store app's frame host is recognised, so its window gets no silent this-app sound`() {
+        assertTrue(ShareWindows.isFrameHostExe("C:\\Windows\\System32\\ApplicationFrameHost.exe"))
+        assertTrue(ShareWindows.isFrameHostExe("c:\\windows\\system32\\applicationframehost.EXE"))
+        assertFalse(ShareWindows.isFrameHostExe("C:\\Program Files\\Google\\chrome.exe"))
     }
 }

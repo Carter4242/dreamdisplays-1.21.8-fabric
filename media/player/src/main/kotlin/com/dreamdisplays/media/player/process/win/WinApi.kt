@@ -63,6 +63,7 @@ internal object WinApi {
         fun ShowWindow(hwnd: Pointer, cmd: Int): Boolean
         fun SetWindowPos(hwnd: Pointer, after: Pointer?, x: Int, y: Int, cx: Int, cy: Int, flags: Int): Boolean
         fun IsWindow(hwnd: Pointer): Boolean
+        fun FindWindowExW(parent: Pointer?, after: Pointer?, className: WString?, title: WString?): Pointer?
     }
 
     interface Dwmapi : StdCallLibrary {

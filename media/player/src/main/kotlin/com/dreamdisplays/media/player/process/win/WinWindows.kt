@@ -4,6 +4,7 @@ import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ShareWindows
 import com.sun.jna.Memory
 import com.sun.jna.Pointer
+import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
 
 /** The top-level windows that can be shared (Windows), in Z order (the frontmost first). */
@@ -55,9 +56,27 @@ object WinWindows {
         }
         user32.EnumWindows(proc, null)
         java.lang.ref.Reference.reachabilityFence(proc)
-        // Program names come after the walk: reading version resources inside the callback would hold it up
-        return found.map { it.copy(app = WinAudio.appName(it.pid)) }
+        // Program names come after the walk: reading version resources inside the callback would hold it up. A Store
+        // app's window belongs to ApplicationFrameHost; the app itself (its name, its sound) is the hosted window's.
+        return found.map { w ->
+            val pid = if (isFrameHost(w.pid)) hostedAppPid(w) ?: w.pid else w.pid
+            w.copy(pid = pid, app = WinAudio.appName(pid))
+        }
     }
+
+    /** True when process [pid] is ApplicationFrameHost, the frame around every Store (UWP) app's window. */
+    fun isFrameHost(pid: Long): Boolean =
+        ProcessHandle.of(pid).flatMap { it.info().command() }.orElse(null)
+            ?.let { ShareWindows.isFrameHostExe(it) } == true
+
+    /** The process of the Store app inside frame [window] (its `Windows.UI.Core.CoreWindow`); null while minimized. */
+    private fun hostedAppPid(window: ScreenCapture.Window): Long? = runCatching {
+        val core = WinApi.user32.FindWindowExW(Pointer(window.hwnd), null, WString("Windows.UI.Core.CoreWindow"), null)
+            ?: return null
+        val pid = IntByReference()
+        WinApi.user32.GetWindowThreadProcessId(core, pid)
+        (pid.value.toLong() and 0xFFFFFFFFL).takeIf { it != 0L && it != window.pid }
+    }.getOrNull()
 
     /** True while [window] still exists. */
     fun exists(window: ScreenCapture.Window): Boolean = runCatching { WinApi.user32.IsWindow(Pointer(window.hwnd)) }.getOrDefault(false)

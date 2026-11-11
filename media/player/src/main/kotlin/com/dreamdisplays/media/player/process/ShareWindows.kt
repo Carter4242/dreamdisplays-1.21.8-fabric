@@ -35,6 +35,10 @@ object ShareWindows {
         return w.title != "Program Manager"
     }
 
+    /** True when [exePath] is ApplicationFrameHost, which draws the frame of every Store (UWP) app's window. */
+    fun isFrameHostExe(exePath: String): Boolean =
+        exePath.substringAfterLast('\\').substringAfterLast('/').equals("ApplicationFrameHost.exe", ignoreCase = true)
+
     /** A program's friendly name from its file description, else its executable's name without `.exe`. */
     fun appName(description: String?, exePath: String?): String {
         description?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
