@@ -21,6 +21,8 @@ internal class HlsAudioFeeder(
     private val terminated: AtomicBoolean,
     private val debugLabel: String,
     private val resumeSeq: Long = -1L,
+    /** The URL the session asked for, under which an unreadable playlist is remembered (see [readable]). */
+    private val memoKey: String = playlistUrl,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -32,6 +34,13 @@ internal class HlsAudioFeeder(
 
     @Volatile
     var splicedAtSeq: Long = -1L; private set
+
+    /**
+     * The playlist encrypts its segments (`EXT-X-KEY`), which this feeder cannot decrypt: it stopped without piping
+     * anything, and the session should read the playlist with `FFmpeg` instead (see [readable]).
+     */
+    @Volatile
+    var unreadable: Boolean = false; private set
 
     private val stopAtSplice = playlistUrl.contains(".ttvnw.net/")
 
@@ -46,6 +55,7 @@ internal class HlsAudioFeeder(
         @JvmField val targetDurationMs: Long,
         @JvmField val segments: List<Segment>,
         @JvmField val endList: Boolean,
+        @JvmField val encrypted: Boolean = false,
     )
 
     /** Starts the feeder thread. The thread exits on stop/terminate, sink failure, or `#EXT-X-ENDLIST`. */
@@ -73,6 +83,12 @@ internal class HlsAudioFeeder(
                     continue
                 }
                 playlistFailures = 0
+                if (playlist.encrypted) {
+                    logger.info("$debugLabel [audio-hls] the playlist is encrypted; its sound is read by FFmpeg instead.")
+                    markUnreadable(memoKey)
+                    unreadable = true
+                    return
+                }
 
                 // Join (or re-join after falling out of the window) a few segments shy of the live
                 // edge, mirroring FFmpeg's own HLS default, so audio content lines up with the video
@@ -157,6 +173,7 @@ internal class HlsAudioFeeder(
         var endList = false
         var initUrl: String? = null
         var discontinuity = false
+        var encrypted = false
         val segments = ArrayList<Segment>()
         val base = URI(playlistUrl)
         for (raw in body.lineSequence()) {
@@ -174,6 +191,9 @@ internal class HlsAudioFeeder(
                     initUrl = line.substringAfter("URI=\"", "").substringBefore('"').takeIf { it.isNotEmpty() }
                         ?.let { base.resolve(it).toString() }
 
+                line.startsWith("#EXT-X-KEY:") ->
+                    if (!line.substringAfter("METHOD=", "NONE").startsWith("NONE")) encrypted = true
+
                 line == "#EXT-X-DISCONTINUITY" -> discontinuity = true
                 line == "#EXT-X-ENDLIST" -> endList = true
                 line.startsWith("#") -> {} // Comments, Twitch daterange / prefetch tags, EXTINF durations
@@ -183,7 +203,7 @@ internal class HlsAudioFeeder(
                 }
             }
         }
-        return MediaPlaylist(mediaSequence, targetDurationMs, segments, endList)
+        return MediaPlaylist(mediaSequence, targetDurationMs, segments, endList, encrypted)
     }
 
     private fun tsFirstAudioPtsNanos(segment: ByteArray): Long {
@@ -259,5 +279,25 @@ internal class HlsAudioFeeder(
             String(data, Charsets.ISO_8859_1).indexOf(type).takeIf { it >= 0 && it + 28 <= data.size } ?: -1
 
         fun supports(url: String): Boolean = url.contains(".m3u8") || url.contains(".ttvnw.net/")
+
+        private const val UNREADABLE_LIMIT = 64
+
+        private val unreadablePlaylists: MutableSet<String> = java.util.Collections.newSetFromMap(
+            java.util.Collections.synchronizedMap(object : LinkedHashMap<String, Boolean>() {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>) = size > UNREADABLE_LIMIT
+            }),
+        )
+
+        private fun markUnreadable(url: String) {
+            unreadablePlaylists.add(url)
+        }
+
+        /** False once a feeder found [url]'s playlist encrypted: its sound must be read by `FFmpeg` itself. */
+        fun readable(url: String): Boolean = url !in unreadablePlaylists
+
+        /** Parses a media playlist [body] and says whether its segments are encrypted (for tests). */
+        internal fun encryptedPlaylist(body: String, playlistUrl: String): Boolean =
+            HlsAudioFeeder(playlistUrl, java.io.OutputStream.nullOutputStream(), AtomicBoolean(), AtomicBoolean(), "test")
+                .parse(body).encrypted
     }
 }

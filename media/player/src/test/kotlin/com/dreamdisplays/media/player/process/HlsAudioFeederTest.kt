@@ -33,4 +33,15 @@ class HlsAudioFeederTest {
     fun `a segment without the boxes yields no PTS`() {
         assertEquals(-1L, HlsAudioFeeder.mp4FirstPtsNanos(ByteArray(64), ByteArray(64)))
     }
+
+    @Test
+    fun `a playlist with an AES key is recognised as one the feeder cannot read`() {
+        val base = "https://live.example/hls/audio.m3u8"
+        val plain = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2.0,\nseg7.ts\n"
+        val aes = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://keys.example/k\"\n#EXTINF:2.0,\nseg7.ts\n"
+        val none = "#EXTM3U\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:2.0,\nseg7.ts\n"
+        kotlin.test.assertFalse(HlsAudioFeeder.encryptedPlaylist(plain, base))
+        kotlin.test.assertTrue(HlsAudioFeeder.encryptedPlaylist(aes, base))
+        kotlin.test.assertFalse(HlsAudioFeeder.encryptedPlaylist(none, base))
+    }
 }

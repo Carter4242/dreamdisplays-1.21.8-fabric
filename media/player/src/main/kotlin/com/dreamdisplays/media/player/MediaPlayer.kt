@@ -1325,6 +1325,11 @@ class MediaPlayer(
             logger.debug("$debugLabel Audio pipe ended near VOD end (pos=${clock.currentTime()}, dur=$durationHintNanos); deferring to video EOS.")
             return@onControl
         }
+        if (liveStream && sessionManager.audioFeederUnreadable()) {
+            // An encrypted live playlist: reopen the sound through FFmpeg's own HLS reader, which has the key
+            restartAudioOrStall()
+            return@onControl
+        }
         if (liveStream && sessionManager.audioSourceGone()) {
             handleSessionStall("live audio source stopped serving")
             return@onControl

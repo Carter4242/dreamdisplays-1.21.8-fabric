@@ -309,13 +309,13 @@ internal class PlaybackSessionManager(
             audioFeeder = null
             return null
         }
-        if (liveSession && HlsAudioFeeder.supports(url)) {
+        if (liveSession && HlsAudioFeeder.supports(url) && HlsAudioFeeder.readable(url)) {
             // Same SSRF gate the FFmpeg URL path applies in MediaProcess.baseCommand
             val safeUrl = MediaHostGuard.resolveSafeUrl(url)
             val proc = MediaProcess.buildAudioPiped(ffmpeg, AudioSink.SAMPLE_RATE)
             // A session that ended at an ad splice is continued from that very segment, not from the live edge
             val resumeSeq = audioFeeder?.splicedAtSeq ?: -1L
-            audioFeeder = HlsAudioFeeder(safeUrl, proc.outputStream, stopFlag, terminated, debugLabel, resumeSeq)
+            audioFeeder = HlsAudioFeeder(safeUrl, proc.outputStream, stopFlag, terminated, debugLabel, resumeSeq, memoKey = url)
                 .also { it.start() }
             return proc
         }
@@ -329,6 +329,9 @@ internal class PlaybackSessionManager(
     private fun audioOriginKnown(): Boolean = !liveSession && audioFeeder == null
 
     fun audioSourceGone(): Boolean = audioFeeder?.sourceGone == true
+
+    /** True when the live feeder gave up on an encrypted playlist; a restart reads it with `FFmpeg` instead. */
+    fun audioFeederUnreadable(): Boolean = audioFeeder?.unreadable == true
 
     /**
      * The video pipeline in use, for hitch reports: `lav` (in-process libav), `native` (native NV12 / GPU-YUV),
