@@ -1181,6 +1181,9 @@ class DisplayScreen(
         popoutManager.minimizeFullscreenToPip(mediaPlayer, interactive = false)
     }
 
+    /** True while this display is shown in a PiP overlay. */
+    val isPipActive: Boolean get() = popoutManager.isPipActive
+
     /** True while this display is shown in the fullscreen overlay. */
     val isFullscreenActive: Boolean get() = popoutManager.isFullscreenActive
 

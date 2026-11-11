@@ -33,6 +33,9 @@ class DisplayPopoutManager(
     val isActive: Boolean
         get() = windowActive || (popoutWindow?.isOpen == true) || (pipOverlay != null) || (fullscreenOverlay != null)
 
+    /** True while this display has a PiP overlay (not one that is fading out). */
+    val isPipActive: Boolean get() = pipOverlay != null
+
     /** True while the fullscreen overlay is active. */
     val isFullscreenActive: Boolean get() = fullscreenOverlay != null
 

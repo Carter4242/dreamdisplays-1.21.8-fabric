@@ -22,15 +22,30 @@ class DefaultPopoutManager : PopoutManager {
     private val listeners = CopyOnWriteArrayList<(PopoutEvent) -> Unit>()
 
     override fun openWindow(displayId: DisplayId, config: WindowConfig): VideoFrameSink? {
-        DisplayRegistry.screens[displayId.uuid]?.activateWindowMode()
+        replacingPip(displayId) { it.activateWindowMode() }
         return null
     }
 
     override fun openPip(displayId: DisplayId): VideoFrameSink? {
-        DisplayRegistry.screens[displayId.uuid]?.activatePipMode()
-        ClientSettingsStore.setPipOpen(displayId.uuid, true)
-        Initializer.sendPacket(PipPin(displayId.uuid, pinned = true))
+        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
+        screen.activatePipMode()
+        // Remembered (and reopened on every join) only when it actually opened
+        if (screen.isPipActive) {
+            ClientSettingsStore.setPipOpen(displayId.uuid, true)
+            Initializer.sendPacket(PipPin(displayId.uuid, pinned = true))
+        }
         return null
+    }
+
+    /** Runs [open], which closes the display's PiP when it succeeds; a PiP it replaced is forgotten like a closed one. */
+    private fun replacingPip(displayId: DisplayId, open: (com.dreamdisplays.platform.client.displays.DisplayScreen) -> Unit) {
+        val screen = DisplayRegistry.screens[displayId.uuid] ?: return
+        val hadPip = screen.isPipActive
+        open(screen)
+        if (hadPip && !screen.isPipActive) {
+            ClientSettingsStore.setPipOpen(displayId.uuid, false)
+            Initializer.sendPacket(PipPin(displayId.uuid, pinned = false))
+        }
     }
 
     override fun close(displayId: DisplayId) {
@@ -43,7 +58,7 @@ class DefaultPopoutManager : PopoutManager {
     }
 
     override fun openFullscreen(displayId: DisplayId, mode: FullscreenMode) {
-        DisplayRegistry.screens[displayId.uuid]?.activateFullscreenMode(mode)
+        replacingPip(displayId) { it.activateFullscreenMode(mode) }
     }
 
     override fun closeFullscreen(displayId: DisplayId) {
