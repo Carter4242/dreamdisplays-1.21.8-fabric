@@ -3,6 +3,9 @@ name: Build & release (Fabric 1.21.8)
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
