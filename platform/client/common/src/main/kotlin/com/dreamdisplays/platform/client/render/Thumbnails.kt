@@ -150,7 +150,10 @@ object Thumbnails {
     private suspend fun download(avgColorKey: String, cacheKey: String, bytesDeferred: Deferred<ByteArray>) {
         runCatching { bytesDeferred.await() }
             .onSuccess { bytes ->
-                Minecraft.getInstance().execute { register(avgColorKey, cacheKey, bytes) }
+                // JPEG decode and the per-pixel copy run here, off the render thread: a strip of cards arriving
+                // together used to decode all of them inside one frame's task queue
+                val decoded = runCatching { decode(bytes) }
+                Minecraft.getInstance().execute { register(avgColorKey, cacheKey, decoded) }
             }
             .onFailure { e ->
                 if (e is CancellationException) throw e
@@ -204,14 +207,14 @@ object Thumbnails {
 
     private class Decoded(val image: NativeImage, val avgColor: Int, val ambientImage: NativeImage)
 
-    private fun register(avgColorKey: String, key: String, bytes: ByteArray) {
+    private fun register(avgColorKey: String, key: String, decodeResult: Result<Decoded>) {
         var image: NativeImage? = null
         var tex: DynamicTexture? = null
         var ambientImage: NativeImage? = null
         var ambientTex: DynamicTexture? = null
 
         runCatching {
-            val decoded = decode(bytes)
+            val decoded = decodeResult.getOrThrow()
             image = decoded.image
             ambientImage = decoded.ambientImage
             //? if >=1.21.5 {
