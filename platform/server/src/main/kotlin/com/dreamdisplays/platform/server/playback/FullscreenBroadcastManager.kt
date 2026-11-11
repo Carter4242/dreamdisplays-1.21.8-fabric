@@ -302,7 +302,7 @@ object FullscreenBroadcastManager {
         val timeline = session?.timeline ?: return true
         val now = transport.nowMs()
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
-        session.timeline = timeline.anchoredAt(now).copy(durationMs = scheduledMs, loop = session.loop)
+        session.timeline = QueueTiming.withLength(timeline, scheduledMs, now, loop = session.loop)
         for (playerId in session.shownTo) sendTimeline(session, playerId, now)
         return true
     }

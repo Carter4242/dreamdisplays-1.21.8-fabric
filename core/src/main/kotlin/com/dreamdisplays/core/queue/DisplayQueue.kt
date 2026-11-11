@@ -327,6 +327,18 @@ object QueueTiming {
         return scheduled.serverTimeMs.takeIf { nowMs < it }
     }
 
+    /**
+     * [timeline] running for [durationMs] from [nowMs] on. A length that came down below where the clock already is
+     * (an overstated header corrected by observed ends) does not wrap it into the middle of the video: it stops looping
+     * at that end, so the end is due at once ([loopRestartAtMs], [advanceDue]) and the video starts over (or the queue
+     * moves on) from the beginning. [loop]: whether it loops otherwise.
+     */
+    fun withLength(timeline: Timeline, durationMs: Long, nowMs: Long, loop: Boolean = true): Timeline {
+        val at = timeline.anchoredAt(nowMs)
+        val past = !at.paused && durationMs > 0L && at.positionMs >= durationMs
+        return at.copy(durationMs = durationMs, loop = loop && !past)
+    }
+
     /** Past the media end the timeline waits this long more: switching late holds the last frame, early cuts the video. */
     const val END_SAFETY_MS = 150L
 

@@ -598,7 +598,7 @@ object TimelineManager {
         // Local: kept for when the display is shared again
         if (!shared) return
         val current = timelines[display.id] ?: return
-        timelines[display.id] = current.copy(durationMs = scheduledMs, loop = true)
+        timelines[display.id] = QueueTiming.withLength(current, scheduledMs, transport.nowMs())
         broadcast(display, timelines.getValue(display.id))
     }
 
@@ -757,7 +757,7 @@ object TimelineManager {
             val mediaMs = durations.recheck(displayId, display.url, QueueManager.playingEntryDurationMs(display), present) ?: continue
             val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
             display.duration = scheduledMs * 1_000_000L
-            val updated = timeline.copy(durationMs = scheduledMs, loop = true)
+            val updated = QueueTiming.withLength(timeline, scheduledMs, transport.nowMs())
             timelines[displayId] = updated
             broadcast(display, updated)
         }

@@ -55,4 +55,20 @@ class QueueDurationTest {
             assertTrue(switchAt <= 1_000 + mediaEndMs + 1_000 + QueueTiming.END_SAFETY_MS)
         }
     }
+
+    @Test
+    fun `a length that comes down below the clock ends the play-through instead of wrapping into the middle`() {
+        // Running since wall 0 with a 6:00 header; at 3:30 the real length turns out to be 3:00
+        val playing = Timeline(0, 0, paused = false, durationMs = 360_150, loop = true)
+        val shorter = QueueTiming.withLength(playing, 180_150, nowMs = 210_000)
+        assertFalse(shorter.loop)
+        assertEquals(210_000L, shorter.positionMs)
+        // Its end is due now: the restart (or the queue's switch) comes at once, from the beginning
+        assertEquals(210_000L, QueueTiming.loopRestartAtMs(shorter, 210_000, earlyMs = 150))
+        assertTrue(QueueTiming.advanceDue(shorter, 210_000, earlyMs = 0))
+        // Still ahead of the clock: it keeps looping
+        val longer = QueueTiming.withLength(playing, 400_150, nowMs = 210_000)
+        assertTrue(longer.loop)
+        assertEquals(400_150L, longer.durationMs)
+    }
 }
