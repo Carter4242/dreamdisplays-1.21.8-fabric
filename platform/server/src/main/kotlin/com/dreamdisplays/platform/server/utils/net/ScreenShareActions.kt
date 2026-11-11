@@ -372,6 +372,8 @@ object ScreenShareActions {
             QueueManager.resumePlayingEntry(display, share.previousEntry)
             // Viewers' clients closed their fullscreen of this display when the share's picture went away: open it again
             FullscreenBroadcastManager.redeliver(display.id)
+            // Entries queued while the share ran on an empty display waited for an end the live stream never had
+            if (reason != EndReason.PLUGIN_DISABLE && share.previousUrl.isBlank()) QueueManager.startFromEmpty(display)
         }
         logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }
