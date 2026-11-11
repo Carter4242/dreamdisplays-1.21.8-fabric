@@ -195,6 +195,7 @@ class StorageManager(
     /** Upserts the full row for [data] into the displays table. */
     @PaperOnly
     fun saveDisplay(data: PaperDisplayData) {
+        if (!isRegistered(data)) return
         val worldName = data.pos1.world?.name ?: run {
             logger.error("Cannot save display ${data.id}: world is null.")
             return
@@ -206,6 +207,12 @@ class StorageManager(
             packFacing(data.facing.ordinal, data.rotation, data.conforming)
         )
     }
+
+    /**
+     * Saves run on background workers in no fixed order: one queued before a delete may run after it. Only a display
+     * that is still registered is written, so a late save never brings a deleted display back.
+     */
+    private fun isRegistered(data: DisplayData): Boolean = DisplayManager.getDisplayData(data.id) === data
 
     /** Deletes the display with the given [data] from the displays table. */
     fun deleteDisplay(data: DisplayData) = delete(data.id)
@@ -242,6 +249,7 @@ class StorageManager(
 
     /** Upserts the full row for [data] into the displays table. */
     fun saveDisplay(data: VanillaDisplayData) {
+        if (!isRegistered(data)) return
         upsert(
             data, data.worldKey,
             packPos(data.pos1.x, data.pos1.y, data.pos1.z),
