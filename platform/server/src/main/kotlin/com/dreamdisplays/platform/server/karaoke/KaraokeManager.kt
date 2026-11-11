@@ -115,6 +115,7 @@ object KaraokeManager {
         voice = loadVoice()
         TimelineManager.playerLeadsMs = { leads[it] ?: emptyMap() }
         QueueManager.beforeStart = ::beforeStart
+        TimelineManager.onLoopRestart = ::onLoopRestart
     }
 
     /** Detaches from voice chat and forgets every session (plugin disable). */
@@ -429,17 +430,23 @@ object KaraokeManager {
      * A line singer stops when the display no longer plays their entry (hand-set video), or their song reached its end
      * with nothing queued after it (the display then just loops it).
      */
-    private fun endFinishedSongs(display: DisplayData, state: State) {
+    private fun endFinishedSongs(display: DisplayData, state: State, restartedAtEnd: Boolean = false) {
         val fromLine = state.singers.values.filter { it.itemId != null }
         if (fromLine.isEmpty()) return
         val current = QueueManager.snapshotOf(display.id)?.current?.itemId
         val timeline = TimelineManager.timelineOf(display.id)
         val untilEnd = timeline?.let { QueueTiming.msUntilEnd(it, PaperPlaybackTransport.nowMs()) }
-        val ended = untilEnd != null && untilEnd <= SONG_END_MS
         for (singer in fromLine) {
-            if (singer.itemId == current && !ended) continue
-            removeSinger(display, singer.playerId)
+            if (!KaraokeTiming.lineSongOver(singer.itemId, current, untilEnd, SONG_END_MS, restartedAtEnd)) continue
+            // At a restart the restarted timeline is sent right after, without their lead
+            removeSinger(display, singer.playerId, resend = !restartedAtEnd)
         }
+    }
+
+    /** [display]'s video reached its end with nothing queued and starts over for everyone: a line song there is done. */
+    private fun onLoopRestart(display: DisplayData) {
+        val state = states[display.id] ?: return
+        endFinishedSongs(display, state, restartedAtEnd = true)
     }
 
     private fun pruneLine(display: DisplayData, state: State) {

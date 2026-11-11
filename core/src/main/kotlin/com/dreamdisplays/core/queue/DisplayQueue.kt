@@ -294,6 +294,17 @@ object QueueTiming {
         return maxOf(nowMs, timeline.serverTimeMs) + leftWallMs
     }
 
+    /**
+     * The wall time at which a loop restart [scheduled] by [loopRestartAtMs] starts the video over, while it is still
+     * the display's [current] timeline and that instant is still ahead of [nowMs]; null otherwise. An entry queued in
+     * that window lands before the end the restart stands in for, so the queue moves on there instead of after one more
+     * play-through.
+     */
+    fun pendingRestartAtMs(scheduled: Timeline?, current: Timeline?, nowMs: Long): Long? {
+        if (scheduled == null || current != scheduled) return null
+        return scheduled.serverTimeMs.takeIf { nowMs < it }
+    }
+
     /** Past the media end the timeline waits this long more: switching late holds the last frame, early cuts the video. */
     const val END_SAFETY_MS = 150L
 

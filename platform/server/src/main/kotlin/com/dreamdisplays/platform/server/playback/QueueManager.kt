@@ -170,8 +170,10 @@ object QueueManager {
         val queue = queues.computeIfAbsent(display.id) { DisplayQueue() }
         var added = 0
         var stoppedBy: Result? = null
+        var wasEmpty = false
         synchronized(queue) {
-            if (!queue.hasNext()) armedAt[display.id] = now
+            wasEmpty = !queue.hasNext()
+            if (wasEmpty) armedAt[display.id] = now
             for (entry in valid) {
                 val item = QueueItem(
                     itemId = newItemId(),
@@ -197,7 +199,12 @@ object QueueManager {
         changed(display)
         // Only a display with no video at all starts the entry now; one that plays something keeps playing it and
         // the entry waits for the end of the video (tick) or a skip
-        if (QueueTiming.startsOnAdd(display.url)) advance(display)
+        if (QueueTiming.startsOnAdd(display.url)) {
+            advance(display)
+        } else if (wasEmpty) {
+            // Added just after the video was restarted at its end (it had nothing queued then): that end is this one
+            TimelineManager.pendingLoopRestartAt(display.id)?.let { advance(display, it) }
+        }
         return AddOutcome(Result.OK, added)
     }
 

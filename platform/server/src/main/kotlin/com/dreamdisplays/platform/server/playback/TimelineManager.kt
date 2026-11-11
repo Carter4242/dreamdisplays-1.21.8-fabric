@@ -44,6 +44,15 @@ object TimelineManager {
      */
     private const val LOOP_EARLY_MS = 150L
 
+    /** The restart [tickEnds] last scheduled per display, to tell whether it is still the display's timeline. */
+    private val loopRestarts = ConcurrentHashMap<UUID, Timeline>()
+
+    /**
+     * Called by [tickEnds] just before a display's video starts over at its end, before the restart is sent (karaoke:
+     * a line singer's song is over, so the restart already reaches them without their lead).
+     */
+    var onLoopRestart: (display: DisplayData) -> Unit = {}
+
     /** Older clients loop their own player at end of stream by seeking to 0; those reports are not seeks. */
     private val endOfStream = EndOfStreamGuard()
 
@@ -485,12 +494,22 @@ object TimelineManager {
             if (!FullscreenBroadcastManager.loopsAtEnd(displayId)) continue
             // Late end-of-stream loops from older clients around this end are not seeks
             endOfStream.onVideoChanged(displayId, restartAt)
+            runCatching { onLoopRestart(display) }
+                .onFailure { logger.warn("Loop restart hook failed for display {}.", displayId, it) }
             val restarted = Timeline(0, restartAt, paused = false, durationMs = durationMs, loop = true, rate = timeline.rate)
             timelines[displayId] = restarted
+            loopRestarts[displayId] = restarted
             broadcast(display, restarted)
             logger.info("Display {}: reached the end of its video; restarted from 0 for everyone.", displayId)
         }
     }
+
+    /**
+     * The wall time at which [displayId]'s video starts over after [tickEnds] restarted it at its end, while that
+     * restart is still ahead and still its timeline; null otherwise ([QueueTiming.pendingRestartAtMs]).
+     */
+    fun pendingLoopRestartAt(displayId: UUID): Long? =
+        QueueTiming.pendingRestartAtMs(loopRestarts[displayId], timelines[displayId], transport.nowMs())
 
     /** [display]'s video length to loop at: the timeline's, else the display's stored one, else its queue entry's. */
     private fun knownDurationMs(display: DisplayData, timeline: Timeline): Long =
@@ -505,6 +524,7 @@ object TimelineManager {
         emptySince.remove(displayId)
         videoChangedAt.remove(displayId)
         timelines.remove(displayId)
+        loopRestarts.remove(displayId)
         durations.forget(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)

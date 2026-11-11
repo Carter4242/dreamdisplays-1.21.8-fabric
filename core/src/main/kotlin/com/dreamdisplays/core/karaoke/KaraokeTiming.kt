@@ -154,4 +154,14 @@ object KaraokeTiming {
             else -> raw.coerceIn(0L, durationMs)
         }
     }
+
+    /**
+     * True when a karaoke line singer's song is over: the display no longer plays their queue entry ([currentItemId]
+     * differs from [singerItemId]), its play-through is within [endMs] of its end ([msUntilEnd]), or it was just
+     * started over at its end for everyone ([restartedAtEnd]). The restart is decided up to a couple hundred ms before
+     * the end and re-anchors the clock at 0, so [msUntilEnd] alone never sees that end.
+     */
+    fun lineSongOver(
+        singerItemId: String?, currentItemId: String?, msUntilEnd: Long?, endMs: Long, restartedAtEnd: Boolean,
+    ): Boolean = restartedAtEnd || singerItemId != currentItemId || (msUntilEnd != null && msUntilEnd <= endMs)
 }
