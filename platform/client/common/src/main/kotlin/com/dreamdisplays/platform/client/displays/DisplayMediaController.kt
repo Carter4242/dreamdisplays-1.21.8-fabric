@@ -364,7 +364,8 @@ internal const val OBSERVED_END_RESEND_MS = 250L
 internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs: Long, rate: Double = 1.0): Long? {
     val maxAgeMs = if (metadataMs > 0L) OBSERVED_END_MAX_SAMPLE_AGE_MS else OBSERVED_END_MAX_GUESS_AGE_MS
     if (positionMs <= 0L || sampleAgeMs !in 0..maxAgeMs) return null
-    val endMs = positionMs + (sampleAgeMs * rate.coerceIn(0.0, 4.0)).roundToLong()
+    // Any speed the timeline allows: a lower cap would report a 10x video's end short, and the server would cut it there
+    val endMs = positionMs + (sampleAgeMs * rate.coerceIn(0.0, com.dreamdisplays.api.playback.model.PlaybackSpeed.MAX)).roundToLong()
     val wholeSeconds = metadataMs % 1_000L == 0L
     if (metadataMs > 0L && !wholeSeconds && kotlin.math.abs(endMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
     return endMs

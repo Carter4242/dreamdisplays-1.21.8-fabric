@@ -35,6 +35,11 @@ class ObservedEndTest {
     }
 
     @Test
+    fun `a stall over the end of a 10x video is measured at 10x`() {
+        assertEquals(120_000L, observedEndToReport(positionMs = 100_000, sampleAgeMs = 2_000, metadataMs = 0, rate = 10.0))
+    }
+
+    @Test
     fun `a missing or ancient position says nothing`() {
         assertNull(observedEndToReport(positionMs = 0, sampleAgeMs = 10, metadataMs = 0))
         assertNull(observedEndToReport(positionMs = 120_000, sampleAgeMs = 60_000, metadataMs = 0))
