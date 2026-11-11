@@ -47,6 +47,9 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
 
         /** Persistent coherent mapping of the whole buffer, when buffer-storage is supported. */
         var persistent: ByteBuffer? = null
+
+        /** The buffer has immutable storage ([GL44.glBufferStorage]): it can only be replaced, never reallocated. */
+        var immutable: Boolean = false
     }
 
     private val slots: Array<Slot> = Array(PBO_COUNT) { Slot().apply { pbo = GL15.glGenBuffers() } }
@@ -229,6 +232,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
             if (slot.pbo != 0) GL15.glDeleteBuffers(slot.pbo)
             slot.pbo = 0
             slot.capacity = 0
+            slot.immutable = false
         }
     }
 
@@ -254,31 +258,41 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
     private fun ensureCapacity(slot: Slot, size: Int) {
         if (size <= slot.capacity) return
 
+        // Immutable storage can't be resized or reallocated: unmap it and replace the buffer object
+        if (slot.immutable) replaceBuffer(slot)
+
         if (persistentMapSupported) {
-            if (slot.persistent != null) {
-                // Immutable storage can't be resized: unmap and replace the buffer object
-                GL30.glUnmapBuffer(GL21.GL_PIXEL_UNPACK_BUFFER)
-                slot.persistent = null
-                bindBuffer(id = 0)
-                GL15.glDeleteBuffers(slot.pbo)
-                slot.pbo = GL15.glGenBuffers()
-                bindBuffer(id = slot.pbo)
-            }
             val flags = GL44.GL_MAP_WRITE_BIT or GL44.GL_MAP_PERSISTENT_BIT or GL44.GL_MAP_COHERENT_BIT
             if (GL.getCapabilities().OpenGL44) {
                 GL44.glBufferStorage(GL21.GL_PIXEL_UNPACK_BUFFER, size.toLong(), flags)
             } else {
                 ARBBufferStorage.glBufferStorage(GL21.GL_PIXEL_UNPACK_BUFFER, size.toLong(), flags)
             }
+            slot.immutable = true
             slot.persistent = GL30.glMapBufferRange(GL21.GL_PIXEL_UNPACK_BUFFER, 0L, size.toLong(), flags)
-            // If mapping unexpectedly failed, fall back to plain mutable storage for this slot
+            // If mapping unexpectedly failed, fall back to plain mutable storage for this slot, in a new buffer object
+            // (the immutable one cannot take glBufferData, nor glBufferSubData without the dynamic-storage bit)
             if (slot.persistent == null) {
+                replaceBuffer(slot)
                 GL15.glBufferData(GL21.GL_PIXEL_UNPACK_BUFFER, size.toLong(), GL15.GL_STREAM_DRAW)
             }
         } else {
             GL15.glBufferData(GL21.GL_PIXEL_UNPACK_BUFFER, size.toLong(), GL15.GL_STREAM_DRAW)
         }
         slot.capacity = size
+    }
+
+    /** Drops [slot]'s buffer object (unmapping it first) and binds a fresh one with no storage yet. */
+    private fun replaceBuffer(slot: Slot) {
+        if (slot.persistent != null) {
+            GL30.glUnmapBuffer(GL21.GL_PIXEL_UNPACK_BUFFER)
+            slot.persistent = null
+        }
+        bindBuffer(id = 0)
+        GL15.glDeleteBuffers(slot.pbo)
+        slot.pbo = GL15.glGenBuffers()
+        slot.immutable = false
+        bindBuffer(id = slot.pbo)
     }
 
     private fun bindBuffer(target: Int = GL21.GL_PIXEL_UNPACK_BUFFER, id: Int) {
