@@ -71,16 +71,28 @@ object PaperV2Networking : PluginMessageListener {
      * this greeting answer with their hello, which restores displays without a relog; older clients ignore it.
      */
     fun greetOnlinePlayers() {
+        if (greetWaiting() == 0) return
+        // A client answers a greeting only when it says hello after one it had sent more than a few seconds earlier
+        // (it joined while no plugin listened, or just said hello to the previous instance): greet again until it does
+        REGREET_DELAYS_TICKS.forEach { ticks -> com.dreamdisplays.platform.server.meta.Scheduler.runLater(ticks) { greetWaiting() } }
+    }
+
+    /** Greets the online players who listen on [V2_CHANNEL] but have not said hello to this instance; returns how many. */
+    private fun greetWaiting(): Int {
         val waiting = plugin.server.onlinePlayers.filter {
             !V2PlayerTracker.isV2(it.uniqueId) && V2_CHANNEL in it.listeningPluginChannels
         }
-        if (waiting.isEmpty()) return
+        if (waiting.isEmpty()) return 0
         waiting.forEach { player ->
             regreeted.add(player.uniqueId)
             send([player], buildServerHello(player).copy(greeting = true))
         }
         logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
+        return waiting.size
     }
+
+    /** Follow-up greetings after a reload: 12 s and 30 s, past the client's 10 s window for answering one. */
+    private val REGREET_DELAYS_TICKS = listOf(12L * 20, 30L * 20)
 
     /**
      * Sends every connected client a fresh hello after the config was reloaded: the features it advertises (queue,
