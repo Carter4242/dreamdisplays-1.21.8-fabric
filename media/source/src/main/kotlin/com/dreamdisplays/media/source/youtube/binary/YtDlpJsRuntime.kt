@@ -17,8 +17,11 @@ import java.util.concurrent.TimeUnit
  * The JavaScript runtime `yt-dlp` solves YouTube's player challenges with. Without one some videos ("made for kids")
  * resolve to nothing and others lose formats. `yt-dlp` only looks for Deno on its own, and only on `PATH` (which a
  * game launcher often trims), so an installed Deno, Node or Bun is found here and passed as `--js-runtimes name:path`.
- * When none is installed, Deno is downloaded from its GitHub releases (checked against the checksum published with
- * each asset) into `libs/deno`. Never from a server-supplied URL.
+ *
+ * When none is installed, Deno (about 40 MB) is downloaded only once `yt-dlp` fails in a way one fixes
+ * ([requestDownload], [needsRuntime]), never at launch: from its GitHub releases (checked against the checksum
+ * published with each asset) into `libs/deno`, never from a server-supplied URL. A download that does not run here is
+ * remembered ([DOWNLOAD_RECORD]) and not fetched again. The server can turn all of it off ([policy]).
  */
 object YtDlpJsRuntime {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -44,6 +47,25 @@ object YtDlpJsRuntime {
     /** A failed Deno download (about 40 MB) is not tried again for this long. */
     private const val RETRY_AFTER_FAILURE_MS = 30L * 60L * 1_000L
 
+    /**
+     * Kept beside the downloaded Deno: `<sha256 of the binary> ok|fails`, whether it ran when downloaded. A Deno that
+     * does not run now and is still that download is not downloaded again (the same bytes fail the same way).
+     */
+    private const val DOWNLOAD_RECORD = ".download"
+
+    /**
+     * `auto` (an installed runtime, else Deno downloaded when `yt-dlp` needs one) or `off` (no runtime at all: `yt-dlp`
+     * is told to use none, not even one it would find itself, and nothing is downloaded). Set by the game (the server's
+     * `client.ytDlpJsRuntime`); applies to `yt-dlp` runs started after a change.
+     */
+    @Volatile
+    var policy: () -> String = { "auto" }
+
+    private fun turnedOff(): Boolean = runCatching(policy).getOrDefault("auto") == "off"
+
+    /** What `yt-dlp` gets while the server turned runtimes off. */
+    internal val NO_RUNTIMES: List<String> = ["--no-js-runtimes"]
+
     /** Where the downloaded Deno lives, next to the bundled `yt-dlp`. */
     val dir: Path = Path.of("libs", "deno")
 
@@ -55,9 +77,13 @@ object YtDlpJsRuntime {
     @Volatile
     private var detected = false
 
-    /** `not probed`, `system`, `downloaded`, `downloading`, `missing` (with [note] saying why). */
+    /** `not probed`, `system`, `downloaded`, `downloading`, `none`, `missing` (with [note] saying why). */
     @Volatile
     private var state = "not probed"
+
+    /** The downloaded Deno does not run on this machine (see [DOWNLOAD_RECORD]): never downloaded again. */
+    @Volatile
+    private var unrunnable = false
 
     @Volatile
     private var note = ""
@@ -70,14 +96,22 @@ object YtDlpJsRuntime {
 
     /**
      * Arguments to add to every `yt-dlp` call: `--js-runtimes name:path` for the runtime in use, none while there is
-     * none. Detects installed runtimes the first time (a few `--version` runs); never waits for a Deno download, which
-     * starts in the background when nothing is installed.
+     * none, [NO_RUNTIMES] while the server turned runtimes off. Detects installed runtimes the first time (a few
+     * `--version` runs); never downloads anything.
      */
-    fun args(): List<String> = argsFor(current())
+    fun args(): List<String> = if (turnedOff()) NO_RUNTIMES else argsFor(current())
 
-    /** The runtime in use, detecting it the first time; starts a Deno download when there is none. */
+    /**
+     * The runtime in use (null while the server turned runtimes off), detecting it the first time. One whose file has
+     * gone since (an antivirus quarantine, an uninstall) is looked for again. Never downloads anything.
+     */
     fun current(): Runtime? {
-        if (detected) return selected ?: run { maybeDownload(); null }
+        if (turnedOff()) return null
+        selected?.let { r ->
+            if (File(r.path).isFile) return r
+            forget(r)
+        }
+        if (detected) return selected
         synchronized(this) {
             if (!detected) {
                 selected = detect()
@@ -85,14 +119,63 @@ object YtDlpJsRuntime {
                 selected?.let {
                     state = it.source
                     logger.info("yt-dlp JavaScript runtime: {} {} ({}, {}).", it.name, it.version, it.source, it.path)
+                } ?: run {
+                    if (state == "not probed") state = "none"
                 }
             }
         }
-        return selected ?: run { maybeDownload(); null }
+        return selected
     }
+
+    private fun forget(gone: Runtime) {
+        synchronized(this) {
+            if (selected != gone) return
+            logger.warn("yt-dlp JavaScript runtime {} at {} is gone; looking for one again.", gone.name, gone.path)
+            selected = null
+            detected = false
+            state = "not probed"
+        }
+    }
+
+    /**
+     * `yt-dlp` failed with [output] for want of a JavaScript runtime ([needsRuntime]) and there is none: downloads Deno in
+     * the background, unless the server turned runtimes off, Deno is known not to run here, or a download failed in the
+     * last [RETRY_AFTER_FAILURE_MS]. True while a download is under way (started now or before).
+     */
+    fun requestDownload(output: String): Boolean {
+        if (turnedOff() || current() != null) return false
+        if (downloading) return true
+        if (unrunnable) return false
+        if (downloadFailedAtMs != 0L && System.currentTimeMillis() - downloadFailedAtMs < RETRY_AFTER_FAILURE_MS) return false
+        val reason = output.lineSequence().lastOrNull { it.isNotBlank() }?.trim()?.take(160).orEmpty()
+        logger.info("yt-dlp needs a JavaScript runtime ({}); downloading Deno.", reason)
+        return startDownload()
+    }
+
+    /** True while a Deno download is under way: a video that needs it plays once it is in. */
+    val isDownloading: Boolean get() = downloading
+
+    /**
+     * True when `yt-dlp`'s error [output] says a JavaScript runtime is missing: its own runtime and challenge messages,
+     * or "This video is not available", which is what it answers for a "made for kids" video without one (those play
+     * only through a client that needs the runtime).
+     */
+    internal fun needsRuntime(output: String?): Boolean {
+        val text = output?.lowercase() ?: return false
+        return NEEDS_RUNTIME.any { it in text }
+    }
+
+    private val NEEDS_RUNTIME = [
+        "this video is not available",
+        "javascript runtime",
+        "js runtime",
+        "challenge solving failed",
+        "signature solving failed",
+    ]
 
     /** For the client environment report: `deno 2.9.8, <path>`, and where it came from (or why there is none). */
     fun describe(): Pair<String, String> {
+        if (turnedOff()) return "" to "off (server)"
         val r = selected
         val source = when {
             r != null -> r.source
@@ -118,16 +201,46 @@ object YtDlpJsRuntime {
         return null
     }
 
-    /** The previously downloaded Deno, when it still runs. */
-    private fun downloaded(quiet: Boolean = false): Runtime? {
+    /**
+     * The previously downloaded Deno, when it still runs. One that does not and is still exactly what was downloaded
+     * ([DOWNLOAD_RECORD]) marks Deno as not running here, so it is not downloaded again.
+     */
+    private fun downloaded(): Runtime? {
         val binary = dir.resolve(binaryName).toAbsolutePath()
         if (!Files.isRegularFile(binary)) return null
-        val version = versionOutput(binary.toString(), timeoutSeconds = 60)?.let { parseVersion("deno", it) }
-        if (version == null || !supported("deno", version)) {
-            if (!quiet) logger.warn("Downloaded Deno at {} does not run (or is too old); downloading it again.", binary)
-            return null
+        runs(binary)?.let { return it }
+        val record = runCatching { Files.readString(dir.resolve(DOWNLOAD_RECORD)) }.getOrNull()
+        val sha = runCatching { SourceLoader.sha256(binary) }.getOrNull()
+        if (recordedResult(record, sha) != null) {
+            unrunnable = true
+            state = "missing"
+            note = "the downloaded Deno does not run here"
+            logger.warn("Downloaded Deno at {} does not run here; it is not downloaded again.", binary)
+        } else {
+            logger.warn("Downloaded Deno at {} does not run; it is downloaded again if yt-dlp needs a runtime.", binary)
         }
+        return null
+    }
+
+    /** [binary] as a [Runtime] when it runs and is a Deno `yt-dlp` accepts, else null. */
+    private fun runs(binary: Path): Runtime? {
+        val version = versionOutput(binary.toString(), timeoutSeconds = 60)?.let { parseVersion("deno", it) }
+            ?.takeIf { supported("deno", it) } ?: return null
         return Runtime("deno", binary.toString(), version.joinToString("."), "downloaded")
+    }
+
+    /** `ok` / `fails` from a [DOWNLOAD_RECORD] [record] when it is about the binary whose SHA-256 is [sha], else null. */
+    internal fun recordedResult(record: String?, sha: String?): String? {
+        if (record == null || sha == null) return null
+        val parts = record.trim().split(' ', limit = 2)
+        if (parts.size != 2 || !parts[0].equals(sha, ignoreCase = true)) return null
+        return parts[1].trim().takeIf { it == "ok" || it == "fails" }
+    }
+
+    private fun writeRecord(binary: Path, ok: Boolean) {
+        runCatching {
+            Files.writeString(dir.resolve(DOWNLOAD_RECORD), "${SourceLoader.sha256(binary)} ${if (ok) "ok" else "fails"}")
+        }.onFailure { logger.debug("Could not record the Deno download: {}", it.message) }
     }
 
     /**
@@ -219,11 +332,10 @@ object YtDlpJsRuntime {
         else -> "deno-x86_64-unknown-linux-gnu.zip"
     }
 
-    private fun maybeDownload() {
-        if (downloading) return
-        if (downloadFailedAtMs != 0L && System.currentTimeMillis() - downloadFailedAtMs < RETRY_AFTER_FAILURE_MS) return
+    private fun startDownload(): Boolean {
         synchronized(this) {
-            if (downloading || selected != null) return
+            if (downloading) return true
+            if (selected != null) return false
             downloading = true
             state = "downloading"
             note = ""
@@ -232,18 +344,20 @@ object YtDlpJsRuntime {
             try {
                 val runtime = provision()
                 selected = runtime
+                detected = true
                 state = "downloaded"
                 note = ""
                 logger.info("yt-dlp JavaScript runtime: deno {} (downloaded, {}).", runtime.version, runtime.path)
             } catch (e: Exception) {
-                downloadFailedAtMs = System.currentTimeMillis()
+                if (!unrunnable) downloadFailedAtMs = System.currentTimeMillis()
                 state = "missing"
-                note = "Deno download failed: ${e.message?.take(160)}"
-                logger.warn("No JavaScript runtime for yt-dlp; Deno download failed: {}", e.message)
+                note = if (unrunnable) "the downloaded Deno does not run here" else "Deno download failed: ${e.message?.take(160)}"
+                logger.warn("No JavaScript runtime for yt-dlp; {}", note)
             } finally {
                 downloading = false
             }
         }
+        return true
     }
 
     /** Downloads Deno (latest release, else [PINNED_TAG]), unpacks it in place atomically and checks that it runs. */
@@ -253,21 +367,27 @@ object YtDlpJsRuntime {
             ?: throw IOException("Deno publishes no build for ${System.getProperty("os.name")} ${System.getProperty("os.arch")}.")
         val bases = listOfNotNull(latestBase(), "$RELEASES/download/$PINNED_TAG/").distinct()
         var last: IOException? = null
+        var ranNone = true
         for (base in bases) {
             try {
                 // The zip holds just the binary; each asset has `<asset>.sha256sum` beside it
                 SourceLoader.downloadAndExtractVerified(base + asset, "$base$asset.sha256sum", dir, "Deno") { entry ->
                     binaryName.takeIf { entry == binaryName }
                 }
-                val binary = dir.resolve(binaryName)
+                val binary = dir.resolve(binaryName).toAbsolutePath()
                 if (!Files.isRegularFile(binary)) throw IOException("$asset holds no $binaryName.")
                 if (!OsInfo.isWindows) SourceLoader.makeExecutable(binary)
-                return downloaded(quiet = true) ?: throw IOException("Deno from $base does not run here.")
+                val runtime = runs(binary)
+                writeRecord(binary, ok = runtime != null)
+                return runtime ?: throw IOException("Deno from $base does not run here.")
             } catch (e: IOException) {
                 logger.warn("Deno from {} failed: {}", base + asset, e.message)
+                if (e.message?.endsWith("does not run here.") != true) ranNone = false
                 last = e
             }
         }
+        // Every release tried downloaded and failed to run: the same files would fail the same way next time
+        if (ranNone && last != null) unrunnable = true
         throw last ?: IOException("No Deno release to download.")
     }
 

@@ -494,6 +494,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
             ?.let { stringList(it, "policy.client.disabled_resolvers").map(String::lowercase) },
         ffmpegSource = t.choiceOrNull("policy.client.ffmpeg_source", DisplayPolicy.ToolSource.entries),
         ytDlpSource = t.choiceOrNull("policy.client.yt_dlp_source", DisplayPolicy.ToolSource.entries),
+        ytDlpJsRuntime = t.choiceOrNull("policy.client.yt_dlp_js_runtime", DisplayPolicy.JsRuntime.entries),
         queuePreload = t.boolOrNull("policy.client.queue_preload"),
         autoWarm = t.boolOrNull("policy.client.auto_warm"),
     )

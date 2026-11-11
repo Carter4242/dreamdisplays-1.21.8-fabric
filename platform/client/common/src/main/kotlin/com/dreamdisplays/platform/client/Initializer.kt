@@ -66,6 +66,9 @@ object Initializer {
         com.dreamdisplays.media.source.youtube.binary.YtDlpBinary.preferredSource = {
             com.dreamdisplays.platform.client.displays.ServerOverrides.settings.ytDlpSource.name.lowercase()
         }
+        com.dreamdisplays.media.source.youtube.binary.YtDlpJsRuntime.policy = {
+            com.dreamdisplays.platform.client.displays.ServerOverrides.settings.ytDlpJsRuntime.name.lowercase()
+        }
         com.dreamdisplays.media.player.pipeline.AudioOutputHooks.openAlLine = { device ->
             com.dreamdisplays.platform.client.audio.OpenAlSourceLine.open(device)
         }

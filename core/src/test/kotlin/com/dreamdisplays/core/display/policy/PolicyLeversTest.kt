@@ -17,13 +17,14 @@ class PolicyLeversTest {
             videoDecoder = DisplayPolicy.VideoDecoder.JVM, gpuYuv = false,
             textureUpload = DisplayPolicy.TextureUpload.BASIC, audioBackend = DisplayPolicy.AudioBackend.OPENAL,
             disabledResolvers = ["newpipe"], ffmpegSource = DisplayPolicy.ToolSource.SYSTEM,
-            ytDlpSource = DisplayPolicy.ToolSource.BUNDLED, queuePreload = false, autoWarm = false,
+            ytDlpSource = DisplayPolicy.ToolSource.BUNDLED, ytDlpJsRuntime = DisplayPolicy.JsRuntime.OFF,
+            queuePreload = false, autoWarm = false,
         )
         val policy = DisplayPolicy(client = client)
         assertEquals(
             "{\"v\":1,\"client\":{\"videoDecoder\":\"jvm\",\"gpuYuv\":false,\"textureUpload\":\"basic\"," +
                 "\"audioBackend\":\"openal\",\"disabledResolvers\":[\"newpipe\"],\"ffmpegSource\":\"system\"," +
-                "\"ytDlpSource\":\"bundled\",\"queuePreload\":false,\"autoWarm\":false}}",
+                "\"ytDlpSource\":\"bundled\",\"ytDlpJsRuntime\":\"off\",\"queuePreload\":false,\"autoWarm\":false}}",
             policy.encode().toString(Charsets.UTF_8),
         )
         assertEquals(policy, DisplayPolicy.decode(policy.encode()))
@@ -42,6 +43,7 @@ class PolicyLeversTest {
         assertEquals(emptySet(), s.disabledResolvers)
         assertEquals(DisplayPolicy.ToolSource.AUTO, s.ffmpegSource)
         assertEquals(DisplayPolicy.ToolSource.AUTO, s.ytDlpSource)
+        assertEquals(DisplayPolicy.JsRuntime.AUTO, s.ytDlpJsRuntime)
         assertTrue(s.queuePreload)
         assertTrue(s.autoWarm)
     }
@@ -99,6 +101,13 @@ class PolicyLeversTest {
         val decoder = PolicyPaths.find("client.video_decoder")!!
         assertEquals(DisplayPolicy.VideoDecoder.JVM, PolicyPaths.apply(null, decoder, "JVM")?.client?.videoDecoder)
         assertNull(PolicyPaths.apply(null, decoder, "gpu"))
+        val js = PolicyPaths.find("client.yt_dlp_js_runtime")!!
+        assertTrue(js.serverWideOnly)
+        assertEquals(DisplayPolicy.JsRuntime.OFF, PolicyPaths.apply(null, js, "off")?.client?.ytDlpJsRuntime)
+        assertNull(PolicyPaths.apply(null, js, "node"))
+        // An unknown runtime choice from a newer server leaves the client's own
+        val newer = assertNotNull(DisplayPolicy.decode("""{"v":1,"client":{"ytDlpJsRuntime":"quickjs"}}""".toByteArray()))
+        assertEquals(DisplayPolicy.JsRuntime.AUTO, ServerClientSettings(newer).ytDlpJsRuntime)
         val seeks = PolicyPaths.find("sync.corrective_seeks")!!
         assertFalse(seeks.serverWideOnly)
         assertEquals(false, PolicyPaths.apply(null, seeks, "off")?.sync?.correctiveSeeks)

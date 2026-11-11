@@ -118,6 +118,45 @@ class YtDlpJsRuntimeTest {
     }
 
     @Test
+    fun `a yt-dlp failure a runtime fixes is told apart from other failures`() {
+        // What yt-dlp 2026.10.26 answers for a "made for kids" video without a runtime (checked by hand)
+        assertTrue(rt.needsRuntime("ERROR: [youtube] XqZsoesa55w: This video is not available"))
+        assertTrue(rt.needsRuntime("WARNING: [youtube] abc: n challenge solving failed: Some formats may be missing."))
+        assertTrue(rt.needsRuntime("No supported JavaScript runtime could be found."))
+        assertFalse(rt.needsRuntime("ERROR: [youtube] abc: Video unavailable. This video has been removed by the uploader"))
+        assertFalse(rt.needsRuntime("ERROR: [youtube] abc: Private video. Sign in if you've been granted access"))
+        assertFalse(rt.needsRuntime("Timed out for url: https://www.youtube.com/watch?v=abc (client=visionos)."))
+        assertFalse(rt.needsRuntime(null))
+    }
+
+    @Test
+    fun `a download record speaks only for the exact binary it was written for`() {
+        val sha = "ab".repeat(32)
+        assertEquals("fails", rt.recordedResult("$sha fails", sha))
+        assertEquals("ok", rt.recordedResult("${sha.uppercase()} ok\n", sha))
+        assertNull(rt.recordedResult("$sha fails", "cd".repeat(32)))
+        assertNull(rt.recordedResult(null, sha))
+        assertNull(rt.recordedResult("$sha", sha))
+        assertNull(rt.recordedResult("$sha maybe", sha))
+        assertNull(rt.recordedResult("$sha ok", null))
+    }
+
+    @Test
+    fun `with runtimes turned off by the server yt-dlp is told to use none and nothing is downloaded`() {
+        val before = rt.policy
+        try {
+            rt.policy = { "off" }
+            assertEquals(["--no-js-runtimes"], rt.args())
+            assertNull(rt.current())
+            assertFalse(rt.requestDownload("ERROR: [youtube] abc: This video is not available"))
+            assertFalse(rt.isDownloading)
+            assertEquals("off (server)", rt.describe().second)
+        } finally {
+            rt.policy = before
+        }
+    }
+
+    @Test
     fun `only a yt-dlp with --js-runtimes gets the flag`() {
         assertTrue(YtDlpBinary.takesJsRuntimes("2026.10.26"))
         assertTrue(YtDlpBinary.takesJsRuntimes("2025.11.12"))

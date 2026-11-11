@@ -55,7 +55,8 @@ enum class ClientFeature(override val wire: String) : WireEnum {
     /**
      * Applies the policy levers that came with this token: `client.videoDecoder`, `client.gpuYuv`,
      * `client.textureUpload`, `client.audioBackend`, `client.disabledResolvers`, `client.ffmpegSource`,
-     * `client.ytDlpSource`, `client.queuePreload`, `client.autoWarm`, `sync.correctiveSeeks`, `sync.cheapSeeks`; and reads
+     * `client.ytDlpSource`, `client.ytDlpJsRuntime`, `client.queuePreload`, `client.autoWarm`, `sync.correctiveSeeks`,
+     * `sync.cheapSeeks`; and reads
      * a policy section with one unreadable field as the rest of that section. Without it those fields are ignored.
      */
     POLICY_LEVERS("policy_levers");

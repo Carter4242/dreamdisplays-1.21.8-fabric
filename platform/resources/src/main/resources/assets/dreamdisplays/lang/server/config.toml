@@ -108,6 +108,8 @@ auto_pause_when_empty_seconds = 0
 #                           # vimeo, bilibili); a link nothing else opens still tries all of them
 # ffmpeg_source = "auto"    # "system" = an installed FFmpeg first; "bundled" = the downloaded one first
 # yt_dlp_source = "auto"    # "system" = an installed yt-dlp first; "bundled" = the downloaded one first
+# yt_dlp_js_runtime = "auto"  # "off" = yt-dlp gets no JavaScript runtime and Deno is never downloaded ("auto": an
+#                           # installed Deno/Node/Bun, else Deno downloaded the first time yt-dlp fails without one)
 # queue_preload = true      # false = the next queue entry is not loaded ahead of time
 # auto_warm = true          # false = paused displays are not kept ready to play on their own (starts don't wait for them)
 

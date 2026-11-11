@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.youtube
 
+import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.search.MediaSearchPage
 import com.dreamdisplays.api.media.search.MediaSearchResult
 import com.dreamdisplays.api.media.search.SortOrder
@@ -73,8 +74,9 @@ object YtDlp {
             runCatching {
                 NewPipeResolver.ensureInitialized()
                 NewPipeResolver.prewarmPlayer()
-                YtDlpBinary.resolveCommand()
-                YtDlpJsRuntime.current()
+                val command = YtDlpBinary.resolveCommand()
+                // Finds an installed runtime (never downloads one) and, with one, reads whether this yt-dlp takes it
+                if (YtDlpJsRuntime.current() != null) YtDlpBinary.jsRuntimeArgs(command)
                 cookies.prewarm()
             }.onFailure { e ->
                 logger.warn("Failed to prewarm yt-dlp.", e)
@@ -245,10 +247,21 @@ object YtDlp {
             }
 
             viaYtDlp.isNotEmpty() -> viaYtDlp
-            else -> throw YtDlpErrors.classify(clientRace.takeLastError(videoUrl))
-                ?: IOException("All yt-dlp clients failed for $videoUrl.")
+            else -> throw failure(videoUrl, clientRace.takeLastError(videoUrl))
         }
     }
+
+    /**
+     * Why every `yt-dlp` client failed: what its output says, else a passing failure while the JavaScript runtime it
+     * needs is downloading (the player retries quietly, and once more after showing it), else a plain one.
+     */
+    private fun failure(videoUrl: String, lastError: String?): Throwable =
+        YtDlpErrors.classify(lastError)
+            ?: if (YtDlpJsRuntime.isDownloading) {
+                DreamMediaException.Network("YouTube needs a JavaScript runtime for this video; it is being downloaded (once).")
+            } else {
+                IOException("All yt-dlp clients failed for $videoUrl.")
+            }
 
     /**
      * Resolve after YouTube refused this video's stream URLs more than once: `yt-dlp` with the clients [plan] picks,
@@ -282,9 +295,7 @@ object YtDlp {
         currentCoroutineContext().ensureActive()
         if (YtStreams.usable(viaYtDlp)) return viaYtDlp
         val lastError = clientRace.takeLastError(videoUrl)
-        if (!ResolverConfig.newPipeInsideYtDlp) {
-            throw YtDlpErrors.classify(lastError) ?: IOException("All yt-dlp clients failed for $videoUrl.")
-        }
+        if (!ResolverConfig.newPipeInsideYtDlp) throw failure(videoUrl, lastError)
         val viaNewPipe = runCatching { NewPipeResolver.fetch(videoUrl) }
             .onFailure { e -> if (e is CancellationException) throw e }
             .getOrElse { [] }
@@ -296,6 +307,6 @@ object YtDlp {
             logger.warn("yt-dlp could not resolve {}; falling back to NewPipe's stream URLs.", videoUrl)
             return viaNewPipe
         }
-        throw YtDlpErrors.classify(lastError) ?: IOException("All yt-dlp clients failed for $videoUrl.")
+        throw failure(videoUrl, lastError)
     }
 }

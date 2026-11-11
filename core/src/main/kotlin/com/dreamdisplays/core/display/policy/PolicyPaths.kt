@@ -127,6 +127,9 @@ object PolicyPaths {
         Path("client.yt_dlp_source", "client.ytDlpSource", Kind.Choice(listOf("auto", "bundled", "system"))) {
             it.client?.ytDlpSource?.name?.lowercase(Locale.ROOT)
         },
+        Path("client.yt_dlp_js_runtime", "client.ytDlpJsRuntime", Kind.Choice(listOf("auto", "off"))) {
+            it.client?.ytDlpJsRuntime?.name?.lowercase(Locale.ROOT)
+        },
         Path("client.queue_preload", "client.queuePreload", Kind.Bool) { it.client?.queuePreload },
         Path("client.auto_warm", "client.autoWarm", Kind.Bool) { it.client?.autoWarm },
         Path("debug.sync_log_interval_seconds", "debug.syncLogIntervalSeconds", Kind.Whole(0, 3_600)) {

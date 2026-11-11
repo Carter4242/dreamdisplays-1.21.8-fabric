@@ -82,6 +82,7 @@ class ClientPolicyTest {
                 field.endsWith("textureUpload") -> "basic"
                 field.endsWith("audioBackend") -> "openal"
                 field.endsWith("Source") -> "system"
+                field.endsWith("JsRuntime") -> "off"
                 field.endsWith("disabledResolvers") -> listOf("newpipe")
                 field.endsWith("gpuYuv") || field.endsWith("queuePreload") || field.endsWith("autoWarm") -> false
                 field.endsWith("Acoustics") -> "off"
@@ -100,7 +101,7 @@ class ClientPolicyTest {
                 "client.audio_normalization", "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose", "debug.log_level",
                 "debug.report_interval_seconds", "client.video_decoder", "client.gpu_yuv", "client.texture_upload",
                 "client.audio_backend", "client.disabled_resolvers", "client.ffmpeg_source", "client.yt_dlp_source",
-                "client.queue_preload", "client.auto_warm",
+                "client.yt_dlp_js_runtime", "client.queue_preload", "client.auto_warm",
             ),
             serverWide,
         )

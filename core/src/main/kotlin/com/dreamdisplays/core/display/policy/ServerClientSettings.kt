@@ -72,6 +72,9 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
     /** Where yt-dlp comes from ([DisplayPolicy.ToolSource.AUTO] = the client's own order). */
     val ytDlpSource: DisplayPolicy.ToolSource get() = client?.ytDlpSource ?: DisplayPolicy.ToolSource.AUTO
 
+    /** The JavaScript runtime yt-dlp may use ([DisplayPolicy.JsRuntime.AUTO] = the client's own, downloaded if needed). */
+    val ytDlpJsRuntime: DisplayPolicy.JsRuntime get() = client?.ytDlpJsRuntime ?: DisplayPolicy.JsRuntime.AUTO
+
     /** False when the server turned queue preloading off. */
     val queuePreload: Boolean get() = client?.queuePreload != false
 

@@ -3,6 +3,7 @@ package com.dreamdisplays.media.source.youtube.process
 import com.dreamdisplays.media.runtime.diagnostics.ResolveTrail
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
+import com.dreamdisplays.media.source.youtube.binary.YtDlpJsRuntime
 import com.dreamdisplays.media.source.youtube.binary.YtDlpOutputParser
 import com.dreamdisplays.media.source.youtube.cookie.YtCookieManager
 import com.dreamdisplays.media.source.youtube.model.YtStream
@@ -55,6 +56,10 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         // A process killed because another source already won is not a failure worth a warning
         if (abandoned) return
         logFailure(videoUrl, client, e)
+        // A failure a JavaScript runtime fixes, with none here: get one for the retry (never at launch)
+        if (YtDlpErrors.classify(e.message) == null && YtDlpJsRuntime.needsRuntime(e.message)) {
+            YtDlpJsRuntime.requestDownload(e.message.orEmpty())
+        }
         ResolveTrail.record(videoUrl, YtDlpBinary.label(), client ?: "cookies", ok = false, error = e.message ?: e.javaClass.simpleName)
         e.message?.let { ResolveTrail.recordStderr(videoUrl, it) }
         val message = e.message ?: return

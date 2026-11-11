@@ -172,6 +172,8 @@ data class DisplayPolicy(
         val ffmpegSource: ToolSource? = null,
         /** Where the client takes yt-dlp from ([ToolSource]); applies to resolves started after it. */
         val ytDlpSource: ToolSource? = null,
+        /** The JavaScript runtime yt-dlp may use ([JsRuntime]); applies to yt-dlp runs started after it. */
+        val ytDlpJsRuntime: JsRuntime? = null,
         /** False: the next queue entry is not opened ahead of time (it loads when it starts). */
         val queuePreload: Boolean? = null,
         /**
@@ -196,6 +198,7 @@ data class DisplayPolicy(
             disabledResolvers = disabledResolvers ?: base?.disabledResolvers,
             ffmpegSource = ffmpegSource ?: base?.ffmpegSource,
             ytDlpSource = ytDlpSource ?: base?.ytDlpSource,
+            ytDlpJsRuntime = ytDlpJsRuntime ?: base?.ytDlpJsRuntime,
             queuePreload = queuePreload ?: base?.queuePreload,
             autoWarm = autoWarm ?: base?.autoWarm,
         )
@@ -257,6 +260,18 @@ data class DisplayPolicy(
         /** One installed on the system (PATH and the usual install folders) first. */
         @SerialName("system")
         SYSTEM,
+    }
+
+    /** The JavaScript runtime yt-dlp solves YouTube's challenges with. Unknown values (from a newer server) read as unset. */
+    @Serializable
+    enum class JsRuntime {
+        /** An installed Deno, Node or Bun; else Deno, downloaded the first time yt-dlp fails for want of one. */
+        @SerialName("auto")
+        AUTO,
+
+        /** None: yt-dlp is told to use no runtime (not even one it finds itself) and nothing is downloaded. */
+        @SerialName("off")
+        OFF,
     }
 
     @Serializable
@@ -377,8 +392,8 @@ data class DisplayPolicy(
             "client.maxActiveDisplays", "client.hardwareDecoding", "client.unshadedDisplays",
             "client.audioOutputProfile", "client.audioNormalization",
             "client.videoDecoder", "client.gpuYuv", "client.textureUpload", "client.audioBackend",
-            "client.disabledResolvers", "client.ffmpegSource", "client.ytDlpSource", "client.queuePreload",
-            "client.autoWarm",
+            "client.disabledResolvers", "client.ffmpegSource", "client.ytDlpSource", "client.ytDlpJsRuntime",
+            "client.queuePreload", "client.autoWarm",
             "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds", "debug.logLevel",
         )
 
