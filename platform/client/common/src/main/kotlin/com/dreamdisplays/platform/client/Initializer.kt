@@ -59,6 +59,13 @@ object Initializer {
                 com.dreamdisplays.platform.client.managers.ClientStateManager.config.audioBackend,
             )
         }
+        // Which FFmpeg / yt-dlp comes first: the server can steer clients off a broken copy (`client.ffmpegSource`, ...)
+        com.dreamdisplays.media.player.process.FFmpegBinary.preferredSource = {
+            com.dreamdisplays.platform.client.displays.ServerOverrides.settings.ffmpegSource.name.lowercase()
+        }
+        com.dreamdisplays.media.source.youtube.binary.YtDlpBinary.preferredSource = {
+            com.dreamdisplays.platform.client.displays.ServerOverrides.settings.ytDlpSource.name.lowercase()
+        }
         com.dreamdisplays.media.player.pipeline.AudioOutputHooks.openAlLine = { device ->
             com.dreamdisplays.platform.client.audio.OpenAlSourceLine.open(device)
         }

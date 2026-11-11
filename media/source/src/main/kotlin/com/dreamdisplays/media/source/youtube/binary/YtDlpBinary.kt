@@ -67,6 +67,30 @@ object YtDlpBinary {
     private var resolved: String? = null
     private val updateChecked = atomic(false)
 
+    /**
+     * Which `yt-dlp` comes first: `auto` (the zipapp, else an installed one, else the bundled binary), `bundled` (the
+     * zipapp or the bundled binary, an installed one only if neither works) or `system` (an installed one, else the
+     * bundled binary). Set by the game (the server's `client.ytDlpSource`); the `dreamdisplays.ytdlp` override still
+     * wins. A change applies to resolves started after it.
+     */
+    @Volatile
+    var preferredSource: () -> String = { "auto" }
+
+    /** The [preferredSource] [resolved] / [resolvedCommand] were picked for. */
+    @Volatile
+    private var resolvedFor: String? = null
+
+    private fun preference(): String = runCatching(preferredSource).getOrDefault("auto")
+
+    /** Drops the picked command when the preference changed since it was picked. Under the lock. */
+    private fun forgetIfPreferenceChanged(preference: String) {
+        if (resolvedFor == null || resolvedFor == preference) return
+        logger.info("yt-dlp source preference is now {}; picking yt-dlp again.", preference)
+        resolved = null
+        resolvedCommand = null
+        resolvedFor = null
+    }
+
     @Volatile
     private var resolvedCommand: List<String>? = null
 
@@ -140,15 +164,20 @@ object YtDlpBinary {
      */
     @Throws(IOException::class)
     fun resolve(): String {
-        resolved?.let { return it }
+        val preference = preference()
+        resolved?.takeIf { resolvedFor == preference }?.let { return it }
         synchronized(this) {
+            forgetIfPreferenceChanged(preference)
             resolved?.let { return it }
+            resolvedFor = preference
 
             val candidates = ArrayList<String>()
             override()?.let(candidates::add)
-            candidates.addAll(CANDIDATE_PATHS)
             val bundled = bundledDir.resolve(bundledBinaryName())
-            candidates.add(bundled.toString())
+            // Bundled first: an installed copy is only the fallback (it may be stale; it never updates itself here)
+            if (preference == "bundled") candidates.add(bundled.toString())
+            candidates.addAll(CANDIDATE_PATHS)
+            if (preference != "bundled") candidates.add(bundled.toString())
 
             for (c in candidates) {
                 if (canExecute(c)) {
@@ -171,12 +200,16 @@ object YtDlpBinary {
      */
     @Throws(IOException::class)
     fun resolveCommand(): List<String> {
-        resolvedCommand?.let { return it }
+        val preference = preference()
+        resolvedCommand?.takeIf { resolvedFor == preference }?.let { return it }
         synchronized(this) {
+            forgetIfPreferenceChanged(preference)
             resolvedCommand?.let { return it }
-            val zipapp = if (override() != null) null else zipappCommand()
+            // An installed yt-dlp first: no zipapp (that is the mod's own copy)
+            val zipapp = if (override() != null || preference == "system") null else zipappCommand()
             val command = zipapp ?: [resolve()]
             resolvedCommand = command
+            resolvedFor = preference
             return command
         }
     }

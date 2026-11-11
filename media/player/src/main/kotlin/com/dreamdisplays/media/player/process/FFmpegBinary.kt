@@ -20,6 +20,18 @@ object FFmpegBinary {
     @Volatile
     private var cachedPath: String? = null
 
+    /** The [preferredSource] [cachedPath] was resolved for: a different preference resolves again. */
+    @Volatile
+    private var cachedFor: String? = null
+
+    /**
+     * Which binary comes first: `auto` / `bundled` (the downloaded build, an installed one if that fails) or `system`
+     * (an installed one, the downloaded build if there is none). Set by the game (the server's `client.ffmpegSource`);
+     * applies to processes started after a change.
+     */
+    @Volatile
+    var preferredSource: () -> String = { "auto" }
+
     /** Where [getPath] found the binary: `bundled`, `system`, or `missing`; empty before it ran. */
     @Volatile
     var source: String = ""
@@ -59,12 +71,15 @@ object FFmpegBinary {
     /** The binary [getPath] already resolved, or null; never downloads or probes (safe on the render thread). */
     fun getPathIfResolved(): String? = cachedPath
 
-    /** Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call. */
+    /** Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call (and on a new [preferredSource]). */
     fun getPath(): String? {
-        cachedPath?.let { return it }
+        val preference = runCatching(preferredSource).getOrDefault("auto")
+        cachedPath?.takeIf { cachedFor == preference }?.let { return it }
         synchronized(this) {
-            cachedPath?.let { return it }
-            cachedPath = resolve()
+            cachedPath?.takeIf { cachedFor == preference }?.let { return it }
+            if (cachedFor != null) logger.info("FFmpeg source preference is now {}; resolving the binary again.", preference)
+            cachedPath = if (preference == "system") probeSystemFfmpeg() ?: resolve() else resolve()
+            cachedFor = preference
             return cachedPath
         }
     }
@@ -126,7 +141,14 @@ object FFmpegBinary {
             }
     }
 
-    private fun findSystemFfmpeg(): String? {
+    private fun findSystemFfmpeg(): String? = probeSystemFfmpeg() ?: run {
+        logger.error("FFmpeg not found (no download succeeded, no system binary).")
+        source = "missing"
+        null
+    }
+
+    /** An installed `FFmpeg` that runs, or null. */
+    private fun probeSystemFfmpeg(): String? {
         val candidates = ["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
         for (candidate in candidates) {
             runCatching {
@@ -141,8 +163,6 @@ object FFmpegBinary {
                 p.destroyForcibly()
             }
         }
-        logger.error("FFmpeg not found (no download succeeded, no system binary).")
-        source = "missing"
         return null
     }
 
