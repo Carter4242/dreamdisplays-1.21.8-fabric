@@ -47,8 +47,11 @@ object ClientPacketManager {
             is DisplayInfo -> DisplayLifecycleManager.handleInfoPacket(packet)
             is DisplaySync -> {
                 // A timeline for a video this client was not told about: ask for the display again (and still follow
-                // the timeline meanwhile, so pauses and seeks keep applying)
-                com.dreamdisplays.platform.client.displays.ServerMediaGens.onSync(packet)
+                // the timeline meanwhile, so pauses and seeks keep applying). Not while displays are off: the answer
+                // would only be recorded, and the display then never asked for again once they are back on
+                if (ClientStateManager.displaysEnabled) {
+                    com.dreamdisplays.platform.client.displays.ServerMediaGens.onSync(packet)
+                }
                 com.dreamdisplays.platform.client.displays.RecentTimelines.record(
                     packet,
                     DisplayRegistry.screens[packet.id]?.videoUrl ?: DisplayRegistry.unloadedScreens[packet.id]?.videoUrl,

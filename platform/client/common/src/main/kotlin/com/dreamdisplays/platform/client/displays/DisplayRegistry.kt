@@ -70,6 +70,9 @@ object DisplayRegistry {
         ConformingWorldMesh.forget(displayScreen.uuid)
         if (displayScreen.virtual) {
             ClientSettingsStore.remove(displayScreen.uuid)
+            // Nothing of it is kept to come back from: forgotten like a deleted display, so a timeline for it later
+            // (displays switched back on while its broadcast runs) asks the server to describe it again
+            ServerMediaGens.forget(displayScreen.uuid)
         } else {
             // One whose world is unknown (only ever described as forced) could come back in the wrong world
             if (DisplayDimensions.cacheableForRestore(displayScreen.dimensionKey)) {
