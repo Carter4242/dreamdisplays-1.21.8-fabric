@@ -2,6 +2,7 @@ package com.dreamdisplays.media.runtime.security
 
 import com.dreamdisplays.util.net.DreamHttpClient
 import com.sun.net.httpserver.HttpServer
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import kotlin.test.AfterTest
@@ -24,7 +25,8 @@ class MediaHostGuardConnectTest {
         assertEquals(200, DreamHttpClient.execute(url).code) // the endpoint itself answers
         assertFailsWith<MediaHostGuard.HostRefusedException> { DreamHttpClient.execute(url, MediaHostGuard.guarded(url)) }
         val byName = "http://localhost:${server.address.port}/segment.ts"
-        assertFailsWith<MediaHostGuard.HostRefusedException> { DreamHttpClient.execute(byName, MediaHostGuard.guarded(byName)) }
+        // Refused at the name's lookup, before anything is dialed
+        assertFailsWith<IOException> { DreamHttpClient.execute(byName, MediaHostGuard.guarded(byName)) }
     }
 
     @Test

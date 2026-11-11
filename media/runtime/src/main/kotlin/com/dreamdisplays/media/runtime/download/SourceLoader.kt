@@ -85,7 +85,7 @@ object SourceLoader {
             try {
                 return attempt(sha)
             } catch (e: ChecksumMismatchException) {
-                logger.warn(e.message)
+                logger.warn(e.message ?: "Checksum mismatch for $name.")
                 mismatch = e
             }
         }
