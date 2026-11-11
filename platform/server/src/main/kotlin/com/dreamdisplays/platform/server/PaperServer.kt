@@ -16,6 +16,7 @@ import com.dreamdisplays.platform.server.registrar.ChannelRegistrar
 import com.dreamdisplays.platform.server.registrar.CommandRegistrar
 import com.dreamdisplays.platform.server.registrar.ListenerRegistrar
 import com.dreamdisplays.platform.server.storage.StorageBackend
+import com.dreamdisplays.platform.server.storage.TimelineStore
 import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
 import com.dreamdisplays.platform.server.utils.net.QueueActions
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -88,7 +89,12 @@ class PaperServer : JavaPlugin() {
         }
 
         WatchPartyManager.init(PaperPlaybackTransport)
-        TimelineManager.init(PaperPlaybackTransport)
+        TimelineManager.init(
+            PaperPlaybackTransport,
+            runCatching { TimelineStore.take() }
+                .onFailure { Companion.logger.warn("Could not read the saved display timelines.", it) }
+                .getOrDefault(emptyList()),
+        )
         TimelineManager.resumeHoldMs = { Companion.config.settings.resumeHoldMs }
         TimelineManager.seekHoldMs = { Companion.config.settings.seekHoldMs }
         ReadinessTracker.startLeadMaxMs = { Companion.config.settings.startLeadMaxMs }
@@ -149,6 +155,7 @@ class PaperServer : JavaPlugin() {
         disableStep("stop addons") { PaperServerApi.stop() }
         disableStep("stop karaoke") { KaraokeManager.shutdown() }
         disableStep("end screen shares") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.stopAll() }
+        disableStep("save timelines") { TimelineStore.save(TimelineManager.snapshot()) }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }

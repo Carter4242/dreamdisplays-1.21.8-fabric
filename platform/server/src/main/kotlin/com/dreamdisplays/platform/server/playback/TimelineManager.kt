@@ -10,6 +10,7 @@ import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.core.queue.QueueTiming
+import com.dreamdisplays.core.sync.TimelineRecords
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -91,11 +92,43 @@ object TimelineManager {
     }
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /** Wires the platform transport and seeds timelines for already-loaded displays. */
-    fun init(transport: PlaybackTransport) {
+    /**
+     * Wires the platform transport and seeds timelines for already-loaded displays: those in [saved] (the previous
+     * plugin instance's [snapshot]) carry on where they were, the rest start afresh.
+     */
+    fun init(transport: PlaybackTransport, saved: List<TimelineRecords.Saved> = emptyList()) {
         this.transport = transport
+        restore(saved)
         DisplayManager.getDisplays().forEach(::ensureTimeline)
         ReadinessTracker.addListener(::releaseIfReady)
+    }
+
+    /** Every shared timeline as it stands now, to hand to the next plugin instance ([init]). */
+    fun snapshot(): List<TimelineRecords.Saved> {
+        val now = transport.nowMs()
+        return timelines.mapNotNull { (displayId, timeline) ->
+            val display = DisplayManager.getDisplayData(displayId) ?: return@mapNotNull null
+            if (WatchPartyManager.hasSession(displayId)) return@mapNotNull null
+            val mediaMs = durationReports[displayId]?.takeIf { it.url == display.url }?.mediaMs ?: 0L
+            TimelineRecords.save(displayId, display.url, timeline, startHolds.containsKey(displayId), mediaMs, now)
+        }
+    }
+
+    /** Puts back the [saved] timelines of displays that still show the same video on a shared clock. */
+    private fun restore(saved: List<TimelineRecords.Saved>) {
+        if (saved.isEmpty()) return
+        val now = transport.nowMs()
+        var restored = 0
+        for (record in saved) {
+            val displayId = runCatching { UUID.fromString(record.displayId) }.getOrNull() ?: continue
+            val display = DisplayManager.getDisplayData(displayId) ?: continue
+            if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
+            if (display.url != record.url) continue
+            timelines[displayId] = TimelineRecords.restore(record, now)
+            if (record.mediaMs > 0L) durationReports[displayId] = ReportedDurations(display.url, emptyMap(), record.mediaMs)
+            restored++
+        }
+        logger.info("Restored {} of {} saved display timeline(s).", restored, saved.size)
     }
 
     /**
