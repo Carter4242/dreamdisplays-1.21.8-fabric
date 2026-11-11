@@ -208,6 +208,20 @@ object FullscreenCommand {
         return if (FullscreenBroadcastManager.cancelPreparation("", displayId)) 1 else 0
     }
 
+    /**
+     * Cancels preparations only (`/display prepare cancel`): by preparation id, by the id of the display prepared, or
+     * every one for `all`. Running broadcasts are never touched. Returns how many were cancelled.
+     */
+    fun cancelPreparations(idOrAll: String): Int {
+        if (idOrAll.equals("all", ignoreCase = true)) {
+            val prepared = FullscreenBroadcastManager.listPreparations().map { it.prepareId }
+            return prepared.count { FullscreenBroadcastManager.cancelPreparation(it) }
+        }
+        if (FullscreenBroadcastManager.cancelPreparation(idOrAll)) return 1
+        val displayId = runCatching { UUID.fromString(idOrAll) }.getOrNull() ?: return 0
+        return if (FullscreenBroadcastManager.cancelPreparation("", displayId)) 1 else 0
+    }
+
     /** Live sessions for the `list` subcommand. */
     fun list(): List<FullscreenSessionInfo> = FullscreenBroadcastManager.list()
 
@@ -402,6 +416,18 @@ object PaperFullscreenCommand {
 
             forwarded -> ServerMessage.FULLSCREEN_NETWORK_STOP_QUEUED.sendTo(sender)
             else -> ServerMessage.FULLSCREEN_STOP_FAILED.sendTo(sender)
+        }
+    }
+
+    /** Handles `/display prepare cancel <id|all>`: preparations only, never a running broadcast. */
+    fun cancelPreparations(sender: CommandSender, idOrAll: String) {
+        val count = FullscreenCommand.cancelPreparations(idOrAll)
+        if (count > 0) {
+            MessageUtil.sendColoredMessage(
+                sender, MessageUtil.formatIndexed(sender, ServerMessage.FULLSCREEN_STOPPED, count.toString()),
+            )
+        } else {
+            ServerMessage.FULLSCREEN_STOP_FAILED.sendTo(sender)
         }
     }
 
@@ -665,6 +691,16 @@ object VanillaFullscreenCommand {
             player,
             line
         ) else ctx.source.sendSystemMessage(literalText(line))
+        return count
+    }
+
+    /** Handles `/display prepare cancel <id|all>`: preparations only, never a running broadcast. */
+    fun cancelPreparations(ctx: CommandContext<CommandSourceStack>, idOrAll: String): Int {
+        val player = ctx.source.entity as? ServerPlayer
+        val count = FullscreenCommand.cancelPreparations(idOrAll)
+        val line = if (count > 0) MessageUtil.formatIndexed(player, ServerMessage.FULLSCREEN_STOPPED, count.toString())
+        else MessageUtil.messageFor(player, ServerMessage.FULLSCREEN_STOP_FAILED)
+        if (player != null) MessageUtil.sendColoredMessage(player, line) else ctx.source.sendSystemMessage(literalText(line))
         return count
     }
 

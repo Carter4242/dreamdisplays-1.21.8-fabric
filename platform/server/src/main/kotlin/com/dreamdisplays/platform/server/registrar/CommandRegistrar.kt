@@ -132,7 +132,7 @@ object CommandRegistrar {
             PaperFullscreenCommand.prepare(s, c.source.location, id, c.flags!!.prepareOptions())
         },
         "prepare.list" to h { s, _ -> PaperFullscreenCommand.list(s) },
-        "prepare.cancel" to h { s, c -> PaperFullscreenCommand.stop(s, sessionToken(c["id"]!!)) },
+        "prepare.cancel" to h { s, c -> PaperFullscreenCommand.cancelPreparations(s, sessionToken(c["id"]!!)) },
         "fullscreen.start" to h { s, c ->
             val flags = c.flags!!
             val id = sourceToken(s, c["source"]!!, network = flags.has("server")) ?: return@h

@@ -90,7 +90,7 @@ object VanillaCommandTree {
             VanillaFullscreenCommand.prepare(ctx, id, c.flags!!.prepareOptions())
         },
         "prepare.list" to h { ctx, _ -> VanillaFullscreenCommand.list(ctx) },
-        "prepare.cancel" to h { ctx, c -> VanillaFullscreenCommand.stop(ctx, sessionToken(c["id"]!!)) },
+        "prepare.cancel" to h { ctx, c -> VanillaFullscreenCommand.cancelPreparations(ctx, sessionToken(c["id"]!!)) },
         "fullscreen.start" to h { ctx, c ->
             val flags = c.flags!!
             val id = sourceToken(ctx, c["source"]!!, network = flags.has("server")) ?: return@h
