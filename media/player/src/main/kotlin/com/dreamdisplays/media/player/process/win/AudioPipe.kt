@@ -44,8 +44,19 @@ class AudioPipe(private val format: ShareAudio.Format, private val startNanos: L
 
     private val writer = Thread(::run, "DreamDisplays-share-audio-pipe").apply { isDaemon = true }
 
-    /** Starts waiting for `FFmpeg` to open the pipe. */
-    fun start() = writer.start()
+    /** The writer thread was started: it owns [handle] and closes it when it ends. Guarded by `this`. */
+    private var started = false
+
+    private val handleClosed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Starts waiting for `FFmpeg` to open the pipe (nothing once [close]d: the pipe is gone). */
+    fun start() {
+        synchronized(this) {
+            if (closed) return
+            started = true
+        }
+        writer.start()
+    }
 
     /** A captured packet: its first frame's time and its PCM. Never blocks. */
     fun offer(nanos: Long, data: ByteArray) {
@@ -55,10 +66,21 @@ class AudioPipe(private val format: ShareAudio.Format, private val startNanos: L
 
     /** Stops writing; `FFmpeg` then sees the end of its sound input. */
     fun close() {
-        if (closed) return
-        closed = true
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            // Never started (the share stopped first, or FFmpeg did not launch): nothing else will close the handle
+            if (!started) {
+                closeHandle()
+                return
+            }
+        }
         // Still waiting in ConnectNamedPipe (FFmpeg never opened it): connect once ourselves to release it
         if (!connected) runCatching { FileInputStream(path).close() }
+    }
+
+    private fun closeHandle() {
+        if (handleClosed.compareAndSet(false, true)) WinApi.kernel32.CloseHandle(handle)
     }
 
     private fun run() {
@@ -89,7 +111,7 @@ class AudioPipe(private val format: ShareAudio.Format, private val startNanos: L
             if (!closed) logger.warn("Share audio pipe stopped: {}", t.toString())
         } finally {
             closed = true
-            WinApi.kernel32.CloseHandle(handle)
+            closeHandle()
         }
     }
 
