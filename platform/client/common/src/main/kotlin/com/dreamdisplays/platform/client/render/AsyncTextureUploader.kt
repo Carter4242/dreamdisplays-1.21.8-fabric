@@ -58,15 +58,33 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
     private var managedTexW: Int = -1
     private var managedTexH: Int = -1
 
-    /**
-     * Persistently mapped slots: the driver offers buffer storage and the server has not asked for plain uploads
-     * (`client.textureUpload = basic`). Fixed for this uploader's life, so no slot ever mixes the two kinds of storage.
-     */
-    private val persistentMapSupported: Boolean by lazy {
-        ServerOverrides.settings.persistentUploads && runCatching {
+    /** The driver offers buffer storage (GL 4.4 or `ARB_buffer_storage`). */
+    private val bufferStorageSupported: Boolean by lazy {
+        runCatching {
             val caps = GL.getCapabilities()
             caps.OpenGL44 || caps.GL_ARB_buffer_storage
         }.getOrDefault(false)
+    }
+
+    /**
+     * Persistently mapped slots: the driver offers buffer storage and the server has not asked for plain uploads
+     * (`client.textureUpload = basic`). Null until the first upload; when the server's choice changes, the whole ring is
+     * replaced before the next upload ([followUploadPolicy]), so no slot ever mixes the two kinds of storage and an
+     * uploader kept open (a PiP, fullscreen, window or menu preview) moves over too.
+     */
+    private var persistentMapSupported: Boolean? = null
+
+    /** Applies the server's current upload choice to this uploader's ring; GL thread, before writing a slot. */
+    private fun followUploadPolicy() {
+        val wanted = ServerOverrides.settings.persistentUploads && bufferStorageSupported
+        if (!UploadStoragePolicy.replacesRing(persistentMapSupported, wanted)) {
+            persistentMapSupported = wanted
+            return
+        }
+        persistentMapSupported = wanted
+        cleanup()
+        for (slot in slots) slot.pbo = GL15.glGenBuffers()
+        ringIndex = 0
     }
 
     /**
@@ -133,6 +151,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
     fun upload(textureId: Int, src: ByteBuffer, w: Int, h: Int, format: UploadPixelFormat = UploadPixelFormat.RGB24) {
         val size = w * h * format.bytesPerPixel
         if (size <= 0 || src.remaining() < size) return
+        followUploadPolicy()
 
         // Pick the next slot and advance the ring
         val slot = slots[ringIndex]
@@ -180,6 +199,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         val vSize = vW * vH
         val total = ySize + uSize + vSize
         if (total <= 0 || src.remaining() < total) return
+        followUploadPolicy()
 
         val slot = slots[ringIndex]
         ringIndex = (ringIndex + 1) % PBO_COUNT
@@ -261,7 +281,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         // Immutable storage can't be resized or reallocated: unmap it and replace the buffer object
         if (slot.immutable) replaceBuffer(slot)
 
-        if (persistentMapSupported) {
+        if (persistentMapSupported == true) {
             val flags = GL44.GL_MAP_WRITE_BIT or GL44.GL_MAP_PERSISTENT_BIT or GL44.GL_MAP_COHERENT_BIT
             if (GL.getCapabilities().OpenGL44) {
                 GL44.glBufferStorage(GL21.GL_PIXEL_UNPACK_BUFFER, size.toLong(), flags)
@@ -372,4 +392,10 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         private const val PBO_COUNT = 3
         private const val FENCE_TIMEOUT_NS = 100_000_000L
     }
+}
+
+/** When an uploader's PBO ring changes kind (see [AsyncTextureUploader]). */
+internal object UploadStoragePolicy {
+    /** True when a ring built for [current] (null: none yet) must be replaced to serve [wanted] (persistent mapping). */
+    fun replacesRing(current: Boolean?, wanted: Boolean): Boolean = current != null && current != wanted
 }
