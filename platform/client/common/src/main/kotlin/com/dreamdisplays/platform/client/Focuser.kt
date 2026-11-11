@@ -19,7 +19,7 @@ class Focuser : Thread() {
                 if (mc != null) {
                     val focused = mc.isWindowActive
                     for (screen in DisplayRegistry.getScreens()) {
-                        screen.setFocusMuted(!focused)
+                        screen.setFocusMuted(shouldFocusMute(focused, screen.hasWindowPopout))
                     }
                 }
             }
@@ -33,6 +33,13 @@ class Focuser : Thread() {
     }
 
     companion object {
+        /**
+         * True when a display goes quiet because the game window lost focus. Not one shown in its own popout window:
+         * clicking into that window to watch it is what takes the focus away.
+         */
+        fun shouldFocusMute(gameWindowFocused: Boolean, inPopoutWindow: Boolean): Boolean =
+            !gameWindowFocused && !inPopoutWindow
+
         /** The running focuser thread, or `null` before it is started. */
         @Volatile
         var instance: Focuser? = null

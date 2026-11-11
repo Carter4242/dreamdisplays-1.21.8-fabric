@@ -33,6 +33,9 @@ class DisplayPopoutManager(
     val isActive: Boolean
         get() = windowActive || (popoutWindow?.isOpen == true) || (pipOverlay != null) || (fullscreenOverlay != null)
 
+    /** True while the separate OS window is open. */
+    val isWindowOpen: Boolean get() = windowActive || (popoutWindow?.isOpen == true)
+
     /** True once any popout surface of this display has been opened. */
     var wasEverActive: Boolean = false
         private set

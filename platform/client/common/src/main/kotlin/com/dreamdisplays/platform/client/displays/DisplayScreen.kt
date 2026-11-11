@@ -627,6 +627,9 @@ class DisplayScreen(
     /** True while a PiP or window popout is open for this display. */
     val isPopoutActive: Boolean; get() = popoutManager.isActive
 
+    /** True while this display is shown in its own OS window (not PiP or fullscreen, which are in the game window). */
+    val hasWindowPopout: Boolean get() = popoutManager.isWindowOpen
+
     /**
      * True for a virtual display (a URL broadcast) that was shown and has no popout left: dismissed, out of the
      * broadcast's radius, or its PiP closed. Nothing else can show it again, so it is dropped (see
