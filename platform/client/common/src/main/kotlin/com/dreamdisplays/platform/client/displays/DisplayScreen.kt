@@ -871,10 +871,35 @@ class DisplayScreen(
     /** True while the display has a media player (resolving or playing). */
     internal val hasPlayer: Boolean get() = mediaPlayer != null
 
-    /** Primes the player to begin at [positionNanos] so the first frame lands on the synced position. */
-    internal fun primeTimelineStart(positionNanos: Long) {
-        mediaPlayer?.primeStartPosition(positionNanos.coerceAtLeast(0L))
+    /**
+     * Primes the player to begin at [positionNanos] so the first frame lands on the synced position. With no player
+     * yet it is kept for the next one made for this video ([takePendingStartNanos]): a timeline that came first must
+     * not leave the stream to open at the video's beginning. [ratePerMs]: content advanced per real ms (0 paused).
+     */
+    internal fun primeTimelineStart(positionNanos: Long, ratePerMs: Double = 0.0) {
+        val player = mediaPlayer
+        if (player != null) {
+            player.primeStartPosition(positionNanos.coerceAtLeast(0L))
+            return
+        }
+        val url = videoUrl?.takeIf { it.isNotEmpty() } ?: return
+        primeNextStart(url, positionNanos, ratePerMs)
     }
+
+    /** The next player made for [url] opens at [positionNanos] (moving on at [ratePerMs] until then). */
+    internal fun primeNextStart(url: String, positionNanos: Long, ratePerMs: Double = 0.0) {
+        pendingStart = PendingStart(url, positionNanos.coerceAtLeast(0L), System.nanoTime(), ratePerMs)
+    }
+
+    /** A start primed while there was no player ([primeTimelineStart]), for [url], as of now; -1 when none. */
+    internal fun takePendingStartNanos(url: String): Long {
+        val pending = pendingStart ?: return -1L
+        pendingStart = null
+        return pending.positionFor(url, System.nanoTime())
+    }
+
+    @Volatile
+    private var pendingStart: PendingStart? = null
 
     /** Drops the rendered frame so the screen re-fades in after a timeline-driven seek. */
     internal fun clearRenderedFrameForTimeline() {
@@ -1883,4 +1908,22 @@ internal fun scheduledToggleApplies(effectiveMode: PlaybackMode): Boolean = effe
 internal fun entersSharedMode(previous: PlaybackMode, next: PlaybackMode): Boolean {
     fun shared(m: PlaybackMode) = m == PlaybackMode.SYNCED || m == PlaybackMode.BROADCAST
     return shared(next) && !shared(previous)
+}
+
+/**
+ * A stream start primed before its player existed: [positionNanos] of [url] at [atNanos], running on at [ratePerMs]
+ * content ms per real ms (0 while paused).
+ */
+internal class PendingStart(val url: String, val positionNanos: Long, val atNanos: Long, val ratePerMs: Double) {
+    /** Where the next player for [forUrl] opens at [nowNanos]; -1 for another video or once it is too old to trust. */
+    fun positionFor(forUrl: String, nowNanos: Long): Long {
+        val ageNanos = nowNanos - atNanos
+        if (forUrl != url || ageNanos !in 0..MAX_AGE_NANOS) return -1L
+        return positionNanos + (ageNanos * ratePerMs).toLong()
+    }
+
+    companion object {
+        /** Older than this, the clock may well have moved without this client hearing of it (see RecentTimelines). */
+        const val MAX_AGE_NANOS = 15_000_000_000L
+    }
 }

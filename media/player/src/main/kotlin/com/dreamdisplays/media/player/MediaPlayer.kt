@@ -58,6 +58,8 @@ class MediaPlayer(
     private val env: PlaybackEnvironment,
     @Volatile private var replayBootstrap: ReplayBootstrap? = null,
     private val audioStage: AudioDspStage? = null,
+    /** Where the stream first opens (ns, -1 = the start): the shared clock's position, known before the player was made. */
+    initialStartNanos: Long = -1L,
 ) {
     private val debugLabel = "${host.reportId}/${Integer.toHexString(System.identityHashCode(this))}"
     private val terminated = AtomicBoolean(false)
@@ -135,7 +137,11 @@ class MediaPlayer(
     private val isReady: Boolean get() = state.isReady
 
     @Volatile
-    private var primedStartPositionNanos = -1L
+    private var primedStartPositionNanos = initialStartNanos
+
+    /** Set once a session's streams were actually opened (not skipped for a pause): see [coldResumeOffsetNanos]. */
+    @Volatile
+    private var streamsEverStarted = false
 
     /** Playback speed the viewer asked for (see [setPlaybackSpeed]); live / unseekable media plays at 1 anyway. */
     @Volatile
@@ -331,7 +337,9 @@ class MediaPlayer(
             dispatchInitialize(coalesce = true)
             return@safeExecute
         }
-        val offset = if (lifecycle == PlayerState.Ended) 0L else clock.originNanos
+        val offset = coldResumeOffsetNanos(
+            lifecycle == PlayerState.Ended, streamsEverStarted, primedStartPositionNanos, clock.originNanos,
+        )
         startStreams(ss, offset)
     }
 
@@ -1044,6 +1052,7 @@ class MediaPlayer(
             return
         }
         if (lifecycle == PlayerState.Ended) lifecycle = PlayerState.Paused
+        streamsEverStarted = true
         val bootstrap = replayBootstrap?.also { replayBootstrap = null }
         val replayActive = sessionManager.isBridging()
         logger.debug(
@@ -1568,8 +1577,9 @@ class MediaPlayer(
         if (isPausedWarm()) freezePausedWarmSession()
         heldReady = false
         clock.reset(nanos)
-        // A retry or re-resolve still pending opens at the primed position: a seek made meanwhile moves it there
-        if (lifecycle == PlayerState.Restarting && !liveStream) primedStartPositionNanos = nanos
+        // A retry or re-resolve still pending opens at the primed position: a seek made meanwhile moves it there; so
+        // does a seek before the stream was ever opened (its first play opens there)
+        if ((lifecycle == PlayerState.Restarting || !streamsEverStarted) && !liveStream) primedStartPositionNanos = nanos
         val ss = streams ?: return
         if (warmingUp) {
             // Still opening a paused stream to hold it ready: open it at the new position instead
@@ -1773,3 +1783,16 @@ class MediaPlayer(
             runCatching { controlExecutor.submit(action) }
     }
 }
+
+/**
+ * Where a play() that finds no session opens its streams: the start after an end; the primed start ([primedNanos], the
+ * shared clock's position, -1 = none) when no stream was ever opened (the first open was skipped for a pause), which is
+ * where the display belongs rather than the clock's untouched origin (the video's beginning); else where it paused
+ * ([originNanos]).
+ */
+internal fun coldResumeOffsetNanos(ended: Boolean, everStarted: Boolean, primedNanos: Long, originNanos: Long): Long =
+    when {
+        ended -> 0L
+        !everStarted && primedNanos >= 0L -> primedNanos
+        else -> originNanos
+    }

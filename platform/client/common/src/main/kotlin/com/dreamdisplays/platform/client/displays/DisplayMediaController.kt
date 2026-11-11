@@ -202,9 +202,12 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         if (preloaded != null) screen.paused = true
         val shouldBePaused = preservePausedState && screen.paused
         val audioStage = DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.registerSource(screen.uuid)
+        // A start primed before this player existed (a timeline that came first, a display back in range): the stream
+        // opens there, not at the video's beginning
+        val primedStart = screen.takePendingStartNanos(videoUrl)
         val newPlayer = preloaded?.also { it.attachAudioStage(audioStage) } ?: MediaPlayer(
             videoUrl, lang, DisplayPlaybackHost(screen), DreamPlaybackEnvironment,
-            screen.takeReplayBootstrap(videoUrl), audioStage,
+            screen.takeReplayBootstrap(videoUrl), audioStage, initialStartNanos = primedStart,
         )
         player = newPlayer
         // Before the stream opens, so the first session already plays at the display's speed

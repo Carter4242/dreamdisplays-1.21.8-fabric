@@ -126,6 +126,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val receivedAtNanos: Long,
         val latencyCompMs: Double,
         val rate: Double,
+        /** The first timeline since this video's player was made (none was known before it). */
+        val first: Boolean = false,
     )
 
     /** Clears follow state when a new video loads. */
@@ -251,15 +253,16 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             val now = System.nanoTime()
             latencyCompMs = comp
             this.loop = loop
+            val first = !estimator.hasTimeline
             if (estimator.onPacket(targetMs, paused, now / NANOS_PER_MS, comp, rate, newSegment)) controller.resetMeasurement()
-            Pending(++nextSeq, targetMs, serverTimeMs, paused, loop, now, comp, rate).also { pending = it }
+            Pending(++nextSeq, targetMs, serverTimeMs, paused, loop, now, comp, rate, first).also { pending = it }
         }
         applyPending(packet)
     }
 
     private fun applyPending(packet: Pending) {
         val startMs = projectTargetMs(packet) + if (packet.paused) 0L else contentMs(coldLeadMs, packet.rate)
-        screen.primeTimelineStart(wrapForStart(startMs, packet.loop) * 1_000_000L)
+        screen.primeTimelineStart(wrapForStart(startMs, packet.loop) * 1_000_000L, if (packet.paused) 0.0 else packet.rate)
         val generation = screen.mediaGeneration
         screen.waitForMFInit {
             synchronized(lock) {
@@ -288,7 +291,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 // A fresh player that opened its stream before any timeline was known (back in range with a cached
                 // resolve) runs from its own start, far from the others: move it there now, its stale picture
                 // cleared, rather than show its opening and then wait for the landing to be judged
-                if (initialTimeline && !packet.paused && screen.videoStarted && joinCorrection(System.nanoTime())) {
+                // Also the first timeline after the picture stopped waiting for one (it came late): the stream ran from
+                // where it opened (its beginning) meanwhile, and is never left to drift there for a landing to judge
+                if (joinsFarOff(initialTimeline, packet.first, packet.paused, screen.videoStarted) &&
+                    joinCorrection(System.nanoTime())
+                ) {
                     screen.markInitialTimelineReady()
                     pending = null
                     return@waitForMFInit
@@ -319,6 +326,17 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
      */
     fun onHeldReady() {
         synchronized(lock) { coldAfterSnap = false }
+    }
+
+    /**
+     * Where a stream should open (ns) for [packet], a timeline replayed for a display loaded again before its player
+     * exists: as [apply] would prime it, with this follower's cold-start lead and latency.
+     */
+    fun startNanosFor(packet: com.dreamdisplays.core.protocol.common.packets.DisplaySync): Long = synchronized(lock) {
+        replayStartMs(
+            packet.currentTimeMs, packet.isPaused, packet.startInMs, com.dreamdisplays.api.playback.model.PlaybackSpeed.clamp(packet.rate),
+            oneWayLatencyMs().roundToLong(), coldLeadMs, packet.loop, packet.durationMs,
+        ) * 1_000_000L
     }
 
     /** Called every client tick for a loaded display: measures drift and corrects it. */
@@ -830,6 +848,14 @@ private const val JOIN_SLACK_MS = 1_000L
 internal fun isStaleTimeline(serverTimeMs: Long, lastServerTimeMs: Long): Boolean = serverTimeMs in 1..<lastServerTimeMs
 
 /**
+ * Whether a playing timeline is checked for a stream far from it (see `joinCorrection`): the one the picture waits for
+ * ([initialTimeline]), or the first one this player gets at all ([firstForPlayer], when the wait already timed out and
+ * the stream is showing whatever it opened on). Only once the player runs ([videoStarted]).
+ */
+internal fun joinsFarOff(initialTimeline: Boolean, firstForPlayer: Boolean, paused: Boolean, videoStarted: Boolean): Boolean =
+    (initialTimeline || firstForPlayer) && !paused && videoStarted
+
+/**
  * Whether a player that has not resolved yet ([videoStarted] false; it reads its primed start when it opens) gets its
  * primed start moved to the live position: a running (not paused) timeline is known.
  */
@@ -873,6 +899,21 @@ internal fun loopDrift(targetMs: Long, localMs: Long, loop: Boolean, periodMs: L
     if (!loop || periodMs <= 0 || localMs >= periodMs) return rawDiff
     val half = periodMs / 2
     return ((rawDiff % periodMs) + periodMs + half) % periodMs - half
+}
+
+/**
+ * The content position (ms) a stream opens at for a timeline at [targetMs] whose start was [startInMs] away when it is
+ * applied (negative: that long ago; replayed timelines), at [rate]: while paused, or a start still ahead, the target
+ * itself; else the target plus what played since, plus [latencyMs] and the cold-start lead [coldLeadMs] (real ms),
+ * wrapped into the loop of [durationMs] when [loop].
+ */
+internal fun replayStartMs(
+    targetMs: Long, paused: Boolean, startInMs: Int, rate: Double, latencyMs: Long, coldLeadMs: Long, loop: Boolean,
+    durationMs: Long,
+): Long {
+    if (paused || startInMs > 0) return targetMs.coerceAtLeast(0L)
+    val realMs = -startInMs.toLong() + latencyMs + coldLeadMs
+    return wrapTimeline(targetMs + (realMs * rate).roundToLong(), loop, durationMs)
 }
 
 /** [ms] wrapped into a loop of [periodMs] (unchanged, but not negative, when not looping or the period is unknown). */

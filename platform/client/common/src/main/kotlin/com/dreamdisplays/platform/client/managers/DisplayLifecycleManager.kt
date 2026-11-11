@@ -290,14 +290,22 @@ object DisplayLifecycleManager {
         DisplayRegistry.recordScreen(displayScreen)
 
         if (data.videoUrl.isNotEmpty()) {
-            displayScreen.loadVideo(data.videoUrl, data.lang)
             // Back in range: open the stream where the shared clock is, from the timeline the server kept sending,
-            // not at the video's beginning while the one it asks for is on its way
-            if (displayScreen.followsServerTimeline) {
+            // not at the video's beginning while the one it asks for is on its way. Primed before the player is made,
+            // so it opens there even when its resolve is cached and done before the timeline could reach it.
+            val replay = if (!displayScreen.followsServerTimeline) null else {
                 com.dreamdisplays.platform.client.displays.RecentTimelines.replayable(
                     data.uuid, data.videoUrl, com.dreamdisplays.platform.client.displays.ServerMediaGens.of(data.uuid),
-                )?.let { displayScreen.updateData(it) }
+                )
             }
+            replay?.let {
+                val running = !it.isPaused && it.startInMs <= 0
+                displayScreen.primeNextStart(
+                    data.videoUrl, displayScreen.timelineFollower.startNanosFor(it), if (running) it.rate else 0.0,
+                )
+            }
+            displayScreen.loadVideo(data.videoUrl, data.lang)
+            replay?.let { displayScreen.updateData(it) }
         }
     }
 
