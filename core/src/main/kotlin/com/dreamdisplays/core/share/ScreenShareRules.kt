@@ -34,8 +34,9 @@ object ScreenShareViewerRules {
 
     /**
      * The display's URL changes from [previousUrl] to [newUrl]: true when the old picture must go at once (texture
-     * cleared, popouts / PiP / fullscreen closed, preview dropped) instead of staying up until the new video's first
-     * frame.
+     * cleared, preview dropped, popout window closed, PiP / fullscreen blanked and detached from the relay player)
+     * instead of staying up until the new video's first frame. PiP and fullscreen stay open for a video put back in its
+     * place, and close only when nothing follows (see [stopPlayerOnUrlChange]).
      */
     fun clearOnUrlChange(previousUrl: String?, newUrl: String?): Boolean =
         ScreenSharePrivacy.isPrivateStream(previousUrl) && previousUrl != newUrl
