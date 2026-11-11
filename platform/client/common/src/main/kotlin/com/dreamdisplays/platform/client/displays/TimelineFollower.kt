@@ -286,6 +286,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     private fun logIfDue(now: Long) {
         if (!estimator.hasTimeline || estimator.paused || screen.isLive || !screen.videoStarted) return
+        // No measurement is taken while the player can't seek (errored, re-resolving); the last drift would be stale
+        if (!screen.canSeek()) return
         // The server can change the interval or turn these lines off (0)
         val intervalNanos = ServerOverrides.settings.syncLogIntervalMs * 1_000_000L
         if (intervalNanos <= 0L || now - lastLogNanos < intervalNanos) return

@@ -22,6 +22,15 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
     private val formatMemo = AsyncMemo<String, List<YtStream>>(200, cacheTtlMs, DreamCoroutines.clientIo, "fetch")
     private val fetchedAtMs: Cache<String, Long> = Caffeine.newBuilder().maximumSize(300).build()
 
+    /**
+     * When each URL was last [invalidate]d. The disk delete is asynchronous and a resolve already in flight may still
+     * finish afterwards, so anything persisted before this instant (or by a resolve started before it) is not served.
+     */
+    private val invalidatedAtMs: Cache<String, Long> = Caffeine.newBuilder()
+        .maximumSize(300)
+        .expireAfterWrite(cacheTtlMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
+
     /** Returns stream list for videoUrl (in-memory -> disk -> [resolve]). */
     @Throws(IOException::class)
     fun fetch(videoUrl: String): List<YtStream> {
@@ -47,6 +56,7 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
 
     /** Removes [videoUrl] from the in-memory format cache, in-flight map, and disk cache. */
     fun invalidate(videoUrl: String) {
+        invalidatedAtMs.put(videoUrl, System.currentTimeMillis())
         formatMemo.invalidate(videoUrl)
         fetchedAtMs.invalidate(videoUrl)
         FormatDiskCache.deleteEntry(videoUrl)
@@ -69,7 +79,8 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
 
     private fun loadFromDisk(videoUrl: String): List<YtStream>? {
         formatMemo.peekFresh(videoUrl)?.let { return it }
-        val fromDisk = FormatDiskCache.load(videoUrl, cacheTtlMs)?.takeIf { it.isNotEmpty() } ?: return null
+        val notBefore = invalidatedAtMs.getIfPresent(videoUrl) ?: 0L
+        val fromDisk = FormatDiskCache.load(videoUrl, cacheTtlMs, notBefore)?.takeIf { it.isNotEmpty() } ?: return null
         val immutable = fromDisk.toList()
         formatMemo.put(videoUrl, immutable)
         fetchedAtMs.put(videoUrl, System.currentTimeMillis())
@@ -78,9 +89,12 @@ class YtFormatCache(private val resolve: suspend (String) -> List<YtStream>) {
 
     @Throws(IOException::class)
     private suspend fun fetchAndPersist(videoUrl: String): List<YtStream> {
+        val startedAtMs = System.currentTimeMillis()
         val streams = resolve(videoUrl).toList()
         fetchedAtMs.put(videoUrl, System.currentTimeMillis())
-        if (streams.isNotEmpty()) FormatDiskCache.saveAsync(videoUrl, streams)
+        // Invalidated while resolving (the player was refused these URLs' predecessors): don't persist this one
+        val invalidated = (invalidatedAtMs.getIfPresent(videoUrl) ?: 0L) >= startedAtMs
+        if (streams.isNotEmpty() && !invalidated) FormatDiskCache.saveAsync(videoUrl, streams)
         return streams
     }
 }

@@ -591,6 +591,9 @@ class DisplayScreen(
         val url = videoUrl ?: return
         errorGate.markRetry()
         loadVideoInternal(url, lang ?: "", preservePausedState = true)
+        // The new player's follower starts without a timeline; ask for it, or a synced display would play from
+        // wherever it starts instead of rejoining the others
+        if (requiresServerTimeline()) sendRequestSyncPacket()
     }
 
     /** Called once a load got far enough to start playing: unattended retries get their full budget back. */

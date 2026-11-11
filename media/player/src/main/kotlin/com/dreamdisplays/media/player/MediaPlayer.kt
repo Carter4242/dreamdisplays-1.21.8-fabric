@@ -810,7 +810,7 @@ class MediaPlayer(
 
         val decision = retryPolicy.evaluate(stderr, normalEos, liveStream)
         if (decision != null) {
-            scheduleRetry(decision.invalidateCache)
+            scheduleRetry(decision)
             return@onControl
         }
 
@@ -825,19 +825,19 @@ class MediaPlayer(
             return@onControl
         }
 
+        // Retries used up on a refused stream or a connection problem: still a passing failure, which the
+        // display may retry on its own later. Anything else is a verdict on the stream itself.
+        val error = RetryPolicy.exhaustedError(stderr, normalEos, source)
         if (stderr.isNotEmpty()) {
-            logger.error("$debugLabel Unrecoverable: ${MediaUtil.truncate(stderr)}.")
+            val detail = MediaUtil.truncate(stderr)
+            if (error.isFatal) logger.error("$debugLabel Unrecoverable: $detail.")
+            else logger.warn("$debugLabel Giving up on this stream for now (${error.message}): $detail.")
         }
+        // Nothing is decoding any more: stop the session, or the watchdog would restart it behind the error,
+        // leaving a player that plays while reporting an error (and so is never seekable or resynced).
+        stopSession()
         lifecycle = PlayerState.Error
-        // Retries used up on a connection problem: still a network failure, which the display may
-        // retry on its own later. Anything else is a verdict on the stream itself.
-        reportError(
-            if (!normalEos && LoadFailures.looksTransient(stderr)) {
-                DreamMediaException.Network("Lost the connection to the video.")
-            } else {
-                DreamMediaException.Decode("Unrecoverable stream failure", isFatal = true)
-            }
-        )
+        reportError(error)
     }
 
     private fun restartFromBeginning() {
@@ -860,11 +860,17 @@ class MediaPlayer(
         }
     }
 
-    private fun scheduleRetry(invalidateCache: Boolean) {
+    private fun scheduleRetry(decision: RetryPolicy.Decision) {
         val delayMs = retryPolicy.nextDelay()
-        logger.warn("$debugLabel ${if (invalidateCache) "Cache invalidated" else "Transient error"}. Retry ${retryPolicy.retries}/$MAX_FETCH_RETRIES in $delayMs ms.")
-        if (invalidateCache) {
-            env.cacheInvalidator.invalidate(url)
+        val what = when {
+            decision.refused -> "Stream refused (403); cache invalidated"
+            decision.invalidateCache -> "Cache invalidated"
+            else -> "Transient error"
+        }
+        logger.warn("$debugLabel $what. Retry ${retryPolicy.retries}/$MAX_FETCH_RETRIES in $delayMs ms.")
+        if (decision.invalidateCache) {
+            // A refusal is reported as such, so a repeated one is resolved from another source
+            if (decision.refused) env.cacheInvalidator.streamRefused(url) else env.cacheInvalidator.invalidate(url)
             forgetResolvedStreamUrls()
         }
         lifecycle = PlayerState.Restarting
@@ -917,7 +923,8 @@ class MediaPlayer(
     }
 
     private fun handleSessionStall(reason: String): Unit = onControl {
-        if (terminated.get()) return@onControl
+        // An errored player waits for the display's retry; restarting it here would play behind the error
+        if (terminated.get() || lifecycle == PlayerState.Error) return@onControl
         val ss = streams ?: return@onControl
         val now = System.nanoTime()
         val repeated = lastStallNanos != 0L && now - lastStallNanos < REPEATED_STALL_WINDOW_NS
