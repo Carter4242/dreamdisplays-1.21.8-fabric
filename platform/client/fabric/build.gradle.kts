@@ -94,20 +94,26 @@ tasks.matching { it.name == "sourcesJar" }.configureEach {
 val sourceClassTweaker = project(":platform:client:common").file("src/main/resources/dreamdisplays.classtweaker")
 val classTweakerNamespace = if (isLegacyObfuscated) "named" else "official"
 val generatedClassTweaker = layout.buildDirectory.file("generated/classtweaker/dreamdisplays.classtweaker").get().asFile
+val rewrittenClassTweaker = sourceClassTweaker.readText().lineSequence()
+    .filter { hasRenderTypePackage || "net/minecraft/client/renderer/rendertype/" !in it }
+    .joinToString("\n") { line ->
+        if (line.startsWith("classTweaker v1 ")) "classTweaker v1 $classTweakerNamespace" else line
+    }
 run {
-    val rewritten = sourceClassTweaker.readText().lineSequence()
-        .filter { hasRenderTypePackage || "net/minecraft/client/renderer/rendertype/" !in it }
-        .joinToString("\n") { line ->
-            if (line.startsWith("classTweaker v1 ")) "classTweaker v1 $classTweakerNamespace" else line
-        }
-    if (!generatedClassTweaker.exists() || generatedClassTweaker.readText() != rewritten) {
+    if (!generatedClassTweaker.exists() || generatedClassTweaker.readText() != rewrittenClassTweaker) {
         generatedClassTweaker.parentFile.mkdirs()
-        generatedClassTweaker.writeText(rewritten)
+        generatedClassTweaker.writeText(rewrittenClassTweaker)
     }
 }
 
+// Targets whose class tweaker has no entries left ship without one. Fabric Loader before 0.17 can't parse the
+// `classTweaker` header at all, so an empty tweaker is the only thing that would lock those loaders out.
+val hasClassTweaks = rewrittenClassTweaker.lineSequence()
+    .map { it.trim() }
+    .any { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("classTweaker ") }
+
 val loomExt = the<net.fabricmc.loom.api.LoomGradleExtensionAPI>()
-loomExt.accessWidenerPath.set(generatedClassTweaker)
+if (hasClassTweaks) loomExt.accessWidenerPath.set(generatedClassTweaker)
 
 // Dev runs get native-library debug logging by default
 loomExt.runs.configureEach {
@@ -212,20 +218,30 @@ dependencies {
 }
 
 tasks.processResources {
-    from(generatedClassTweaker)
+    val shipClassTweaker = hasClassTweaks
+    if (shipClassTweaker) from(generatedClassTweaker)
     from(project(":platform:resources").file("src/main/resources/assets/dreamdisplays/lang/client")) {
         into("assets/dreamdisplays/lang")
     }
     val projectVersion = project.version.toString()
     val fabricMcVer = scVersion("fabric.minecraft.dependency")
+    val loaderDependency = scVersions.getOrNull("fabric.loader.dependency") ?: ">=0.19"
     val javaVersion = scVersion("java.version")
     val stripOitMixin = !hasRenderTypePackage
     inputs.property("version", projectVersion)
     inputs.property("minecraftVersion", fabricMcVer)
+    inputs.property("loaderDependency", loaderDependency)
     inputs.property("javaVersion", javaVersion)
     inputs.property("stripOitMixin", stripOitMixin)
+    inputs.property("shipClassTweaker", shipClassTweaker)
     filesMatching("fabric.mod.json") {
-        expand(mapOf("version" to projectVersion, "minecraftVersion" to fabricMcVer, "javaVersion" to javaVersion))
+        expand(
+            mapOf(
+                "version" to projectVersion, "minecraftVersion" to fabricMcVer,
+                "loaderDependency" to loaderDependency, "javaVersion" to javaVersion,
+            )
+        )
+        if (!shipClassTweaker) filter { line -> if ("\"accessWidener\"" in line) "" else line }
     }
     filesMatching(listOf("dreamdisplays.mixins.json", "dreamdisplays.server.mixins.json")) {
         expand(mapOf("javaVersion" to javaVersion))

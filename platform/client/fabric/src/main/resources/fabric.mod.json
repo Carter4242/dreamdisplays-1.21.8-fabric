@@ -30,7 +30,7 @@
   ],
   "accessWidener": "dreamdisplays.classtweaker",
   "depends": {
-    "fabricloader": ">=0.19",
+    "fabricloader": "${loaderDependency}",
     "fabric-api": "*",
     "minecraft": "${minecraftVersion}",
     "java": ">=${javaVersion}"

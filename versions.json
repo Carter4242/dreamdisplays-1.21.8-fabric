@@ -94,13 +94,13 @@
       "java.version": "21",
       "loom.version": "1.17.13",
       "moddev.version": "2.0.141",
-      "fabric.loader.version": "0.19.3",
+      "fabric.loader.version": "0.16.14",
       "quilt.loader.version": "0.30.0-beta.7",
       "fabric.api.version": "0.136.1+1.21.8",
       "cloth.config.version": "19.0.147",
       "modmenu.version": "15.0.2",
       "fabric.minecraft.version": "1.21.8",
-      "fabric.minecraft.dependency": "1.21.8",
+      "fabric.minecraft.dependency": ">=1.21.7 <1.21.9",
       "parchment.dependency": "org.parchmentmc.data:parchment-1.21.8:2025.09.14",
       "paper.api.version": "1.21.8-R0.1-SNAPSHOT",
       "paper.minecraft.api": "1.21.8",
@@ -110,7 +110,8 @@
       "commons.io.version": "2.17.0",
       "commons.lang3.version": "3.17.0",
       "lwjgl.version": "3.3.3",
-      "neoforge.compile.version": "21.8.57"
+      "neoforge.compile.version": "21.8.57",
+      "fabric.loader.dependency": ">=0.16.14"
     },
     "1.21.11": {
       "minecraft.version": "1.21.11",
