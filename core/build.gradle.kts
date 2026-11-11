@@ -10,6 +10,9 @@ dependencies {
     compileOnly(libs.slf4jApi)
     // Display policy JSON; every runtime that loads it (server plugin, client mods) already ships this
     compileOnly(libs.kotlinxSerializationJson)
+    // The /display command tree; every server runtime (Paper, Fabric, NeoForge) ships Brigadier
+    compileOnly("com.mojang:brigadier:1.3.10")
+    testImplementation("com.mojang:brigadier:1.3.10")
     testImplementation(libs.slf4jApi)
     testImplementation(libs.kotlinxSerializationJson)
 }
