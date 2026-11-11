@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server
 
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.core.display.policy.ClientLogLevel
 import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.shared.playback.FullscreenMode
@@ -441,6 +442,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         syncLogIntervalSeconds = t.numberOrNull("policy.debug.sync_log_interval_seconds")?.toInt(),
         verbose = t.boolOrNull("policy.debug.verbose"),
         reportIntervalSeconds = t.numberOrNull("policy.debug.report_interval_seconds")?.toInt(),
+        logLevel = (t?.get("policy.debug.log_level") as? String)?.let(ClientLogLevel::fromWire)?.wire,
     )
     val network = DisplayPolicy.Network(t.numberOrNull("policy.network.read_ahead_seconds")?.toInt())
     return DisplayPolicy(

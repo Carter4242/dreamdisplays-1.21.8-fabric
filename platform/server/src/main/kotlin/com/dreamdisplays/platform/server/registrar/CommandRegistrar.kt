@@ -54,6 +54,7 @@ object CommandRegistrar {
             clientsBranch()
             errorsBranch()
             diagBranch()
+            debugBranch()
             reloadBranch()
             policyBranch()
             speedBranch()
@@ -143,6 +144,32 @@ object CommandRegistrar {
                             ErrorsCommand.optionSuggestions().map { Suggestion(it) }.startingWith(typed)
                         })
                         executesCommand { ctx -> run(ctx) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.debugBranch() {
+        literal("debug", tip("suggestDebug")) {
+            requires { PolicyCommand.allowed(it.sender) }
+            argument("player", StringArgumentType.word()) {
+                suggests(suggesting(tips) { _, _, typed ->
+                    (PaperFullscreenCommand.onlinePlayerNames() + ClientErrorReports.knownPlayerNames()).distinct()
+                        .map { Suggestion(it) }.startingWith(typed)
+                })
+                executesCommand { ctx ->
+                    DebugLevelCommand.execute(ctx.source.sender, StringArgumentType.getString(ctx, "player"), null)
+                }
+                argument("level", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        DebugLevelCommand.levelSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        DebugLevelCommand.execute(
+                            ctx.source.sender, StringArgumentType.getString(ctx, "player"),
+                            StringArgumentType.getString(ctx, "level"),
+                        )
                     }
                 }
             }

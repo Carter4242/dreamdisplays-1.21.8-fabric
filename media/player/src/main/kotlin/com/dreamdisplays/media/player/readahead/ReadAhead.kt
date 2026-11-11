@@ -93,6 +93,10 @@ object ReadAhead {
     }
 
     /** Called when [displayId]'s player stops: its buffers are dropped once no decoder still reads them. */
+    /** Bytes the read-ahead currently holds for [displayId], or -1 when it buffers nothing for it. */
+    fun bufferedBytes(displayId: UUID): Long =
+        if (serverHolder.isInitialized()) server.bufferedBytes(displayId) else -1L
+
     fun release(displayId: UUID) {
         if (serverHolder.isInitialized()) server.release(displayId)
     }

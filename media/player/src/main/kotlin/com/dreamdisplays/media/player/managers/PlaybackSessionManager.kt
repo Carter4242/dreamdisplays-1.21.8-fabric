@@ -276,6 +276,21 @@ internal class PlaybackSessionManager(
 
     fun audioSourceGone(): Boolean = audioFeeder?.sourceGone == true
 
+    /**
+     * The video pipeline in use, for hitch reports: `lav` (in-process libav), `native` (native NV12 / GPU-YUV),
+     * `ffmpeg` (JVM pipe), `ffmpeg-rgba` (alpha), `none`; with `-gpuyuv` when planes are converted on the GPU.
+     */
+    fun pipelineLabel(): String {
+        val channel = active ?: return "none"
+        val base = when {
+            channel.alpha != null -> "ffmpeg-rgba"
+            channel.inProcess -> "lav"
+            channel.nativePipe != null -> "native"
+            else -> "ffmpeg"
+        }
+        return if (gpuYuvActive && channel.alpha == null) "$base-gpuyuv" else base
+    }
+
     fun audioSpliced(): Boolean = (audioFeeder?.splicedAtSeq ?: -1L) >= 0L
 
     @Volatile

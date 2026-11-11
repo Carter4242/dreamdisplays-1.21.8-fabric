@@ -7,6 +7,13 @@ import com.dreamdisplays.core.protocol.common.packets.ClientErrorReport
 import com.dreamdisplays.core.protocol.common.packets.ErrorStage
 import com.dreamdisplays.core.protocol.common.packets.ResolveAttemptReport
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
+import com.dreamdisplays.media.player.MediaPlayer
+import com.dreamdisplays.media.player.readahead.ReadAhead
+import com.dreamdisplays.media.runtime.diagnostics.DisplaySignalsRegistry
+import com.dreamdisplays.media.runtime.diagnostics.FrameGapDetector
+import com.dreamdisplays.media.runtime.diagnostics.GcPauses
+import com.dreamdisplays.media.runtime.diagnostics.HitchClassifier
+import com.dreamdisplays.media.runtime.diagnostics.HitchSample
 import com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
 import com.dreamdisplays.media.runtime.diagnostics.PlaybackFailure
 import com.dreamdisplays.platform.client.Initializer
@@ -82,15 +89,137 @@ object ClientErrorReporter {
         episodes.clear()
         errors.reset()
         hitches.reset()
+        synchronized(histories) { histories.clear() }
         lastEnvSent = null
         envSends = 0
         envBuiltAtMs = 0L
         envReady = null
     }
 
+    /** Hitches per display in the last minute (time, cause, gap ms), for viewer reports. Any thread. */
+    private class HitchHistory {
+        val times = LongArray(HISTORY)
+        val gaps = IntArray(HISTORY)
+        val causes = arrayOfNulls<String>(HISTORY)
+        var next = 0
+    }
+
+    private const val HISTORY = 64
+    private const val MINUTE_MS = 60_000L
+    private val histories = HashMap<UUID, HitchHistory>()
+
+    /** Summary of [displayId]'s hitches in the last minute: count, most common cause, worst gap in ms. */
+    data class HitchSummary(val count: Int, val topCause: String, val worstGapMs: Int)
+
+    fun hitchSummary(displayId: UUID, now: Long = System.currentTimeMillis()): HitchSummary = synchronized(histories) {
+        val h = histories[displayId] ?: return HitchSummary(0, "", 0)
+        var count = 0
+        var worst = 0
+        val byCause = HashMap<String, Int>()
+        for (i in 0 until HISTORY) {
+            val cause = h.causes[i] ?: continue
+            if (now - h.times[i] > MINUTE_MS) continue
+            count++
+            if (h.gaps[i] > worst) worst = h.gaps[i]
+            byCause.merge(cause, 1, Int::plus)
+        }
+        HitchSummary(count, byCause.maxByOrNull { it.value }?.key.orEmpty(), worst)
+    }
+
+    private fun remember(displayId: UUID, cause: String, gapMs: Long, now: Long) = synchronized(histories) {
+        val h = histories.getOrPut(displayId) { HitchHistory() }
+        h.times[h.next] = now
+        h.gaps[h.next] = gapMs.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+        h.causes[h.next] = cause
+        h.next = (h.next + 1) % HISTORY
+    }
+
+    @Volatile
+    private var ultraLogged = 0L
+    private var ultraWindowStartMs = 0L
+
+    /** At log level ultra, one compact line per hitch (bounded to a few hundred a minute). */
+    private fun logHitch(line: String, now: Long) {
+        if (PlaybackDiagnostics.logLevel < PlaybackDiagnostics.LOG_ULTRA) return
+        synchronized(this) {
+            if (now - ultraWindowStartMs > MINUTE_MS) {
+                ultraWindowStartMs = now
+                ultraLogged = 0
+            }
+            if (++ultraLogged > 300) return
+        }
+        logger.info(line)
+    }
+
+    /**
+     * The frame-gap detector of [screen] found a stutter (render thread): attribute it, count it for the viewer
+     * report, log it at ultra, and queue a report for servers that take them.
+     */
+    fun onStutter(screen: DisplayScreen, mp: MediaPlayer, gap: FrameGapDetector, nowNanos: Long) {
+        GcPauses.install()
+        val from = gap.gapStartNanos
+        val signals = DisplaySignalsRegistry.of(screen.uuid)
+        val (gcMs, gcDetail) = GcPauses.overlapping(from, nowNanos)
+        val follower = runCatching { screen.timelineFollower }.getOrNull()
+        val jumpAt = follower?.lastJumpNanos ?: 0L
+        val noted = PlaybackDiagnostics.peekHitchCause(screen.uuid)
+            ?.takeIf { it.stage == ErrorStage.SEEK.wire && System.currentTimeMillis() - it.atMs < 1_000L }
+        val sync = when {
+            jumpAt != 0L && jumpAt >= from - SYNC_SLACK_NANOS -> "${follower?.lastJumpLabel}"
+            noted != null -> noted.action
+            else -> null
+        }
+        fun within(at: Long) = at != 0L && at >= from - SIGNAL_SLACK_NANOS && at <= nowNanos
+        val sample = HitchSample(
+            gapMs = gap.gapNanos / 1_000_000L,
+            expectedMs = gap.expectedNanos / 1_000_000L,
+            worstGameFrameMs = gap.worstGameFrameNanos / 1_000_000L,
+            gameFrameMs = gap.gameFrameNanos / 1_000_000L,
+            gcPauseMs = gcMs,
+            gcDetail = gcDetail,
+            uploadMs = gap.worstUploadNanos / 1_000_000L,
+            decodeStarved = within(signals.decodeStarvedAtNanos),
+            lateDrops = within(signals.lateDropAtNanos),
+            decodeQueue = signals.decodeQueue,
+            audioUnderrun = within(signals.audioUnderrunAtNanos),
+            audioBufferedMs = signals.audioBufferedMs,
+            netBufferedBytes = runCatching { ReadAhead.bufferedBytes(screen.uuid) }.getOrDefault(-1L),
+            syncAction = sync,
+            pipeline = runCatching { mp.pipelineLabel() }.getOrDefault("?"),
+        )
+        val cause = HitchClassifier.classify(sample)
+        val now = System.currentTimeMillis()
+        remember(screen.uuid, cause, sample.gapMs, now)
+        logHitch(HitchClassifier.logLine(screen.uuid.toString().take(8), cause, sample), now)
+        if (!enabled || queue.size >= MAX_QUEUED) return
+        queue.add(
+            PlaybackFailure(
+                displayId = screen.uuid,
+                url = screen.videoUrl.orEmpty(),
+                kind = "",
+                message = "stutter: ${HitchClassifier.describe(cause, sample)}",
+                stage = ErrorStage.STUTTER.wire,
+                hitch = true,
+                durationMs = sample.gapMs,
+                positionMs = screen.currentTimeNanos / 1_000_000L,
+                action = sync ?: "none",
+                cause = cause,
+                metrics = HitchClassifier.metrics(sample),
+                atMs = now,
+            )
+        )
+    }
+
+    private const val SYNC_SLACK_NANOS = 200_000_000L
+    private const val SIGNAL_SLACK_NANOS = 50_000_000L
+
     /** Client tick: measures hitches, keeps the environment summary current and sends what is due. */
     fun tick() {
-        if (!enabled) return
+        GcPauses.install()
+        if (!enabled) {
+            if (PlaybackDiagnostics.logLevel >= PlaybackDiagnostics.LOG_ULTRA) trackHitches(System.currentTimeMillis())
+            return
+        }
         val now = System.currentTimeMillis()
         trackHitches(now)
         val pending = queue.isNotEmpty()
@@ -131,9 +260,9 @@ object ClientErrorReporter {
     private fun send(f: PlaybackFailure, now: Long) {
         val type = if (f.hitch) ClientErrorReport.TYPE_HITCH else ClientErrorReport.TYPE_ERROR
         val throttle = if (f.hitch) hitches else errors
-        val signature = ReportThrottle.signature(
-            type, f.stage, if (f.hitch) f.action else f.kind, f.message, f.retry, f.final,
-        )
+        // Stutters are deduplicated by cause (their figures differ every time); other reports by their text
+        val signature = if (f.cause.isNotEmpty()) ReportThrottle.signature(type, f.stage, f.cause, "", 0, false)
+        else ReportThrottle.signature(type, f.stage, if (f.hitch) f.action else f.kind, f.message, f.retry, f.final)
         val suppressed = throttle.admit(f.displayId, signature, now) ?: return
         runCatching { Initializer.sendPacket(toPacket(f, suppressed, now)) }
             .onFailure { logger.debug("Could not send an error report.", it) }
@@ -170,6 +299,8 @@ object ClientErrorReporter {
             durationMs = f.durationMs.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
             positionMs = f.positionMs,
             action = f.action.take(32),
+            cause = f.cause.take(32),
+            metrics = f.metrics.entries.take(24).associate { (k, v) -> k.take(32) to ReportScrubber.scrub(v, homes).take(200) },
         )
     }
 
@@ -213,7 +344,13 @@ object ClientErrorReporter {
         if (duration < MIN_HITCH_MS) return
         val stage = cause?.stage ?: ErrorStage.UNDERRUN.wire
         val action = (cause?.action ?: "wait") + if (stillFrozen) " (still frozen)" else ""
-        if (queue.size >= MAX_QUEUED) return
+        remember(screen.uuid, stage, duration, now)
+        logHitch(
+            "[dd-hitch] ${screen.uuid.toString().take(8)} freeze=${duration}ms cause=$stage action=$action" +
+                (cause?.message?.let { " ($it)" } ?: ""),
+            now,
+        )
+        if (!enabled || queue.size >= MAX_QUEUED) return
         queue.add(
             PlaybackFailure(
                 displayId = screen.uuid,

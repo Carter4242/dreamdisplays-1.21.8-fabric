@@ -116,6 +116,10 @@ class ClientErrorLog(val path: Path, private val maxBytes: Long = DEFAULT_MAX_BY
                     put("durationMs", report.durationMs)
                     put("positionMs", report.positionMs)
                     if (report.action.isNotEmpty()) put("action", report.action)
+                    if (report.cause.isNotEmpty()) put("cause", report.cause)
+                    if (report.metrics.isNotEmpty()) {
+                        put("metrics", buildJsonObject { report.metrics.toSortedMap().forEach { (k, v) -> put(k, v) } })
+                    }
                 } else {
                     put("retry", report.retry)
                     put("maxRetries", report.maxRetries)

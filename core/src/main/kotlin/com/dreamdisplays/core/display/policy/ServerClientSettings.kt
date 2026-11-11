@@ -53,12 +53,24 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
     fun displayDistanceChunks(own: Int, policy: DisplayPolicy? = null): Int =
         (policy?.client?.displayDistanceChunks ?: client?.displayDistanceChunks)?.coerceIn(0, MAX_DISTANCE_CHUNKS) ?: own
 
-    /** Interval of the `[dd-sync]` drift log lines in ms; 0 = off. */
-    val syncLogIntervalMs: Long
-        get() = debug?.syncLogIntervalSeconds?.coerceIn(0, 3_600)?.let { it * 1_000L } ?: DEFAULT_SYNC_LOG_MS
+    /**
+     * How much the client logs: the server's `debug.log_level` (per player, else server-wide); an old `verbose = true`
+     * counts as [ClientLogLevel.VERBOSE]. [ClientLogLevel.QUIET] by default.
+     */
+    val logLevel: ClientLogLevel
+        get() = ClientLogLevel.fromWire(debug?.logLevel)
+            ?: if (debug?.verbose == true) ClientLogLevel.VERBOSE else ClientLogLevel.QUIET
 
-    /** Media / sync debug logging requested by the server. */
-    val verbose: Boolean get() = debug?.verbose == true
+    /** Interval of the `[dd-sync]` drift log lines in ms; 0 = off. Off unless set or the [logLevel] asks for them. */
+    val syncLogIntervalMs: Long
+        get() = debug?.syncLogIntervalSeconds?.coerceIn(0, 3_600)?.let { it * 1_000L } ?: when (logLevel) {
+            ClientLogLevel.ULTRA -> ULTRA_SYNC_LOG_MS
+            ClientLogLevel.VERBOSE -> VERBOSE_SYNC_LOG_MS
+            else -> DEFAULT_SYNC_LOG_MS
+        }
+
+    /** Media / sync debug logging (DEBUG level for the mod's media packages): at [ClientLogLevel.VERBOSE] and up. */
+    val verbose: Boolean get() = logLevel >= ClientLogLevel.VERBOSE
 
     /** Interval of viewer reports in ms; 0 = do not send (also when the server never sent a policy). */
     val reportIntervalMs: Long
@@ -71,7 +83,9 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
     companion object {
         const val MAX_ACTIVE = 16
         const val MAX_DISTANCE_CHUNKS = 32
-        const val DEFAULT_SYNC_LOG_MS = 10_000L
+        const val DEFAULT_SYNC_LOG_MS = 0L
+        const val VERBOSE_SYNC_LOG_MS = 10_000L
+        const val ULTRA_SYNC_LOG_MS = 1_000L
         const val DEFAULT_REPORT_MS = 5_000L
         private const val MIN_REPORT_SECONDS = 2
 

@@ -69,7 +69,16 @@ object ViewerStatsCommand {
             if (r.qualityHeight > 0) "${r.qualityHeight}p" else "auto",
             clock(r.positionMs),
             age,
+            hitches(r),
         )
+    }
+
+    /** `3/min (gc, worst 180ms)`, or `0/min`: the viewer's playback hitches in the last minute and their top cause. */
+    private fun hitches(r: com.dreamdisplays.core.protocol.common.packets.ViewerReport): String {
+        if (r.hitchesLastMinute <= 0) return "0/min"
+        // Client-supplied and printed through a color-code template: letters, digits and dashes only
+        val cause = r.hitchTopCause.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(24).ifEmpty { "?" }
+        return "${r.hitchesLastMinute.coerceAtMost(9_999)}/min ($cause, worst ${r.worstGapMs.coerceIn(0, 999_999)}ms)"
     }
 
     /** The viewer's name with its client build (`Steve [1a2b3c4d]`, `[older]` for jars without one). */

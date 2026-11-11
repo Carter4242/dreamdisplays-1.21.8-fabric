@@ -537,6 +537,7 @@ class DisplayScreen(
     }
 
     private fun markRendered() {
+        framePresented = true
         if (!hasEverRendered) firstFrameNanos = System.nanoTime()
         hasEverRendered = true
     }
@@ -959,8 +960,22 @@ class DisplayScreen(
     fun fitTexture() {
         val mp = mediaPlayer ?: return
         matchAlphaTexture(mp)
+        val start = System.nanoTime()
+        framePresented = false
         frameUploader.upload(mp, textureResource, onRendered)
+        // Stutter detection: the gap between presented frames against the expected one (no allocation per draw)
+        val now = System.nanoTime()
+        val running = !isPaused && mp.isClockRunning()
+        if (frameGaps.onDraw(now, framePresented, now - start, running, mp.frameIntervalNanos())) {
+            ClientErrorReporter.onStutter(this, mp, frameGaps, now)
+        }
     }
+
+    /** Finds short stutters in this display's presented frames (render thread only). */
+    internal val frameGaps = com.dreamdisplays.media.runtime.diagnostics.FrameGapDetector()
+
+    /** A new frame landed during the current [fitTexture] call. */
+    private var framePresented = false
 
     /** The player the live texture was last switched to alpha for. */
     private var alphaTexturePlayer: MediaPlayer? = null
@@ -993,7 +1008,7 @@ class DisplayScreen(
      * while a quality handoff is staged: that one only completes once its first frame lands.
      */
     fun fitTextureWhileHidden() {
-        if (textureResource.hasPending) fitTexture()
+        if (textureResource.hasPending) fitTexture() else frameGaps.hidden()
     }
 
     private val sphereScratch = DoubleArray(4)

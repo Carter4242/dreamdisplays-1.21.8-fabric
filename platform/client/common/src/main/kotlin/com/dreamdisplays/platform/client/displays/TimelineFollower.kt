@@ -341,7 +341,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             LeadKind.COLD -> coldLeadMs = (coldLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
             LeadKind.WARM -> return
         }
-        logger.info(
+        if (ServerOverrides.settings.logLevel >= com.dreamdisplays.core.display.policy.ClientLogLevel.VERBOSE) logger.info(
             "[dd-sync] {} landed {}ms after {}; leads seek={}ms quick={}ms cold={}ms",
             shortId(), signed(landingDriftMs), kind.name.lowercase(), seekLeadMs, quickSeekLeadMs, coldLeadMs,
         )
@@ -355,7 +355,20 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         lastRatioPushNanos = now
     }
 
+    /** When the last correction that moves the picture (seek / snap) happened, for hitch attribution. */
+    @Volatile
+    var lastJumpNanos: Long = 0L
+        private set
+
+    @Volatile
+    var lastJumpLabel: String = ""
+        private set
+
     private fun note(action: Action) {
+        if (action == Action.SEEK || action == Action.SNAP) {
+            lastJumpNanos = System.nanoTime()
+            lastJumpLabel = action.label
+        }
         if (action.ordinal > intervalAction.ordinal) intervalAction = action
         if (action.ordinal > reportAction.ordinal) reportAction = action
         if (action == Action.SEEK || action == Action.SNAP) reportSeeks++

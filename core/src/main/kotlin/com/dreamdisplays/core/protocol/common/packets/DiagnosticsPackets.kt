@@ -56,6 +56,12 @@ data class ViewerReport(
     /** Failure kind (e.g. `NETWORK`) while the display shows an error, else empty. */
     @ProtoNumber(13) val errorKind: String = "",
     @ProtoNumber(14) val errorMessage: String = "",
+    /** Playback hitches (stutters and freezes) on this display in the last minute. */
+    @ProtoNumber(15) val hitchesLastMinute: Int = 0,
+    /** Most common hitch cause in the last minute (`gc`, `decode`, `game-stall` ...), empty when none. */
+    @ProtoNumber(16) val hitchTopCause: String = "",
+    /** Longest frame gap in the last minute, in ms. */
+    @ProtoNumber(17) val worstGapMs: Int = 0,
 ) : DreamPacket
 
 /** Coarse display state in a [ViewerReport]. */
@@ -127,6 +133,13 @@ data class ClientErrorReport(
     @ProtoNumber(17) val positionMs: Long = 0,
     /** What the player did about it: `restart`, `re_resolve`, `retry`, `cold_restart`, `in_place_seek` ... */
     @ProtoNumber(18) val action: String = "",
+    /**
+     * Hitch: best-guess cause (`game-stall`, `gc`, `decode`, `upload`, `network-starved`, `audio`, `sync-seek`,
+     * `unknown`) for a stutter the frame-gap detector caught, empty otherwise.
+     */
+    @ProtoNumber(19) val cause: String = "",
+    /** Hitch: the raw numbers behind [cause] (`mc_frame_ms`, `gc`, `decode_q`, `audio_buf_ms`, `pipeline` ...). */
+    @ProtoNumber(20) val metrics: Map<String, String> = emptyMap(),
 ) : DreamPacket {
     val isHitch: Boolean get() = type == TYPE_HITCH
 
@@ -149,7 +162,10 @@ enum class ErrorStage(val wire: String) {
     SEEK("seek"),
     RESUME("resume"),
     UNDERRUN("underrun"),
-    AV_SYNC("av_sync");
+    AV_SYNC("av_sync"),
+
+    /** A short stutter (a few frames) the frame-gap detector caught while the clock kept running. */
+    STUTTER("stutter");
 
     companion object {
         fun fromWire(wire: String): ErrorStage? = entries.firstOrNull { it.wire == wire }

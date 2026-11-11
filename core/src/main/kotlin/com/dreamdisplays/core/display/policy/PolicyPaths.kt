@@ -97,6 +97,9 @@ object PolicyPaths {
         Path("debug.report_interval_seconds", "debug.reportIntervalSeconds", Kind.Whole(0, 600)) {
             it.debug?.reportIntervalSeconds
         },
+        Path("debug.log_level", "debug.logLevel", Kind.Choice(ClientLogLevel.entries.map { it.wire })) {
+            it.debug?.logLevel
+        },
         Path("network.read_ahead_seconds", "network.readAheadSeconds", Kind.Whole(0, 120)) {
             it.network?.readAheadSeconds
         },

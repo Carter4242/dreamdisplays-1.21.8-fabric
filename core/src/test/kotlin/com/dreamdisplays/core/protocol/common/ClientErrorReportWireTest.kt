@@ -29,6 +29,15 @@ class ClientErrorReportWireTest {
         assertEquals(report, PacketRegistry.decode(PacketRegistry.encode(report)))
         val hitch = ClientErrorReport(type = "hitch", stage = "stall", durationMs = 2_300, positionMs = 61_000L, action = "restart")
         assertEquals(hitch, PacketRegistry.decode(PacketRegistry.encode(hitch)))
+        val stutter = ClientErrorReport(
+            type = "hitch", stage = "stutter", durationMs = 180, cause = "gc",
+            metrics = mapOf("gc" to "G1 Young Generation 140ms", "mc_frame_ms" to "150", "pipeline" to "native/d3d11va"),
+        )
+        assertEquals(stutter, PacketRegistry.decode(PacketRegistry.encode(stutter)))
+        val viewer = com.dreamdisplays.core.protocol.common.packets.ViewerReport(
+            hitchesLastMinute = 7, hitchTopCause = "decode", worstGapMs = 230,
+        )
+        assertEquals(viewer, PacketRegistry.decode(PacketRegistry.encode(viewer)))
         assertEquals(ClientErrorReport(), PacketRegistry.decode(PacketRegistry.encode(ClientErrorReport())))
         val env = ClientEnvironment(
             osName = "Windows 11", osArch = "amd64", gpuRenderer = "NVIDIA GeForce RTX 3060/PCIe/SSE2", ytDlpMode = "zipapp",

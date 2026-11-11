@@ -517,6 +517,15 @@ class MediaPlayer(
         sessionManager.previewFrameSink = sink
     }
 
+    /** Interval between the current video's frames in ns, 0 when unknown. Cheap; called on every draw. */
+    fun frameIntervalNanos(): Long {
+        val fps = media?.streams?.currentVideo?.fps ?: return 0L
+        return if (fps > 1.0 && fps < 1_000.0) (1_000_000_000.0 / fps).toLong() else 0L
+    }
+
+    /** The video pipeline and hardware decoder in use (`native-gpuyuv/d3d11va`), for hitch reports. */
+    fun pipelineLabel(): String = "${sessionManager.pipelineLabel()}/${currentHwAccel().name.lowercase()}"
+
     /** `true` once the first decoded frame is ready for GPU upload. */
     fun textureFilled(): Boolean = sessionManager.textureFilled()
 
@@ -867,7 +876,7 @@ class MediaPlayer(
 
     /** Notes why the picture is about to stop, for the client's hitch report of the freeze that follows. */
     private fun noteHitch(stage: String, action: String, message: String, stderr: String = "", frozenBeforeMs: Long = 0L) {
-        if (!PlaybackDiagnostics.enabled) return
+        if (!PlaybackDiagnostics.collectingHitches) return
         PlaybackDiagnostics.noteHitchCause(host.uuid, HitchCause(stage, action, message, stderr, frozenBeforeMs))
     }
 

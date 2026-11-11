@@ -94,6 +94,12 @@ internal class ReadAheadServer(
     }
 
     /** Lets [displayId]'s sessions drop their buffers; they re-fill if read again. */
+    /** Bytes cached for [displayId] across its sessions, or -1 when it has none. */
+    fun bufferedBytes(displayId: UUID): Long {
+        val sessions = synchronized(byKey) { byKey.filterKeys { it.displayId == displayId }.values.toList() }
+        return if (sessions.isEmpty()) -1L else sessions.sumOf { it.bufferedBytes }
+    }
+
     fun release(displayId: UUID) {
         val sessions = synchronized(byKey) { byKey.filterKeys { it.displayId == displayId }.values.toList() }
         sessions.forEach(ReadAheadSession::release)

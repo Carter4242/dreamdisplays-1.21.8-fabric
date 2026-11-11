@@ -55,6 +55,10 @@ class ClientErrorLogTest {
         assertEquals("hitch", h["type"]!!.jsonPrimitive.content)
         assertEquals("2300", h["report"]!!.jsonObject["durationMs"]!!.jsonPrimitive.content)
         assertFalse("retry" in h["report"]!!.jsonObject)
+        val stutter = hitch.copy(stage = "stutter", cause = "gc", metrics = mapOf("gc" to "G1 Young 140ms", "gap_ms" to "180"))
+        val st = Json.parseToJsonElement(ClientErrorLog.reportLine(0L, "Alex", player, null, null, stutter, null, null, zone)).jsonObject
+        assertEquals("gc", st["report"]!!.jsonObject["cause"]!!.jsonPrimitive.content)
+        assertEquals("G1 Young 140ms", st["report"]!!.jsonObject["metrics"]!!.jsonObject["gc"]!!.jsonPrimitive.content)
         val c = Json.parseToJsonElement(
             ClientErrorLog.commandLine(0L, "Alex", player, display, "lobby", "pause", 61_000L, mapOf("mode" to "synced"), zone)
         ).jsonObject

@@ -34,10 +34,14 @@ object ClientDiagnostics {
 
     /** Every second: sends the policy to v2 clients that lack the current one, and drops stale reports. */
     fun tick() {
-        val bytes = DisplayPolicies.defaults().serverWide().encode()
+        val serverWide = DisplayPolicies.defaults().serverWide()
+        val shared = serverWide.encode()
         val now = System.currentTimeMillis()
         Scheduler.forEachTrackedPlayer { player ->
             if (!V2PlayerTracker.isV2(player.uniqueId)) return@forEachTrackedPlayer
+            // A player with their own log level (/display debug) gets it on top of the server-wide policy
+            val bytes = if (ClientLogLevels.get(player.uniqueId) == null) shared
+            else ClientLogLevels.applyTo(serverWide, player.uniqueId).encode()
             val last = sent[player.uniqueId]
             if (last != null && last.bytes.contentEquals(bytes) && now - last.atMs < RESEND_MS) return@forEachTrackedPlayer
             sent[player.uniqueId] = Sent(bytes, now)

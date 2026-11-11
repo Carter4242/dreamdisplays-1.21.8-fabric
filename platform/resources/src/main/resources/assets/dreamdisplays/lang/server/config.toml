@@ -100,8 +100,10 @@ auto_pause_when_empty_seconds = 0
 
 [policy.debug]
 # Client diagnostics (server-wide only); clients read these without needing an update.
-# sync_log_interval_seconds = 10  # seconds between "[dd-sync]" drift lines in client logs; 0 = off
-# verbose = false           # true = clients log their media / sync debug output
+# log_level = "quiet"       # what clients write to their own log: quiet (failures only), normal, verbose, ultra.
+#                           # One player: /display debug <player> <level> (overrides this; kept across restarts)
+# sync_log_interval_seconds = 0  # seconds between "[dd-sync]" drift lines; unset = by log_level (verbose 10, ultra 1)
+# verbose = false           # old switch; true = log_level "verbose"
 # report_interval_seconds = 5  # seconds between the viewer reports behind /display stats <display>; 0 = off
 
 [policy.network]

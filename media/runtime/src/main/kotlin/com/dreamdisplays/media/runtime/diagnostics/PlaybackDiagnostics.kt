@@ -35,6 +35,9 @@ data class PlaybackFailure(
     val durationMs: Long = 0,
     val positionMs: Long = 0,
     val action: String = "",
+    /** Stutter: best-guess cause and the figures behind it. */
+    val cause: String = "",
+    val metrics: Map<String, String> = emptyMap(),
     val atMs: Long = System.currentTimeMillis(),
 )
 
@@ -62,6 +65,18 @@ object PlaybackDiagnostics {
     @Volatile
     var listener: ((PlaybackFailure) -> Unit)? = null
 
+    /**
+     * How much the client logs, as set by the server: 0 quiet (failures only, the default), 1 normal, 2 verbose,
+     * 3 ultra (every hitch with its attribution). Reports to the server do not depend on it.
+     */
+    @Volatile
+    var logLevel: Int = LOG_QUIET
+
+    const val LOG_QUIET = 0
+    const val LOG_NORMAL = 1
+    const val LOG_VERBOSE = 2
+    const val LOG_ULTRA = 3
+
     /** The display audio line last opened (the `Display audio line` log message). */
     @Volatile
     var audioLine: String = ""
@@ -70,6 +85,9 @@ object PlaybackDiagnostics {
 
     val enabled: Boolean get() = listener != null
 
+    /** Hitch causes are worth noting: a reporter listens, or the player's log wants every hitch. */
+    val collectingHitches: Boolean get() = listener != null || logLevel >= LOG_ULTRA
+
     fun emit(failure: PlaybackFailure) {
         val l = listener ?: return
         runCatching { l(failure) }
@@ -77,11 +95,14 @@ object PlaybackDiagnostics {
 
     /** Notes [cause] as the reason the picture of [displayId] is about to stop. */
     fun noteHitchCause(displayId: UUID, cause: HitchCause) {
-        if (listener == null) return
+        if (!collectingHitches) return
         causes[displayId] = cause
     }
 
     /** Takes the cause noted for [displayId] at or after [sinceMs], if any. */
+    /** The cause noted for [displayId], left in place (a stutter only looks at it). */
+    fun peekHitchCause(displayId: UUID): HitchCause? = causes[displayId]
+
     fun takeHitchCause(displayId: UUID, sinceMs: Long): HitchCause? {
         val cause = causes.remove(displayId) ?: return null
         return cause.takeIf { it.atMs >= sinceMs }

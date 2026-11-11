@@ -71,6 +71,7 @@ object ViewerReporter {
             track.buffering -> ViewerState.BUFFERING
             else -> ViewerState.PLAYING
         }
+        val hitches = ClientErrorReporter.hitchSummary(screen.uuid)
         return ViewerReport(
             id = screen.uuid,
             state = state.wire,
@@ -86,6 +87,9 @@ object ViewerReporter {
             qualityHeight = runCatching { screen.playbackQuality.targetHeight ?: 0 }.getOrDefault(0),
             errorKind = error?.kind?.name ?: "",
             errorMessage = (error?.message ?: "").take(MAX_MESSAGE),
+            hitchesLastMinute = hitches.count,
+            hitchTopCause = hitches.topCause,
+            worstGapMs = hitches.worstGapMs,
         )
     }
 }

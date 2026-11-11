@@ -406,6 +406,12 @@ message ViewerReport {
   optional string errorKind = 13;
   // WARNING: a default value decoded when value is missing
   optional string errorMessage = 14;
+  // WARNING: a default value decoded when value is missing
+  optional int32 hitchesLastMinute = 15;
+  // WARNING: a default value decoded when value is missing
+  optional string hitchTopCause = 16;
+  // WARNING: a default value decoded when value is missing
+  optional int32 worstGapMs = 17;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare'
@@ -536,6 +542,10 @@ message ClientErrorReport {
   optional int64 positionMs = 17;
   // WARNING: a default value decoded when value is missing
   optional string action = 18;
+  // WARNING: a default value decoded when value is missing
+  optional string cause = 19;
+  // WARNING: a default value decoded when value is missing
+  map<string, string> metrics = 20;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ClientEnvironment'

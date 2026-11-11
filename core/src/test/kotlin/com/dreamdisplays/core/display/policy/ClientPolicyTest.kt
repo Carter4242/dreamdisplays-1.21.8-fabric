@@ -80,6 +80,7 @@ class ClientPolicyTest {
             val value: Any = when {
                 field.endsWith("Acoustics") -> "off"
                 field.endsWith("OutputProfile") -> "speakers"
+                field.endsWith("logLevel") -> "ultra"
                 field.endsWith("Decoding") || field.endsWith("Displays") && !field.contains("max") ||
                         field.endsWith("verbose") || field.endsWith("Normalization") -> true
                 else -> 1
@@ -90,7 +91,7 @@ class ClientPolicyTest {
         assertEquals(
             setOf(
                 "client.max_active_displays", "client.hardware_decoding", "client.audio_output_profile",
-                "client.audio_normalization", "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose",
+                "client.audio_normalization", "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose", "debug.log_level",
                 "debug.report_interval_seconds",
             ),
             serverWide,

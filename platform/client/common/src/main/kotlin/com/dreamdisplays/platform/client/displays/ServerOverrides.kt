@@ -52,6 +52,10 @@ object ServerOverrides {
             DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.setGlobalQuality(audioAcoustics)
         }
         runCatching { ClientAudioModule.applyOutputSettings() }
+        if (previous.logLevel != next.logLevel) {
+            com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics.logLevel = next.logLevel.ordinal
+            logger.info("Display log level: {} (set by the server).", next.logLevel.wire)
+        }
         if (previous.verbose != next.verbose) VerboseLogging.set(next.verbose)
     }
 

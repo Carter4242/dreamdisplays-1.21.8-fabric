@@ -115,7 +115,7 @@ object ErrorsCommand {
                     .joinToString("").let { safe(it, 160) }, NamedTextColor.GRAY))
 
             else -> if (r.isHitch) {
-                text("HITCH ${r.stage} ${r.durationMs}ms", NamedTextColor.YELLOW)
+                text("HITCH ${r.stage}${if (r.cause.isNotEmpty()) "/${safe(r.cause, 24)}" else ""} ${r.durationMs}ms", NamedTextColor.YELLOW)
                     .append(text(" ${r.action} at ${clock(r.positionMs)}: ${safe(r.message, 100)}", NamedTextColor.GRAY))
             } else {
                 val tag = if (r.final) "FAILED" else "retry ${r.retry}/${r.maxRetries}"
@@ -150,7 +150,13 @@ object ErrorsCommand {
         }
         appendLine("url ${safe(r.url, if (hover) 120 else 512)}")
         appendLine("${r.type.ifEmpty { "error" }} stage=${r.stage} kind=${r.kind}${if (r.httpStatus != 0) " http=${r.httpStatus}" else ""}")
-        if (r.isHitch) appendLine("frozen ${r.durationMs} ms at ${clock(r.positionMs)}, action ${r.action}")
+        if (r.isHitch) {
+            appendLine("frozen ${r.durationMs} ms at ${clock(r.positionMs)}, action ${r.action}")
+            if (r.cause.isNotEmpty()) appendLine("cause ${safe(r.cause, 32)}")
+            if (r.metrics.isNotEmpty()) {
+                appendLine(r.metrics.toSortedMap().entries.joinToString(" ") { "${safe(it.key, 32)}=${safe(it.value, 80)}" })
+            }
+        }
         else appendLine("retry ${r.retry}/${r.maxRetries} final=${r.final} fatal=${r.fatal}${if (r.positionMs > 0) " at ${clock(r.positionMs)}" else ""}")
         if (r.suppressed > 0) appendLine("(${r.suppressed} identical reports held back by the client before this one)")
         appendLine(safe(r.message, if (hover) 200 else 512))
@@ -219,5 +225,50 @@ object ErrorsCommand {
         val m = (total / 60L) % 60L
         val s = total % 60L
         return if (h > 0) String.format(Locale.ROOT, "%d:%02d:%02d", h, m, s) else String.format(Locale.ROOT, "%d:%02d", m, s)
+    }
+}
+
+/**
+ * `/display debug <player> [quiet|normal|verbose|ultra|reset]`: shows or sets how much that player's client writes to
+ * its own log. Saved per player and pushed to their client within a second; reports to the server are the same at
+ * every level. Same permission as `/display policy`.
+ */
+@PaperOnly
+object DebugLevelCommand {
+    fun levelSuggestions(): List<String> =
+        com.dreamdisplays.core.display.policy.ClientLogLevel.entries.map { it.wire } + "reset"
+
+    fun execute(sender: CommandSender, name: String, level: String?) {
+        val target = Bukkit.getPlayerExact(name)?.let { it.uniqueId to it.name }
+            ?: ClientErrorReports.findPlayer(name)
+            ?: Bukkit.getOfflinePlayerIfCached(name)?.let { it.uniqueId to (it.name ?: name) }
+        if (target == null) {
+            sender.sendMessage(Component.text("Unknown player '${ReportLimits.forChat(name, 40)}'.", NamedTextColor.RED))
+            return
+        }
+        val (id, playerName) = target
+        val serverWide = com.dreamdisplays.core.display.policy.ServerClientSettings(
+            com.dreamdisplays.platform.server.policy.DisplayPolicies.defaults().serverWide(),
+        ).logLevel
+        if (level == null) {
+            val own = com.dreamdisplays.platform.server.policy.ClientLogLevels.get(id)
+            sender.sendMessage(
+                Component.text("$playerName client log level: ", NamedTextColor.GRAY)
+                    .append(Component.text((own ?: serverWide).wire, NamedTextColor.WHITE))
+                    .append(Component.text(if (own == null) " (server-wide default)" else " (set for this player)", NamedTextColor.DARK_GRAY))
+            )
+            return
+        }
+        val parsed = if (level.equals("reset", ignoreCase = true)) null
+        else com.dreamdisplays.core.display.policy.ClientLogLevel.fromWire(level) ?: run {
+            sender.sendMessage(Component.text("Level must be quiet, normal, verbose, ultra or reset.", NamedTextColor.RED))
+            return
+        }
+        com.dreamdisplays.platform.server.policy.ClientLogLevels.set(id, parsed)
+        sender.sendMessage(
+            Component.text("$playerName client log level is now ", NamedTextColor.GRAY)
+                .append(Component.text((parsed ?: serverWide).wire, NamedTextColor.WHITE))
+                .append(Component.text(if (parsed == null) " (server-wide default)" else "; applies live if they are online", NamedTextColor.DARK_GRAY))
+        )
     }
 }

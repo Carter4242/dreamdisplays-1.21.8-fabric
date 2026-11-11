@@ -172,6 +172,9 @@ internal class AudioSink(private val debugLabel: String) {
     @Volatile
     private var lastLineChoice: String? = null
 
+    /** Hitch attribution for this display (line underruns, buffered audio). */
+    private val signals = com.dreamdisplays.media.runtime.diagnostics.DisplaySignalsRegistry.ofLabel(debugLabel)
+
     /**
      * Requested playback rate as content frames per output frame (1.01 plays 1 % fast), used to keep synced
      * playback on the server timeline. Reached gradually; the audio clock keeps reporting content time.
@@ -588,8 +591,11 @@ internal class AudioSink(private val debugLabel: String) {
         else (paceTargetBytes.toLong() * format.bytesPerSecond / (SAMPLE_RATE * BYTES_PER_FRAME)).toInt()
         val lineBytesPerSecond = format.bytesPerSecond
         val unplayedBefore = (ln.bufferSize - ln.available()).coerceAtLeast(0)
+        signals?.audioBufferedMs = (unplayedBefore.toLong() * 1_000L / lineBytesPerSecond.coerceAtLeast(1)).toInt()
         if (paceStreaming) {
             if (unplayedBefore == 0) {
+                // The line ran dry: the audio clock (and the picture paced to it) stalled
+                signals?.audioUnderrunAtNanos = System.nanoTime()
                 paceTargetBytes = (paceTargetBytes + PACE_STEP_BYTES).coerceAtMost(MAX_PACE_BYTES)
                 paceCleanChunks = 0
             } else if (++paceCleanChunks >= PACE_RECOVER_CHUNKS) {

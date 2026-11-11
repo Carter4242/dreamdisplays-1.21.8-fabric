@@ -20,6 +20,7 @@ object ReportLimits {
     const val MAX_STDERR_LINES = 15
     const val MAX_ENV_FIELD = 256
     const val MAX_ENV_LIST = 32
+    const val MAX_METRICS = 24
 
     fun sanitize(r: ClientErrorReport): ClientErrorReport = r.copy(
         url = text(ReportScrubber.scrubUrl(r.url), MAX_URL),
@@ -36,6 +37,9 @@ object ReportLimits {
         durationMs = r.durationMs.coerceIn(0, 86_400_000),
         positionMs = r.positionMs.coerceIn(0L, 1_000L * 86_400_000L),
         action = short(r.action),
+        cause = short(r.cause),
+        metrics = r.metrics.entries.take(MAX_METRICS)
+            .associate { (k, v) -> short(k) to text(ReportScrubber.scrub(v), MAX_ENV_FIELD) },
     )
 
     private fun sanitize(a: ResolveAttemptReport): ResolveAttemptReport = a.copy(

@@ -173,11 +173,14 @@ data class DisplayPolicy(
         val verbose: Boolean? = null,
         /** Seconds between the viewer reports clients send for every loaded display; 0 = off. */
         val reportIntervalSeconds: Int? = null,
+        /** How much the client writes to its own log: a [ClientLogLevel] wire value (`quiet` when unset). */
+        val logLevel: String? = null,
     ) {
         fun mergedOver(base: Debug?): Debug = Debug(
             syncLogIntervalSeconds = syncLogIntervalSeconds ?: base?.syncLogIntervalSeconds,
             verbose = verbose ?: base?.verbose,
             reportIntervalSeconds = reportIntervalSeconds ?: base?.reportIntervalSeconds,
+            logLevel = logLevel ?: base?.logLevel,
         )
     }
 
@@ -238,7 +241,7 @@ data class DisplayPolicy(
         val GLOBAL_ONLY: Set<String> = setOf(
             "client.maxActiveDisplays", "client.hardwareDecoding", "client.unshadedDisplays",
             "client.audioOutputProfile", "client.audioNormalization",
-            "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds",
+            "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds", "debug.logLevel",
         )
 
         /** No overrides at all. */

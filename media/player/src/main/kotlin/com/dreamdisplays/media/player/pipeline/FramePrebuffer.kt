@@ -254,6 +254,8 @@ internal class FramePrebuffer(
                 val tf = pending.getAndSet(null) ?: queue.poll(POLL_MS, TimeUnit.MILLISECONDS)
                 if (tf == null) {
                     if (inputClosed) break // Tail drained
+                    // Playing with nothing decoded to show: the decoder (or its input) fell behind
+                    if (!flushRequested) signals?.decodeStarvedAtNanos = System.nanoTime()
                     continue
                 }
                 if (tf.generation != generation.get()) {
@@ -332,12 +334,17 @@ internal class FramePrebuffer(
         )
     }
 
+    /** Hitch attribution for this display (decode starvation, late drops, queue depth). */
+    private val signals = com.dreamdisplays.media.runtime.diagnostics.DisplaySignalsRegistry.ofLabel(debugLabel)
+
     private fun recordFrame(lateNs: Long, presentedIt: Boolean) {
+        signals?.decodeQueue = queue.size
         if (presentedIt) {
             statPresented++
             if (lateNs >= BEHIND_WARN_NANOS) statPresentedLate++
         } else {
             statDroppedLate++
+            signals?.lateDropAtNanos = System.nanoTime()
         }
         if (lateNs > statWorstLateNs) statWorstLateNs = lateNs
         val now = System.nanoTime()
@@ -345,7 +352,8 @@ internal class FramePrebuffer(
         val total = statPresented + statDroppedLate
         val offCadence = statDroppedLate + statPresentedLate
         if (total > 0 && offCadence * 100L >= total * DROP_WARN_PERCENT) {
-            logger.warn(
+            // The server gets every such window as a hitch report; the player's own log only from "normal" up
+            if (com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics.logLevel >= 1) logger.warn(
                 "$debugLabel A / V: $statDroppedLate of $total frames dropped and $statPresentedLate shown behind " +
                         "the audio clock in the last ${(now - statWindowStartNs) / 1_000_000_000L} s " +
                         "(worst lateness ${statWorstLateNs / 1_000_000} ms); decode or upload is not " +
