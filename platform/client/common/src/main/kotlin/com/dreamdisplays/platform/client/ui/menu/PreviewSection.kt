@@ -184,7 +184,7 @@ class PreviewSection(
         }
 
         if (ds.isVideoStarted && ds.texture != null && ds.textureId != null) {
-            ds.fitTexture()
+            ds.fitTexture(measure = false)
             // fitTexture() may promote a staged quality-handoff texture, which releases and
             // unregisters the previous one. Re-read the id afterwards so we never blit a
             // just-freed texture (otherwise: "Missing resource" + GL_INVALID_OPERATION).

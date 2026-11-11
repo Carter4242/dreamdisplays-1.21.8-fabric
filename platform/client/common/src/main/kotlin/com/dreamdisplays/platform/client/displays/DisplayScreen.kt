@@ -1174,13 +1174,18 @@ class DisplayScreen(
         )
     }
 
-    /** Uploads the latest decoded frame to the GPU texture(s). Called on the render thread once per frame. */
-    fun fitTexture() {
+    /**
+     * Uploads the latest decoded frame to the GPU texture(s). Called on the render thread once per frame. [measure]:
+     * this is the display's one draw of the frame, timed by the stutter detector; a second draw in the same frame (the
+     * menu preview, on top of the world) passes false, or the detector would take every call for a game frame.
+     */
+    fun fitTexture(measure: Boolean = true) {
         val mp = mediaPlayer ?: return
         matchAlphaTexture(mp)
         val start = System.nanoTime()
         framePresented = false
         frameUploader.upload(mp, textureResource, onRendered)
+        if (!measure) return
         // Stutter detection: the gap between presented frames against the expected one (no allocation per draw)
         val now = System.nanoTime()
         val running = !isPaused && mp.isClockRunning()
