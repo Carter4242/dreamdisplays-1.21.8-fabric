@@ -15,6 +15,8 @@ import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.render.AsyncTextureUploader
+import com.dreamdisplays.platform.client.render.FrameHandoff
+import com.dreamdisplays.platform.client.render.OverlayFrame
 import com.dreamdisplays.platform.client.render.TextureUploadUtil
 import com.dreamdisplays.platform.client.render.UploadPixelFormat
 import com.dreamdisplays.platform.client.ui.kit.UiRect
@@ -37,7 +39,6 @@ import com.dreamdisplays.platform.client.ui.compat.GuiGraphics
 */
 import net.minecraft.client.renderer.texture.DynamicTexture
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.*
 
 /** Full-screen overlay covering the entire viewport. No anchors or resizing like PiP. */
@@ -48,23 +49,10 @@ class FullscreenOverlay(
     val sessionId: String? = null,
 ) {
     @Volatile
-    private var frontBuf: ByteBuffer = EMPTY_DIRECT
-    private var backBuf: ByteBuffer = EMPTY_DIRECT
-
-    @Volatile
-    private var frameW = 0
-
-    @Volatile
-    private var frameH = 0
-
-    @Volatile
-    private var frameVersion = 0L
-
-    @Volatile
     private var contentAspect = 0.0
 
-    @Volatile
-    private var frameFormat = UploadPixelFormat.RGB24
+    /** Decoded frames from the decode thread, handed over without sharing a buffer either side is using. */
+    private val frames = FrameHandoff<OverlayFrame>()
     private var uploadedVersion = 0L
 
     /** Pixel layout of the frame currently in the texture, or null before the first upload. */
@@ -96,40 +84,28 @@ class FullscreenOverlay(
         aspect: Double,
         format: UploadPixelFormat = UploadPixelFormat.RGB24,
     ) {
-        val size = w * h * format.bytesPerPixel
-        if (size <= 0 || buf.remaining() < size) return
-        var back = backBuf
-        if (back.capacity() < size) {
-            back = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-        }
-        back.clear()
-        val savedLimit = buf.limit()
-        val savedPos = buf.position()
-        buf.limit(savedPos + size)
-        back.put(buf)
-        buf.limit(savedLimit)
-        buf.position(savedPos)
-        back.flip()
-
-        val prev = frontBuf
-        frontBuf = back
-        backBuf = if (prev.capacity() >= size) prev else ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-        contentAspect = aspect
-        frameFormat = format
-        frameW = w; frameH = h
-        frameVersion++
+        // Copied into a buffer the render thread is not reading; published together with its description
+        frames.publish(buf, w * h * format.bytesPerPixel, OverlayFrame(w, h, format, aspect))
     }
 
     /** Uploads the latest stored frame to the GPU texture; render-thread only. */
     fun uploadFrame() {
-        val fw = frameW
-        val fh = frameH
-        val v = frameVersion
-        if (v == uploadedVersion) return
-        val buf = frontBuf
-        val format = frameFormat
-        val size = fw * fh * format.bytesPerPixel
-        if (fw <= 0 || fh <= 0 || buf.remaining() < size) return
+        // Borrowed: the decode thread cannot write into it until it is released after the upload
+        val frame = frames.borrowNewest(uploadedVersion) ?: return
+        try {
+            upload(frame)
+        } finally {
+            frames.release()
+        }
+    }
+
+    private fun upload(frame: FrameHandoff.Frame<OverlayFrame>) {
+        val fw = frame.meta.width
+        val fh = frame.meta.height
+        val buf = frame.buffer
+        val format = frame.meta.format
+        contentAspect = frame.meta.aspect
+        if (fw <= 0 || fh <= 0) return
 
         val mc = Minecraft.getInstance()
         var tex = dynamicTexture
@@ -158,7 +134,7 @@ class FullscreenOverlay(
             rgbaScratch = rgbaUploadBuffer,
             setRgbaScratch = { rgbaUploadBuffer = it },
         )
-        uploadedVersion = v
+        uploadedVersion = frame.version
         uploadedFormat = format
     }
 
@@ -314,7 +290,6 @@ class FullscreenOverlay(
     }
 
     companion object {
-        private val EMPTY_DIRECT: ByteBuffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
         private const val STANDARD_FRACTION = 0.92f
         private const val SCRIM_ALPHA = 0.72f
     }

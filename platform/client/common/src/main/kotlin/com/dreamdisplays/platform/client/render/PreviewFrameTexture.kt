@@ -10,7 +10,6 @@ import com.mojang.blaze3d.platform.NativeImage
 import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.DynamicTexture
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.*
 
 /**
@@ -18,21 +17,8 @@ import java.util.*
  * GPU on the render thread.
  */
 class PreviewFrameTexture(private val uuid: UUID) {
-    @Volatile
-    private var frontBuf: ByteBuffer = EMPTY_DIRECT
-    private var backBuf: ByteBuffer = EMPTY_DIRECT
-
-    @Volatile
-    private var frameW = 0
-
-    @Volatile
-    private var frameH = 0
-
-    @Volatile
-    private var frameFormat = UploadPixelFormat.RGB24
-
-    @Volatile
-    private var frameVersion = 0L
+    /** Decoded frames from the decode thread, handed over without sharing a buffer either side is using. */
+    private val frames = FrameHandoff<OverlayFrame>()
     private var uploadedVersion = 0L
     private var dynamicTexture: DynamicTexture? = null
     var textureId: Identifier? = null
@@ -45,40 +31,26 @@ class PreviewFrameTexture(private val uuid: UUID) {
     private var rgbaUploadBuffer: ByteBuffer? = null
 
     fun updateFrame(buf: ByteBuffer, w: Int, h: Int, format: UploadPixelFormat) {
-        val size = w * h * format.bytesPerPixel
-        if (size <= 0 || buf.remaining() < size) return
-        var back = backBuf
-        if (back.capacity() < size) {
-            back = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-        }
-        back.clear()
-        val savedLimit = buf.limit()
-        val savedPos = buf.position()
-        buf.limit(savedPos + size)
-        back.put(buf)
-        buf.limit(savedLimit)
-        buf.position(savedPos)
-        back.flip()
-
-        val prev = frontBuf
-        frontBuf = back
-        backBuf =
-            if (prev.capacity() >= size) prev else ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
-        frameW = w
-        frameH = h
-        frameFormat = format
-        frameVersion++
+        // Copied into a buffer the render thread is not reading; published together with its description
+        frames.publish(buf, w * h * format.bytesPerPixel, OverlayFrame(w, h, format, 0.0))
     }
 
     fun uploadFrame() {
-        val fw = frameW
-        val fh = frameH
-        val version = frameVersion
-        if (version == uploadedVersion) return
-        val buf = frontBuf
-        val format = frameFormat
-        val size = fw * fh * format.bytesPerPixel
-        if (fw <= 0 || fh <= 0 || buf.remaining() < size) return
+        // Borrowed: the decode thread cannot write into it until it is released after the upload
+        val frame = frames.borrowNewest(uploadedVersion) ?: return
+        try {
+            upload(frame)
+        } finally {
+            frames.release()
+        }
+    }
+
+    private fun upload(frame: FrameHandoff.Frame<OverlayFrame>) {
+        val fw = frame.meta.width
+        val fh = frame.meta.height
+        val buf = frame.buffer
+        val format = frame.meta.format
+        if (fw <= 0 || fh <= 0) return
 
         val mc = Minecraft.getInstance()
         var tex = dynamicTexture
@@ -111,19 +83,15 @@ class PreviewFrameTexture(private val uuid: UUID) {
             rgbaScratch = rgbaUploadBuffer,
             setRgbaScratch = { rgbaUploadBuffer = it },
         )
-        uploadedVersion = version
+        uploadedVersion = frame.version
     }
 
     /**
-     * Forgets the held frame (both buffers) and releases the GPU texture on the render thread: nothing of the last
+     * Forgets the held frames and releases the GPU texture on the render thread: nothing of the last
      * picture can be shown again. Any thread. The next [updateFrame] starts over.
      */
     fun clear() {
-        frontBuf = EMPTY_DIRECT
-        backBuf = EMPTY_DIRECT
-        frameW = 0
-        frameH = 0
-        frameVersion++
+        frames.clear()
         closeAsync()
     }
 
@@ -147,7 +115,4 @@ class PreviewFrameTexture(private val uuid: UUID) {
         Minecraft.getInstance().execute { close() }
     }
 
-    companion object {
-        private val EMPTY_DIRECT: ByteBuffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder())
-    }
 }
