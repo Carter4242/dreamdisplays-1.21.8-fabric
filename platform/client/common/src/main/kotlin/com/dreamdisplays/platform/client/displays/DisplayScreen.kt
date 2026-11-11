@@ -1372,6 +1372,10 @@ class DisplayScreen(
     fun deactivateFullscreen() {
         popoutManager.deactivateFullscreen(mediaPlayer)
         clearBroadcastOverrides()
+        // The fullscreen replaced the viewer's pinned PiP of this display: it comes back, as on the next join
+        if (!isPipActive && !isFullscreenActive && !isPrepared && ClientSettingsStore.getSettings(uuid).pipOpen) {
+            activatePipMode()
+        }
     }
 
     /** The volume this display plays at: a fullscreen broadcast's while it shows, else the viewer's own [volume]. */
