@@ -121,4 +121,19 @@ class RelayLeaseSyncTest {
         assertNotNull(RelayControlConfig.problem("https:///v1/shares", "t".repeat(32)))
         assertNotNull(RelayControlConfig.problem("https://live.example.org/v1/shares", "t".repeat(16) + " x"))
     }
+
+    @Test
+    fun `a failed keep-warm push does not count toward refusing a start`() {
+        val relay = Relay(up = false)
+        val sync = RelayLeaseSync("ep", send = relay::send)
+        assertFalse(sync.warm())
+        val results = ArrayList<Boolean>()
+        sync.set(mapOf("dda" to k1)) { results += it }
+        // The start's first push fails too: it still gets its retry before being refused
+        assertFalse(sync.push())
+        assertEquals(emptyList(), results)
+        relay.up = true
+        assertTrue(sync.push())
+        assertEquals(listOf(true), results)
+    }
 }

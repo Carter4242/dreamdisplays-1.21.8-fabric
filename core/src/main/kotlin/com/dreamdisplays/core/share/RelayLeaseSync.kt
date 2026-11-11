@@ -69,8 +69,16 @@ class RelayLeaseSync(
     @Synchronized
     fun needsRenewal(): Boolean = wanted.isNotEmpty() || dirty()
 
+    /**
+     * [push] only to keep the connection to the service open while nothing waits on it: a failure here does not count
+     * toward refusing a start (a start still gets its own push and retry before it is refused).
+     */
+    fun warm(): Boolean = push(countFailure = false)
+
     /** Sends the newest set once. Returns whether the service took it. */
-    fun push(): Boolean {
+    fun push(): Boolean = push(countFailure = true)
+
+    private fun push(countFailure: Boolean): Boolean {
         val (body, version) = synchronized(this) {
             seq++
             body(wanted, seq) to wantedVersion
@@ -81,9 +89,11 @@ class RelayLeaseSync(
                 failuresInRow = 0
                 if (version > ackedVersion) ackedVersion = version
                 takeWaiters(version).map { it to true }
-            } else {
+            } else if (countFailure) {
                 failuresInRow++
                 if (failuresInRow >= MAX_FAILURES_BEFORE_REFUSING) takeWaiters(version).map { it to false } else emptyList()
+            } else {
+                emptyList()
             }
         }
         done.forEach { (callback, result) -> runCatching { callback(result) } }

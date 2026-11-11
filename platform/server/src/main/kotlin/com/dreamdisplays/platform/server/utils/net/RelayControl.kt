@@ -62,7 +62,7 @@ object RelayControl {
         if (!enabled || System.currentTimeMillis() - lastSentMs < WARM_EVERY_MS) return
         lastSentMs = System.currentTimeMillis()
         val (s, w) = started()
-        runCatching { w.execute { runCatching { s.push() } } }
+        runCatching { w.execute { runCatching { s.warm() } } }
     }
 
     private const val WARM_EVERY_MS = 4L * 60_000L
