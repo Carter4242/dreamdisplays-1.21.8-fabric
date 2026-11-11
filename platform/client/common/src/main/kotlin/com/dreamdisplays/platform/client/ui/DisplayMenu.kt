@@ -409,7 +409,9 @@ class DisplayMenu private constructor(
                 shareDropdown.toggle()
             }
         })
-        shareButton.visibleWhen = { ScreenShare.available && !ds.errored }
+        // Stop is always there while this display is shared to, whatever else hides the button (an error, the server
+        // dropping the feature): the capture runs until it is pressed
+        shareButton.visibleWhen = { ScreenShare.isSharing(ds.uuid) || (ScreenShare.available && !ds.errored) }
         shareButton.enabledWhen = { ScreenShare.isSharing(ds.uuid) || ds.canSetVideoHere }
         settings = SettingsSection(
             rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, accessReset),
@@ -424,7 +426,7 @@ class DisplayMenu private constructor(
                 },
             ],
         )
-        errorPanel = ErrorPanel(retryButton, deleteButton, reportButton, clearVideoButton) { ds.mediaError }
+        errorPanel = ErrorPanel(retryButton, deleteButton, reportButton, clearVideoButton, shareButton) { ds.mediaError }
     }
 
     private fun settingsRows(

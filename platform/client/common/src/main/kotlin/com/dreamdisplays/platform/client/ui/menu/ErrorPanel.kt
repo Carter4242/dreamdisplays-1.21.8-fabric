@@ -27,6 +27,8 @@ class ErrorPanel(
     private val reportButton: IconButton?,
     /** "Clear the video" for everyone; in the row only while it is visible (the viewer may clear it). */
     private val clearVideoButton: IconButton? = null,
+    /** "Stop sharing"; in the row only while it is visible (this player shares to the display). */
+    private val stopShareButton: IconButton? = null,
     private val error: () -> DreamMediaException?,
 ) {
     /** Draws the error panel centered in a [screenW] x [screenH] screen and places the action buttons. */
@@ -60,14 +62,20 @@ class ErrorPanel(
 
         g.drawText(font, hint, screenW / 2 - font.width(hint) / 2, y, UiTheme.TEXT_PRIMARY, false)
 
-        // Action row centered along the bottom edge: Retry, Clear (when offered), Report (when enabled), Delete.
+        // Action row centered along the bottom edge: Retry, Stop sharing (while sharing here), Clear (when offered),
+        // Report (when enabled), Delete.
         val clearShown = clearVideoButton?.visible == true
-        val count = 2 + (if (reportButton != null) 1 else 0) + (if (clearShown) 1 else 0)
+        val stopShown = stopShareButton?.visible == true
+        val count = 2 + (if (reportButton != null) 1 else 0) + (if (clearShown) 1 else 0) + (if (stopShown) 1 else 0)
         val rowW = count * BUTTON_SIZE + (count - 1) * BUTTON_GAP
         val by = panel.bottom - UiTheme.PANEL_PADDING_Y - BUTTON_SIZE
         var bx = panel.centerX - rowW / 2
         retryButton.place(UiRect(bx, by, BUTTON_SIZE, BUTTON_SIZE))
         bx += BUTTON_SIZE + BUTTON_GAP
+        if (stopShown) {
+            stopShareButton?.place(UiRect(bx, by, BUTTON_SIZE, BUTTON_SIZE))
+            bx += BUTTON_SIZE + BUTTON_GAP
+        }
         if (clearShown) {
             clearVideoButton?.place(UiRect(bx, by, BUTTON_SIZE, BUTTON_SIZE))
             bx += BUTTON_SIZE + BUTTON_GAP
