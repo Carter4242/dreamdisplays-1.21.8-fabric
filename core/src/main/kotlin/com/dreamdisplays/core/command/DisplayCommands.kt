@@ -134,6 +134,10 @@ object DisplayCommands {
             "policy", "policy", Area.ADMIN, Perm.ADMIN_POLICY,
             opt("display", DISPLAY), opt("key", WORD, "key|reset"), opt("value", WORD, "value|reset"),
         )
+        cmd(
+            "policy.player", "policy player", Area.ADMIN, Perm.ADMIN_POLICY,
+            req("player", KNOWN_PLAYER), opt("key", WORD, "key|reset"), opt("value", WORD, "value|reset"),
+        )
         cmd("reload", "reload", Area.ADMIN, Perm.ADMIN_CONFIG)
 
         cmd("diag.clients", "diag clients", Area.DIAG, Perm.DIAG)

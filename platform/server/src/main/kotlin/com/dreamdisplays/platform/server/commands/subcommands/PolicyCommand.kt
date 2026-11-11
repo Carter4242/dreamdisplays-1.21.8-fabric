@@ -1,15 +1,19 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.core.command.Perm
+import com.dreamdisplays.core.display.policy.PlayerPolicies
 import com.dreamdisplays.core.display.policy.PolicyPaths
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
 import com.dreamdisplays.platform.server.managers.DisplayManager
+import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
+import com.dreamdisplays.platform.server.policy.PlayerPolicyOverrides
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import io.github.arnodoelinger.platformweaver.PaperOnly
+import org.bukkit.Bukkit
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 
@@ -57,6 +61,63 @@ object PolicyCommand {
             }
         }
     }
+
+    /**
+     * `/display policy player <player> [<key> [<value>|reset] | reset]`: shows or edits one player's own client policy
+     * ([PlayerPolicies]): the server-wide-only keys, on top of the `[policy.*]` defaults, for that player's client only.
+     */
+    fun executePlayer(sender: CommandSender, name: String, key: String?, value: String?) {
+        val (id, playerName) = Bukkit.getPlayerExact(name)?.let { it.uniqueId to it.name }
+            ?: ClientErrorReports.findPlayer(name)
+            ?: Bukkit.getOfflinePlayerIfCached(name)?.let { it.uniqueId to (it.name ?: name) }
+            ?: run {
+                ServerMessage.POLICY_PLAYER_UNKNOWN.sendTo(sender, name)
+                return
+            }
+        val override = PlayerPolicyOverrides.get(id)
+        when {
+            key == null -> {
+                ServerMessage.POLICY_PLAYER_HEADER.sendTo(sender, playerName)
+                val effective = PlayerPolicyOverrides.applyTo(DisplayPolicies.defaults().serverWide(), id)
+                PlayerPolicies.keys.forEach {
+                    ServerMessage.POLICY_LINE.sendTo(
+                        sender, it.name, PolicyPaths.format(it.get(effective)), PolicyPaths.format(override?.let(it.get)),
+                    )
+                }
+            }
+
+            key.equals(RESET, ignoreCase = true) && value == null -> {
+                PlayerPolicyOverrides.set(id, null)
+                ServerMessage.POLICY_PLAYER_RESET_ALL.sendTo(sender, playerName)
+            }
+
+            else -> {
+                val path = PolicyPaths.find(key)?.takeIf(PlayerPolicies::isPlayerKey) ?: run {
+                    ServerMessage.POLICY_PLAYER_KEY_ONLY_DISPLAY.sendTo(sender, key, playerKeySuggestions().dropLast(1).joinToString(", "))
+                    return
+                }
+                if (value == null) {
+                    ServerMessage.POLICY_LINE.sendTo(
+                        sender, path.name,
+                        PolicyPaths.format(path.get(PlayerPolicyOverrides.applyTo(DisplayPolicies.defaults().serverWide(), id))),
+                        PolicyPaths.format(override?.let(path.get)),
+                    )
+                    return
+                }
+                val raw = if (value.equals(RESET, ignoreCase = true)) null else value
+                val updated = PlayerPolicies.withKey(override, path, raw) ?: run {
+                    ServerMessage.POLICY_BAD_VALUE.sendTo(sender, path.name, path.hint)
+                    return
+                }
+                PlayerPolicyOverrides.set(id, updated)
+                if (raw == null) ServerMessage.POLICY_PLAYER_RESET.sendTo(sender, path.name, playerName)
+                else ServerMessage.POLICY_PLAYER_SET.sendTo(sender, path.name, PolicyPaths.format(path.get(updated)), playerName)
+            }
+        }
+    }
+
+    /** Suggestions for the key slot of `policy player`: the keys one player may have, plus `reset`. */
+    fun playerKeySuggestions(): List<String> = PlayerPolicies.keys.map { it.name } + RESET
 
     private fun show(sender: CommandSender, display: DisplayData) {
         ServerMessage.POLICY_HEADER.sendTo(sender, display.shortLabel)

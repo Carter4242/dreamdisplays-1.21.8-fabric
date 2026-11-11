@@ -39,9 +39,11 @@ object ClientDiagnostics {
         val now = System.currentTimeMillis()
         Scheduler.forEachTrackedPlayer { player ->
             if (!V2PlayerTracker.isV2(player.uniqueId)) return@forEachTrackedPlayer
-            // A player with their own log level (/display debug) gets it on top of the server-wide policy
-            val bytes = if (ClientLogLevels.get(player.uniqueId) == null) shared
-            else ClientLogLevels.applyTo(serverWide, player.uniqueId).encode()
+            // A player with their own policy (/display policy player) or log level (/display diag loglevel) gets it on
+            // top of the server-wide policy; the log level wins
+            val id = player.uniqueId
+            val bytes = if (PlayerPolicyOverrides.get(id) == null && ClientLogLevels.get(id) == null) shared
+            else ClientLogLevels.applyTo(PlayerPolicyOverrides.applyTo(serverWide, id), id).encode()
             val last = sent[player.uniqueId]
             if (last != null && last.bytes.contentEquals(bytes) && now - last.atMs < RESEND_MS) return@forEachTrackedPlayer
             sent[player.uniqueId] = Sent(bytes, now)

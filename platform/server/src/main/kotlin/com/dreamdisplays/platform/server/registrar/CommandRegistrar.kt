@@ -146,6 +146,7 @@ object CommandRegistrar {
 
         "config" to h { s, c -> ConfigCommand.execute(s, c["key"], c["value"]) },
         "policy" to h { s, c -> PolicyCommand.execute(s, c.display, c["key"], c["value"]) },
+        "policy.player" to h { s, c -> PolicyCommand.executePlayer(s, c["player"]!!, c["key"], c["value"]) },
         "reload" to h { s, _ -> ReloadCommand().execute(s, emptyArray()) },
 
         "diag.clients" to h { s, _ ->
@@ -221,7 +222,11 @@ object CommandRegistrar {
                     (KaraokeCommand.knownNames(values["display"] ?: TargetMatch.THIS) + online).distinct(), typed,
                 )
 
-                "key" -> (if (r.def.id == "config") ConfigCommand.keySuggestions() else PolicyCommand.keySuggestions())
+                "key" -> when (r.def.id) {
+                    "config" -> ConfigCommand.keySuggestions()
+                    "policy.player" -> PolicyCommand.playerKeySuggestions()
+                    else -> PolicyCommand.keySuggestions()
+                }
                     .map { Suggestion(it) }.startingWith(typed)
 
                 "value" -> {
