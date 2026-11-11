@@ -28,6 +28,7 @@ import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
+import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
@@ -73,6 +74,9 @@ enum class PacketType(
     PIP_PIN(20, PipPin::class, PacketDirection.CLIENT_TO_SERVER),
     REPORT_DURATION(21, ReportDuration::class, PacketDirection.CLIENT_TO_SERVER),
     REMOTE_PLAYBACK_TOGGLE(22, RemotePlaybackToggle::class, PacketDirection.SERVER_TO_CLIENT),
+
+    // Protocol 12: the server asks a client to send its reports again
+    REPORT_REQUEST(23, ReportRequest::class, PacketDirection.SERVER_TO_CLIENT),
 
     // Diagnostics / remote client control; ids start at 40 so packets added elsewhere in the 20s cannot collide
     SERVER_POLICY(40, ServerPolicy::class, PacketDirection.SERVER_TO_CLIENT),

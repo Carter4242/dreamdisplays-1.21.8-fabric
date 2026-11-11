@@ -13,8 +13,13 @@ import java.util.*
 fun ServerHello.hasFeature(feature: ServerFeature): Boolean =
     feature.wire in allowedFeatures
 
-/** Builds the wire [DisplaySync] for [id] in [mode], stamped with the current [nowMs] anchor. */
-fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: PlaybackMode, nowMs: Long): DisplaySync {
+/**
+ * Builds the wire [DisplaySync] for [id] in [mode], stamped with the current [nowMs] anchor; [mediaGen] is the
+ * display's [com.dreamdisplays.core.protocol.common.packets.DisplayInfo.mediaGen] (0 = not stamped).
+ */
+fun Timeline.toSync(
+    id: @Serializable(UuidSerializer::class) UUID, mode: PlaybackMode, nowMs: Long, mediaGen: Long = 0L,
+): DisplaySync {
     // A start scheduled ahead of now: say where it starts and how long until then
     if (!paused && serverTimeMs > nowMs) {
         return DisplaySync(
@@ -28,6 +33,7 @@ fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: Playbac
             mode = mode.wire,
             rate = rate,
             startInMs = (serverTimeMs - nowMs).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            mediaGen = mediaGen,
         )
     }
     val anchored = anchoredAt(nowMs)
@@ -41,6 +47,7 @@ fun Timeline.toSync(id: @Serializable(UuidSerializer::class) UUID, mode: Playbac
         loop = anchored.loop,
         mode = mode.wire,
         rate = anchored.rate,
+        mediaGen = mediaGen,
     )
 }
 

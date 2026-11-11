@@ -30,6 +30,7 @@ import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
+import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
@@ -102,6 +103,7 @@ object PacketRegistry {
         Entry(PacketType.PIP_PIN, PipPin::class, PipPin.serializer()),
         Entry(PacketType.REPORT_DURATION, ReportDuration::class, ReportDuration.serializer()),
         Entry(PacketType.REMOTE_PLAYBACK_TOGGLE, RemotePlaybackToggle::class, RemotePlaybackToggle.serializer()),
+        Entry(PacketType.REPORT_REQUEST, ReportRequest::class, ReportRequest.serializer()),
         Entry(PacketType.SERVER_POLICY, ServerPolicy::class, ServerPolicy.serializer()),
         Entry(PacketType.VIEWER_REPORT, ViewerReport::class, ViewerReport.serializer()),
         Entry(PacketType.FULLSCREEN_PREPARE, FullscreenPrepare::class, FullscreenPrepare.serializer()),

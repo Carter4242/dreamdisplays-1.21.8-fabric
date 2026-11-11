@@ -40,6 +40,13 @@ data class DisplayInfo(
     @ProtoNumber(23) val depth: Int = 1,
     @ProtoNumber(24) val conforming: Boolean = false,
     @ProtoNumber(25) val customData: Map<String, ByteArray> = emptyMap(),
+    /**
+     * Which video the display holds: a token the server changes whenever [url] or [lang] changes (0 from older
+     * servers). Equality only, never ordered. Clients echo it in what they send about the video (see [MediaGen]).
+     */
+    @ProtoNumber(26) val mediaGen: Long = 0,
+    /** Dimension key of the display's world (`minecraft:overworld`); empty from older servers and for virtual displays. */
+    @ProtoNumber(27) val world: String = "",
 ) : DreamPacket
 
 /** Removes a display (server broadcast) or requests its deletion (client action). */
@@ -75,6 +82,11 @@ data class DisplaySync(
      * timing (see `VoiceTrackAligner`).
      */
     @ProtoNumber(11) val karaokeLeadMs: Int = 0,
+    /**
+     * The [DisplayInfo.mediaGen] this timeline belongs to (0 from older servers). A client holding another one asks for
+     * the display again ([RequestSync.knownMediaGen]).
+     */
+    @ProtoNumber(12) val mediaGen: Long = 0,
 ) : DreamPacket
 
 /**
@@ -89,12 +101,19 @@ data class DisplayReadiness(
     @ProtoNumber(3) val positionMs: Long = 0,
     /** The client's one-way latency to the server, in ms (half its round trip). */
     @ProtoNumber(4) val latencyMs: Int = 0,
+    /** [DisplayInfo.mediaGen] of the video this report is about (0 from older clients). */
+    @ProtoNumber(5) val mediaGen: Long = 0,
 ) : DreamPacket
 
-/** Client asks the server for the authoritative playback state of a display. */
+/**
+ * Client asks the server for the authoritative playback state of a display. [knownMediaGen]: the
+ * [DisplayInfo.mediaGen] the client holds for it, 0 when it holds no description of the display (or, from clients
+ * older than protocol 12, always 0). A server seeing another generation sends the display's [DisplayInfo] first.
+ */
 @Serializable
 data class RequestSync(
     @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
+    @ProtoNumber(2) val knownMediaGen: Long = 0,
 ) : DreamPacket
 
 /** Client applies a new media URL / audio language to a display. */

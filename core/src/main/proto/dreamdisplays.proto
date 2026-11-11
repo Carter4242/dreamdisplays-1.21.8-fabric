@@ -150,6 +150,10 @@ message DisplayInfo {
   optional bool conforming = 24;
   // WARNING: a default value decoded when value is missing
   map<string, bytes> customData = 25;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 26;
+  // WARNING: a default value decoded when value is missing
+  optional string world = 27;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.DisplayDelete'
@@ -182,12 +186,16 @@ message DisplaySync {
   optional int32 startInMs = 10;
   // WARNING: a default value decoded when value is missing
   optional int32 karaokeLeadMs = 11;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 12;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RequestSync'
 message RequestSync {
   // WARNING: a default value decoded when value is missing
   optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int64 knownMediaGen = 2;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.SetVideo'
@@ -238,6 +246,8 @@ message PlaybackCommand {
   optional int64 positionMs = 3;
   // WARNING: a default value decoded when value is missing
   optional double rate = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 5;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.SetMode'
@@ -248,6 +258,8 @@ message SetMode {
   optional int32 mode = 2;
   // WARNING: a default value decoded when value is missing
   optional int64 positionMs = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 4;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.WatchPartyStart'
@@ -366,6 +378,10 @@ message ReportDuration {
   optional int64 durationMs = 2;
   // WARNING: a default value decoded when value is missing
   optional string url = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 4;
+  // WARNING: a default value decoded when value is missing
+  optional bool observedEnd = 5;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle'
@@ -374,6 +390,14 @@ message RemotePlaybackToggle {
   optional Uuid id = 1;
   // WARNING: a default value decoded when value is missing
   optional bool paused = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ReportRequest'
+message ReportRequest {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid displayId = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int32 kinds = 2;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerPolicy'
@@ -454,6 +478,8 @@ message DisplayReadiness {
   optional int64 positionMs = 3;
   // WARNING: a default value decoded when value is missing
   optional int32 latencyMs = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int64 mediaGen = 5;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.QueueState'
