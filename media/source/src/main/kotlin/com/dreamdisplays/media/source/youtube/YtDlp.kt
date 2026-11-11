@@ -144,7 +144,8 @@ object YtDlp {
             ytdlp.cancel()
         }
 
-        val viaNewPipe = runCatching { NewPipeResolver.fetch(videoUrl) }
+        // The server took NewPipe out (`client.disabledResolvers`): yt-dlp alone
+        val viaNewPipe = if (!ResolverConfig.newPipeInsideYtDlp) [] else runCatching { NewPipeResolver.fetch(videoUrl) }
             .onFailure { e ->
                 if (e is CancellationException) {
                     abandonYtDlp()
@@ -213,6 +214,9 @@ object YtDlp {
         }
         if (YtStreams.usable(viaYtDlp)) return viaYtDlp
         val lastError = clientRace.takeLastError(videoUrl)
+        if (!ResolverConfig.newPipeInsideYtDlp) {
+            throw YtDlpErrors.classify(lastError) ?: IOException("All yt-dlp clients failed for $videoUrl.")
+        }
         val viaNewPipe = runCatching { NewPipeResolver.fetch(videoUrl) }
             .onFailure { e -> if (e is CancellationException) throw e }
             .getOrElse { [] }

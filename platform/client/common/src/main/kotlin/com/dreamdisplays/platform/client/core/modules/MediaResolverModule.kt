@@ -20,6 +20,8 @@ object MediaResolverModule : DreamDisplaysModule {
         ResolverConfig.provider = object : ResolverConfig.Provider {
             override val ytdlpProxy: String get() = ClientStateManager.config.ytdlpProxy
             override val ytdlpCookieSource get() = ClientStateManager.config.ytdlpCookieSource
+            override val disabledResolvers: Set<String>
+                get() = com.dreamdisplays.platform.client.displays.ServerOverrides.settings.disabledResolvers
         }
 
         // The server can take a misbehaving resolver out of the race (`client.disabledResolvers`)

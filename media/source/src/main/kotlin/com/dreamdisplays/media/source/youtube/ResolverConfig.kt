@@ -14,6 +14,9 @@ object ResolverConfig {
 
         /** Browser to import cookies from, or [CookieSource.NONE]. */
         val ytdlpCookieSource: CookieSource
+
+        /** Resolvers the server took out (`client.disabledResolvers`, lowercase short names: `newpipe`, `yt-dlp`). */
+        val disabledResolvers: Set<String> get() = emptySet()
     }
 
     private object Defaults : Provider {
@@ -34,4 +37,28 @@ object ResolverConfig {
 
     /** Current browser to import cookies from, or [CookieSource.NONE]. */
     val ytdlpCookieSource: CookieSource get() = provider.ytdlpCookieSource
+
+    /** Whether `yt-dlp`'s YouTube resolve may use NewPipe ([ResolverLevers.newPipeInsideYtDlp]). */
+    val newPipeInsideYtDlp: Boolean get() = ResolverLevers.newPipeInsideYtDlp(disabled())
+
+    /** Whether NewPipe keeps a result without a quality ladder ([ResolverLevers.newPipeKeepsNonLadder]). */
+    val newPipeKeepsNonLadder: Boolean get() = ResolverLevers.newPipeKeepsNonLadder(disabled())
+
+    private fun disabled(): Set<String> = runCatching { provider.disabledResolvers }.getOrDefault(emptySet())
+}
+
+/**
+ * How `client.disabledResolvers` reaches inside YouTube resolving, where NewPipe and `yt-dlp` lean on each other:
+ * `yt-dlp`'s resolve asks NewPipe first, and NewPipe hands a video without a quality ladder to `yt-dlp`. Both disabled
+ * is the same as neither (the registry then keeps every resolver).
+ */
+object ResolverLevers {
+    const val NEWPIPE = "newpipe"
+    const val YT_DLP = "yt-dlp"
+
+    /** NewPipe may be asked inside `yt-dlp`'s resolve: unless NewPipe alone is disabled. */
+    fun newPipeInsideYtDlp(disabled: Set<String>): Boolean = NEWPIPE !in disabled || YT_DLP in disabled
+
+    /** NewPipe keeps a result without a quality ladder (360p only) rather than defer: `yt-dlp` alone is disabled. */
+    fun newPipeKeepsNonLadder(disabled: Set<String>): Boolean = YT_DLP in disabled && NEWPIPE !in disabled
 }

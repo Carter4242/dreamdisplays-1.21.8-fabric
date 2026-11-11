@@ -82,7 +82,8 @@ object NewPipeResolver : MediaResolverService {
         // YouTube often exposes only the muxed 360p track to this client (adaptive tracks are
         // SABR / DASH-only); failing here lets the resolver chain fall through to yt-dlp, which
         // still gets the full quality ladder.
-        if (!resolved.isLive && !YtStreams.offersQualityLadder(resolved.streams)) {
+        // Unless the server took yt-dlp out (`client.disabledResolvers`): then the muxed stream is all there is
+        if (!resolved.isLive && !YtStreams.offersQualityLadder(resolved.streams) && !ResolverConfig.newPipeKeepsNonLadder) {
             val heights = YtStreams.distinctHeights(resolved.streams)
             throw IllegalStateException("NewPipe returned no quality ladder (heights=$heights); deferring to yt-dlp")
         }
@@ -175,7 +176,8 @@ object NewPipeResolver : MediaResolverService {
     private fun resolveCached(url: String, overlapFallback: Boolean = false): NewPipeResolved? {
         val key = YouTubeUrls.extractVideoId(url) ?: url
         cache.getIfPresent(key)?.let { it.error?.let { e -> throw e }; return it.value }
-        if (overlapFallback && NewPipeLadderTracker.shouldOverlapFallback()) {
+        // No yt-dlp warm-up beside it when the server took yt-dlp out
+        if (overlapFallback && !ResolverConfig.newPipeKeepsNonLadder && NewPipeLadderTracker.shouldOverlapFallback()) {
             runCatching { YtDlp.prefetchFormats(url) }
         }
         val entry = cache.get(key) {
