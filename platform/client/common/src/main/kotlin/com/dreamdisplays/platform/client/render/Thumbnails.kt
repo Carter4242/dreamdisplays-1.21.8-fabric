@@ -74,6 +74,15 @@ object Thumbnails {
 
     private val THUMB_CACHE_DIR: Path = Path.of("config", "dreamdisplays", "thumb-cache")
     private const val THUMB_CACHE_TTL_MS = 7L * 24L * 60L * 60L * 1_000L
+    private const val THUMB_CACHE_MAX_BYTES = 128L * 1024L * 1024L
+
+    /** Deletes expired and surplus thumbnail files (call once at startup, off the client thread). */
+    fun sweepDiskCache() {
+        val removed = ThumbnailCacheSweep.sweep(
+            THUMB_CACHE_DIR.toFile(), System.currentTimeMillis(), THUMB_CACHE_TTL_MS, THUMB_CACHE_MAX_BYTES,
+        )
+        if (removed > 0) logger.info("Removed $removed old thumbnail(s) from the disk cache.")
+    }
 
     private fun releaseTexture(id: Identifier?) {
         if (id == null) return

@@ -17,6 +17,7 @@ import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.core.modules.*
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.render.Thumbnails
 import com.dreamdisplays.platform.client.storage.ClientSettingsStore
 import com.dreamdisplays.platform.client.storage.CustomVideoStore
 import com.dreamdisplays.platform.client.storage.WatchedVideoStore
@@ -68,6 +69,8 @@ object ClientStartupManager {
         scope.launch {
             runCatching { FormatDiskCache.sweepExpired() }
                 .onFailure { e -> logger.warn("Cache sweep failed.", e) }
+            runCatching { Thumbnails.sweepDiskCache() }
+                .onFailure { e -> logger.warn("Thumbnail cache sweep failed.", e) }
         }
         Focuser().start()
         scope.launch {
