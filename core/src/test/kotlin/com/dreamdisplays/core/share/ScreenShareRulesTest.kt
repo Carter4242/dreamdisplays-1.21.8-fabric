@@ -171,6 +171,17 @@ class ScreenShareRulesTest {
     }
 
     @Test
+    fun `a server stall between share checks credits the heartbeats it held up`() {
+        assertEquals(0L, ScreenShareServerRules.stallCreditMs(0L, 50_000L))
+        assertEquals(0L, ScreenShareServerRules.stallCreditMs(10_000L, 11_000L))
+        assertEquals(0L, ScreenShareServerRules.stallCreditMs(10_000L, 12_000L))
+        assertEquals(12_000L, ScreenShareServerRules.stallCreditMs(10_000L, 23_000L))
+        // A share silent through a 12 s stall is not ended at the first check after it
+        val credited = 10_000L + 12_000L
+        assertNull(ScreenShareServerRules.endReason(SharerState(true, true, true, true, credited, 23_000L)))
+    }
+
+    @Test
     fun `only shares started with a nonce are expected to heartbeat`() {
         assertFalse(ScreenShareServerRules.expectsHeartbeat(0L))
         assertTrue(ScreenShareServerRules.expectsHeartbeat(42L))

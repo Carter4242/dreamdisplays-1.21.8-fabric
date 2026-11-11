@@ -162,6 +162,20 @@ object ScreenShareServerRules {
     /** A share whose sharer sent no heartbeat for this long is ended. */
     const val HEARTBEAT_TIMEOUT_MS: Long = 5_000L
 
+    /** A gap longer than this between two share checks (normally [HEARTBEAT_INTERVAL_MS]) is a server stall. */
+    const val STALL_GAP_MS: Long = 2_000L
+
+    /**
+     * How far to move every share's last heartbeat forward when the share check runs at [nowMs] after its previous
+     * run at [lastCheckMs] (0: never ran): a main-thread stall delays the heartbeats queued during it, so the silence
+     * it caused is not the sharer's. 0 without a stall.
+     */
+    fun stallCreditMs(lastCheckMs: Long, nowMs: Long): Long {
+        if (lastCheckMs <= 0L) return 0L
+        val gap = nowMs - lastCheckMs
+        return if (gap > STALL_GAP_MS) gap - HEARTBEAT_INTERVAL_MS else 0L
+    }
+
     /** Why a share ended. */
     enum class EndReason {
         /** The sharer (or an admin from the menu) asked. */

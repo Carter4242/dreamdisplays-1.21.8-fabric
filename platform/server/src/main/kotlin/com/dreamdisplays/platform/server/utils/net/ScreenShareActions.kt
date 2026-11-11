@@ -266,8 +266,12 @@ object ScreenShareActions {
      * another world, out of range, or silent for longer than [ScreenShareServerRules.HEARTBEAT_TIMEOUT_MS].
      */
     fun tick() {
-        if (byDisplay.isEmpty()) return
         val now = System.currentTimeMillis()
+        val stallCredit = ScreenShareServerRules.stallCreditMs(lastTickMs, now)
+        lastTickMs = now
+        if (byDisplay.isEmpty()) return
+        // Heartbeats queued behind a server stall are not the sharer's silence
+        if (stallCredit > 0L) byDisplay.values.forEach { it.lastHeartbeatMs = maxOf(it.lastHeartbeatMs, minOf(now, it.lastHeartbeatMs + stallCredit)) }
         for (share in byDisplay.values.toList()) {
             val display = DisplayManager.getDisplayData(share.displayId) as? PaperDisplayData
             if (display == null) {
@@ -298,6 +302,10 @@ object ScreenShareActions {
             end(share, reason)
         }
     }
+
+    /** When [tick] last ran, epoch ms (0: never). */
+    @Volatile
+    private var lastTickMs = 0L
 
     /** Ends every share (plugin disable), restoring each display before it is saved. */
     fun stopAll() {
