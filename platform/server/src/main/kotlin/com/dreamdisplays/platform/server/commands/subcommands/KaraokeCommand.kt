@@ -127,7 +127,13 @@ object KaraokeCommand {
 
     private fun join(sender: CommandSender, display: DisplayData, playerId: UUID, name: String, raw: String, self: Boolean) {
         val label = display.shortLabel
-        val url = QueueCommand.queueableUrl(sender, raw) ?: return
+        // Joining yourself is the players' permission: their own custom-link rights apply (an operator adding someone
+        // to the line queues with operator rights)
+        val url = if (self) {
+            QueueCommand.queueableUrl(sender, raw, sender.hasPermission(PaperServer.config.permissions.custom), playerId)
+        } else {
+            QueueCommand.queueableUrl(sender, raw)
+        } ?: return
         val outcome = KaraokeManager.join(display, playerId, name, url)
         when (outcome.result) {
             LineResult.OK -> when {

@@ -21,6 +21,7 @@ import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
+import java.util.UUID
 
 /**
  * `/display queue <display> [list | add <url> | remove <n> | move <n> <pos> | skip | clear | loop on|off]` for
@@ -90,8 +91,11 @@ object QueueCommand {
 
     private fun actorOf(sender: CommandSender, display: DisplayData) = (sender as? Player)?.uniqueId ?: display.ownerId
 
-    /** [raw] as a link that may be queued, or null after telling [sender] why not. */
-    internal fun queueableUrl(sender: CommandSender, raw: String): String? {
+    /**
+     * [raw] as a link that may be queued, or null after telling [sender] why not. [customAllowed] / [playerId]: whose
+     * custom-link permission and per-player limit apply (an operator's own command: allowed, nobody's limit).
+     */
+    internal fun queueableUrl(sender: CommandSender, raw: String, customAllowed: Boolean = true, playerId: UUID? = null): String? {
         val url = canonical(raw) ?: run {
             ServerMessage.INVALID_URL.sendTo(sender)
             return null
@@ -99,7 +103,8 @@ object QueueCommand {
         CustomMediaGate.refusalKey(
             url,
             PaperServer.config.settings.customMediaPolicy,
-            hasPermission = true,
+            hasPermission = customAllowed,
+            playerId = playerId,
         )?.let {
             MessageUtil.sendMessage(sender, it)
             return null
