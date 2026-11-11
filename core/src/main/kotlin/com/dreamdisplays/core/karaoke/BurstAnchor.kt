@@ -46,6 +46,10 @@ class BurstAnchor(
     private var previous: Burst? = null
     private val history = ArrayDeque<Long>()
 
+    /** The last frame no burst could place, and how many such frames came in a row, numbered one after another. */
+    private var orphanSeq = Long.MIN_VALUE
+    private var orphanRun = 0
+
     /**
      * Recent bursts, newest last, so [estimate] still knows a burst whose frames are held back for longer than the
      * bursts after it last (voice activation sends a burst per phrase, often shorter than a listener's delay).
@@ -122,7 +126,15 @@ class BurstAnchor(
                 rebase(cur, seq)
                 return cur
             }
-            return null
+            // Several new frames in a row numbered below everything known: the client started counting again (voice
+            // chat reconnected or reloaded its audio). A late straggler never comes as such a run.
+            orphanRun = if (seq == orphanSeq + 1) orphanRun + 1 else 1
+            orphanSeq = seq
+            if (orphanRun < RESTART_RUN_FRAMES) return null
+            orphanRun = 0
+            learn(cur)
+            previous = null
+            return startBurst(seq)
         }
         val startNew = when {
             cur == null || cur.ended -> true
@@ -135,6 +147,10 @@ class BurstAnchor(
         if (!startNew) return cur
         cur?.let(::learn)
         previous = cur
+        return startBurst(seq)
+    }
+
+    private fun startBurst(seq: Long): Burst {
         bursts++
         return Burst(nextId++, seq).also {
             current = it
@@ -178,5 +194,8 @@ class BurstAnchor(
     private companion object {
         const val MIN_FRAMES_TO_LEARN = 5
         const val MAX_REBASE_FRAMES = 10
+
+        /** Frames in a row that say the client's frame count started over. */
+        const val RESTART_RUN_FRAMES = 3
     }
 }

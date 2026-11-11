@@ -181,4 +181,39 @@ class BurstAnchorTest {
         }
         assertTrue(worst < 10 * ms, "worst anchor error ${worst / ms} ms")
     }
+
+    @Test
+    fun aRestartedFrameCountStartsANewBurstAfterAFewFrames() {
+        val anchor = BurstAnchor()
+        var at = 0L
+        var old = -1
+        // A long song: the count is far along, and the previous burst sits just below the current one
+        for (q in 2_900L..2_949L) old = anchor.onFrame(at.also { at += frame }, q)
+        anchor.onFrame(at.also { at += frame }, 2_950, stop = true)
+        at += 500 * ms
+        for (q in 3_000L..3_049L) anchor.onFrame(at.also { at += frame }, q)
+        assertNotEquals(-1, old)
+        // Voice chat reloads its audio: the count starts again at 0
+        at += 300 * ms
+        assertEquals(-1, anchor.onFrame(at.also { at += frame }, 0))
+        assertEquals(-1, anchor.onFrame(at.also { at += frame }, 1))
+        val fresh = anchor.onFrame(at.also { at += frame }, 2)
+        assertNotEquals(-1, fresh)
+        assertEquals(fresh, anchor.onFrame(at.also { at += frame }, 3))
+        assertTrue(anchor.estimate(fresh, 3, lock = false) != null)
+    }
+
+    @Test
+    fun aSingleStragglerFromLongAgoIsStillDropped() {
+        val anchor = BurstAnchor()
+        var at = 0L
+        for (q in 1_000L..1_049L) anchor.onFrame(at.also { at += frame }, q)
+        anchor.onFrame(at.also { at += frame }, 1_050, stop = true)
+        at += 500 * ms
+        val current = anchor.onFrame(at.also { at += frame }, 2_000)
+        assertEquals(-1, anchor.onFrame(at, 10))
+        assertEquals(current, anchor.onFrame(at.also { at += frame }, 2_001))
+        assertEquals(-1, anchor.onFrame(at, 500))
+        assertEquals(current, anchor.onFrame(at.also { at += frame }, 2_002))
+    }
 }
