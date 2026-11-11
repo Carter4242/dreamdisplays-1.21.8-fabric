@@ -80,6 +80,23 @@ internal class OpenAlSourceLine private constructor(
         }
     }
 
+    /**
+     * [withContext] for calls that can come after [close] (a pump flushing a line another thread already closed):
+     * skipped then. Its context is destroyed by then, and an AL call with no thread context current falls through to
+     * the game's own sound context, where this line's source id names one of the game's sources.
+     */
+    private inline fun ifOpen(block: () -> Unit) {
+        synchronized(lock) {
+            if (!open) return
+            EXTThreadLocalContext.alcSetThreadContext(context)
+            try {
+                block()
+            } finally {
+                EXTThreadLocalContext.alcSetThreadContext(0L)
+            }
+        }
+    }
+
     private fun monitorLoop() {
         while (open) {
             runCatching { refresh() }
@@ -94,8 +111,7 @@ internal class OpenAlSourceLine private constructor(
 
     /** Recycles played buffers, updates [playedFrames] and restarts the source after an underrun. */
     private fun refresh() {
-        withContext {
-            if (!open) return@withContext
+        ifOpen {
             var processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED)
             while (processed-- > 0 && queued.isNotEmpty()) {
                 val buffer = AL10.alSourceUnqueueBuffers(source)
@@ -143,8 +159,7 @@ internal class OpenAlSourceLine private constructor(
                 refresh()
                 continue
             }
-            withContext {
-                if (!open) return@withContext
+            ifOpen {
                 val buffer = freeBuffers.pollFirst() ?: AL10.alGenBuffers()
                 staging.clear()
                 staging.put(b, off + done, n).flip()
@@ -162,21 +177,21 @@ internal class OpenAlSourceLine private constructor(
     }
 
     override fun start() {
-        withContext {
+        ifOpen {
             started = true
             if (queued.isNotEmpty()) AL10.alSourcePlay(source)
         }
     }
 
     override fun stop() {
-        withContext {
+        ifOpen {
             started = false
             AL10.alSourcePause(source)
         }
     }
 
     override fun flush() {
-        withContext {
+        ifOpen {
             AL10.alSourceStop(source)
             // Stopping marks every queued buffer processed; take them all back
             while (queued.isNotEmpty()) {
