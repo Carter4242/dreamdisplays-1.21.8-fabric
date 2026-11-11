@@ -166,7 +166,7 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
                     return report(p, FullscreenPrepareState.READY)
                 }
                 p.lastWarmAttemptNanos = now
-                p.player.warmUpPaused(0L)
+                warm(p)
                 p.phase = Phase.WARMING
                 report(p, FullscreenPrepareState.LOADING)
             }
@@ -181,7 +181,7 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
                 now - p.startedNanos > LOAD_TIMEOUT_NANOS -> fail(p, "never held ready")
                 now - p.lastWarmAttemptNanos > WARM_RETRY_NANOS -> {
                     p.lastWarmAttemptNanos = now
-                    p.player.warmUpPaused(0L)
+                    warm(p)
                 }
             }
 
@@ -191,11 +191,20 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
                 // The held session was dropped (it went stale): open it again
                 p.phase = Phase.WARMING
                 p.lastWarmAttemptNanos = now
-                p.player.warmUpPaused(0L)
+                warm(p)
             }
 
             Phase.FAILED -> {}
         }
+    }
+
+    /**
+     * Holds the preload ready at 0, at the display's speed: the next entry keeps the timeline's speed, and adopting a
+     * player held at another speed would drop its warm session to retime it.
+     */
+    private fun warm(p: Preload) {
+        p.player.setPlaybackSpeed(screen.playbackSpeed)
+        p.player.warmUpPaused(0L)
     }
 
     private fun fail(p: Preload, why: String) {

@@ -298,6 +298,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // offset rather than drop its open stream
             val held = screen.isPrepared || screen.isHeldReady || warmAdopted
             val tolerance = if (held) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
+            // A singer's preloaded queue entry is held at the start, while their timeline runs the karaoke lead ahead:
+            // keep the warm hold and jump the lead in place once it plays, rather than snap to a cold start
+            if (warmAdopted && karaokeLeadMs > 0 && drift > tolerance && drift <= tolerance + karaokeLeadMs) {
+                jumpToLead = true
+                return
+            }
             if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
                 screen.seekVideoTo(target * 1_000_000L)
                 lastSnapNanos = now
