@@ -226,7 +226,11 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         if (mode != PlaybackMode.SYNCED && mode != PlaybackMode.BROADCAST) return
         val durationNanos = screen.mediaPlayerDurationNanos
         if (durationNanos <= 0L) return // 0 for live streams and any not-yet-resolved case.
-        Initializer.sendPacket(ReportDuration(screen.uuid, durationNanos / 1_000_000L, screen.videoUrl.orEmpty()))
+        Initializer.sendPacket(
+            ReportDuration(
+                screen.uuid, durationNanos / 1_000_000L, screen.videoUrl.orEmpty(), ServerMediaGens.of(screen.uuid),
+            ),
+        )
     }
 
     private companion object {

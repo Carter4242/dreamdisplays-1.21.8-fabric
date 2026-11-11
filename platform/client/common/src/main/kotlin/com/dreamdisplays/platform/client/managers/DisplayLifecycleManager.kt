@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.managers
 
+import com.dreamdisplays.platform.client.displays.ServerMediaGens
 import com.dreamdisplays.api.display.model.property.DisplayRotation
 import com.dreamdisplays.api.display.model.property.DisplayFacing
 import com.dreamdisplays.core.services.keys.MediaServices
@@ -37,6 +38,8 @@ object DisplayLifecycleManager {
 
     /** Creates or updates a display from a server [DisplayInfo] packet, honoring render distance and size limits. */
     fun handleInfoPacket(packet: DisplayInfo) {
+        // Known even while displays are off: its timelines must not look like ones for a display never described
+        ServerMediaGens.onInfo(packet)
         if (!ClientStateManager.displaysEnabled) return
         if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
             logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")

@@ -893,7 +893,7 @@ class DisplayScreen(
     }
 
     private fun sendRequestSyncPacket() {
-        Initializer.sendPacket(RequestSync(uuid))
+        Initializer.sendPacket(RequestSync(uuid, ServerMediaGens.of(uuid)))
     }
 
 
@@ -1287,7 +1287,9 @@ class DisplayScreen(
         action: PlaybackAction, positionMs: Long = currentTimeNanos / 1_000_000L, rate: Double = PlaybackSpeed.NORMAL,
     ) {
         when (effectiveMode) {
-            PlaybackMode.SYNCED -> Initializer.sendPacket(PlaybackCommand(uuid, action.wire, positionMs, rate))
+            PlaybackMode.SYNCED -> Initializer.sendPacket(
+                PlaybackCommand(uuid, action.wire, positionMs, rate, ServerMediaGens.of(uuid)),
+            )
             PlaybackMode.WATCH_PARTY -> if (watchParty?.isHost == true) action.toWatchPartyAction()?.let {
                 Initializer.sendPacket(WatchPartyControl(uuid, it.wire, positionMs))
             }
@@ -1399,7 +1401,7 @@ class DisplayScreen(
     fun requestMode(newMode: PlaybackMode) {
         if (!canSetModeHere) return
         if (PlaybackMode.isBaseMode(newMode)) {
-            Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L))
+            Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L, ServerMediaGens.of(uuid)))
         }
     }
 

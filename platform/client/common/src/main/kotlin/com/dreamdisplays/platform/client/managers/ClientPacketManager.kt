@@ -44,9 +44,14 @@ object ClientPacketManager {
             is ServerHello -> applyServerHello(packet)
             is SetDisplaysEnabled -> applyDisplaysEnabled(packet.enabled)
             is DisplayInfo -> DisplayLifecycleManager.handleInfoPacket(packet)
-            is DisplaySync -> DisplayRegistry.screens[packet.id]?.let {
-                it.updateData(packet)
-                DisplayRegistry.recordScreen(it)
+            is DisplaySync -> {
+                // A timeline for a video this client was not told about: ask for the display again (and still follow
+                // the timeline meanwhile, so pauses and seeks keep applying)
+                com.dreamdisplays.platform.client.displays.ServerMediaGens.onSync(packet)
+                DisplayRegistry.screens[packet.id]?.let {
+                    it.updateData(packet)
+                    DisplayRegistry.recordScreen(it)
+                }
             }
 
             is WatchPartyState -> DisplayRegistry.screens[packet.id]?.let {
@@ -86,6 +91,7 @@ object ClientPacketManager {
     }
 
     private fun handleDelete(packet: DisplayDelete) {
+        com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(packet.id)
         DisplayRegistry.screens[packet.id]?.let { DisplayRegistry.unregisterScreen(it) }
         DisplayRegistry.unloadedScreens.remove(packet.id)
         DisplayStorage.removeDisplay(packet.id)
@@ -94,6 +100,7 @@ object ClientPacketManager {
 
     private fun handleClearCache(packet: ClearCache) {
         packet.ids.forEach { uuid ->
+            com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(uuid)
             DisplayRegistry.screens[uuid]?.let { DisplayRegistry.unregisterScreen(it) }
             DisplayRegistry.unloadedScreens.remove(uuid)
             DreamServices.registry.getOrNull<DisplaySystem>()?.removeDisplay(DisplayId(uuid))
@@ -105,6 +112,7 @@ object ClientPacketManager {
     fun reset() {
         serverSnapshot = ServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
+        com.dreamdisplays.platform.client.displays.ServerMediaGens.reset()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()

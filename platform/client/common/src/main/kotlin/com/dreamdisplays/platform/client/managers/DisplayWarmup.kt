@@ -178,7 +178,10 @@ object DisplayWarmup {
 
     private fun send(displayId: UUID, state: ReadinessState, positionMs: Long) {
         ProtocolRouter.send(
-            DisplayReadiness(displayId, state.wire, positionMs, TimelineFollower.oneWayLatencyMs().roundToInt()),
+            DisplayReadiness(
+                displayId, state.wire, positionMs, TimelineFollower.oneWayLatencyMs().roundToInt(),
+                com.dreamdisplays.platform.client.displays.ServerMediaGens.of(displayId),
+            ),
         )
     }
 
