@@ -53,9 +53,20 @@ object SourceLoader {
     fun extract(archive: Path, destDir: Path, select: (entryName: String) -> String?): Int {
         Files.createDirectories(destDir)
         var count = 0
+        val root = destDir.toAbsolutePath().normalize()
         fun write(name: String, input: InputStream) {
             val target = select(name) ?: return
-            destDir.resolve(target).outputStream().buffered().use { input.transferTo(it) }
+            val dest = root.resolve(target).normalize()
+            if (!dest.startsWith(root) || dest == root) throw IOException("Archive entry escapes $destDir: $name")
+            // Unpacked next to the target and moved into place whole: an interrupted unpack (game closed, disk
+            // full, corrupt archive) must never leave a truncated binary that later runs pass as installed.
+            val part = dest.resolveSibling("${dest.name}.part")
+            try {
+                part.outputStream().buffered().use { input.transferTo(it) }
+                Files.move(part, dest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } finally {
+                part.deleteIfExists()
+            }
             count++
         }
         Files.newInputStream(archive).buffered().use { raw ->
