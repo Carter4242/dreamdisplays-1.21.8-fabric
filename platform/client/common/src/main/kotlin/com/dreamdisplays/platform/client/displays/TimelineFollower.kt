@@ -138,9 +138,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, rate: Double = 1.0, startInMs: Int = 0,
         leadMs: Int = 0,
     ) {
-        // Any newer word from the server replaces a start still waiting for its moment
+        // Any newer word from the server replaces a start still waiting for its moment. Cancelling cannot recall one
+        // already handed to the client thread, so that one checks it is still the latest word before it plays.
         scheduledStart?.cancel(false)
         scheduledStart = null
+        val word = applyWord.incrementAndGet()
         synchronized(lock) {
             // A singer's lead changed (they started or stopped singing): a jump of that size is not drift to close
             // slowly at a percent of speed, so the next evaluation seeks there in place at once (one seek, no pause)
@@ -165,13 +167,16 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         scheduledStart = START_SCHEDULER.schedule({
             // The player is told on the client thread like every other packet: at most a frame later
             Minecraft.getInstance().execute {
-                applyNow(targetMs, startServerTimeMs, false, loop, 0.0, rate)
+                if (applyWord.get() == word) applyNow(targetMs, startServerTimeMs, false, loop, 0.0, rate)
             }
         }, (waitMs * 1_000.0).toLong(), java.util.concurrent.TimeUnit.MICROSECONDS)
     }
 
     @Volatile
     private var scheduledStart: java.util.concurrent.ScheduledFuture<*>? = null
+
+    /** Counts [apply] calls: a scheduled start only plays if no newer timeline arrived meanwhile. */
+    private val applyWord = java.util.concurrent.atomic.AtomicLong()
 
     private fun applyNow(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, comp: Double, rate: Double) {
         val packet = synchronized(lock) {
