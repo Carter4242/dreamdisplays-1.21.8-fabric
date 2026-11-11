@@ -65,6 +65,9 @@ object PolicyPaths {
             it.visibility?.maxDistanceBlocks
         },
         Path("quality.max_height", "quality.maxHeight", Kind.Whole(144, 4_320)) { it.quality?.maxHeight },
+        Path("network.read_ahead_seconds", "network.readAheadSeconds", Kind.Whole(0, 120)) {
+            it.network?.readAheadSeconds
+        },
     )
 
     private val byName = all.associateBy { it.name }

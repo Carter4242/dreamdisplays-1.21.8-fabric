@@ -58,7 +58,6 @@ import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
 import java.util.*
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.TimeSource
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -144,19 +143,15 @@ class DisplayScreen(
     /** Wire ordinal of the scheduled [com.dreamdisplays.api.playback.model.PlaybackAction] (`PLAY`/`PAUSE`), or `-1` when none is set. */
     var scheduledAction: Int = -1
 
-    @Volatile
-    private var lastRetryMark: TimeSource.Monotonic.ValueTimeMark? = null
+    private val errorGate = MediaErrorGate(cooldown = ERROR_RETRY_COOLDOWN)
 
     /**
-     * The last media failure on this display, or `null` when healthy. New failures within
-     * [ERROR_RETRY_COOLDOWN] of a retry are swallowed.
+     * The last media failure on this display, or `null` when healthy. A failure within
+     * [ERROR_RETRY_COOLDOWN] of a retry is held back until the cooldown ends (see [MediaErrorGate]).
      */
-    @Volatile
-    var mediaError: DreamMediaException? = null
-        set(value) {
-            if (value != null && lastRetryMark?.elapsedNow()?.let { it < ERROR_RETRY_COOLDOWN } == true) return
-            field = value
-        }
+    var mediaError: DreamMediaException?
+        get() = errorGate.current
+        set(value) = errorGate.set(value)
 
     /** True while a media error is active. */
     val errored: Boolean get() = mediaError != null
@@ -582,6 +577,7 @@ class DisplayScreen(
 
     /** Loads a new video from [videoUrl], preserving the current paused state. */
     fun loadVideo(videoUrl: String, lang: String) {
+        errorGate.resetAutoRetries()
         if (!clientUrlOverride) ClientSettingsStore.setUrlOverride(uuid, null, null)
         loadVideoInternal(videoUrl, lang, true)
     }
@@ -589,8 +585,18 @@ class DisplayScreen(
     /** Re-attempts current video after failure; purely local, no server packet. */
     fun retryVideo() {
         val url = videoUrl ?: return
-        lastRetryMark = TimeSource.Monotonic.markNow()
+        errorGate.markRetry()
         loadVideoInternal(url, lang ?: "", preservePausedState = true)
+    }
+
+    /** Called once a load got far enough to start playing: unattended retries get their full budget back. */
+    internal fun onMediaStarted() = errorGate.resetAutoRetries()
+
+    /** Shows a held-back error once due, and retries a display that failed on the network on its own. */
+    private fun recoverMediaErrorIfDue() {
+        if (!errorGate.tick()) return
+        logger.info("Display $uuid: retrying after a network error.")
+        retryVideo()
     }
 
     /** Requests a server-authoritative video change from a picked suggestion. */
@@ -1213,6 +1219,7 @@ class DisplayScreen(
 
     /** Called every game tick to update distance-based volume attenuation from [pos]. */
     fun tick(pos: BlockPos) {
+        recoverMediaErrorIfDue()
         val distance = getDistanceToScreen(pos)
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         timelineFollower.tick()

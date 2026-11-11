@@ -56,8 +56,13 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
     }
 
     override fun resolve(source: MediaSource): ResolvedMedia {
-        if (isBlockedHost(source)) {
-            throw DreamMediaException.Unknown("Refusing to resolve a media URL on a non-public host.", isFatal = true)
+        when (hostVerdict(source)) {
+            MediaHostGuard.HostVerdict.NON_PUBLIC ->
+                throw DreamMediaException.Unknown("Refusing to resolve a media URL on a non-public host.", isFatal = true)
+            // A name that failed to resolve this once is a network hiccup, not a verdict on the link.
+            MediaHostGuard.HostVerdict.UNRESOLVED ->
+                throw DreamMediaException.Network("Could not look up this link's server. Check your connection.")
+            else -> Unit
         }
         val candidates = resolvers.filter { it.canResolve(source) }
         if (candidates.isEmpty()) {
@@ -101,13 +106,16 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
         }
     }
 
-    private fun isBlockedHost(source: MediaSource): Boolean {
+    private fun isBlockedHost(source: MediaSource): Boolean =
+        hostVerdict(source) != MediaHostGuard.HostVerdict.PUBLIC
+
+    private fun hostVerdict(source: MediaSource): MediaHostGuard.HostVerdict {
         val url = when (source) {
             is MediaSource.Remote -> source.url
             is MediaSource.DirectStream -> source.streamUrl
-            else -> return false
+            else -> return MediaHostGuard.HostVerdict.PUBLIC
         }
-        return !MediaHostGuard.isAllowed(url)
+        return MediaHostGuard.verdict(url)
     }
 
     private companion object {

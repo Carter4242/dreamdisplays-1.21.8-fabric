@@ -38,6 +38,8 @@ class DisplayPlaybackHost(private val screen: DisplayScreen) : PlaybackHost {
             screen.mediaError = value
         }
 
+    override val readAheadSeconds: Int? get() = screen.policy.network?.readAheadSeconds
+
     override fun afterSeek() = screen.afterSeek()
 
     override fun beginQualityHandoff() = screen.beginQualityHandoff()

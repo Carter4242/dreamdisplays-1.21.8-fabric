@@ -381,11 +381,13 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
     )
     val visibility = DisplayPolicy.Visibility(t.numberOrNull("policy.visibility.max_distance_blocks")?.toDouble())
     val quality = DisplayPolicy.Quality(t.numberOrNull("policy.quality.max_height")?.toInt())
+    val network = DisplayPolicy.Network(t.numberOrNull("policy.network.read_ahead_seconds")?.toInt())
     return DisplayPolicy(
         sync = sync.takeIf { it != DisplayPolicy.Sync() },
         audio = audio.takeIf { it != DisplayPolicy.Audio() },
         visibility = visibility.takeIf { it != DisplayPolicy.Visibility() },
         quality = quality.takeIf { it != DisplayPolicy.Quality() },
+        network = network.takeIf { it != DisplayPolicy.Network() },
     )
 }
 

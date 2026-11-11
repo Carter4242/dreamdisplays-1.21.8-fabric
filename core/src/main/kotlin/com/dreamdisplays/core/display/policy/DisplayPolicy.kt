@@ -32,6 +32,7 @@ data class DisplayPolicy(
     val audio: Audio? = null,
     val visibility: Visibility? = null,
     val quality: Quality? = null,
+    val network: Network? = null,
 ) {
     /** Playback sync to the server timeline (Synced / Broadcast / watch parties). */
     @Serializable
@@ -101,10 +102,21 @@ data class DisplayPolicy(
         fun mergedOver(base: Quality?): Quality = Quality(maxHeight = maxHeight ?: base?.maxHeight)
     }
 
+    /** How clients fetch a display's media. */
+    @Serializable
+    data class Network(
+        /** Seconds of a direct media file (MP4 / WebM link) kept downloaded ahead of playback; 0 turns it off. */
+        val readAheadSeconds: Int? = null,
+    ) {
+        fun mergedOver(base: Network?): Network =
+            Network(readAheadSeconds = readAheadSeconds ?: base?.readAheadSeconds)
+    }
+
     /** True when no section sets anything, so there is nothing worth sending. */
     val isEmpty: Boolean
         get() = (sync == null || sync == Sync()) && (audio == null || audio == Audio()) &&
-                (visibility == null || visibility == Visibility()) && (quality == null || quality == Quality())
+                (visibility == null || visibility == Visibility()) && (quality == null || quality == Quality()) &&
+                (network == null || network == Network())
 
     /** This policy with every field it leaves unset taken from [base]. */
     fun mergedOver(base: DisplayPolicy): DisplayPolicy = DisplayPolicy(
@@ -113,6 +125,7 @@ data class DisplayPolicy(
         audio = mergeSection(audio, base.audio, Audio::mergedOver),
         visibility = mergeSection(visibility, base.visibility, Visibility::mergedOver),
         quality = mergeSection(quality, base.quality, Quality::mergedOver),
+        network = mergeSection(network, base.network, Network::mergedOver),
     )
 
     /** Compact JSON bytes for the custom-data entry. */
@@ -165,6 +178,7 @@ data class DisplayPolicy(
                 audio = section(root, "audio", Audio.serializer()),
                 visibility = section(root, "visibility", Visibility.serializer()),
                 quality = section(root, "quality", Quality.serializer()),
+                network = section(root, "network", Network.serializer()),
             )
         }
 

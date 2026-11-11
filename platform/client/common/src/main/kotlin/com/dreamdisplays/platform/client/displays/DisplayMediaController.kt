@@ -83,6 +83,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     fun start() {
         val mp = player ?: return
         videoStarted = true
+        screen.onMediaStarted()
         (screen.videoUrl?.let(MediaSource::from) as? MediaSource.YouTube)?.let { WatchedVideoStore.markWatched(it.videoId) }
         screen.applyEffectiveVolume()
         mp.setBrightness(screen.brightness)

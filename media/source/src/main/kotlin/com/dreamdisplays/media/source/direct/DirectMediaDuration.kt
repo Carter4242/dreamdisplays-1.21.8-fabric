@@ -2,6 +2,7 @@ package com.dreamdisplays.media.source.direct
 
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -173,7 +174,16 @@ internal object DirectMediaDuration {
         return null
     }
 
-    private fun range(url: String, first: Long, last: Long): ByteArray? = runCatching {
+    private fun range(url: String, first: Long, last: Long): ByteArray? {
+        // One quiet second try: without a duration a file plays with no seek bar and no synced
+        // timeline, and a single dropped request on a busy host should not cost that.
+        repeat(RANGE_ATTEMPTS - 1) {
+            rangeOnce(url, first, last).onSuccess { return it }
+        }
+        return rangeOnce(url, first, last).getOrNull()
+    }
+
+    private fun rangeOnce(url: String, first: Long, last: Long): Result<ByteArray?> = runCatching {
         val window = (last - first + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         if (window <= 0) return@runCatching null
         val response = DreamHttpClient.executeLimited(
@@ -181,11 +191,14 @@ internal object DirectMediaDuration {
             maxBytes = window,
             options = DreamHttpClient.RequestOptions(
                 headers = DreamHttpClient.headersOf("Range" to "bytes=$first-$last"),
-                connectTimeoutMs = 8_000L,
-                readTimeoutMs = 8_000L,
+                connectTimeoutMs = 10_000L,
+                readTimeoutMs = 15_000L,
             ),
         )
+        if (response.code == 429 || response.code in 500..599) throw IOException("HTTP ${response.code}")
         if (!response.isSuccessful || (response.code != 206 && first > 0L)) return@runCatching null
         response.body.takeIf { it.isNotEmpty() }
-    }.getOrNull()
+    }
+
+    private const val RANGE_ATTEMPTS = 2
 }

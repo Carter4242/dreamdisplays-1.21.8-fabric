@@ -8,6 +8,8 @@ import kotlinx.io.IOException
 import org.slf4j.LoggerFactory
 import java.net.InetAddress
 import java.net.URI
+import java.net.UnknownHostException
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /**
@@ -23,7 +25,32 @@ object MediaHostGuard {
     private const val HOST_VERDICT_TTL_SECONDS = 30L
     private const val REDIRECTED_TTL_NANOS = 60L * 1_000_000_000L
     private const val IDENTITY_TTL_NANOS = 5L * 60L * 1_000_000_000L
-    private val hostVerdicts: Cache<String, Boolean> = Caffeine.newBuilder()
+    /** Why a host was or was not cleared. */
+    enum class HostVerdict {
+        PUBLIC,
+        NON_PUBLIC,
+
+        /** The name did not resolve right now: a passing DNS failure, not a verdict, so never cached. */
+        UNRESOLVED,
+    }
+
+    /** The guard refused a URL for good (non-public address, unparseable or endless redirects). */
+    class HostRefusedException(message: String) : IOException(message)
+
+    /**
+     * Predicates naming URLs this client serves to itself (the loopback read-ahead proxy). Those are
+     * the one exception to the loopback ban: they can only ever relay a URL that already passed here.
+     */
+    private val trustedLocal = CopyOnWriteArrayList<(String) -> Boolean>()
+
+    /** Lets [predicate]'s URLs through the guard; for this client's own loopback endpoints only. */
+    fun trustLocalUrls(predicate: (String) -> Boolean) {
+        trustedLocal += predicate
+    }
+
+    private fun isTrustedLocal(url: String): Boolean = trustedLocal.any { it(url) }
+
+    private val hostVerdicts: Cache<String, HostVerdict> = Caffeine.newBuilder()
         .maximumSize(512)
         .expireAfterWrite(HOST_VERDICT_TTL_SECONDS, TimeUnit.SECONDS)
         .build()
@@ -51,26 +78,36 @@ object MediaHostGuard {
      * exclusively to public unicast addresses. Returns `false` on any non-public address or when the
      * host cannot be parsed or resolved.
      */
-    fun isAllowed(url: String): Boolean {
-        if (allowPrivate) return true
+    fun isAllowed(url: String): Boolean = verdict(url) == HostVerdict.PUBLIC
+
+    /** Like [isAllowed], but tells a refused host apart from one whose name just failed to resolve. */
+    fun verdict(url: String): HostVerdict {
+        if (allowPrivate || isTrustedLocal(url)) return HostVerdict.PUBLIC
         val host = hostOf(url) ?: run {
             logger.warn("Blocked media URL with no parseable host: ${url.take(120)}")
-            return false
+            return HostVerdict.NON_PUBLIC
         }
-        return hostVerdicts.get(host, ::resolvesToPublicAddresses)
+        hostVerdicts.getIfPresent(host)?.let { return it }
+        val verdict = classifyHost(host)
+        if (verdict != HostVerdict.UNRESOLVED) hostVerdicts.put(host, verdict)
+        return verdict
     }
 
-    private fun resolvesToPublicAddresses(host: String): Boolean {
-        val addresses = runCatching {
+    private fun classifyHost(host: String): HostVerdict {
+        val addresses = try {
             InetAddress.getAllByName(host)
-        }.onFailure { e ->
-            logger.warn("Blocked media URL; host '$host' did not resolve: ${e.message}.")
-        }.getOrNull() ?: return false
+        } catch (e: UnknownHostException) {
+            logger.warn("Media host '$host' did not resolve: ${e.message}.")
+            return HostVerdict.UNRESOLVED
+        } catch (e: Exception) {
+            logger.warn("Blocked media URL; host '$host' could not be checked: ${e.message}.")
+            return HostVerdict.NON_PUBLIC
+        }
         addresses.firstOrNull { isNonPublic(it) }?.let {
             logger.warn("Blocked media URL resolving to non-public address ${it.hostAddress} (host=$host).")
-            return false
+            return HostVerdict.NON_PUBLIC
         }
-        return true
+        return HostVerdict.PUBLIC
     }
 
     /** Forgets what is known about [url] and its host, so the next check probes for real. */
@@ -82,7 +119,11 @@ object MediaHostGuard {
     /** Like [isAllowed] but throws [IOException] when blocked, so it slots into the playback launch paths. */
     @Throws(IOException::class)
     fun requireAllowed(url: String) {
-        if (!isAllowed(url)) throw IOException("Refusing to open a media URL on a non-public host.")
+        when (verdict(url)) {
+            HostVerdict.PUBLIC -> Unit
+            HostVerdict.UNRESOLVED -> throw UnknownHostException("Could not resolve the media host of ${url.take(120)}.")
+            HostVerdict.NON_PUBLIC -> throw HostRefusedException("Refusing to open a media URL on a non-public host.")
+        }
     }
 
     /**
@@ -91,6 +132,7 @@ object MediaHostGuard {
      */
     @Throws(IOException::class)
     fun resolveSafeUrl(url: String, maxRedirects: Int = 5): String {
+        if (isTrustedLocal(url)) return url
         requireAllowed(url)
         if (allowPrivate) return url
         val scheme = runCatching { URI(url.trim()).scheme?.lowercase() }.getOrNull()
@@ -105,39 +147,45 @@ object MediaHostGuard {
         var current = url
         var hops = 0
         while (hops < maxRedirects) {
-            val location = peekRedirectLocation(current)
+            val peek = peekRedirectLocation(current)
+            val location = peek.getOrNull()
             if (location == null) {
-                resolvedUrls.put(
-                    url,
-                    ResolvedUrl(current, if (hops == 0) IDENTITY_TTL_NANOS else REDIRECTED_TTL_NANOS),
-                )
+                // A walk cut short by a network error is only a best guess (the link may well
+                // redirect), so it is used once but never remembered: caching it would pin a
+                // pre-redirect URL for minutes and fail every retry the same way.
+                if (peek.isSuccess) {
+                    resolvedUrls.put(
+                        url,
+                        ResolvedUrl(current, if (hops == 0) IDENTITY_TTL_NANOS else REDIRECTED_TTL_NANOS),
+                    )
+                }
                 return current
             }
             val next = runCatching {
                 URI(current.trim()).resolve(location.trim()).toString()
             }.getOrElse { e ->
-                throw IOException("Refusing to follow an unparseable media redirect: ${e.message}.")
+                throw HostRefusedException("Refusing to follow an unparseable media redirect: ${e.message}.")
             }
             requireAllowed(next)
             current = next
             hops++
         }
-        throw IOException("Refusing to follow more than $maxRedirects media redirects.")
+        throw HostRefusedException("Refusing to follow more than $maxRedirects media redirects.")
     }
 
-    private fun peekRedirectLocation(url: String): String? {
+    private fun peekRedirectLocation(url: String): Result<String?> {
         return runCatching {
             DreamHttpClient.peekRedirectLocation(
                 url.trim(),
                 DreamHttpClient.RequestOptions(
                     headers = DreamHttpClient.headersOf("Range" to "bytes=0-0"),
-                    connectTimeoutMs = 5_000,
-                    readTimeoutMs = 5_000,
+                    connectTimeoutMs = 8_000,
+                    readTimeoutMs = 10_000,
                 ),
             )
         }.onFailure { e ->
             logger.debug("Redirect probe failed for ${url.take(120)}: ${e.message}.")
-        }.getOrNull()
+        }
     }
 
     private fun isYouTubeCdn(url: String): Boolean =
