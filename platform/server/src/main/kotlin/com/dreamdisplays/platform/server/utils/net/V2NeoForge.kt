@@ -5,7 +5,6 @@ import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.protocol.PacketDirection
 import com.dreamdisplays.shared.protocol.ProtocolVersion
 import com.dreamdisplays.core.protocol.common.PacketRegistry
@@ -99,11 +98,6 @@ object NeoForgeV2Networking {
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
                 VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
-            }
-
-            is WatchPartyStart -> VanillaDisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)
-            is WatchPartyControl -> WatchPartyAction.fromWire(packet.action)?.let {
-                VanillaDisplayActions.watchPartyControl(player, packet.id, it, packet.positionMs)
             }
 
             is SetDisplaysEnabled -> PlayerManager.setDisplaysEnabled(player.uuid, packet.enabled)

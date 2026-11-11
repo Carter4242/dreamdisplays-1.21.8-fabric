@@ -46,7 +46,7 @@ interface PlaybackPort {
     /** Restarts the video for a display. */
     fun restart(displayId: DisplayId)
 
-    /** The effective [PlaybackMode] of a display (`WATCH_PARTY` while a session is live). */
+    /** The [PlaybackMode] of a display. */
     fun getMode(displayId: DisplayId): PlaybackMode
 
     /** Requests a new persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`); the server validates it. */

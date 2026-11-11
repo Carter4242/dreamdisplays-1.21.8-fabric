@@ -100,7 +100,6 @@ class PaperServer : JavaPlugin() {
             }
         }
 
-        WatchPartyManager.init(PaperPlaybackTransport)
         TimelineManager.init(
             PaperPlaybackTransport,
             runCatching { TimelineStore.take() }
@@ -170,7 +169,6 @@ class PaperServer : JavaPlugin() {
         disableStep("end transient fullscreen sessions") { FullscreenBroadcastManager.endTransientSessions() }
         disableStep("end screen shares") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.stopAll() }
         disableStep("save timelines") { TimelineStore.save(TimelineManager.snapshot()) }
-        disableStep("end watch parties") { WatchPartyManager.endAllForShutdown() }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
         disableStep("save PiP pins") { PipPinManager.flush() }

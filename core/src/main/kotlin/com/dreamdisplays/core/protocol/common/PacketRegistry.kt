@@ -41,9 +41,6 @@ import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
 import com.dreamdisplays.core.protocol.common.packets.SetVideo
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyControl
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyStart
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyState
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -94,9 +91,6 @@ object PacketRegistry {
         Entry(PacketType.CLEAR_CACHE, ClearCache::class, ClearCache.serializer()),
         Entry(PacketType.PLAYBACK_COMMAND, PlaybackCommand::class, PlaybackCommand.serializer()),
         Entry(PacketType.SET_MODE, SetMode::class, SetMode.serializer()),
-        Entry(PacketType.WATCH_PARTY_START, WatchPartyStart::class, WatchPartyStart.serializer()),
-        Entry(PacketType.WATCH_PARTY_CONTROL, WatchPartyControl::class, WatchPartyControl.serializer()),
-        Entry(PacketType.WATCH_PARTY_STATE, WatchPartyState::class, WatchPartyState.serializer()),
         Entry(PacketType.FULLSCREEN_STATE, FullscreenState::class, FullscreenState.serializer()),
         Entry(PacketType.FULLSCREEN_ACK, FullscreenAck::class, FullscreenAck.serializer()),
         Entry(PacketType.RADIUS_PREVIEW, RadiusPreview::class, RadiusPreview.serializer()),

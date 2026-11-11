@@ -62,11 +62,6 @@ object ClientPacketManager {
                 }
             }
 
-            is WatchPartyState -> DisplayRegistry.screens[packet.id]?.let {
-                it.updateWatchParty(packet)
-                DisplayRegistry.recordScreen(it)
-            }
-
             is FullscreenState -> FullscreenController.handle(packet)
             is FullscreenPrepare -> FullscreenPrepareController.handle(packet)
             is RemotePlaybackToggle -> DisplayRegistry.screens[packet.id]?.applyScheduledPaused(packet.paused)

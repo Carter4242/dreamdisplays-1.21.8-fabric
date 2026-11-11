@@ -40,7 +40,6 @@ object Perm {
     const val MENU_LOCAL = "dreamdisplays.local"
     const val MENU_SYNCED = "dreamdisplays.synced"
     const val MENU_BROADCAST = "dreamdisplays.broadcast"
-    const val MENU_WATCHPARTY = "dreamdisplays.watchparty"
     const val MENU_CUSTOM = "dreamdisplays.custom"
     const val MENU_LOCK = "dreamdisplays.lock"
     const val MENU_SHARE = "dreamdisplays.share"
@@ -53,7 +52,7 @@ object Perm {
         PLAYBACK_VIDEO, PLAYBACK_SPEED, PLAYBACK_MODE, PLAYBACK_SCHEDULE,
         QUEUE, KARAOKE_MANAGE, KARAOKE_JOIN, PREPARE, FULLSCREEN, FULLSCREEN_NETWORK, SHARE_MANAGE,
         VIEWING_TOGGLE, VIEWING_TOGGLE_OTHERS, ADMIN_CONFIG, ADMIN_POLICY, DIAG,
-        MENU_LOCAL, MENU_SYNCED, MENU_BROADCAST, MENU_WATCHPARTY, MENU_CUSTOM, MENU_LOCK, MENU_SHARE, MENU_PREMIUM,
+        MENU_LOCAL, MENU_SYNCED, MENU_BROADCAST, MENU_CUSTOM, MENU_LOCK, MENU_SHARE, MENU_PREMIUM,
         MENU_UPDATES,
     )
 

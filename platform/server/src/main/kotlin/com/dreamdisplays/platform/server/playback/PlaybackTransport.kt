@@ -4,7 +4,7 @@ import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import java.util.*
 
-/** The minimal platform surface the v2 playback backend ([TimelineManager], [WatchPartyManager]) needs. */
+/** The minimal platform surface the v2 playback backend ([TimelineManager]) needs. */
 interface PlaybackTransport {
     /** Server wall-clock in ms; the single time source for every authoritative timeline. */
     fun nowMs(): Long
@@ -15,7 +15,7 @@ interface PlaybackTransport {
     /** Sends [packet] to one player by [playerId], if online and v2-negotiated. */
     fun sendTo(playerId: UUID, packet: DreamPacket)
 
-    /** UUIDs of players currently in range of [display] (watch-party nearby / ready-check denominator). */
+    /** UUIDs of players currently in range of [display]. */
     fun nearbyPlayerIds(display: DisplayData): List<UUID>
 
     /** Display name for [playerId], or null if unknown / offline. */

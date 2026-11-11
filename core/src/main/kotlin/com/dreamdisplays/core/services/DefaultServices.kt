@@ -8,8 +8,6 @@ import com.dreamdisplays.api.display.model.property.DisplayState
 import com.dreamdisplays.api.display.model.settings.DisplaySettings
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.watchparty.WatchPartyService
-import com.dreamdisplays.api.watchparty.WatchPartySession
 
 /**
  * Default core implementation of [DisplayService].
@@ -49,17 +47,4 @@ class DefaultPlaybackService(
     override fun setMode(displayId: DisplayId, mode: PlaybackMode) = playback.setMode(displayId, mode)
     override fun retry(displayId: DisplayId) = playback.retry(displayId)
     override fun setSpeed(displayId: DisplayId, rate: Double) = playback.setSpeed(displayId, rate)
-}
-
-/** Default core implementation of [WatchPartyService]. */
-class DefaultWatchPartyService(
-    private val watchParty: WatchPartyPort,
-) : WatchPartyService {
-    override fun start(displayId: DisplayId, url: String?): Boolean = watchParty.start(displayId, url)
-    override fun setReady(displayId: DisplayId, ready: Boolean) = watchParty.setReady(displayId, ready)
-    override fun begin(displayId: DisplayId) = watchParty.begin(displayId)
-    override fun end(displayId: DisplayId) = watchParty.end(displayId)
-    override fun restart(displayId: DisplayId) = watchParty.restartSession(displayId)
-    override fun close(displayId: DisplayId) = watchParty.close(displayId)
-    override fun getSession(displayId: DisplayId): WatchPartySession? = watchParty.getSession(displayId)
 }

@@ -11,7 +11,6 @@ import com.dreamdisplays.api.display.model.property.DisplayId
 import com.dreamdisplays.api.media.search.MediaSearchService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.platform.identity.Platform
-import com.dreamdisplays.api.watchparty.WatchPartyService
 
 /**
  * What `Dream Displays` plugs in behind itself. Implemented by the mod itself;
@@ -40,9 +39,6 @@ interface ApiBackend {
 
     /** Limits for how many displays play at once. */
     val budget: DisplayBudget
-
-    /** `Watch party`: shared playback with other players. */
-    val watchParty: WatchPartyService
 
     /** Searches videos on the supported platforms. */
     val search: MediaSearchService

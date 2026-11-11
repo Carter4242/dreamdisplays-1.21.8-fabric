@@ -110,7 +110,7 @@ object ScheduledPlaybackManager {
                 }
             }
 
-            PlaybackMode.LOCAL, PlaybackMode.WATCH_PARTY ->
+            PlaybackMode.LOCAL ->
                 transport.broadcast(display, RemotePlaybackToggle(displayId, action == PlaybackAction.PAUSE))
         }
     }

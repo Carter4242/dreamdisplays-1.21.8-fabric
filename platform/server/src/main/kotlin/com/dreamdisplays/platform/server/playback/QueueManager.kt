@@ -370,7 +370,7 @@ object QueueManager {
             if (head == null) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.virtual || !PlaybackPermissions.queueRuns(display.mode)) continue
-            if (WatchPartyManager.hasSession(displayId) || TimelineManager.isHolding(displayId)) continue
+            if (TimelineManager.isHolding(displayId)) continue
             val timeline = TimelineManager.timelineOf(displayId) ?: continue
             val armed = armedAt[displayId] ?: Long.MIN_VALUE
             // No reported duration (e.g. the plugin reloaded and no client re-reported it): use the playing queue entry's
@@ -395,7 +395,7 @@ object QueueManager {
         if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return
         val queue = queues[display.id] ?: return
         val current = synchronized(queue) { if (queue.hasNext()) queue.current else return }
-        if (WatchPartyManager.hasSession(display.id) || TimelineManager.isHolding(display.id)) return
+        if (TimelineManager.isHolding(display.id)) return
         val timeline = TimelineManager.timelineOf(display.id) ?: return
         val durationMs = timeline.durationMs.takeIf { it > 0L }
             ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)

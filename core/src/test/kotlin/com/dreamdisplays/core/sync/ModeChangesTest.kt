@@ -33,7 +33,7 @@ class ModeChangesTest {
     }
 
     @Test
-    fun `with no report since a restart or a watch party the stored length stays`() {
+    fun `with no report since a restart the stored length stays`() {
         assertEquals(90_000L, ModeChanges.durationAfter(reportedMediaMs = 0, storedMs = 90_000))
     }
 

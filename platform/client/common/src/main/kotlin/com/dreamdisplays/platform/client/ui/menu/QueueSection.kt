@@ -2,7 +2,6 @@ package com.dreamdisplays.platform.client.ui.menu
 
 import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.YouTubeUrls
-import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
 import com.dreamdisplays.media.source.youtube.cache.VideoTitleCache
 import com.dreamdisplays.platform.client.displays.DisplayQueues
@@ -74,7 +73,6 @@ class QueueSection(private val ds: DisplayScreen) {
         val stripRect = UiRect(panel.x + 10, panel.y + 10 + HEADER_H + 8, panel.w - 20, panel.h - StripCardMetrics.QUEUE_PANEL_CHROME_H)
         strip = stripRect
         val notice = when {
-            ds.effectiveMode == PlaybackMode.WATCH_PARTY -> ClientMessage.QUEUE_WATCH_PARTY.text()
             !ds.queueRunsHere -> ClientMessage.QUEUE_NOT_RUNNING.text()
             DisplayQueues.items(ds.uuid).isEmpty() -> ClientMessage.QUEUE_EMPTY.text()
             else -> null
@@ -86,7 +84,7 @@ class QueueSection(private val ds: DisplayScreen) {
                 y += f.lineHeight + 2
             }
             maxScroll = 0
-            if (ds.effectiveMode == PlaybackMode.WATCH_PARTY || !ds.queueRunsHere) return
+            if (!ds.queueRunsHere) return
         }
         val items = DisplayQueues.items(ds.uuid)
         if (items.isEmpty() || stripRect.h < 40) return

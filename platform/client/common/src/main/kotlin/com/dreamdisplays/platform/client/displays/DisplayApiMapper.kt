@@ -29,7 +29,6 @@ internal fun DisplayScreen.toDisplay(): DisplayInfo = DisplayInfo(
     url = videoUrl,
     state = toRuntimeState(),
     mode = effectiveMode,
-    watchParty = watchParty,
     customData = customData,
 )
 

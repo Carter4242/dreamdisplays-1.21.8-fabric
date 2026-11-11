@@ -2,7 +2,6 @@ package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.core.protocol.common.PacketRegistry
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.client.Initializer
@@ -137,11 +136,6 @@ object ForgeV2Networking {
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
                 VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
-            }
-
-            is WatchPartyStart -> VanillaDisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)
-            is WatchPartyControl -> WatchPartyAction.fromWire(packet.action)?.let {
-                VanillaDisplayActions.watchPartyControl(player, packet.id, it, packet.positionMs)
             }
 
             is SetDisplaysEnabled -> PlayerManager.setDisplaysEnabled(player.uuid, packet.enabled)

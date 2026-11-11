@@ -43,9 +43,7 @@ class PlaybackCoreTest {
         owner: Boolean = false,
         admin: Boolean = false,
         locked: Boolean = true,
-        party: Boolean = false,
-        host: Boolean = false,
-    ) = PlaybackContext(mode, owner, admin, locked, party, host)
+    ) = PlaybackContext(mode, owner, admin, locked)
 
     @Test
     fun localControlsRespectLock() {
@@ -62,14 +60,6 @@ class PlaybackCoreTest {
     }
 
     @Test
-    fun watchPartyIsHostOnlyAndForcedLocked() {
-        assertTrue(PlaybackPermissions.canControlWatchParty(ctx(PlaybackMode.WATCH_PARTY, host = true)))
-        assertFalse(PlaybackPermissions.canControlWatchParty(ctx(PlaybackMode.WATCH_PARTY, owner = true, host = false)))
-        assertFalse(PlaybackPermissions.canToggleLock(ctx(PlaybackMode.WATCH_PARTY, admin = true)))
-        assertTrue(PlaybackPermissions.isEffectivelyLocked(PlaybackMode.WATCH_PARTY, baseLocked = false))
-    }
-
-    @Test
     fun broadcastLocksEverythingDown() {
         assertFalse(PlaybackPermissions.canPlayPause(ctx(PlaybackMode.BROADCAST, owner = true)))
         assertFalse(PlaybackPermissions.canChangeQuality(ctx(PlaybackMode.BROADCAST, owner = true)))
@@ -78,9 +68,10 @@ class PlaybackCoreTest {
     }
 
     @Test
-    fun startWatchPartyRespectsLock() {
-        assertTrue(PlaybackPermissions.canStartWatchParty(ctx(PlaybackMode.SYNCED, owner = false, locked = false)))
-        assertFalse(PlaybackPermissions.canStartWatchParty(ctx(PlaybackMode.SYNCED, owner = false, locked = true)))
-        assertTrue(PlaybackPermissions.canStartWatchParty(ctx(PlaybackMode.SYNCED, owner = true, locked = true)))
+    fun modeWireValuesStayPut() {
+        // Stored in the displays table and sent on the wire; 2 was the removed watch-party mode
+        assertEquals(listOf(0, 1, 3), PlaybackMode.entries.map { it.wire })
+        assertEquals(PlaybackMode.BROADCAST, PlaybackMode.fromWire(3))
+        assertEquals(PlaybackMode.LOCAL, PlaybackMode.fromWire(2))
     }
 }

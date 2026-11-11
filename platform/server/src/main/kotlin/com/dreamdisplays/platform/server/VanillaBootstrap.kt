@@ -40,7 +40,6 @@ object VanillaBootstrap {
         DisplayManager.register(storage.loadAllVanillaDisplays())
         DisplayPolicies.defaults = { VanillaServerState.config.settings.policy }
         VanillaPlaybackTransport.bind(server)
-        WatchPartyManager.init(VanillaPlaybackTransport)
         TimelineManager.init(VanillaPlaybackTransport)
         FullscreenBroadcastManager.init(VanillaPlaybackTransport)
         FullscreenBroadcastManager.prepareTimeoutMs = { VanillaServerState.config.settings.fullscreenPrepareTimeoutMs }
@@ -75,7 +74,6 @@ object VanillaBootstrap {
         DisplayManager.clearAll()
         TimelineManager.reset()
         FullscreenBroadcastManager.forgetAll()
-        WatchPartyManager.forgetAll()
         PipPinManager.forgetAll()
         ScheduledPlaybackManager.forgetAll()
         com.dreamdisplays.platform.server.listeners.VanillaPlayerListener.onServerStopped()
@@ -91,7 +89,6 @@ object VanillaBootstrap {
                     server.execute {
                         DisplayManager.updateAllDisplays(server)
                         TimelineManager.tick()
-                        WatchPartyManager.tick()
                         FullscreenBroadcastManager.tick()
                         VanillaProxyBridge.tick(server)
                     }

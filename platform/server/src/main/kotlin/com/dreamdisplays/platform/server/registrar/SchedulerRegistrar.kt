@@ -7,7 +7,6 @@ import com.dreamdisplays.platform.server.meta.Updater
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
-import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.policy.ClientDiagnostics
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
 import com.dreamdisplays.platform.server.utils.PlatformUtil
@@ -41,7 +40,6 @@ object SchedulerRegistrar {
                 }
             }
             step("timeline tick") { TimelineManager.tick() }
-            step("watch party tick") { WatchPartyManager.tick() }
             step("fullscreen tick") { FullscreenBroadcastManager.tick() }
             step("proxy tick") { ProxyBridge.tick() }
             step("diagnostics tick") { ClientDiagnostics.tick() }

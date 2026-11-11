@@ -32,10 +32,7 @@ import com.dreamdisplays.shared.playback.PlaybackContext
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
-import com.dreamdisplays.api.playback.model.WatchPartyAction
-import com.dreamdisplays.api.playback.model.WatchPartySessionState
 import com.dreamdisplays.shared.playback.PlaybackPermissions
-import com.dreamdisplays.api.watchparty.WatchPartySession
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.client.net.ProtocolRouter
@@ -183,27 +180,17 @@ class DisplayScreen(
     /** Legacy mirror of [mode]; true only for [PlaybackMode.SYNCED]. */
     val isSync: Boolean get() = mode == PlaybackMode.SYNCED
 
-    /** Live watch-party session over this display, or null when none is running. */
-    @Volatile
-    var watchParty: WatchPartySession? = null; internal set
-
-    /** Whether the local player has marked themselves ready in the current session (UI toggle state). */
-    @Volatile
-    var localWatchPartyReady: Boolean = false; internal set
-
     /** Suggestions-panel state; survives menu close/reopen. */
     val suggestionsController = SuggestionsController()
 
-    /** The effective mode the player experiences — `WATCH_PARTY` while a session is live. */
-    val effectiveMode: PlaybackMode get() = if (watchParty != null) PlaybackMode.WATCH_PARTY else mode
+    /** The effective mode the player experiences. */
+    val effectiveMode: PlaybackMode get() = mode
 
     private fun ctx(): PlaybackContext = PlaybackContext(
         mode = effectiveMode,
         isOwner = owner,
         isAdmin = isAdmin,
         isLocked = PlaybackPermissions.isEffectivelyLocked(effectiveMode, lockedForMe()),
-        hasActiveParty = watchParty != null,
-        isPartyHost = watchParty?.isHost == true,
     )
 
     private fun lockedForMe(): Boolean = when (access) {
@@ -225,17 +212,16 @@ class DisplayScreen(
     /** Speed of the server timeline this display follows (1 until a timeline says otherwise). */
     private var serverSpeed: Double = PlaybackSpeed.NORMAL
 
-    /** The speed this display plays at: its shared timeline's, the viewer's own when Local, 1 in a watch party. */
+    /** The speed this display plays at: its shared timeline's, or the viewer's own when Local. */
     val playbackSpeed: Double
         get() = when {
-            watchParty != null -> PlaybackSpeed.NORMAL
             requiresServerTimeline() -> serverSpeed
             else -> localSpeed
         }
 
     /**
-     * True if the local player may change the speed here: whoever may play / pause, never in a watch party or on a
-     * live stream, and on a shared timeline only when the server keeps a speed for it.
+     * True if the local player may change the speed here: whoever may play / pause, never on a live stream, and on
+     * a shared timeline only when the server keeps a speed for it.
      */
     val canChangeSpeedHere: Boolean
         get() = PlaybackPermissions.canChangeSpeed(ctx()) && !isLive &&
@@ -279,17 +265,11 @@ class DisplayScreen(
     /** True if the local player may open the popout here — false in Broadcast for everyone. */
     val canPopoutHere: Boolean get() = PlaybackPermissions.canPopout(ctx())
 
-    /** True if the base lock may be toggled (impossible in Watch Party / Broadcast). */
+    /** True if the base lock may be toggled (impossible in Broadcast). */
     val canToggleLockHere: Boolean get() = PlaybackPermissions.canToggleLock(ctx())
 
     /** True if the base mode may be switched. */
     val canSetModeHere: Boolean get() = PlaybackPermissions.canSetMode(ctx())
-
-    /** True if the local player may start a watch party here. */
-    val canStartWatchPartyHere: Boolean get() = PlaybackPermissions.canStartWatchParty(ctx())
-
-    /** True if the local player may close the active watch party. */
-    val canCloseWatchPartyHere: Boolean get() = PlaybackPermissions.canCloseWatchParty(ctx())
 
     /** True when the server runs queues and this display's mode lets the queue advance. */
     val queueRunsHere: Boolean get() = DisplayQueues.supported && PlaybackPermissions.queueRuns(effectiveMode)
@@ -304,7 +284,7 @@ class DisplayScreen(
     fun canRemoveFromQueueHere(isAdder: Boolean): Boolean =
         DisplayQueues.supported && PlaybackPermissions.canRemoveFromQueue(ctx(), isAdder)
 
-    /** The lock the player actually sees: base lock, or forced on by Watch Party / Broadcast. */
+    /** The lock the player actually sees: base lock, or forced on by Broadcast. */
     val effectiveLocked: Boolean get() = PlaybackPermissions.isEffectivelyLocked(effectiveMode, lockedForMe())
 
     private val textureResource = DisplayTextureResource(uuid)
@@ -511,7 +491,7 @@ class DisplayScreen(
     /** The video [savedTimeNanos] was saved in (null: unknown, from older settings). */
     var savedTimeUrl: String? = null
 
-    /** Follows the server-authoritative timeline (Synced / Broadcast / watch party). */
+    /** Follows the server-authoritative timeline (Synced / Broadcast). */
     internal val timelineFollower = TimelineFollower(this)
 
     /** Preloads this display's next queue entry shortly before the current video ends. */
@@ -527,7 +507,6 @@ class DisplayScreen(
     internal fun onMediaGenChanged() = media.reportDuration()
 
     private val media = DisplayMediaController(this)
-    private val watchPartyController = WatchPartyController(this)
     private val frameUploader = DisplayFrameUploader(uuid)
     private val mediaPlayer: MediaPlayer? get() = media.player
 
@@ -808,7 +787,7 @@ class DisplayScreen(
      */
     internal fun rebuildPlayerInPlace() {
         val url = videoUrl?.takeIf { it.isNotEmpty() } ?: return
-        if (mode == PlaybackMode.LOCAL && watchParty == null) savedTimeNanos = currentTimeNanos
+        if (mode == PlaybackMode.LOCAL) savedTimeNanos = currentTimeNanos
         loadVideoInternal(url, lang ?: "", preservePausedState = true)
         // Like a retry: the new player's follower starts without a timeline
         if (requiresServerTimeline()) sendRequestSyncPacket()
@@ -909,7 +888,7 @@ class DisplayScreen(
     }
 
     private fun requiresServerTimeline(): Boolean =
-        mode == PlaybackMode.SYNCED || mode == PlaybackMode.BROADCAST || watchParty != null
+        mode == PlaybackMode.SYNCED || mode == PlaybackMode.BROADCAST
 
     /** Sizes the GPU texture buffers for the current dimensions and quality before the first frame. */
     internal fun prepareTextureDimensions() {
@@ -1057,7 +1036,6 @@ class DisplayScreen(
 
     /** Applies the authoritative server timeline: matches pause state and corrects drift. */
     fun updateData(packet: DisplaySync) {
-        if (watchParty != null) return
         // The next queue entry's start, scheduled at the current video's end: kept for that instant
         if (media.onTimelineWhileSwitching(packet)) return
         serverSpeed = PlaybackSpeed.clamp(packet.rate)
@@ -1086,46 +1064,6 @@ class DisplayScreen(
     /** The current media player, for the karaoke track tap (it changes with every video). */
     internal val karaokePlayer: MediaPlayer? get() = mediaPlayer
 
-    /** Applies watch-party snapshot: tracks session, loads host video, follows timeline. */
-    fun updateWatchParty(packet: WatchPartyState) {
-        if (packet.sessionId.isEmpty()) {
-            watchParty = null
-            localWatchPartyReady = false
-            sendRequestSyncPacket() // Pull the base-mode timeline back
-            return
-        }
-        if (watchParty?.sessionId != packet.sessionId) localWatchPartyReady = false
-        val localId = Minecraft.getInstance().player?.gameProfile?.id
-        val state = WatchPartySessionState.fromWire(packet.state)
-        watchParty = WatchPartySession(
-            sessionId = packet.sessionId,
-            state = state,
-            isHost = localId != null && localId == packet.hostId,
-            hostName = packet.hostName,
-            readyCount = packet.readyCount,
-            nearbyCount = packet.nearbyCount,
-            positionMs = packet.positionMs,
-            // Both stamps are server-time, so this is immune to client / server wall-clock skew
-            countdownRemainingMs = (packet.countdownStartEpochMs - packet.serverTimeMs)
-                .takeIf { state == WatchPartySessionState.COUNTDOWN && it > 0 },
-        )
-
-        if (packet.url.isNotEmpty() && packet.url != videoUrl) {
-            // The party's video replaces a screen share: its picture goes at once, as on every other URL change
-            if (ScreenShareViewerRules.clearOnUrlChange(videoUrl, packet.url)) {
-                dropPrivatePicture("watch party video", closeSurfaces = false, nextVideo = true)
-            }
-            loadVideo(packet.url, packet.lang)
-        }
-
-        when (state) {
-            WatchPartySessionState.PLAYING, WatchPartySessionState.PAUSED ->
-                timelineFollower.apply(packet.positionMs, packet.serverTimeMs, packet.paused, loop = false)
-
-            else -> if (!isPaused && videoStarted) applyServerPaused(true)
-        }
-    }
-
     /** Forces the pause state and starts playback; used by the sync controller before the video has started. */
     internal fun beginPlaybackPaused(desiredPaused: Boolean) {
         paused = desiredPaused
@@ -1146,7 +1084,7 @@ class DisplayScreen(
     /** True when a resume would continue the open session instantly rather than restart the stream. */
     internal fun resumesWarm(): Boolean = mediaPlayer?.resumesWarm() == true
 
-    /** True while this display follows a server timeline (Synced / Broadcast / watch party). */
+    /** True while this display follows a server timeline (Synced / Broadcast). */
     internal val followsServerTimeline: Boolean get() = requiresServerTimeline()
 
     /** A preloaded queue entry is waiting for its scheduled start (the current video plays on until then). */
@@ -1496,7 +1434,7 @@ class DisplayScreen(
 
     /**
      * A server-scheduled play / pause of a Local display (`RemotePlaybackToggle`): applied for every viewer, whatever
-     * they may control themselves, and never echoed upstream. Ignored while a timeline or watch party drives it.
+     * they may control themselves, and never echoed upstream. Ignored while a timeline drives it.
      */
     internal fun applyScheduledPaused(paused: Boolean) {
         if (scheduledToggleApplies(effectiveMode)) applyPausedLocal(paused)
@@ -1536,20 +1474,9 @@ class DisplayScreen(
             PlaybackMode.SYNCED -> Initializer.sendPacket(
                 PlaybackCommand(uuid, action.wire, positionMs, rate, ServerMediaGens.onScreen(uuid)),
             )
-            PlaybackMode.WATCH_PARTY -> if (watchParty?.isHost == true) action.toWatchPartyAction()?.let {
-                Initializer.sendPacket(WatchPartyControl(uuid, it.wire, positionMs))
-            }
 
             else -> {}
         }
-    }
-
-    private fun PlaybackAction.toWatchPartyAction(): WatchPartyAction? = when (this) {
-        PlaybackAction.PLAY -> WatchPartyAction.RESUME
-        PlaybackAction.PAUSE -> WatchPartyAction.PAUSE
-        PlaybackAction.SEEK -> WatchPartyAction.SEEK
-        PlaybackAction.RESTART -> WatchPartyAction.RESTART
-        PlaybackAction.SPEED -> null // Watch parties play at normal speed
     }
 
     /** Seeks [seconds] seconds relative to the current playback position (negative = backward). */
@@ -1595,7 +1522,7 @@ class DisplayScreen(
     }
 
     private fun captureReplayCache() {
-        if (mode != PlaybackMode.LOCAL || watchParty != null || isLive) return
+        if (mode != PlaybackMode.LOCAL || isLive) return
         val url = videoUrl?.takeIf(ScreenSharePrivacy::maySnapshot) ?: return
         val mp = mediaPlayer ?: return
         val position = currentTimeNanos
@@ -1648,29 +1575,8 @@ class DisplayScreen(
     /** Switches the persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`); the server validates and echoes. */
     fun requestMode(newMode: PlaybackMode) {
         if (!canSetModeHere) return
-        if (PlaybackMode.isBaseMode(newMode)) {
-            Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L, ServerMediaGens.onScreen(uuid)))
-        }
+        Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L, ServerMediaGens.onScreen(uuid)))
     }
-
-    /** Starts a watch party here with the current (or given) video; the local player becomes host. */
-    fun startWatchParty(url: String = videoUrl ?: "", lang: String = this.lang ?: "") =
-        watchPartyController.start(url, lang)
-
-    /** Marks the local player ready / not-ready in the active watch party. */
-    fun setWatchPartyReady(ready: Boolean) = watchPartyController.setReady(ready)
-
-    /** Host action: starts the countdown for the active watch party. */
-    fun beginWatchParty() = watchPartyController.begin()
-
-    /** Host action: ends the active watch party (freezes on the final frame). */
-    fun endWatchParty() = watchPartyController.end()
-
-    /** Host action: restarts an ended watch party from preparation. */
-    fun restartWatchParty() = watchPartyController.restart()
-
-    /** Closes the watch party, handing the display back to its base mode (host / owner / admin). */
-    fun closeWatchParty() = watchPartyController.close()
 
     /** Seeks to the saved playback position after reconnection; only meaningful for Local displays. */
     fun restoreSavedTime() {
@@ -1692,7 +1598,7 @@ class DisplayScreen(
     /** Whether this display can be parked warm when it leaves render distance (Local VOD on the
      *  in-process-libav decoder), rather than torn down and rebuilt from a snapshot on return. */
     fun canWarmPark(): Boolean =
-        mode == PlaybackMode.LOCAL && watchParty == null && !isLive && ScreenSharePrivacy.maySnapshot(videoUrl) &&
+        mode == PlaybackMode.LOCAL && !isLive && ScreenSharePrivacy.maySnapshot(videoUrl) &&
                 mediaPlayer?.canPark() == true
 
     /** Parks the display warm: stops rendering/advancing but keeps the decoder + audio open and frozen. */
@@ -1725,7 +1631,7 @@ class DisplayScreen(
 
     /** Takes a one-shot replay bootstrap matching [url] and this screen's saved restore position. */
     internal fun takeReplayBootstrap(url: String): MediaPlayer.ReplayBootstrap? {
-        if (mode != PlaybackMode.LOCAL || watchParty != null || savedTimeNanos <= 0L) return null
+        if (mode != PlaybackMode.LOCAL || savedTimeNanos <= 0L) return null
         return DisplayReplayCache.take(uuid, url, savedTimeNanos)
     }
 
@@ -1761,7 +1667,7 @@ class DisplayScreen(
         refreshPrepareState(distance)
         tickPolicyGain()
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
-        syncPlaybackSpeed() // Follows mode / watch-party changes
+        syncPlaybackSpeed() // Follows mode changes
         timelineFollower.tick()
         media.noteProgress()
         queuePreloader.tick()

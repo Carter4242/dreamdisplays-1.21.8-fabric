@@ -1,23 +1,16 @@
 package com.dreamdisplays.platform.server.proxy
 
 import com.dreamdisplays.shared.playback.FullscreenMode
-import com.dreamdisplays.api.playback.model.WatchPartySessionState
-import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyState
 import com.dreamdisplays.core.protocol.proxy.packets.ApplyFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.ApplyNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.BackendDisplayIndex
 import com.dreamdisplays.core.protocol.proxy.packets.DisplayIndexEntry
 import com.dreamdisplays.core.protocol.proxy.packets.BackendHello
 import com.dreamdisplays.core.protocol.proxy.packets.ClockProbe
 import com.dreamdisplays.core.protocol.proxy.packets.ClockReply
-import com.dreamdisplays.core.protocol.proxy.packets.CloseNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.DisplayTokenResolved
-import com.dreamdisplays.core.protocol.proxy.packets.JoinNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.ListNetworkSessions
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkFullscreenAck
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkSessionList
-import com.dreamdisplays.core.protocol.proxy.packets.NetworkWatchPartyState
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerFullscreenMinimized
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerLeftNetwork
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerReady
@@ -29,13 +22,11 @@ import com.dreamdisplays.core.protocol.proxy.packets.ProxyWelcome
 import com.dreamdisplays.core.protocol.proxy.packets.ReplayForPlayer
 import com.dreamdisplays.core.protocol.proxy.packets.ResolveDisplayToken
 import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.StopNetworkFullscreen
 import com.dreamdisplays.platform.client.net.ProxyPayload
 import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
-import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.VanillaPermissions
 import com.dreamdisplays.platform.server.utils.net.VanillaNetworking
 import net.minecraft.server.MinecraftServer
@@ -81,8 +72,6 @@ object VanillaProxyBridge {
         this.clockSyncIntervalMs = clockSyncIntervalSeconds.coerceAtLeast(1) * 1_000L
         helloSent.set(false)
         ProxyClock.reset()
-        WatchPartyManager.onVirtualBroadcast = { displayId, snapshot -> relayWatchPartyState(displayId, snapshot) }
-        WatchPartyManager.onVirtualClosed = { partyId -> sendViaAnyPlayer(CloseNetworkWatchParty(partyId)) }
         FullscreenBroadcastManager.onMinimizedChanged = { sessionId, playerId, minimized ->
             sendViaAnyPlayer(PlayerFullscreenMinimized(sessionId, playerId.toString(), minimized))
         }
@@ -197,32 +186,6 @@ object VanillaProxyBridge {
         send(player, StopNetworkFullscreen(sessionId))
     }
 
-    /** Requests a new network-wide watch party, hosted by [player]. The proxy replies with [ApplyNetworkWatchParty]. */
-    fun startNetworkWatchParty(player: ServerPlayer, url: String, lang: String) {
-        send(player, StartNetworkWatchParty(hostId = player.uuid.toString(), url = url, lang = lang))
-    }
-
-    private fun relayWatchPartyState(displayId: UUID, snapshot: WatchPartyState) {
-        sendViaAnyPlayer(
-            NetworkWatchPartyState(
-                partyId = snapshot.sessionId,
-                sharedDisplayId = displayId.toString(),
-                state = snapshot.state,
-                hostId = snapshot.hostId.toString(),
-                hostName = snapshot.hostName,
-                url = snapshot.url,
-                lang = snapshot.lang,
-                readyCount = snapshot.readyCount,
-                nearbyCount = snapshot.nearbyCount,
-                countdownStartEpochMs = ProxyClock.toProxy(snapshot.countdownStartEpochMs),
-                positionMs = snapshot.positionMs,
-                serverTimeMs = ProxyClock.toProxy(snapshot.serverTimeMs),
-                durationMs = snapshot.durationMs,
-                paused = snapshot.paused,
-            ),
-        )
-    }
-
     private fun resolveNetworkTargets(server: MinecraftServer, targetsRaw: String): Set<UUID> {
         val online = server.playerList.players
         if (targetsRaw.isBlank()) return online.map { it.uuid }.toSet()
@@ -331,72 +294,6 @@ object VanillaProxyBridge {
             is PlayerLeftNetwork -> {
                 val uuid = runCatching { UUID.fromString(packet.playerId) }.getOrNull() ?: return
                 TransferTracker.clear(uuid)
-            }
-
-            is ApplyNetworkWatchParty -> {
-                val displayId = runCatching { UUID.fromString(packet.sharedDisplayId) }.getOrNull() ?: return
-                val hostId = runCatching { UUID.fromString(packet.hostId) }.getOrNull() ?: return
-                if (!WatchPartyManager.startVirtual(displayId, hostId, packet.url, packet.lang)) {
-                    logger.warn(
-                        "Could not start network watch party '{}' (no world loaded yet, or already live?)",
-                        packet.partyId
-                    )
-                }
-            }
-
-            is JoinNetworkWatchParty -> {
-                val displayId = runCatching { UUID.fromString(packet.sharedDisplayId) }.getOrNull() ?: return
-                val playerId = runCatching { UUID.fromString(packet.playerId) }.getOrNull() ?: return
-                val hostId = runCatching { UUID.fromString(packet.hostId) }.getOrNull() ?: return
-                if (WatchPartyManager.isVirtual(displayId)) {
-                    WatchPartyManager.addMember(displayId, playerId)
-                } else {
-                    val display = NetworkWatchPartyRelay.display(packet.partyId)
-                        ?: WatchPartyManager.createFollowerDisplay(displayId, hostId)?.also {
-                            NetworkWatchPartyRelay.registerDisplay(packet.partyId, it)
-                        }
-                    NetworkWatchPartyRelay.addMember(packet.partyId, playerId)
-                    if (display != null && playerId in server.playerList.players.map { it.uuid }) {
-                        WatchPartyManager.sendFollowerDisplayInfo(display, playerId)
-                    }
-                }
-            }
-
-            is NetworkWatchPartyState -> {
-                val displayId = runCatching { UUID.fromString(packet.sharedDisplayId) }.getOrNull() ?: return
-                val hostId = runCatching { UUID.fromString(packet.hostId) }.getOrNull() ?: return
-                val wire = WatchPartyState(
-                    id = displayId,
-                    sessionId = packet.partyId,
-                    state = packet.state,
-                    hostId = hostId,
-                    hostName = packet.hostName,
-                    url = packet.url,
-                    lang = packet.lang,
-                    readyCount = packet.readyCount,
-                    nearbyCount = packet.nearbyCount,
-                    countdownStartEpochMs = ProxyClock.toLocal(packet.countdownStartEpochMs),
-                    positionMs = packet.positionMs,
-                    serverTimeMs = ProxyClock.toLocal(packet.serverTimeMs),
-                    durationMs = packet.durationMs,
-                    paused = packet.paused,
-                )
-                NetworkWatchPartyRelay.localMembers(packet.partyId).forEach { memberId ->
-                    WatchPartyManager.sendToMember(memberId, wire)
-                }
-            }
-
-            is CloseNetworkWatchParty -> {
-                if (!WatchPartyManager.closeVirtual(packet.partyId)) {
-                    val (display, members) = NetworkWatchPartyRelay.remove(packet.partyId) ?: return
-                    val closing = WatchPartyState(
-                        id = display.id, sessionId = "", state = WatchPartySessionState.ENDED.wire,
-                    )
-                    members.forEach { memberId ->
-                        WatchPartyManager.sendToMember(memberId, closing)
-                        WatchPartyManager.sendToMember(memberId, DisplayDelete(display.id))
-                    }
-                }
             }
 
             is ResolveDisplayToken -> {

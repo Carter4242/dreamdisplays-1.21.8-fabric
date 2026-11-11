@@ -39,9 +39,6 @@ import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
 import com.dreamdisplays.core.protocol.common.packets.SetVideo
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyControl
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyStart
-import com.dreamdisplays.core.protocol.common.packets.WatchPartyState
 import kotlin.reflect.KClass
 
 /**
@@ -65,9 +62,8 @@ enum class PacketType(
     CLEAR_CACHE(11, ClearCache::class, PacketDirection.SERVER_TO_CLIENT),
     PLAYBACK_COMMAND(12, PlaybackCommand::class, PacketDirection.CLIENT_TO_SERVER),
     SET_MODE(13, SetMode::class, PacketDirection.CLIENT_TO_SERVER),
-    WATCH_PARTY_START(14, WatchPartyStart::class, PacketDirection.CLIENT_TO_SERVER),
-    WATCH_PARTY_CONTROL(15, WatchPartyControl::class, PacketDirection.CLIENT_TO_SERVER),
-    WATCH_PARTY_STATE(16, WatchPartyState::class, PacketDirection.SERVER_TO_CLIENT),
+
+    // 14-16 are retired ([RetiredPackets]); never reuse them
     FULLSCREEN_STATE(17, FullscreenState::class, PacketDirection.SERVER_TO_CLIENT),
     FULLSCREEN_ACK(18, FullscreenAck::class, PacketDirection.CLIENT_TO_SERVER),
     RADIUS_PREVIEW(19, RadiusPreview::class, PacketDirection.SERVER_TO_CLIENT),
@@ -114,6 +110,7 @@ enum class PacketType(
 
         init {
             require(byId.size == entries.size) { "Duplicate protocol packet type ids." }
+            require(entries.none { it.id in RetiredPackets.ids }) { "A packet type reuses a retired id." }
         }
     }
 }

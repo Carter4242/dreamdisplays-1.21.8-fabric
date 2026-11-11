@@ -3,19 +3,15 @@
 package com.dreamdisplays.core.protocol.proxy
 
 import com.dreamdisplays.core.protocol.proxy.packets.ApplyFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.ApplyNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.BackendDisplayIndex
 import com.dreamdisplays.core.protocol.proxy.packets.BackendHello
 import com.dreamdisplays.core.protocol.proxy.packets.ClockProbe
 import com.dreamdisplays.core.protocol.proxy.packets.ClockReply
-import com.dreamdisplays.core.protocol.proxy.packets.CloseNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.DisplayTokenResolved
 import com.dreamdisplays.core.protocol.proxy.packets.ProxyPacket
-import com.dreamdisplays.core.protocol.proxy.packets.JoinNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.ListNetworkSessions
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkFullscreenAck
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkSessionList
-import com.dreamdisplays.core.protocol.proxy.packets.NetworkWatchPartyState
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerFullscreenMinimized
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerLeftNetwork
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerReady
@@ -24,7 +20,6 @@ import com.dreamdisplays.core.protocol.proxy.packets.ProxyWelcome
 import com.dreamdisplays.core.protocol.proxy.packets.ReplayForPlayer
 import com.dreamdisplays.core.protocol.proxy.packets.ResolveDisplayToken
 import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.StopNetworkFullscreen
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
@@ -76,11 +71,6 @@ object ProxyPacketRegistry {
         Entry(ProxyPacketType.REPLAY_FOR_PLAYER, ReplayForPlayer::class, ReplayForPlayer.serializer()),
         Entry(ProxyPacketType.PLAYER_TRANSFERRING, PlayerTransferring::class, PlayerTransferring.serializer()),
         Entry(ProxyPacketType.PLAYER_LEFT_NETWORK, PlayerLeftNetwork::class, PlayerLeftNetwork.serializer()),
-        Entry(ProxyPacketType.START_NETWORK_WATCH_PARTY, StartNetworkWatchParty::class, StartNetworkWatchParty.serializer()),
-        Entry(ProxyPacketType.APPLY_NETWORK_WATCH_PARTY, ApplyNetworkWatchParty::class, ApplyNetworkWatchParty.serializer()),
-        Entry(ProxyPacketType.JOIN_NETWORK_WATCH_PARTY, JoinNetworkWatchParty::class, JoinNetworkWatchParty.serializer()),
-        Entry(ProxyPacketType.NETWORK_WATCH_PARTY_STATE, NetworkWatchPartyState::class, NetworkWatchPartyState.serializer()),
-        Entry(ProxyPacketType.CLOSE_NETWORK_WATCH_PARTY, CloseNetworkWatchParty::class, CloseNetworkWatchParty.serializer()),
         Entry(ProxyPacketType.RESOLVE_DISPLAY_TOKEN, ResolveDisplayToken::class, ResolveDisplayToken.serializer()),
         Entry(ProxyPacketType.DISPLAY_TOKEN_RESOLVED, DisplayTokenResolved::class, DisplayTokenResolved.serializer()),
         Entry(ProxyPacketType.PLAYER_FULLSCREEN_MINIMIZED, PlayerFullscreenMinimized::class, PlayerFullscreenMinimized.serializer()),

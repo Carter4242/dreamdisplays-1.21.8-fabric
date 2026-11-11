@@ -168,7 +168,6 @@ object TimelineManager {
         val now = transport.nowMs()
         return timelines.mapNotNull { (displayId, timeline) ->
             val display = DisplayManager.getDisplayData(displayId) ?: return@mapNotNull null
-            if (WatchPartyManager.hasSession(displayId)) return@mapNotNull null
             val mediaMs = durations.mediaMsOf(displayId, display.url)
             TimelineRecords.save(displayId, display.url, timeline, startHolds.containsKey(displayId), mediaMs, now)
         }
@@ -199,7 +198,7 @@ object TimelineManager {
         display: DisplayData, senderId: UUID, action: PlaybackAction, positionMs: Long,
         rate: Double = PlaybackSpeed.NORMAL,
     ): Boolean {
-        if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(display.id)) return false
+        if (display.mode != PlaybackMode.SYNCED) return false
         val ctx = PlaybackContexts.of(
             display, senderId, transport.isAdmin(senderId),
             { transport.isTerritoryMember(display, senderId) },
@@ -369,7 +368,6 @@ object TimelineManager {
      */
     fun playNow(display: DisplayData): Boolean {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
-        if (WatchPartyManager.hasSession(display.id)) return false
         val current = timelines[display.id] ?: return false
         if (!current.paused) return false
         release(display, transport.nowMs())
@@ -382,7 +380,6 @@ object TimelineManager {
      */
     fun parkAtStart(display: DisplayData): Boolean {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
-        if (WatchPartyManager.hasSession(display.id)) return false
         val now = transport.nowMs()
         startHolds.remove(display.id)
         val current = ensureTimeline(display) ?: return false
@@ -402,7 +399,6 @@ object TimelineManager {
      */
     fun resumeAfterPreparation(display: DisplayData) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
-        if (WatchPartyManager.hasSession(display.id)) return
         startWhenReady(display, transport.nowMs() + resumeHoldMs())
     }
 
@@ -462,7 +458,7 @@ object TimelineManager {
         }
         val now = transport.nowMs()
         // The length viewers reported for the video it holds now (in any mode: it may have changed while Local), else
-        // the one stored for it (nobody reported since a restart or a watch party)
+        // the one stored for it (nobody reported since a restart)
         val reportedMs = durations.mediaMsOf(display.id, display.url)
         val durationMs = ModeChanges.durationAfter(reportedMs, durationMsOf(display))
         display.duration = durationMs.takeIf { it > 0L }?.let { it * 1_000_000L }
@@ -560,7 +556,7 @@ object TimelineManager {
         ReadinessTracker.forgetHeldStates(display.id)
     }
 
-    /** The authoritative timeline of [displayId], or null when it has none (`LOCAL`, watch party, unknown). */
+    /** The authoritative timeline of [displayId], or null when it has none (`LOCAL`, unknown). */
     fun timelineOf(displayId: UUID): Timeline? = timelines[displayId]
 
     /** True while [displayId] sits in a start hold (paused, about to start by itself). */
@@ -605,8 +601,8 @@ object TimelineManager {
     /**
      * Restarts every playing display that reaches the end of its video with nothing queued from 0, for everyone,
      * scheduled at the end instant ([QueueTiming.loopRestartAtMs]); clients hold the last frame at end of stream and
-     * never loop a shared display themselves. A display whose queue moves on at the end, a watch party or a start hold
-     * is left alone; a fullscreen session of it that does not loop ends there. Called every couple of ticks.
+     * never loop a shared display themselves. A display whose queue moves on at the end or a start hold is left
+     * alone; a fullscreen session of it that does not loop ends there. Called every couple of ticks.
      */
     fun tickEnds() {
         if (timelines.isEmpty()) return
@@ -624,7 +620,7 @@ object TimelineManager {
             val durationMs = knownDurationMs(display, timeline)
             if (wrappedUnseen(display, timeline, now, durationMs)) continue
             val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, durationMs) ?: continue
-            if (WatchPartyManager.hasSession(displayId) || QueueManager.advancesAtEnd(display)) continue
+            if (QueueManager.advancesAtEnd(display)) continue
             // A fullscreen session that does not loop is over at this end; the display itself starts over as usual
             FullscreenBroadcastManager.endNonLoopingSessions(displayId)
             // Late end-of-stream loops from older clients around this end are not seeks
@@ -653,8 +649,8 @@ object TimelineManager {
         }
         playThroughs[display.id] = timeline to current
         if (!LoopWraps.missedWrap(previous, current)) return false
-        // The queue moves on by itself after a missed end (advanceDue counts past ends); a party runs its own
-        if (WatchPartyManager.hasSession(display.id) || QueueManager.advancesAtEnd(display)) return false
+        // The queue moves on by itself after a missed end (advanceDue counts past ends)
+        if (QueueManager.advancesAtEnd(display)) return false
         FullscreenBroadcastManager.endNonLoopingSessions(display.id)
         endOfStream.onVideoChanged(display.id, now)
         runCatching { onLoopRestart(display) }
@@ -729,7 +725,7 @@ object TimelineManager {
                 continue
             }
             val display = DisplayManager.getDisplayData(displayId) ?: continue
-            if (display.mode != PlaybackMode.SYNCED || WatchPartyManager.hasSession(displayId) ||
+            if (display.mode != PlaybackMode.SYNCED ||
                 DisplayFollowers.watched(transport.nearbyPlayerIds(display), extraReceivers(displayId))
             ) {
                 emptySince.remove(displayId)
@@ -786,10 +782,6 @@ object TimelineManager {
     private fun releaseStartHolds(now: Long) {
         for ((displayId, startAt) in startHolds) {
             if (now < startAt && !nobodyToWaitFor(displayId)) continue
-            if (WatchPartyManager.hasSession(displayId)) {
-                startHolds.remove(displayId)
-                continue
-            }
             val display = DisplayManager.getDisplayData(displayId)
             if (display == null || timelines[displayId] == null) {
                 startHolds.remove(displayId)
@@ -813,7 +805,6 @@ object TimelineManager {
     private fun durationMsOf(display: DisplayData): Long = display.duration?.let { it / 1_000_000L } ?: 0L
 
     private fun ensureTimeline(display: DisplayData): Timeline? {
-        if (WatchPartyManager.hasSession(display.id)) return null
         if (!EmptyDisplays.hasVideo(display.url)) {
             timelines.remove(display.id)
             return null

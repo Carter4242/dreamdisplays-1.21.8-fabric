@@ -8,9 +8,6 @@ enum class ServerFeature(override val wire: String) : WireEnum {
     /** Server supports selecting playback modes. */
     MODES("modes"),
 
-    /** Server supports watch-party sessions. */
-    WATCH_PARTY("watch_party"),
-
     /** Server supports broadcast playback. */
     BROADCAST("broadcast"),
 
@@ -58,7 +55,7 @@ enum class ServerFeature(override val wire: String) : WireEnum {
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
-        val playbackFeatures: List<ServerFeature> = [MODES, WATCH_PARTY, BROADCAST, PLAYBACK_SPEED, DISPLAY_READINESS]
+        val playbackFeatures: List<ServerFeature> = [MODES, BROADCAST, PLAYBACK_SPEED, DISPLAY_READINESS]
 
         /** Playback-related feature tokens for string-based wire protocols. */
         val playbackFeatureWires: List<String> = playbackFeatures.toWire()

@@ -12,9 +12,8 @@ class ScheduledToggleTest {
     }
 
     @Test
-    fun `a scheduled toggle never overrides a timeline or a watch party`() {
+    fun `a scheduled toggle never overrides a timeline`() {
         assertFalse(scheduledToggleApplies(PlaybackMode.SYNCED))
         assertFalse(scheduledToggleApplies(PlaybackMode.BROADCAST))
-        assertFalse(scheduledToggleApplies(PlaybackMode.WATCH_PARTY))
     }
 }

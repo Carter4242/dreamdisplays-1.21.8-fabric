@@ -1,18 +1,14 @@
 package com.dreamdisplays.core.protocol.proxy
 
 import com.dreamdisplays.core.protocol.proxy.packets.ApplyFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.ApplyNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.BackendDisplayIndex
 import com.dreamdisplays.core.protocol.proxy.packets.BackendHello
 import com.dreamdisplays.core.protocol.proxy.packets.ClockProbe
 import com.dreamdisplays.core.protocol.proxy.packets.ClockReply
-import com.dreamdisplays.core.protocol.proxy.packets.CloseNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.DisplayTokenResolved
-import com.dreamdisplays.core.protocol.proxy.packets.JoinNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.ListNetworkSessions
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkFullscreenAck
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkSessionList
-import com.dreamdisplays.core.protocol.proxy.packets.NetworkWatchPartyState
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerFullscreenMinimized
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerLeftNetwork
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerReady
@@ -22,7 +18,6 @@ import com.dreamdisplays.core.protocol.proxy.packets.ProxyWelcome
 import com.dreamdisplays.core.protocol.proxy.packets.ReplayForPlayer
 import com.dreamdisplays.core.protocol.proxy.packets.ResolveDisplayToken
 import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.StopNetworkFullscreen
 import kotlin.reflect.KClass
 
@@ -46,11 +41,8 @@ enum class ProxyPacketType(
     REPLAY_FOR_PLAYER(12, ReplayForPlayer::class, ProxyPacketDirection.PROXY_TO_BACKEND),
     PLAYER_TRANSFERRING(13, PlayerTransferring::class, ProxyPacketDirection.PROXY_TO_BACKEND),
     PLAYER_LEFT_NETWORK(14, PlayerLeftNetwork::class, ProxyPacketDirection.PROXY_TO_BACKEND),
-    START_NETWORK_WATCH_PARTY(15, StartNetworkWatchParty::class, ProxyPacketDirection.BACKEND_TO_PROXY),
-    APPLY_NETWORK_WATCH_PARTY(16, ApplyNetworkWatchParty::class, ProxyPacketDirection.PROXY_TO_BACKEND),
-    JOIN_NETWORK_WATCH_PARTY(17, JoinNetworkWatchParty::class, ProxyPacketDirection.PROXY_TO_BACKEND),
-    NETWORK_WATCH_PARTY_STATE(18, NetworkWatchPartyState::class, ProxyPacketDirection.BIDIRECTIONAL),
-    CLOSE_NETWORK_WATCH_PARTY(19, CloseNetworkWatchParty::class, ProxyPacketDirection.BIDIRECTIONAL),
+
+    // 15-19 are retired ([RETIRED_IDS]); never reuse them
     RESOLVE_DISPLAY_TOKEN(20, ResolveDisplayToken::class, ProxyPacketDirection.BIDIRECTIONAL),
     DISPLAY_TOKEN_RESOLVED(21, DisplayTokenResolved::class, ProxyPacketDirection.BIDIRECTIONAL),
     PLAYER_FULLSCREEN_MINIMIZED(22, PlayerFullscreenMinimized::class, ProxyPacketDirection.BACKEND_TO_PROXY),
@@ -59,8 +51,15 @@ enum class ProxyPacketType(
     companion object {
         private val byId = entries.associateBy { it.id }
 
+        /**
+         * Ids of removed packets (the network watch party: start, apply, join, state, close). Never reuse them; a
+         * receiver drops them as unknown ids.
+         */
+        val RETIRED_IDS: Set<Int> = setOf(15, 16, 17, 18, 19)
+
         init {
             require(byId.size == entries.size) { "Duplicate proxy packet type ids." }
+            require(entries.none { it.id in RETIRED_IDS }) { "A proxy packet type reuses a retired id." }
         }
     }
 }

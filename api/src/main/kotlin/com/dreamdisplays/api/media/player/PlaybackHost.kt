@@ -32,7 +32,7 @@ interface PlaybackHost {
     /** True while the viewer has the display paused. */
     val isPaused: Boolean
 
-    /** Effective playback mode (Watch Party overrides the display's own mode). */
+    /** Effective playback mode. */
     val effectiveMode: PlaybackMode
 
     /**
@@ -42,7 +42,7 @@ interface PlaybackHost {
     val shouldLoopOnEnd: Boolean
 
     /**
-     * True when a server timeline drives this display (Synced, Broadcast, watch party): at the end of the stream the
+     * True when a server timeline drives this display (Synced, Broadcast): at the end of the stream the
      * player then holds its last frame and leaves what comes next (the next queue entry, the timeline's own loop
      * wrap, a pause) to that timeline, never looping or reporting on its own.
      */

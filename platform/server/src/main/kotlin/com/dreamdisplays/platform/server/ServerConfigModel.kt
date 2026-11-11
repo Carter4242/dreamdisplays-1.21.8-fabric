@@ -301,7 +301,6 @@ class PermissionsSection {
     val local = Perm.MENU_LOCAL
     val synced = Perm.MENU_SYNCED
     val broadcast = Perm.MENU_BROADCAST
-    val watchparty = Perm.MENU_WATCHPARTY
     val custom = Perm.MENU_CUSTOM
     val lock = Perm.MENU_LOCK
     val share = Perm.MENU_SHARE

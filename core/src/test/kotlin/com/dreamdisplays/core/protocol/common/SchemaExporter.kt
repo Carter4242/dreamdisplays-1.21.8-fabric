@@ -9,7 +9,7 @@ import java.io.File
 fun generateProtoSchema(): String = ProtoBufSchemaGenerator.generateSchemaText(
     [Envelope.serializer().descriptor] + PacketRegistry.schemaDescriptors,
     packageName = "dreamdisplays.v2",
-)
+) + RetiredPackets.schemaText()
 
 fun normalizeProtoSchema(text: String): String = text.lineSequence()
     .map { it.substringBefore("//").trim() }

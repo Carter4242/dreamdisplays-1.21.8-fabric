@@ -73,7 +73,7 @@ interface Display {
     /** Requested video quality. */
     var quality: VideoQuality
 
-    /** Playback mode: `Local`, `Synced`, `Watch party` or `Broadcast`. */
+    /** Playback mode: `Local`, `Synced` or `Broadcast`. */
     var mode: PlaybackMode
 
     /** Events of this display only. */

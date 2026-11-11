@@ -49,7 +49,7 @@ interface PlaybackService {
     /** Restarts the video for [displayId]. */
     fun restart(displayId: DisplayId)
 
-    /** The effective [PlaybackMode] of [displayId] (`WATCH_PARTY` while a session is live). */
+    /** The [PlaybackMode] of [displayId]. */
     fun getMode(displayId: DisplayId): PlaybackMode
 
     /** Requests a new persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`); the server validates it. */

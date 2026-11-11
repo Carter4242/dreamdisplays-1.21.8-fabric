@@ -5,7 +5,6 @@ import com.dreamdisplays.api.display.model.property.DisplayId
 import com.dreamdisplays.api.display.model.property.DisplayState
 import com.dreamdisplays.api.display.model.settings.DisplaySettings
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.watchparty.WatchPartySession
 
 /**
  * Represents a display that can be rendered on the client.
@@ -30,9 +29,6 @@ data class DisplayInfo(
 
     /** The effective playback mode. */
     val mode: PlaybackMode = PlaybackMode.LOCAL,
-
-    /** The live `Watch party` session over this display, or `null` when none is running. */
-    val watchParty: WatchPartySession? = null,
 
     /** Data addons keep on this display. */
     val customData: Map<String, ByteArray> = emptyMap(),

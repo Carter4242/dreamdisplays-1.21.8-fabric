@@ -69,24 +69,6 @@ interface DisplayExecutor {
     /** Requests playback at [rate] x (see `PlaybackService.setSpeed`). */
     fun setSpeed(displayId: DisplayId, rate: Double): DisplayInfo? = null
 
-    /** Start a `Watch party` session. */
-    fun startWatchParty(displayId: DisplayId, url: String?): DisplayInfo? = null
-
-    /** Set the ready state for a `Watch party` session. */
-    fun setWatchPartyReady(displayId: DisplayId, ready: Boolean): DisplayInfo? = null
-
-    /** Start a `Watch party` session. */
-    fun beginWatchParty(displayId: DisplayId): DisplayInfo? = null
-
-    /** End a `Watch party` session. */
-    fun endWatchParty(displayId: DisplayId): DisplayInfo? = null
-
-    /** Restart a `Watch party` session. */
-    fun restartWatchParty(displayId: DisplayId): DisplayInfo? = null
-
-    /** Close a `Watch party` session. */
-    fun closeWatchParty(displayId: DisplayId): DisplayInfo? = null
-
     companion object {
         val Noop: DisplayExecutor = object : DisplayExecutor {}
     }

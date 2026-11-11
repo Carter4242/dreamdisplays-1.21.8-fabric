@@ -1,16 +1,13 @@
 package com.dreamdisplays.platform.proxy.bungeecord
 
-import com.dreamdisplays.core.protocol.proxy.packets.ApplyNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.BackendDisplayIndex
 import com.dreamdisplays.core.protocol.proxy.packets.BackendHello
 import com.dreamdisplays.core.protocol.proxy.packets.ClockProbe
 import com.dreamdisplays.core.protocol.proxy.packets.ClockReply
-import com.dreamdisplays.core.protocol.proxy.packets.CloseNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.DisplayTokenResolved
 import com.dreamdisplays.core.protocol.proxy.packets.ListNetworkSessions
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkFullscreenAck
 import com.dreamdisplays.core.protocol.proxy.packets.NetworkSessionList
-import com.dreamdisplays.core.protocol.proxy.packets.NetworkWatchPartyState
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerFullscreenMinimized
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerLeftNetwork
 import com.dreamdisplays.core.protocol.proxy.packets.PlayerReady
@@ -21,13 +18,11 @@ import com.dreamdisplays.core.protocol.proxy.packets.ProxyWelcome
 import com.dreamdisplays.core.protocol.proxy.packets.ReplayForPlayer
 import com.dreamdisplays.core.protocol.proxy.packets.ResolveDisplayToken
 import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkFullscreen
-import com.dreamdisplays.core.protocol.proxy.packets.StartNetworkWatchParty
 import com.dreamdisplays.core.protocol.proxy.packets.StopNetworkFullscreen
 import com.dreamdisplays.platform.proxy.NetworkBackendRegistry
 import com.dreamdisplays.platform.proxy.NetworkDisplayIndex
 import com.dreamdisplays.platform.proxy.NetworkFullscreenManager
 import com.dreamdisplays.platform.proxy.NetworkTokenResolutions
-import com.dreamdisplays.platform.proxy.NetworkWatchPartyManager
 import io.github.arnodoelinger.platformweaver.BungeeCordOnly
 import net.md_5.bungee.api.connection.Server
 import net.md_5.bungee.api.event.PlayerDisconnectEvent
@@ -144,29 +139,6 @@ class DreamDisplaysBungeecord : Plugin(), Listener {
                     NetworkFullscreenManager.sessionIdsApplicableTo(serverName, NetworkBackendRegistry.allServerNames())
                 val minimized = NetworkFullscreenManager.minimizedSessionIdsFor(packet.playerId, applicable)
                 sendTo(serverName, ReplayForPlayer(packet.playerId, applicable, minimized))
-            }
-
-            is StartNetworkWatchParty -> {
-                val party = NetworkWatchPartyManager.start(packet, hostServer = serverName)
-                sendTo(
-                    serverName,
-                    ApplyNetworkWatchParty(
-                        party.partyId,
-                        party.sharedDisplayId.toString(),
-                        party.hostId,
-                        party.url,
-                        party.lang
-                    ),
-                )
-            }
-
-            is NetworkWatchPartyState ->
-                NetworkWatchPartyManager.relayTargets(packet.partyId).forEach { name -> sendTo(name, packet) }
-
-            is CloseNetworkWatchParty -> {
-                val targets = NetworkWatchPartyManager.relayTargets(packet.partyId)
-                NetworkWatchPartyManager.stop(packet.partyId)
-                targets.forEach { name -> sendTo(name, packet) }
             }
 
             is ResolveDisplayToken -> {

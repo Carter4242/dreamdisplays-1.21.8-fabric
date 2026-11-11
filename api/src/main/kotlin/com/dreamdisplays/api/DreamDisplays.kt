@@ -8,7 +8,6 @@ import com.dreamdisplays.api.internal.ApiHolder
 import com.dreamdisplays.api.media.search.MediaSearchService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.platform.identity.Platform
-import com.dreamdisplays.api.watchparty.WatchPartyService
 import com.dreamdisplays.api.addon.AddonLifecycle
 
 /**
@@ -78,10 +77,6 @@ object DreamDisplays {
     /** Limits for how many displays play at once. */
     @JvmStatic
     val budget: DisplayBudget get() = backend.budget
-
-    /** `Watch party`: shared playback with other players. */
-    @JvmStatic
-    val watchParty: WatchPartyService get() = backend.watchParty
 
     /** Searches videos on the supported platforms. */
     @JvmStatic

@@ -21,7 +21,7 @@ object ModeChanges {
      * The timeline length (ms, 0: unknown) a display has after a base-mode change: the length its viewers reported for
      * the video it holds now ([reportedMediaMs], media ms, 0: none since the video changed or the server started), else
      * the length it had stored for it ([storedMs], timeline ms: persisted, and kept current in every mode). Only the
-     * stored one is left when nobody reported since a restart or a watch party, and nobody may report again (older
+     * stored one is left when nobody reported since a restart, and nobody may report again (older
      * clients report once, at load).
      */
     fun durationAfter(reportedMediaMs: Long, storedMs: Long): Long =

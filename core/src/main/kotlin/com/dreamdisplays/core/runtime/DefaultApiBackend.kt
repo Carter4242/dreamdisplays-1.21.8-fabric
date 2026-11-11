@@ -11,7 +11,6 @@ import com.dreamdisplays.api.media.search.MediaSearchService
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.platform.identity.Platform
 import com.dreamdisplays.core.services.PlaybackService
-import com.dreamdisplays.api.watchparty.WatchPartyService
 import com.dreamdisplays.api.display.placement.DisplayPlacements
 import com.dreamdisplays.core.addon.AddonManager
 import com.dreamdisplays.core.display.PlacementHub
@@ -24,7 +23,6 @@ import com.dreamdisplays.core.services.keys.DisplayServices
 import com.dreamdisplays.core.services.keys.MediaServices
 import com.dreamdisplays.core.services.keys.PlatformServices
 import com.dreamdisplays.core.services.keys.PlaybackServices
-import com.dreamdisplays.core.services.keys.WatchPartyServices
 
 /** Public [ApiBackend] backed by the internal [ServiceRegistry]; [budget] comes from the platform. */
 class DefaultApiBackend(
@@ -45,7 +43,6 @@ class DefaultApiBackend(
     override val displays: Displays get() = DefaultDisplays(displayService, playbackService, owner = null)
     override val events: Events get() = DefaultEvents(displayService, owner = null, displayId = null)
     override fun session(name: String): Session = DefaultSession(name, displayService, playbackService)
-    override val watchParty: WatchPartyService get() = registry.get(WatchPartyServices.WATCH_PARTY)
     override val search: MediaSearchService get() = registry.get(MediaServices.SEARCH)
     override val resolvers: MediaResolverRegistry get() = registry.get(MediaServices.RESOLVER_REGISTRY)
     override val platform: Platform get() = registry.get(PlatformServices.PLATFORM)

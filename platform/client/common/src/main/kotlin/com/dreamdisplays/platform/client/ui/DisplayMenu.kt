@@ -355,7 +355,7 @@ class DisplayMenu private constructor(
 
         suggestions = addUi(SuggestionsPanel(::onPickSuggested, ds.suggestionsController))
         suggestions.visibleWhen = { !ds.errored && suggestionsRect != null }
-        // Locked / Broadcast / Watch party displays only let the owner / admin change the video, so
+        // Locked / Broadcast displays only let the owner / admin change the video, so
         // the panel shows an "unavailable" notice to everyone else instead of pickable suggestions.
         suggestions.available = { ds.canSetVideoHere }
         // A press on a card's "+" queues it; the card under it must never also play it

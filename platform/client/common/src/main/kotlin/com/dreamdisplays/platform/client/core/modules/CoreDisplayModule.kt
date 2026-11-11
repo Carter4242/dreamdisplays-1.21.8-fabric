@@ -9,7 +9,6 @@ import com.dreamdisplays.core.services.PlaybackPort
 import com.dreamdisplays.core.runtime.DreamDisplaysModule
 import com.dreamdisplays.core.runtime.ModuleContext
 import com.dreamdisplays.core.runtime.register
-import com.dreamdisplays.core.services.WatchPartyPort
 import com.dreamdisplays.core.services.DefaultDisplayService
 import com.dreamdisplays.core.services.DefaultDisplaySystem
 import com.dreamdisplays.platform.client.displays.MinecraftDisplayCommands
@@ -27,7 +26,6 @@ object CoreDisplayModule : DreamDisplaysModule {
         services.register<DisplayLookup>(displaySystem)
         services.register<DisplayMutationPort>(displaySystem)
         services.register<PlaybackPort>(displaySystem)
-        services.register<WatchPartyPort>(displaySystem)
         services.register(DisplayServices.DISPLAY, displayService)
     }
 }

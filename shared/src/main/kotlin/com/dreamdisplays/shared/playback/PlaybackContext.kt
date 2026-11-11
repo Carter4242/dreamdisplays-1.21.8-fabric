@@ -8,6 +8,4 @@ data class PlaybackContext(
     val isOwner: Boolean,
     val isAdmin: Boolean,
     val isLocked: Boolean,
-    val hasActiveParty: Boolean = false,
-    val isPartyHost: Boolean = false,
 )

@@ -4,8 +4,6 @@ package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.playback.model.WatchPartyAction
-import com.dreamdisplays.api.playback.model.WatchPartySessionState
 import com.dreamdisplays.shared.protocol.PacketDirection
 import com.dreamdisplays.core.protocol.common.packets.*
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -14,6 +12,7 @@ import java.util.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class RoundTripTest {
     private val id = UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")
@@ -102,16 +101,21 @@ class RoundTripTest {
     fun playbackModePackets() {
         roundTrip(PlaybackCommand(id, action = PlaybackAction.SEEK.wire, positionMs = 42_000))
         roundTrip(SetMode(id, mode = PlaybackMode.SYNCED.wire))
-        roundTrip(WatchPartyStart(id, "https://youtu.be/abc", "en"))
-        roundTrip(WatchPartyControl(id, action = WatchPartyAction.BEGIN.wire))
-        roundTrip(
-            WatchPartyState(
-                id = id, sessionId = "s-1", state = WatchPartySessionState.COUNTDOWN.wire,
-                hostId = owner, hostName = "Steve", url = "https://youtu.be/abc", lang = "en",
-                readyCount = 3, nearbyCount = 5, countdownStartEpochMs = 1_700_000_003_000,
-                positionMs = 0, serverTimeMs = 1_700_000_000_000, durationMs = 600_000, paused = true,
-            )
-        )
+    }
+
+    @Test
+    fun retiredWatchPartyPacketsAreDropped() {
+        assertEquals(setOf(14, 15, 16), RetiredPackets.ids)
+        assertTrue(PacketType.entries.none { it.id in RetiredPackets.ids })
+        // What an older peer still sends: field 2 (the session id) set
+        val payload = byteArrayOf((2 shl 3 or 2).toByte(), 3) + "s-1".toByteArray()
+        val proto = ProtoBuf { }
+        for (type in RetiredPackets.ids) {
+            val frame = proto.encodeToByteArray(Envelope.serializer(), Envelope(type, payload))
+            assertNull(PacketRegistry.decode(frame))
+            assertNull(PacketRegistry.decode(frame, PacketDirection.CLIENT_TO_SERVER))
+            assertNull(PacketRegistry.decode(frame, PacketDirection.SERVER_TO_CLIENT))
+        }
     }
 
     @Test

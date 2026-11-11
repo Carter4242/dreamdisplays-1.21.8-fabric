@@ -9,7 +9,7 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 
 /**
- * Keeps this display on the server-authoritative timeline (Synced / Broadcast / watch party).
+ * Keeps this display on the server-authoritative timeline (Synced / Broadcast).
  *
  * Packets ([apply]) feed a [TimelineEstimator] (latency-compensated, late-packet tolerant); every client tick
  * ([tick]) projects the server position, compares it with what is actually being heard and shown, and lets a

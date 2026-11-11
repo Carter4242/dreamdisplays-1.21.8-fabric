@@ -10,7 +10,6 @@ import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.playback.ReadinessTracker
-import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import com.dreamdisplays.platform.server.utils.PlatformUtil
@@ -55,7 +54,6 @@ class PlayerListener : Listener {
     fun onPlayerJoin(event: PlayerJoinEvent) {
         val player = event.player
         Scheduler.trackPlayer(player)
-        WatchPartyManager.onPlayerJoin(player.uniqueId)
 
         if (!PlatformUtil.isFolia && !hasValidatedWorld && DisplayManager.getDisplays().isNotEmpty()) {
             hasValidatedWorld = true
@@ -96,7 +94,6 @@ class PlayerListener : Listener {
         // Each step on its own: one failing must not leave the rest of the player's state behind
         quitStep("version") { PlayerManager.removeVersion(event.player) }
         quitStep("handshake") { V2PlayerTracker.clear(id) }
-        quitStep("watch party") { WatchPartyManager.onPlayerQuit(id) }
         quitStep("screen share") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerQuit(id) }
         quitStep("fullscreen") { FullscreenBroadcastManager.onPlayerQuit(id) }
         quitStep("readiness") { ReadinessTracker.forgetPlayer(id) }
@@ -133,7 +130,6 @@ object VanillaPlayerListener {
      * `modRequired` message for vanilla clients when mod detection is enabled.
      */
     fun onJoin(player: ServerPlayer, server: MinecraftServer) {
-        WatchPartyManager.onPlayerJoin(player.uuid)
         if (!hasValidatedWorld && DisplayManager.getDisplays().isNotEmpty()) {
             hasValidatedWorld = true
             // A config with errors may name the wrong base material: checking against it would delete every display
@@ -163,7 +159,6 @@ object VanillaPlayerListener {
     fun onLeave(playerId: UUID) {
         PlayerManager.removePlayer(playerId)
         V2PlayerTracker.clear(playerId)
-        WatchPartyManager.onPlayerQuit(playerId)
         FullscreenBroadcastManager.onPlayerQuit(playerId)
         ReadinessTracker.forgetPlayer(playerId)
         SelectionManager.resetSelection(playerId)

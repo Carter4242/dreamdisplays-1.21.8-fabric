@@ -11,7 +11,6 @@ import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.shared.playback.PlaybackPermissions
-import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.api.ServerApiHost
@@ -26,7 +25,6 @@ import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
-import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
@@ -130,7 +128,7 @@ object DisplayActions {
     /**
      * Takes [displayData]'s video off, with no permission checks (callers check; [actor] is logged): its URL becomes
      * empty and is saved, and everyone who gets its updates (in range, far fullscreen viewers, PiP pinners) is told. Its
-     * clock and length go, a screen share there ends without bringing anything back, and karaoke, a watch party and
+     * clock and length go, a screen share there ends without bringing anything back, and karaoke and
      * fullscreen sessions there end. The queue
      * keeps its entries but does not start them: a skip or a play does. The command form calls this.
      */
@@ -140,8 +138,6 @@ object DisplayActions {
         val previousUrl = displayData.url
         displayData.url = ""
         displayData.lang = ""
-        // A watch party there ends too (its snapshots carry its own video and would bring it straight back)
-        WatchPartyManager.close(displayData)
         if (actor != null) ClientErrorReports.logCommand(
             actor, displayData.id, "clear", null,
             mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl),
@@ -201,7 +197,6 @@ object DisplayActions {
 
     /** A client's request to switch a display's persistent base mode (`LOCAL` / `SYNCED` / `BROADCAST`). */
     fun setMode(player: Player, displayId: UUID, mode: PlaybackMode, positionMs: Long, mediaGen: Long = 0L) {
-        if (!PlaybackMode.isBaseMode(mode)) return
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         // A position on the video the display held before is no place to start this one
         val position = if (MediaGen.matches(mediaGen, displayData.mediaGen)) positionMs else -1L
@@ -277,44 +272,14 @@ object DisplayActions {
         ClientErrorReports.logCommand(player, displayId, name, before?.positionAt(atMs) ?: positionMs, details)
     }
 
-    /** Starts a watch-party session with [player] as host. */
-    fun watchPartyStart(player: Player, displayId: UUID, url: String, lang: String) {
-        val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
-        if (!player.hasPermission(PaperServer.config.permissions.watchparty)) {
-            ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
-            return
-        }
-        if (!MediaUrlPolicy.isAllowed(url)) {
-            logger.warn("Rejected unsafe watch-party URL from ${player.name}: ${url.sanitizedForLog(120)}")
-            return
-        }
-        CustomMediaGate.refusalKey(
-            url,
-            PaperServer.config.settings.customMediaPolicy,
-            player.hasPermission(PaperServer.config.permissions.custom),
-            player.uniqueId,
-        )?.let { return MessageUtil.sendMessage(player, it) }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
-        // A party would take the display over without ending the share or dropping its private picture
-        if (ScreenShareActions.isSharing(displayId)) return
-        WatchPartyManager.start(displayData, player.uniqueId, url, MediaUrlPolicy.sanitizeLang(lang))
-    }
-
-    /** Routes a watch-party control (ready / host action) to the session manager. */
-    fun watchPartyControl(player: Player, displayId: UUID, action: WatchPartyAction, positionMs: Long) {
-        val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
-        WatchPartyManager.control(displayData, player.uniqueId, action, positionMs)
-    }
-
     /** Replies to a client's catch-up request with the current timeline and any live session. */
     fun requestSync(player: Player, displayId: UUID, knownMediaGen: Long = 0L) {
         if (!requestSyncThrottle.tryAcquire(displayId to player.uniqueId, REQUEST_SYNC_COOLDOWN_MS)) return
         resendInfoIfStale(player, displayId, knownMediaGen)
-        // A fullscreen session or preparation answers with its own timeline; the queue and party state still go out
+        // A fullscreen session or preparation answers with its own timeline; the queue state still goes out
         val fullscreen = FullscreenBroadcastManager.sendCurrentTo(displayId, player.uniqueId)
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
         if (!fullscreen) TimelineManager.sendCurrent(displayData, player.uniqueId)
-        WatchPartyManager.sendCurrent(displayData, player.uniqueId)
         QueueManager.sendCurrent(displayData, player.uniqueId)
     }
 
@@ -363,7 +328,6 @@ object DisplayActions {
             PlaybackMode.LOCAL -> PaperServer.config.permissions.local
             PlaybackMode.SYNCED -> PaperServer.config.permissions.synced
             PlaybackMode.BROADCAST -> PaperServer.config.permissions.broadcast
-            else -> return true
         }
         return player.hasPermission(permission)
     }

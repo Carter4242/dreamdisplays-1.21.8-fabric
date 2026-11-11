@@ -62,7 +62,6 @@ permissions:
       dreamdisplays.local: true
       dreamdisplays.synced: true
       dreamdisplays.broadcast: true
-      dreamdisplays.watchparty: true
       dreamdisplays.custom: true
       dreamdisplays.lock: true
       dreamdisplays.share: true
@@ -119,8 +118,6 @@ permissions:
   dreamdisplays.synced:
     default: op
   dreamdisplays.broadcast:
-    default: op
-  dreamdisplays.watchparty:
     default: op
   dreamdisplays.custom:
     default: op

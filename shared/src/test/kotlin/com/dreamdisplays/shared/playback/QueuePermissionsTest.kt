@@ -27,10 +27,9 @@ class QueuePermissionsTest {
     }
 
     @Test
-    fun `the queue does not run on local displays or during a watch party`() {
+    fun `the queue does not run on local displays`() {
         assertFalse(PlaybackPermissions.canAddToQueue(ctx(PlaybackMode.LOCAL, owner = true)))
         assertFalse(PlaybackPermissions.canSkipQueue(ctx(PlaybackMode.LOCAL, admin = true)))
-        assertFalse(PlaybackPermissions.canAddToQueue(ctx(PlaybackMode.WATCH_PARTY, owner = true, locked = true)))
         assertTrue(PlaybackPermissions.queueRuns(PlaybackMode.SYNCED))
         assertTrue(PlaybackPermissions.queueRuns(PlaybackMode.BROADCAST))
     }

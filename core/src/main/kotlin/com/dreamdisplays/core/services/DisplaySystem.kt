@@ -10,8 +10,7 @@ import com.dreamdisplays.api.display.model.property.DisplayId
 interface DisplaySystem :
     DisplayLookup,
     DisplayMutationPort,
-    PlaybackPort,
-    WatchPartyPort {
+    PlaybackPort {
     /** Records a new display in the system. */
     fun recordDisplay(display: DisplayInfo)
 

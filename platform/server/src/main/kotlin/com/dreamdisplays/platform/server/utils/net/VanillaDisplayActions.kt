@@ -7,7 +7,6 @@ import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.shared.playback.PlaybackPermissions
-import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.platform.server.VanillaServerState
@@ -21,7 +20,6 @@ import com.dreamdisplays.platform.server.meta.VersionState
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
-import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
@@ -207,7 +205,6 @@ object VanillaDisplayActions {
         mode: PlaybackMode,
         positionMs: Long
     ) {
-        if (!PlaybackMode.isBaseMode(mode)) return
         val displayData = DisplayManager.getDisplayData(displayId) as? VanillaDisplayData ?: return
         if (!PlaybackPermissions.canSetMode(context(displayData, player))) return
         // Local takes a display off the shared clock for everyone; the menu no longer offers a mode switch, so only
@@ -239,42 +236,12 @@ object VanillaDisplayActions {
         TimelineManager.onCommand(displayData, player.uuid, action, positionMs, rate)
     }
 
-    /** Starts a watch-party session with [player] as host. */
-    fun watchPartyStart(player: ServerPlayer, displayId: java.util.UUID, url: String, lang: String) {
-        val displayData = DisplayManager.getDisplayData(displayId) as? VanillaDisplayData ?: return
-        val perms = VanillaServerState.config.permissions
-        if (!VanillaPermissions.has(player, perms.watchparty, VanillaPermissions.Fallback.EVERYONE)) {
-            ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
-            return
-        }
-        if (!MediaUrlPolicy.isAllowed(url)) return
-        CustomMediaGate.refusalKey(
-            url,
-            VanillaServerState.config.settings.customMediaPolicy,
-            VanillaPermissions.has(
-                player,
-                VanillaServerState.config.permissions.custom,
-                VanillaPermissions.Fallback.EVERYONE,
-            ),
-            player.uuid,
-        )?.let { return MessageUtil.sendMessage(player, it) }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
-        WatchPartyManager.start(displayData, player.uuid, url, MediaUrlPolicy.sanitizeLang(lang))
-    }
-
-    /** Routes a watch-party control (ready / host action) to the session manager. */
-    fun watchPartyControl(player: ServerPlayer, displayId: java.util.UUID, action: WatchPartyAction, positionMs: Long) {
-        val displayData = DisplayManager.getDisplayData(displayId) as? VanillaDisplayData ?: return
-        WatchPartyManager.control(displayData, player.uuid, action, positionMs)
-    }
-
     /** Replies to a client's catch-up request with the current timeline and any live session. */
     fun requestSync(player: ServerPlayer, displayId: java.util.UUID) {
         if (!requestSyncThrottle.tryAcquire(displayId to player.uuid, REQUEST_SYNC_COOLDOWN_MS)) return
         if (FullscreenBroadcastManager.sendCurrentTo(displayId, player.uuid)) return
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
         TimelineManager.sendCurrent(displayData, player.uuid)
-        WatchPartyManager.sendCurrent(displayData, player.uuid)
     }
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED/BROADCAST only). */
@@ -301,7 +268,6 @@ object VanillaDisplayActions {
             PlaybackMode.LOCAL -> perms.local
             PlaybackMode.SYNCED -> perms.synced
             PlaybackMode.BROADCAST -> perms.broadcast
-            else -> return true
         }
         return VanillaPermissions.has(player, node, VanillaPermissions.Fallback.EVERYONE)
     }

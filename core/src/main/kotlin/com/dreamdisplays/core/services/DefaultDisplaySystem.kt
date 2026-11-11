@@ -8,7 +8,6 @@ import com.dreamdisplays.api.display.model.property.DisplayState
 import com.dreamdisplays.api.display.model.settings.DisplaySettings
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.playback.model.PlaybackMode
-import com.dreamdisplays.api.watchparty.WatchPartySession
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -136,35 +135,6 @@ class DefaultDisplaySystem(
     override fun setSpeed(displayId: DisplayId, rate: Double) {
         apply(commands.setSpeed(displayId, rate))
     }
-
-    override fun start(displayId: DisplayId, url: String?): Boolean {
-        val display = commands.startWatchParty(displayId, url) ?: return false
-        recordDisplay(display)
-        return true
-    }
-
-    override fun setReady(displayId: DisplayId, ready: Boolean) {
-        apply(commands.setWatchPartyReady(displayId, ready))
-    }
-
-    override fun begin(displayId: DisplayId) {
-        apply(commands.beginWatchParty(displayId))
-    }
-
-    override fun end(displayId: DisplayId) {
-        apply(commands.endWatchParty(displayId))
-    }
-
-    override fun restartSession(displayId: DisplayId) {
-        apply(commands.restartWatchParty(displayId))
-    }
-
-    override fun close(displayId: DisplayId) {
-        apply(commands.closeWatchParty(displayId))
-    }
-
-    override fun getSession(displayId: DisplayId): WatchPartySession? =
-        displays[displayId]?.watchParty
 
     private fun apply(display: DisplayInfo?) {
         if (display != null) recordDisplay(display)

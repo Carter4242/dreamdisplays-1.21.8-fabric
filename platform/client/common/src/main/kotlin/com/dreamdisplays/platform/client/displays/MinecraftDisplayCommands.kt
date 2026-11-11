@@ -162,41 +162,4 @@ class MinecraftDisplayCommands : DisplayExecutor {
         screen.requestSpeed(rate)
         return screen.toDisplay()
     }
-
-    override fun startWatchParty(displayId: DisplayId, url: String?): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        if (!screen.canStartWatchPartyHere) return null
-        screen.startWatchParty(url ?: screen.videoUrl ?: "")
-        return screen.toDisplay()
-    }
-
-    override fun setWatchPartyReady(displayId: DisplayId, ready: Boolean): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        screen.setWatchPartyReady(ready)
-        return screen.toDisplay()
-    }
-
-    override fun beginWatchParty(displayId: DisplayId): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        screen.beginWatchParty()
-        return screen.toDisplay()
-    }
-
-    override fun endWatchParty(displayId: DisplayId): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        screen.endWatchParty()
-        return screen.toDisplay()
-    }
-
-    override fun restartWatchParty(displayId: DisplayId): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        screen.restartWatchParty()
-        return screen.toDisplay()
-    }
-
-    override fun closeWatchParty(displayId: DisplayId): DisplayInfo? {
-        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
-        screen.closeWatchParty()
-        return screen.toDisplay()
-    }
 }

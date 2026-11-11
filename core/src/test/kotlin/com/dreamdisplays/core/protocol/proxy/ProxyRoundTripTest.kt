@@ -8,6 +8,7 @@ import kotlinx.serialization.protobuf.ProtoBuf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ProxyRoundTripTest {
     private fun roundTrip(packet: ProxyPacket) {
@@ -108,40 +109,6 @@ class ProxyRoundTripTest {
     }
 
     @Test
-    fun networkWatchPartyPackets() {
-        roundTrip(
-            StartNetworkWatchParty(
-                hostId = "01234567-89ab-cdef-0123-456789abcdef",
-                url = "https://youtu.be/abc",
-                lang = "en"
-            )
-        )
-        roundTrip(
-            ApplyNetworkWatchParty(
-                partyId = "p1p2p3p4", sharedDisplayId = "11111111-2222-3333-4444-555555555555",
-                hostId = "01234567-89ab-cdef-0123-456789abcdef", url = "https://youtu.be/abc", lang = "en",
-            )
-        )
-        roundTrip(
-            JoinNetworkWatchParty(
-                partyId = "p1p2p3p4", sharedDisplayId = "11111111-2222-3333-4444-555555555555",
-                playerId = "01234567-89ab-cdef-0123-456789abcdef",
-                hostId = "01234567-89ab-cdef-0123-456789abcdef", url = "https://youtu.be/abc", lang = "en",
-            )
-        )
-        roundTrip(
-            NetworkWatchPartyState(
-                partyId = "p1p2p3p4", sharedDisplayId = "11111111-2222-3333-4444-555555555555",
-                state = 2, hostId = "01234567-89ab-cdef-0123-456789abcdef", hostName = "Steve",
-                url = "https://youtu.be/abc", lang = "en", readyCount = 3, nearbyCount = 5,
-                countdownStartEpochMs = 1_700_000_003_000, positionMs = 0,
-                serverTimeMs = 1_700_000_000_000, durationMs = 600_000, paused = true,
-            )
-        )
-        roundTrip(CloseNetworkWatchParty(partyId = "p1p2p3p4"))
-    }
-
-    @Test
     fun defaultsRoundTrip() {
         roundTrip(BackendHello())
         roundTrip(ProxyWelcome())
@@ -157,11 +124,6 @@ class ProxyRoundTripTest {
         roundTrip(ReplayForPlayer())
         roundTrip(PlayerTransferring())
         roundTrip(PlayerLeftNetwork())
-        roundTrip(StartNetworkWatchParty())
-        roundTrip(ApplyNetworkWatchParty())
-        roundTrip(JoinNetworkWatchParty())
-        roundTrip(NetworkWatchPartyState())
-        roundTrip(CloseNetworkWatchParty())
         roundTrip(ResolveDisplayToken())
         roundTrip(DisplayTokenResolved())
         roundTrip(PlayerFullscreenMinimized())
@@ -173,6 +135,21 @@ class ProxyRoundTripTest {
         val proto = ProtoBuf { }
         val bytes = proto.encodeToByteArray(ProxyEnvelope.serializer(), ProxyEnvelope(9999, byteArrayOf(1, 2, 3)))
         assertNull(ProxyPacketRegistry.decode(bytes))
+    }
+
+    @Test
+    fun retiredWatchPartyPacketsAreDropped() {
+        assertEquals(setOf(15, 16, 17, 18, 19), ProxyPacketType.RETIRED_IDS)
+        assertTrue(ProxyPacketType.entries.none { it.id in ProxyPacketType.RETIRED_IDS })
+        // What an older peer still sends: field 1 (the party id) set
+        val payload = byteArrayOf((1 shl 3 or 2).toByte(), 8) + "p1p2p3p4".toByteArray()
+        val proto = ProtoBuf { }
+        for (type in ProxyPacketType.RETIRED_IDS) {
+            val frame = proto.encodeToByteArray(ProxyEnvelope.serializer(), ProxyEnvelope(type, payload))
+            assertNull(ProxyPacketRegistry.decode(frame))
+            assertNull(ProxyPacketRegistry.decode(frame, ProxyPacketDirection.PROXY_TO_BACKEND))
+            assertNull(ProxyPacketRegistry.decode(frame, ProxyPacketDirection.BACKEND_TO_PROXY))
+        }
     }
 
     @Test
