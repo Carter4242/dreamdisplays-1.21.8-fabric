@@ -1,6 +1,8 @@
 package com.dreamdisplays.media.source.youtube.binary
 
+import java.io.IOException
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertFalse
@@ -48,5 +50,47 @@ class YtDlpBinaryTest {
     fun zipappCommandIsRecognized() {
         assertTrue(YtDlpBinary.isZipapp(["python3", "libs/yt-dlp/yt-dlp.pyz"]))
         assertFalse(YtDlpBinary.isZipapp(["libs/yt-dlp/yt-dlp_macos"]))
+    }
+
+    private val system = listOf("yt-dlp", "/usr/bin/yt-dlp")
+
+    @Test
+    fun aPresentBundledCopyBeatsAStaleSystemInstall() {
+        val pick = YtDlpBinary.pickBinary(null, "libs/yt-dlp/yt-dlp", system, runs = { true }) { error("no download") }
+        assertEquals("libs/yt-dlp/yt-dlp", pick)
+    }
+
+    @Test
+    fun aMissingBundledCopyIsDownloadedEvenWithASystemInstall() {
+        var downloaded = false
+        val pick = YtDlpBinary.pickBinary(null, "libs/yt-dlp/yt-dlp", system, runs = { it in system || downloaded }) {
+            downloaded = true
+            "libs/yt-dlp/yt-dlp"
+        }
+        assertEquals("libs/yt-dlp/yt-dlp", pick)
+        assertTrue(downloaded)
+    }
+
+    @Test
+    fun theSystemInstallIsOnlyTheFallbackWhenTheDownloadFails() {
+        val pick = YtDlpBinary.pickBinary(null, "libs/yt-dlp/yt-dlp", system, runs = { it == "/usr/bin/yt-dlp" }) {
+            throw IOException("offline")
+        }
+        assertEquals("/usr/bin/yt-dlp", pick)
+        assertFailsWith<IOException> {
+            YtDlpBinary.pickBinary(null, "libs/yt-dlp/yt-dlp", system, runs = { false }) { throw IOException("offline") }
+        }
+    }
+
+    @Test
+    fun aRunnableOverrideWinsAndABrokenOneIsSkipped() {
+        assertEquals("/opt/yt-dlp", YtDlpBinary.pickBinary("/opt/yt-dlp", "b", system, runs = { true }) { "b" })
+        assertEquals("b", YtDlpBinary.pickBinary("/opt/yt-dlp", "b", system, runs = { it == "b" }) { "b" })
+    }
+
+    @Test
+    fun aServerPreferringTheSystemInstallGetsItAndTheBundledCopyOtherwise() {
+        assertEquals("/usr/bin/yt-dlp", YtDlpBinary.pickBinary(null, "b", system, runs = { it != "yt-dlp" }, preferSystem = true) { "b" })
+        assertEquals("b", YtDlpBinary.pickBinary(null, "b", system, runs = { it == "b" }, preferSystem = true) { "b" })
     }
 }

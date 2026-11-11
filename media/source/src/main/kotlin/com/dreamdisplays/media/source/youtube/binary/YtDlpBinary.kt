@@ -68,9 +68,8 @@ object YtDlpBinary {
     private val updateChecked = atomic(false)
 
     /**
-     * Which `yt-dlp` comes first: `auto` (the zipapp, else an installed one, else the bundled binary), `bundled` (the
-     * zipapp or the bundled binary, an installed one only if neither works) or `system` (an installed one, else the
-     * bundled binary). Set by the game (the server's `client.ytDlpSource`); the `dreamdisplays.ytdlp` override still
+     * Which `yt-dlp` comes first: `auto` / `bundled` (the zipapp or the bundled binary, downloaded when missing; an
+     * installed one only if neither can be had) or `system` (an installed one, else the bundled binary). Set by the game (the server's `client.ytDlpSource`); the `dreamdisplays.ytdlp` override still
      * wins. A change applies to resolves started after it.
      */
     @Volatile
@@ -159,8 +158,9 @@ object YtDlpBinary {
     }
 
     /**
-     * Returns the path to a usable `yt-dlp` binary, checking the `dreamdisplays.ytdlp` override, well-known system paths,
-     * then falling back to the bundled copy.
+     * Returns the path to a usable `yt-dlp` binary: the `dreamdisplays.ytdlp` override, else the bundled copy (downloaded
+     * when missing; it updates itself), else a system install. A system `yt-dlp` only comes after the bundled one unless
+     * [preferredSource] is `system`: a distro or package-manager copy is often far behind YouTube and never updated by us.
      */
     @Throws(IOException::class)
     fun resolve(): String {
@@ -171,26 +171,47 @@ object YtDlpBinary {
             resolved?.let { return it }
             resolvedFor = preference
 
-            val candidates = ArrayList<String>()
-            override()?.let(candidates::add)
             val bundled = bundledDir.resolve(bundledBinaryName())
-            // Bundled first: an installed copy is only the fallback (it may be stale; it never updates itself here)
-            if (preference == "bundled") candidates.add(bundled.toString())
-            candidates.addAll(CANDIDATE_PATHS)
-            if (preference != "bundled") candidates.add(bundled.toString())
-
-            for (c in candidates) {
-                if (canExecute(c)) {
-                    resolved = c
-                    if (c == bundled.toString()) maybeSelfUpdate(bundled)
-                    return c
-                }
-            }
-
-            val downloaded = download(bundled)
-            resolved = downloaded
-            return downloaded
+            val pick = pickBinary(
+                override(),
+                bundled.toString(),
+                CANDIDATE_PATHS.asList(),
+                ::canExecute,
+                preferSystem = preference == "system",
+                provisionBundled = { download(bundled) },
+            )
+            resolved = pick
+            if (pick == bundled.toString()) maybeSelfUpdate(bundled)
+            return pick
         }
+    }
+
+    /**
+     * The order [resolve] tries: [override] when it runs, the [bundled] copy when present, a fresh download of it
+     * ([provisionBundled]), and only then the [system] installs ([preferSystem]: those first). Throws the download's
+     * error when nothing runs.
+     */
+    internal fun pickBinary(
+        override: String?,
+        bundled: String,
+        system: List<String>,
+        runs: (String) -> Boolean,
+        preferSystem: Boolean = false,
+        provisionBundled: () -> String,
+    ): String {
+        if (override != null && runs(override)) return override
+        if (preferSystem) system.firstOrNull(runs)?.let { return it }
+        if (runs(bundled)) return bundled
+        val failure = try {
+            return provisionBundled()
+        } catch (e: IOException) {
+            e
+        }
+        system.firstOrNull(runs)?.let {
+            logger.warn("Bundled yt-dlp unavailable ({}); using system {}.", failure.message, it)
+            return it
+        }
+        throw failure
     }
 
     /**
