@@ -8,6 +8,7 @@ import com.dreamdisplays.core.share.ScreenShareServerRules
 import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.core.share.ScreenShareServerRules.EndReason
 import com.dreamdisplays.platform.server.PaperServer
+import com.dreamdisplays.platform.server.SettingsSection
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -65,6 +66,8 @@ object ScreenShareActions {
         val nonce: Long,
         /** This share's relay publish key (empty without a lease service). */
         val key: String,
+        /** The `[live]` settings the share started under: the sharer's capture keeps them until it ends. */
+        val live: SettingsSection.LiveConfig,
     ) {
         /** When the sharer's last heartbeat (or the start) arrived, epoch ms. */
         @Volatile
@@ -168,6 +171,7 @@ object ScreenShareActions {
             display.duration,
             nonce,
             key,
+            live,
         )
         byDisplay[displayId] = share
         if (pending != null) starting.remove(displayId, pending)
@@ -315,15 +319,27 @@ object ScreenShareActions {
                     online = online, sameWorld = sameWorld, inRange = inRange,
                     heartbeatExpected = ScreenShareServerRules.expectsHeartbeat(share.nonce),
                     lastHeartbeatMs = share.lastHeartbeatMs, nowMs = now,
+                    permitted = !online || mayShare(sharer!!),
                 ),
             ) ?: continue
-            end(share, reason)
+            end(share, reason, error = if (reason == EndReason.NOT_PERMITTED) "You may no longer share your screen here." else "")
         }
     }
 
     /** When [tick] last ran, epoch ms (0: never). */
     @Volatile
     private var lastTickMs = 0L
+
+    /**
+     * The config was reloaded: a running share keeps the `[live]` settings it started with (its sound, encoder, limits
+     * and relay), so every share started under other settings ends, and its sharer is asked to share again.
+     */
+    fun onSettingsChanged() {
+        val live = PaperServer.config.settings.live
+        byDisplay.values.filter { ScreenShareServerRules.endsOnSettingsChange(it.live, live) }.forEach {
+            end(it, EndReason.SETTINGS_CHANGED, error = "Screen sharing settings changed. Share again to continue.")
+        }
+    }
 
     /** Ends every share (plugin disable), restoring each display before it is saved. */
     fun stopAll() {

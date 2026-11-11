@@ -171,6 +171,17 @@ class ScreenShareRulesTest {
     }
 
     @Test
+    fun `a sharer who may no longer share is stopped, and changed share settings end a running share`() {
+        assertEquals(EndReason.NOT_PERMITTED, ScreenShareServerRules.endReason(SharerState(true, true, true, true, 0L, 0L, permitted = false)))
+        assertEquals(EndReason.SHARER_QUIT, ScreenShareServerRules.endReason(SharerState(false, true, true, true, 0L, 0L, permitted = false)))
+        data class Live(val sound: Boolean, val fps: Int)
+        assertFalse(ScreenShareServerRules.endsOnSettingsChange(Live(true, 30), Live(true, 30)))
+        assertTrue(ScreenShareServerRules.endsOnSettingsChange(Live(true, 30), Live(false, 30)))
+        assertTrue(ScreenShareServerRules.restoresPreviousVideo(EndReason.SETTINGS_CHANGED))
+        assertTrue(ScreenShareServerRules.notifiesSharer(EndReason.NOT_PERMITTED))
+    }
+
+    @Test
     fun `a server stall between share checks credits the heartbeats it held up`() {
         assertEquals(0L, ScreenShareServerRules.stallCreditMs(0L, 50_000L))
         assertEquals(0L, ScreenShareServerRules.stallCreditMs(10_000L, 11_000L))

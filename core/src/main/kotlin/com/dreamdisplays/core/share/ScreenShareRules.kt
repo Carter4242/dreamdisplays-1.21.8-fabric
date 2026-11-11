@@ -207,6 +207,12 @@ object ScreenShareServerRules {
 
         /** The plugin is shutting down. */
         PLUGIN_DISABLE,
+
+        /** The server's share settings changed (a running capture keeps the ones it started with): share again. */
+        SETTINGS_CHANGED,
+
+        /** The sharer may no longer share (permission taken away, or sharing turned off). */
+        NOT_PERMITTED,
     }
 
     /** What the server knows about a running share's sharer, once per check. */
@@ -219,11 +225,21 @@ object ScreenShareServerRules {
         /** When the last heartbeat (or the start) arrived, epoch ms. */
         val lastHeartbeatMs: Long,
         val nowMs: Long,
+        /** The sharer still holds the share permission and sharing is still on. */
+        val permitted: Boolean = true,
     )
+
+    /**
+     * Whether a share started under settings [startedWith] must end now that they are [now]: a client applies the
+     * share settings (sound, encoder, limits, relay) only when a capture starts, so a changed rule only takes effect on
+     * a new share.
+     */
+    fun <T> endsOnSettingsChange(startedWith: T, now: T): Boolean = startedWith != now
 
     /** Why the share must end now given [s], or null while it may run on. */
     fun endReason(s: SharerState): EndReason? = when {
         !s.online -> EndReason.SHARER_QUIT
+        !s.permitted -> EndReason.NOT_PERMITTED
         !s.sameWorld -> EndReason.SHARER_CHANGED_WORLD
         !s.inRange -> EndReason.SHARER_OUT_OF_RANGE
         s.heartbeatExpected && s.nowMs - s.lastHeartbeatMs > HEARTBEAT_TIMEOUT_MS -> EndReason.HEARTBEAT_LOST
