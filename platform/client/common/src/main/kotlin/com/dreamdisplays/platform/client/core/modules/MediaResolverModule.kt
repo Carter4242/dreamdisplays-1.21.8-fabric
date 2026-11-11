@@ -22,7 +22,10 @@ object MediaResolverModule : DreamDisplaysModule {
             override val ytdlpCookieSource get() = ClientStateManager.config.ytdlpCookieSource
         }
 
-        val resolverChain = DefaultMediaResolverRegistry().apply {
+        // The server can take a misbehaving resolver out of the race (`client.disabledResolvers`)
+        val resolverChain = DefaultMediaResolverRegistry {
+            com.dreamdisplays.platform.client.displays.ServerOverrides.settings.disabledResolvers
+        }.apply {
             DefaultMediaResolverProvider.resolvers().forEach(::register)
         }
 

@@ -22,8 +22,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Default [MediaResolverRegistry]: tries registered resolvers in priority order, returning the first success. */
-class DefaultMediaResolverRegistry : MediaResolverRegistry {
+/**
+ * Default [MediaResolverRegistry]: tries registered resolvers in priority order, returning the first success.
+ * [disabled] names resolvers ([resolverName]) not to use; a source that no other resolver takes still gets them all.
+ */
+class DefaultMediaResolverRegistry(
+    private val disabled: () -> Set<String> = { emptySet() },
+) : MediaResolverRegistry {
     private val backing = CopyOnWriteArrayList<MediaResolverService>()
     private val prefetchPermit = Semaphore(PREFETCH_CONCURRENCY)
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
@@ -46,8 +51,7 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
             try {
                 prefetchPermit.withPermit {
                     if (isBlockedHost(source)) return@withPermit
-                    for (resolver in resolvers) {
-                        if (!resolver.canResolve(source)) continue
+                    for (resolver in candidatesFor(source)) {
                         if (runCatching { resolver.prefetch(source) }.getOrDefault(false)) break
                     }
                 }
@@ -66,7 +70,7 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
                 throw DreamMediaException.Network("Could not look up this link's server. Check your connection.")
             else -> Unit
         }
-        val candidates = resolvers.filter { it.canResolve(source) }
+        val candidates = candidatesFor(source)
         if (candidates.isEmpty()) {
             throw DreamMediaException.Unknown("No resolver registered for source: $source", isFatal = true)
         }
@@ -129,6 +133,10 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
         }
     }
 
+    /** The resolvers that take [source], in priority order, without the [disabled] ones unless that leaves none. */
+    private fun candidatesFor(source: MediaSource): List<MediaResolverService> =
+        usableResolvers(resolvers.filter { it.canResolve(source) }, runCatching(disabled).getOrDefault(emptySet()))
+
     private fun isBlockedHost(source: MediaSource): Boolean =
         hostVerdict(source) != MediaHostGuard.HostVerdict.PUBLIC
 
@@ -141,9 +149,19 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
         return MediaHostGuard.verdict(url)
     }
 
-    private companion object {
-        /** Short resolver name for reports: `newpipe`, `yt-dlp`, `direct`, or the platform's own name. */
-        fun sourceName(resolver: MediaResolverService): String = when (resolver) {
+    companion object {
+        /** Short resolver name for reports and `client.disabledResolvers`: `newpipe`, `yt-dlp`, `direct`, or the platform's. */
+        fun resolverName(resolver: MediaResolverService): String = sourceName(resolver)
+
+        /** [candidates] without those named in [disabled]; all of them when that would leave none. */
+        internal fun usableResolvers(
+            candidates: List<MediaResolverService>, disabled: Set<String>,
+        ): List<MediaResolverService> {
+            if (disabled.isEmpty()) return candidates
+            return candidates.filter { sourceName(it) !in disabled }.ifEmpty { candidates }
+        }
+
+        private fun sourceName(resolver: MediaResolverService): String = when (resolver) {
             is Platform<*, *> -> resolver.name.lowercase()
             else -> when (val name = resolver.javaClass.simpleName.removeSuffix("Resolver")) {
                 "NewPipe" -> "newpipe"
@@ -157,8 +175,8 @@ class DefaultMediaResolverRegistry : MediaResolverRegistry {
          * Hints warmed at once. Enough to cover a room of screens, few enough not to flood the
          * network (or the `yt-dlp` subprocess budget) with speculative work.
          */
-        const val PREFETCH_CONCURRENCY = 3
+        private const val PREFETCH_CONCURRENCY = 3
 
-        val RACE_HEAD_START = 400.milliseconds
+        private val RACE_HEAD_START = 400.milliseconds
     }
 }
