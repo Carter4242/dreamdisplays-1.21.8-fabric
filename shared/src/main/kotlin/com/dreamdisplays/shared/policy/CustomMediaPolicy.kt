@@ -1,5 +1,6 @@
 package com.dreamdisplays.shared.policy
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.api.media.source.MediaPlatform
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.MediaHttpUrl
@@ -58,6 +59,7 @@ object CustomMediaPolicy {
         if (!settings.enabled) return Verdict.DISABLED
 
         val host = MediaHttpUrl.parse(url)?.uri?.host?.lowercase(Locale.ROOT)
+            ?: LiveStreamUrls.hostOf(url)
             ?: return Verdict.MALFORMED
         if (settings.blockedHosts.any { matches(host, it) }) return Verdict.HOST_BLOCKED
         if (settings.allowedHosts.isNotEmpty() && settings.allowedHosts.none { matches(host, it) }) {

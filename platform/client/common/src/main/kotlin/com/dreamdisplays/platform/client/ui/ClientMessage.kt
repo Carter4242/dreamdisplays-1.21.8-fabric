@@ -102,6 +102,7 @@ enum class ClientMessage(val key: String) {
     UI_CUSTOM("dreamdisplays.ui.custom"),
     UI_ERROR("dreamdisplays.ui.error"),
     UI_KICK("dreamdisplays.ui.kick"),
+    UI_LIVE("dreamdisplays.ui.live"),
     UI_LIKES("dreamdisplays.ui.likes"),
     UI_NEW("dreamdisplays.ui.new"),
     UI_PREVIEW("dreamdisplays.ui.preview"),
@@ -114,6 +115,7 @@ enum class ClientMessage(val key: String) {
     UI_VIEWS_SHORT("dreamdisplays.ui.views_short"),
     UI_VIMEO("dreamdisplays.ui.vimeo"),
     UI_WAITING("dreamdisplays.ui.waiting"),
+    UI_WAITING_STREAM("dreamdisplays.ui.waiting_stream"),
     UI_WATCHING("dreamdisplays.ui.watching"),
 
     ;

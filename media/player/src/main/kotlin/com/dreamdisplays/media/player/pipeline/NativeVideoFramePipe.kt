@@ -135,12 +135,16 @@ internal class NativeVideoFramePipe(
 
     override fun cleanup() = surface.cleanup()
 
-    /** Opens a native `FFmpeg` session and starts the reader thread. */
+    /**
+     * Opens a native `FFmpeg` session and starts the reader thread. A [liveEdge] session (a live relay stream) shows
+     * every frame the moment it is read, with no jitter buffer and no pacing against the audio clock.
+     */
     fun start(
         args: List<String>, w: Int, h: Int, seekOffsetNanos: Long, sourceFps: Double,
         stopFlag: AtomicBoolean, terminated: AtomicBoolean, getAudioClock: () -> Long, onFirstFrame: () -> Unit,
         getBrightness: () -> Double, onEos: (stderr: String, normalEos: Boolean) -> Unit,
         parkFlag: AtomicBoolean? = null, presentPreview: Boolean = true, tolerateLateness: Boolean = true,
+        liveEdge: Boolean = false,
     ): Thread? {
         prepare(w, h, parkFlag)
         handle = NativeMedia.videoOpen(args, w, h).takeIf { it != 0L } ?: run {
@@ -149,7 +153,7 @@ internal class NativeVideoFramePipe(
         }
         return launch(
             "MediaPlayer-video", w, h, sourceFps, seekOffsetNanos, stopFlag, terminated, getAudioClock, onFirstFrame,
-            getBrightness, onEos, parkFlag, presentPreview, tolerateLateness,
+            getBrightness, onEos, parkFlag, presentPreview, tolerateLateness, liveEdge,
         )
     }
 
@@ -212,13 +216,15 @@ internal class NativeVideoFramePipe(
         threadName: String, w: Int, h: Int, sourceFps: Double, seekOffsetNanos: Long,
         stopFlag: AtomicBoolean, terminated: AtomicBoolean, getAudioClock: () -> Long, onFirstFrame: () -> Unit,
         getBrightness: () -> Double, onEos: (stderr: String, normalEos: Boolean) -> Unit,
-        parkFlag: AtomicBoolean?, presentPreview: Boolean, tolerateLateness: Boolean,
+        parkFlag: AtomicBoolean?, presentPreview: Boolean, tolerateLateness: Boolean, liveEdge: Boolean = false,
     ): Thread {
         val frameNs = (1_000_000_000.0 / MediaProcess.outputFps(sourceFps)).toLong()
-        val prebuffer = FramePrebuffer.create(
+        // The live edge has no jitter buffer: frames go to the surface as they are read (see read)
+        val prebuffer = if (liveEdge) null else FramePrebuffer.create(
             surface, frameNs, getAudioClock, onFirstFrame, terminated, stopFlag, debugLabel, presentPreview,
             tolerateLateness, parkFlag, frameBytes = frameBytesFor(w, h),
-        ).also { activePrebuffer = it }
+        )
+        activePrebuffer = prebuffer
         return daemon(
             {
                 read(
@@ -271,7 +277,7 @@ internal class NativeVideoFramePipe(
     private fun read(
         handle: Long, w: Int, h: Int, frameNs: Long, seekOffsetNanos: Long, stopFlag: AtomicBoolean,
         terminated: AtomicBoolean, onFirstFrame: () -> Unit, getBrightness: () -> Double,
-        onEos: (stderr: String, normalEos: Boolean) -> Unit, prebuffer: FramePrebuffer, presentPreview: Boolean,
+        onEos: (stderr: String, normalEos: Boolean) -> Unit, prebuffer: FramePrebuffer?, presentPreview: Boolean,
     ) {
         val frameSize = frameBytesFor(w, h)
         var spare = surface.takeOrAllocate(frameSize)
@@ -290,7 +296,7 @@ internal class NativeVideoFramePipe(
         val lav = handle == 0L && lavHandle != 0L
         val prerollMarginNs = maxOf(frameNs * 2L, LAV_PREROLL_MARGIN_NS)
         val metrics = NativeReadMetrics(debugLabel, if (lav) "lav" else "process", w, h, frameSize)
-        prebuffer.onPresent = { buf -> feedPopout(buf, w, h, frameSize, metrics) }
+        prebuffer?.onPresent = { buf -> feedPopout(buf, w, h, frameSize, metrics) }
 
         fun armFirstFrameClock() {
             if (!firstFrame) {
@@ -310,7 +316,7 @@ internal class NativeVideoFramePipe(
             } else if (MediaPlayer.DEBUG) {
                 logger.debug("$debugLabel In-place seek applied $queuedMs ms after request.")
             }
-            prebuffer.resetForSeek(seek.onFirstFrame, seek.startGate)
+            prebuffer?.resetForSeek(seek.onFirstFrame, seek.startGate)
             val ok = NativeMedia.lavSeek(lavHandle, seek.offsetNanos / 1_000L)
             synchronized(lavSeekMonitor) {
                 if (ok) seek.applied = true else seek.failed = true
@@ -478,7 +484,18 @@ internal class NativeVideoFramePipe(
             if (passFirstFrameAfterSeek && !MediaPlayer.captureSamples) armFirstFrameClock()
             passFirstFrameAfterSeek = false
 
-            if (MediaPlayer.captureSamples) {
+            if (prebuffer == null) {
+                // Live edge: the newest frame is the right one, now. The surface keeps only the latest one for the
+                // next render frame, so a burst (a backlog draining after a hitch) collapses onto its last picture.
+                armFirstFrameClock()
+                if (MediaPlayer.captureSamples) {
+                    feedPopout(spare, w, h, frameSize, metrics)
+                    spare = surface.publish(spare, frameSize)
+                    if (MediaPlayer.DEBUG) {
+                        MediaPlayer.samplesIn.incrementAndGet(); metrics.recordPublished()
+                    }
+                }
+            } else if (MediaPlayer.captureSamples) {
                 // The prebuffer arms the clock as its own first frame goes out to pace, so the cushion it
                 // filled is not spent as lateness before the first frame is even shown
                 spare = prebuffer.submit(spare, framePts, frameSize)
@@ -496,9 +513,9 @@ internal class NativeVideoFramePipe(
 
         synchronized(lavSeekMonitor) { readerDone = true }
         if (!terminated.get() && !stopFlag.get() && rc == NativeMedia.READ_EOF) {
-            prebuffer.finish()
+            prebuffer?.finish()
         } else {
-            prebuffer.abort()
+            prebuffer?.abort()
         }
         if (activePrebuffer === prebuffer) activePrebuffer = null
 

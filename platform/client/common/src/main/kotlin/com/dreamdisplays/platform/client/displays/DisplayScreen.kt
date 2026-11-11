@@ -614,6 +614,9 @@ class DisplayScreen(
     /** True when the current stream is a live broadcast (no seekable duration). */
     val isLive: Boolean get() = mediaPlayer?.isLive() == true
 
+    /** True while a live relay stream (`srt://` ...) is off the air and its player keeps reconnecting. */
+    val isWaitingForStream: Boolean get() = mediaPlayer?.isWaitingForStream() == true
+
     /** Total duration of the current video in nanoseconds, or `0` if unknown / live. */
     val mediaPlayerDurationNanos: Long get() = mediaPlayer?.getDuration() ?: 0L
 

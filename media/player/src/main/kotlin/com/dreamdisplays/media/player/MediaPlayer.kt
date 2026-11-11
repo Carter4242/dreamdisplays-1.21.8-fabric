@@ -7,6 +7,7 @@ import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.player.GpuTextureRef
 import com.dreamdisplays.api.media.player.PlaybackEnvironment
 import com.dreamdisplays.api.media.player.PlaybackHost
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
@@ -108,6 +109,19 @@ class MediaPlayer(
     /** The current session produced its first frame (a failure before that is a failure to open the stream). */
     @Volatile
     private var sessionFirstFrame = false
+
+    /**
+     * A live relay stream (`srt://`, `rtmp://`, `rtsp://`): played at the live edge, and reconnected every
+     * [RELAY_RECONNECT_MS] for as long as it is off the air, with no error shown (see [reconnectRelay]).
+     */
+    private val relayStream: Boolean = LiveStreamUrls.isLive(url)
+
+    /** A relay stream that is not delivering pictures right now: not on the air yet, or dropped and reconnecting. */
+    @Volatile
+    private var waitingForStream = relayStream
+
+    private val relayReconnectPending = AtomicBoolean(false)
+    private var lastRelayWaitLogNanos = 0L
 
     private var preparedBootstrap: PreparedMedia? = replayBootstrap?.prepared
 
@@ -245,6 +259,15 @@ class MediaPlayer(
         private const val MAX_STALL_RERESOLVES = 6
         private const val AUDIO_EOS_NEAR_END_GUARD_NS = 3_000_000_000L
 
+        /** Pause between attempts to (re)connect a live relay stream that is off the air. */
+        private const val RELAY_RECONNECT_MS = 1_000L
+        private const val RELAY_WAIT_LOG_INTERVAL_NS = 60_000_000_000L
+
+        /** `FFmpeg` errors that no reconnect fixes: the build or the URL itself cannot work. */
+        private val RELAY_PERMANENT_ERRORS = [
+            "Protocol not found", "not on whitelist", "Option not found", "Unrecognized option",
+        ]
+
         private val INIT_THREAD_COUNTER = AtomicInteger()
 
         private val INIT_EXECUTOR: ExecutorService = Executors.newFixedThreadPool(
@@ -277,7 +300,7 @@ class MediaPlayer(
         if (isPausedWarm()) {
             sessionManager.resume()
             lifecycle = PlayerState.Playing
-            watchdog.start()
+            startWatchdog()
             return@safeExecute
         }
         if (sessionManager.isPlaying) return@safeExecute
@@ -338,14 +361,14 @@ class MediaPlayer(
     /** Parks the player warm while its display sits out of render distance. */
     fun park() = safeExecute {
         watchdog.stop()
-        if (!sessionManager.suspend()) watchdog.start()
+        if (!sessionManager.suspend()) startWatchdog()
     }
 
     /** Resumes a [park]ed player from its frozen position. */
     fun unpark() = safeExecute {
         if (sessionManager.isParked()) {
             sessionManager.resume()
-            watchdog.start()
+            startWatchdog()
             applySpeed() // A speed change that arrived while parked
         }
     }
@@ -502,7 +525,10 @@ class MediaPlayer(
      *
      * @return `true` if the stream is a live stream.
      */
-    fun isLive(): Boolean = liveStream
+    fun isLive(): Boolean = liveStream || relayStream
+
+    /** True while a live relay stream is off the air (not started yet, or reconnecting): the UI says it is waiting. */
+    fun isWaitingForStream(): Boolean = relayStream && waitingForStream && !terminated.get()
 
     /** @return `true` if the stream supports seeking. */
     fun canSeek(): Boolean = isReady && seekable
@@ -814,6 +840,7 @@ class MediaPlayer(
             val prepared = preparedBootstrap?.also { preparedBootstrap = null }
                 ?: MediaPreparationService.prepare(
                     url, lang, host.quality, env, ReadAhead.Target(host.uuid, host.readAheadSeconds),
+                    liveLatencyMs = host.liveLatencyMs,
                 )
 
             if (terminated.get()) return
@@ -990,15 +1017,50 @@ class MediaPlayer(
         )
         if (sessionManager.isPlaying) {
             lifecycle = PlayerState.Playing
-            watchdog.start()
+            startWatchdog()
             refreshWarmAudioTracks()
             qualitySwitch = qualitySwitch?.silenced()
         }
     }
 
+    private fun startWatchdog() = watchdog.start(if (relayStream) StreamWatchdog.Thresholds.LIVE_EDGE else null)
+
+    /**
+     * A live relay stream stopped delivering (never came up, dropped, or stalled): reconnect in [RELAY_RECONNECT_MS],
+     * for as long as it takes, showing "waiting for stream" instead of an error. A relay with no publisher refuses
+     * the connection at once, so each attempt costs a round trip.
+     */
+    private fun reconnectRelay(reason: String): Unit = onControl {
+        if (terminated.get() || pauseRequested || lifecycle == PlayerState.Error) return@onControl
+        if (!relayReconnectPending.compareAndSet(false, true)) return@onControl
+        stopSession()
+        waitingForStream = true
+        lifecycle = PlayerState.Restarting
+        val now = System.nanoTime()
+        if (lastRelayWaitLogNanos == 0L || now - lastRelayWaitLogNanos >= RELAY_WAIT_LOG_INTERVAL_NS) {
+            lastRelayWaitLogNanos = now
+            logger.info("$debugLabel Live stream not delivering (${MediaUtil.truncate(reason)}); reconnecting every $RELAY_RECONNECT_MS ms.")
+        }
+        RETRY_SCHEDULER.schedule({
+            safeExecute {
+                relayReconnectPending.set(false)
+                if (terminated.get() || pauseRequested) return@safeExecute
+                val ss = streams
+                if (ss != null) startStreams(ss, 0L) else dispatchInitialize()
+            }
+        }, RELAY_RECONNECT_MS, TimeUnit.MILLISECONDS)
+    }
+
+    /** True when [stderr] says this relay stream can never open here, so reconnecting would only loop. */
+    private fun relayFailedForGood(stderr: String): Boolean = RELAY_PERMANENT_ERRORS.any { stderr.contains(it, ignoreCase = true) }
+
     /** Called on the pipeline thread when a session's playout begins. */
     private fun onSessionFirstFrame() {
         sessionFirstFrame = true
+        if (waitingForStream) {
+            waitingForStream = false
+            if (relayStream) logger.info("$debugLabel Live stream is on the air.")
+        }
         retryPolicy.reset()
         if (warmingUp) safeExecute(::finishWarmUp)
     }
@@ -1066,7 +1128,7 @@ class MediaPlayer(
             return false
         }
         lifecycle = PlayerState.Playing
-        watchdog.start()
+        startWatchdog()
         logger.debug("$debugLabel Attached live after replay at ${ms(liveOffsetNanos)}ms.")
         return true
     }
@@ -1111,6 +1173,11 @@ class MediaPlayer(
             val ss = streams
             val offset = if (liveStream) 0L else sessionStartOffsetNanos
             if (ss != null) startStreams(ss, offset)
+            return@onControl
+        }
+
+        if (relayStream && !relayFailedForGood(stderr)) {
+            reconnectRelay(if (normalEos) "stream ended" else stderr.ifBlank { "connection lost" })
             return@onControl
         }
 
@@ -1213,6 +1280,15 @@ class MediaPlayer(
             }
             return@onControl
         }
+        if (relayStream) {
+            // The relay dropped: the video half sees it too and reconnects both. Only sound lost on its own, while
+            // pictures keep coming, is restarted here.
+            val framesFlowing = System.nanoTime() - sessionManager.lastFrameNanos.get() < 1_000_000_000L
+            if (sessionManager.isPlaying && framesFlowing) {
+                RETRY_SCHEDULER.schedule({ safeExecute(::restartAudioOrStall) }, 500L, TimeUnit.MILLISECONDS)
+            }
+            return@onControl
+        }
         if (!liveStream && durationHintNanos > 0L && durationHintNanos - clock.currentTime() <= AUDIO_EOS_NEAR_END_GUARD_NS) {
             logger.debug("$debugLabel Audio pipe ended near VOD end (pos=${clock.currentTime()}, dur=$durationHintNanos); deferring to video EOS.")
             return@onControl
@@ -1279,6 +1355,10 @@ class MediaPlayer(
     private fun handleSessionStall(reason: String): Unit = onControl {
         // An errored player waits for the display's retry; restarting it here would play behind the error
         if (terminated.get() || lifecycle == PlayerState.Error) return@onControl
+        if (relayStream) {
+            reconnectRelay(reason)
+            return@onControl
+        }
         val ss = streams ?: return@onControl
         val now = System.nanoTime()
         val repeated = lastStallNanos != 0L && now - lastStallNanos < REPEATED_STALL_WINDOW_NS
@@ -1320,7 +1400,7 @@ class MediaPlayer(
             noteHitch(FailureStages.STALL, "restart", "stream stalled: $reason", reason, frozenSinceLastFrameMs())
             val pos = if (liveStream) 0L else clock.currentTime()
             if (sessionManager.beginSeek(ss, pos, lastQuality, currentHwAccel())) {
-                watchdog.start()
+                startWatchdog()
             } else {
                 startStreams(ss, pos)
             }

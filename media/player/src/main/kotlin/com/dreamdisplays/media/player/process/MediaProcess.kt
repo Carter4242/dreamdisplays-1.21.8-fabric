@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.shared.policy.MediaHosts
 import com.dreamdisplays.media.player.pipeline.VideoFramePipe
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
@@ -49,12 +50,16 @@ object MediaProcess {
         return stages.joinToString(",") { "atempo=" + String.format(Locale.US, "%.6f", it) }
     }
 
-    /** Output half of an audio session: s16le stereo at [sampleRate], time-stretched to [tempo] x. */
-    fun audioOutputArgs(sampleRate: Int, tempo: Double = 1.0): List<String> {
+    /**
+     * Output half of an audio session: s16le stereo at [sampleRate], time-stretched to [tempo] x. A [liveEdge] session
+     * flushes every packet into the pipe, so no PCM waits in `FFmpeg`'s output buffer.
+     */
+    fun audioOutputArgs(sampleRate: Int, tempo: Double = 1.0, liveEdge: Boolean = false): List<String> {
         val filter = tempoFilter(tempo)
         return buildList {
             add("-vn")
             if (filter != null) addAll(["-af", filter])
+            if (liveEdge) addAll(["-flush_packets", "1"])
             addAll(["-f", "s16le", "-ar", sampleRate.toString(), "-ac", "2", "-"])
         }
     }
@@ -154,9 +159,16 @@ object MediaProcess {
         }
         // A sped-up session thins frames out first, so the dropped ones are never scaled or converted
         val filters = if (dropToFps) "fps=${String.format(Locale.US, "%.6f", outputFps(fps))},$vf" else vf
+        val liveEdge = LiveStreamUrls.isLive(url)
         return baseCommand(ffmpeg, url, offsetNanos, hwAccel, alreadyResolved, seekByDecoding).apply {
             addAll(["-an", "-vf", filters])
-            addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
+            if (liveEdge) {
+                // Every decoded picture goes out the moment it exists: no constant-rate resampling (which holds a
+                // frame back to decide whether to duplicate or drop it), and no output buffering
+                addAll(["-fps_mode", "passthrough", "-flush_packets", "1"])
+            } else {
+                addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
+            }
             addAll(if (nv12) ["-f", "rawvideo", "-"] else ["-f", "image2pipe", "-c:v", "ppm", "-"])
         }
     }
@@ -202,7 +214,7 @@ object MediaProcess {
         val cmd = baseCommand(
             ffmpeg, url, offsetNanos, HwAccelBackend.NONE, seekByDecoding = seekByDecoding,
         ).apply {
-            addAll(audioOutputArgs(sampleRate, tempo))
+            addAll(audioOutputArgs(sampleRate, tempo, liveEdge = LiveStreamUrls.isLive(url)))
         }
         return ProcessBuilder(cmd).start()
     }
@@ -248,6 +260,7 @@ object MediaProcess {
         decoder: String? = null,
     ): MutableList<String> {
         val safeUrl = if (alreadyResolved) url else MediaHostGuard.resolveSafeUrl(url)
+        if (LiveStreamUrls.isLive(safeUrl)) return liveInputCommand(ffmpeg, safeUrl, hwAccel, decoder)
         // This container's demuxer cannot be trusted with a jump, so the best available seek is a
         // playlist that already starts at the target ([HlsSeekPlaylist]).
         val trimmed =
@@ -321,6 +334,43 @@ object MediaProcess {
             }
         }
     }
+
+    /** Protocols a live relay input may use: the relay's own, and what they run over (RTSP's RTP, RTMPS's TLS). */
+    internal const val LIVE_PROTOCOLS = "srt,rtmp,rtmps,rtsp,rtp,tcp,udp,tls"
+
+    /** How long a live input may go without data before `FFmpeg` gives up, so a dropped relay reconnects quickly. */
+    private const val LIVE_RW_TIMEOUT_MICROS = "2000000"
+
+    /**
+     * Input half for a live relay stream (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`), tuned to sit at the live edge:
+     * no demuxer buffering, a minimal probe, the low-delay decoder (no frame threading, which holds back a frame per
+     * thread), and a short I/O timeout. The URL is expected to carry its SRT latency already ([LiveStreamUrls.playUrl]).
+     */
+    internal fun liveInputCommand(
+        ffmpeg: String, url: String, hwAccel: HwAccelBackend, decoder: String? = null,
+    ): MutableList<String> = mutableListOf<String>().apply {
+        add(ffmpeg)
+        addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
+        addAll(["-protocol_whitelist", LIVE_PROTOCOLS])
+        if (hwAccel.ffmpegName != null) addAll(["-hwaccel", hwAccel.ffmpegName])
+        hwAccel.hwOutputFormat?.let { addAll(["-hwaccel_output_format", it]) }
+        addAll(["-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay"])
+        addAll(["-probesize", LIVE_PROBE_SIZE, "-analyzeduration", "0", "-max_delay", "0"])
+        addAll(["-rw_timeout", LIVE_RW_TIMEOUT_MICROS])
+        when (LiveStreamUrls.schemeOf(url)) {
+            "rtsp" -> addAll(["-rtsp_transport", "tcp", "-reorder_queue_size", "0", "-timeout", LIVE_RW_TIMEOUT_MICROS])
+            // The client buffer RTMP announces to the server (3 s by default)
+            "rtmp", "rtmps" -> addAll(["-rtmp_live", "live", "-rtmp_buffer", "100"])
+        }
+        if (decoder != null) addAll(["-c:v", decoder])
+        addAll(["-i", url])
+    }
+
+    /**
+     * Bytes `FFmpeg` probes a live input for before it starts decoding. Stream parameters arrive with the first
+     * keyframe anyway, so anything larger only delays the first picture.
+     */
+    internal const val LIVE_PROBE_SIZE = "32768"
 
     private fun MutableList<String>.addHttpOptions(url: String) {
         addAll(headerArgs(url))

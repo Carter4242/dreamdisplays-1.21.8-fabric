@@ -46,6 +46,21 @@ internal class AudioSink(private val debugLabel: String) {
         private const val FAULT_WARN_INTERVAL_NANOS = 30_000_000_000L
         private val lastFaultWarnNanos = AtomicLong(0L)
 
+        /** Live edge: PCM read per write, 10 ms, so a chunk never waits on the next one to fill. */
+        private const val LIVE_CHUNK_BYTES = SAMPLE_RATE * BYTES_PER_FRAME / 100
+
+        /** Live edge: sound queued on the line, as in [paceTargetBytes]; starts at 40 ms, may grow to 120 ms. */
+        private const val LIVE_PACE_START_BYTES = LIVE_CHUNK_BYTES * 4
+        private const val LIVE_MIN_PACE_BYTES = LIVE_CHUNK_BYTES * 2
+        private const val LIVE_MAX_PACE_BYTES = LIVE_CHUNK_BYTES * 12
+
+        /**
+         * Live edge: PCM waiting in the pipe beyond this (100 ms) is a backlog (a hitch, a slow line start, a burst
+         * from the relay) and is skipped, down to [LIVE_KEEP_BYTES], so the sound never drifts behind the picture.
+         */
+        private const val LIVE_MAX_BACKLOG_BYTES = LIVE_CHUNK_BYTES * 10
+        private const val LIVE_KEEP_BYTES = LIVE_CHUNK_BYTES * 2
+
         /** Furthest a sync rate request may move playback from real time (5 %). */
         private const val MAX_RATE_OFFSET = 0.05
 
@@ -111,6 +126,8 @@ internal class AudioSink(private val debugLabel: String) {
         @Volatile @JvmField var contentStartNanos: Long,
         /** Playback speed the process was started with (`atempo`); PCM time times this is content time. */
         @JvmField val tempo: Double = 1.0,
+        /** A live relay stream: small chunks, a short line queue, and backlog skipping (see [AudioSink.liveEdge]). */
+        @JvmField val liveEdge: Boolean = false,
     ) {
 
         @Volatile
@@ -139,6 +156,13 @@ internal class AudioSink(private val debugLabel: String) {
      * process plays at, so the content a skipped PCM span stood for is known.
      */
     class CatchUp(val contentStartNanos: Long, val playbackClock: () -> Long, val tempo: Double = 1.0)
+
+    /**
+     * Sessions started from now on play a live relay stream: sound goes out as it arrives, with only a few tens of
+     * ms queued on the line, and any backlog in the pipe is skipped instead of played late.
+     */
+    @Volatile
+    var liveEdge: Boolean = false
 
     /** Current volume multiplier applied to each audio chunk. */
     @Volatile
@@ -266,7 +290,7 @@ internal class AudioSink(private val debugLabel: String) {
 
     private fun beginSession(contentStartNanos: Long, originKnown: Boolean, tempo: Double): LineSession {
         val session = synchronized(sessionLock) {
-            LineSession(++epochCounter, originKnown, contentStartNanos, tempo).also { current = it }
+            LineSession(++epochCounter, originKnown, contentStartNanos, tempo, liveEdge).also { current = it }
         }
         pendingResyncNanos.set(0L) // A skip owed by the previous line means nothing to a fresh one
         dspStage?.reset()
@@ -609,7 +633,9 @@ internal class AudioSink(private val debugLabel: String) {
         session: LineSession, input: InputStream, ln: SourceDataLine,
         terminated: AtomicBoolean, stopFlag: AtomicBoolean,
     ) {
-        val chunk = ByteArray(CHUNK_BYTES)
+        val live = session.liveEdge
+        val chunkBytes = if (live) LIVE_CHUNK_BYTES else CHUNK_BYTES
+        val chunk = ByteArray(chunkBytes)
         val output = session.output ?: return
         var rate = 1.0
         var firstChunk = true
@@ -618,10 +644,12 @@ internal class AudioSink(private val debugLabel: String) {
         // first paced write. The learned target itself persists across sessions.
         paceStreaming = false
         paceCleanChunks = 0
+        if (live) paceTargetBytes = LIVE_PACE_START_BYTES
         while (!terminated.get() && !stopFlag.get()) {
             if (parkIfRequested(ln, terminated, stopFlag)) break
             if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) output.discontinuity()
-            val n = MediaUtil.readFull(input, chunk, CHUNK_BYTES)
+            if (live && skipLiveBacklog(input, chunk, terminated, stopFlag) && !firstChunk) output.discontinuity()
+            val n = MediaUtil.readFull(input, chunk, chunkBytes)
             if (n <= 0) {
                 // A deliberate teardown destroys the process mid-read; that EOF is expected and not
                 // worth a warning (during a session-restart loop it reads as a phantom audio crash).
@@ -645,10 +673,34 @@ internal class AudioSink(private val debugLabel: String) {
             // For the content format at rate 1 this is a plain copy; otherwise the chunk is resampled to the line's
             // rate (times the sync rate) and repacked to its sample format
             val outBytes = output.convert(chunk, n, rate)
-            if (outBytes > 0) paceLiveWrite(ln, output.output, outBytes, output.format, terminated, stopFlag)
+            if (outBytes > 0) paceLiveWrite(ln, output.output, outBytes, output.format, terminated, stopFlag, live)
             lastPcmOutNanos = System.nanoTime()
             pcmTap?.let { if (outBytes > 0) tapWritten(it, chunk, n, ln, output, outBytes) }
         }
+    }
+
+    /**
+     * Live edge: drops PCM piled up in the pipe past [LIVE_MAX_BACKLOG_BYTES], keeping the newest [LIVE_KEEP_BYTES].
+     * Returns true when anything was dropped. The line clock is not moved: nothing is paced to it at the live edge.
+     */
+    private fun skipLiveBacklog(
+        input: InputStream, scratch: ByteArray, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
+    ): Boolean {
+        val pending = runCatching { input.available() }.getOrDefault(0)
+        if (pending <= LIVE_MAX_BACKLOG_BYTES) return false
+        // Whole stereo frames only, or every later sample would be read from the wrong byte
+        var toSkip = ((pending - LIVE_KEEP_BYTES) / BYTES_PER_FRAME * BYTES_PER_FRAME).toLong()
+        var skipped = 0L
+        while (toSkip > 0 && !terminated.get() && !stopFlag.get()) {
+            val n = MediaUtil.readFull(input, scratch, minOf(scratch.size.toLong(), toSkip).toInt())
+            if (n <= 0) break
+            skipped += n
+            toSkip -= n
+        }
+        if (skipped > 0 && MediaPlayer.DEBUG) {
+            logger.debug("$debugLabel [audio] live edge: skipped ${bytesToNanos(skipped) / 1_000_000} ms of backlog.")
+        }
+        return skipped > 0
     }
 
     /** Moves [current] one chunk's worth toward [target], landing exactly on it (and on 1.0) when close. */
@@ -695,8 +747,12 @@ internal class AudioSink(private val debugLabel: String) {
         n: Int,
         format: PcmLineFormat,
         terminated: AtomicBoolean,
-        stopFlag: AtomicBoolean
+        stopFlag: AtomicBoolean,
+        live: Boolean = false,
     ) {
+        val minPace = if (live) LIVE_MIN_PACE_BYTES else MIN_PACE_BYTES
+        val maxPace = if (live) LIVE_MAX_PACE_BYTES else MAX_PACE_BYTES
+        val paceStep = if (live) LIVE_CHUNK_BYTES else PACE_STEP_BYTES
         // The pacing target is kept in content bytes; a line in another format holds a different byte count for
         // the same duration
         val lineTargetBytes = if (format.isContent) paceTargetBytes
@@ -708,10 +764,10 @@ internal class AudioSink(private val debugLabel: String) {
             if (unplayedBefore == 0) {
                 // The line ran dry: the audio clock (and the picture paced to it) stalled
                 signals?.audioUnderrunAtNanos = System.nanoTime()
-                paceTargetBytes = (paceTargetBytes + PACE_STEP_BYTES).coerceAtMost(MAX_PACE_BYTES)
+                paceTargetBytes = (paceTargetBytes + paceStep).coerceAtMost(maxPace)
                 paceCleanChunks = 0
             } else if (++paceCleanChunks >= PACE_RECOVER_CHUNKS) {
-                paceTargetBytes = (paceTargetBytes - PACE_STEP_BYTES).coerceAtLeast(MIN_PACE_BYTES)
+                paceTargetBytes = (paceTargetBytes - paceStep).coerceAtLeast(minPace)
                 paceCleanChunks = 0
             }
         }

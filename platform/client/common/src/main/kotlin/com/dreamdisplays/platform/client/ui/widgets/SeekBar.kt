@@ -51,6 +51,8 @@ class SeekBar(
     private val duration: () -> Long,
     private val previewFrame: ((Long) -> Identifier?)? = null,
     private val waitingLabel: (() -> String?)? = null,
+    /** Text of the badge that replaces the time label on a live stream (it has no timeline), or null for none. */
+    private val liveLabel: (() -> String?)? = null,
     private val scheduleLabel: (() -> String?)? = null,
     statusLabels: List<() -> String?> = [],
     private val chapters: () -> List<MediaChapter> = { [] },
@@ -139,10 +141,11 @@ class SeekBar(
         statusSuffixes.forEach { it.advance() }
 
         val waiting = waitingLabel?.invoke()
-        val base = if (waiting != null) {
-            literalText(waiting).copy().withStyle { it.withColor(WAITING_COLOR) }
-        } else {
-            timeLabel(cur, dur)
+        val live = if (waiting == null) liveLabel?.invoke() else null
+        val base = when {
+            waiting != null -> literalText(waiting).copy().withStyle { it.withColor(WAITING_COLOR) }
+            live != null -> literalText("● $live").copy().withStyle { it.withColor(LIVE_COLOR).withBold(true) }
+            else -> timeLabel(cur, dur)
         }
 
         var shown = scheduleSuffix.appendTo(base.copy())
@@ -338,6 +341,7 @@ class SeekBar(
         private const val FADE_SPEED = 0.35f
         private const val CHAPTER_LABEL_RGB = 0xAAAAAA
         private const val WAITING_COLOR = 0xFFA0A0A0.toInt()
+        private const val LIVE_COLOR = 0xFFFF4040.toInt()
         private val TRACK = vanillaIdentifier("widget/slider")
         private val TRACK_HIGHLIGHTED = vanillaIdentifier("widget/slider_highlighted")
         private val HANDLE = vanillaIdentifier("widget/slider_handle")

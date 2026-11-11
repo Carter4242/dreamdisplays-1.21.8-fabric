@@ -106,3 +106,34 @@ class CustomMediaPolicyTest {
         assertEquals(CustomMediaPolicy.Verdict.ALLOWED, CustomMediaPolicy.evaluate("https://kick.com/xqc", off))
     }
 }
+
+class CustomMediaPolicyLiveTest {
+    private val srt = "srt://relay.example.com:8890?streamid=read:room1"
+
+    @Test
+    fun relayLinkIsCustomMedia() {
+        assertTrue(CustomMediaPolicy.isCustom(srt))
+        assertTrue(CustomMediaPolicy.isCustom("rtmp://live.twitch.tv/app/key"), "A relay link is never a platform link.")
+        assertEquals(CustomMediaPolicy.Verdict.ALLOWED, CustomMediaPolicy.evaluate(srt, CustomMediaPolicy.Settings.DEFAULT))
+        assertEquals(
+            CustomMediaPolicy.Verdict.DISABLED,
+            CustomMediaPolicy.evaluate(srt, CustomMediaPolicy.Settings(enabled = false)),
+        )
+    }
+
+    @Test
+    fun hostRulesApplyToRelayLinks() {
+        assertEquals(
+            CustomMediaPolicy.Verdict.HOST_BLOCKED,
+            CustomMediaPolicy.evaluate(srt, CustomMediaPolicy.Settings(blockedHosts = ["example.com"])),
+        )
+        assertEquals(
+            CustomMediaPolicy.Verdict.ALLOWED,
+            CustomMediaPolicy.evaluate(srt, CustomMediaPolicy.Settings(allowedHosts = ["relay.example.com"])),
+        )
+        assertEquals(
+            CustomMediaPolicy.Verdict.HOST_NOT_ALLOWED,
+            CustomMediaPolicy.evaluate("rtsp://other.net:8554/a", CustomMediaPolicy.Settings(allowedHosts = ["example.com"])),
+        )
+    }
+}

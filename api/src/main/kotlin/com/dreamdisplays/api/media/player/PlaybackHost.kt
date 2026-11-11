@@ -54,6 +54,9 @@ interface PlaybackHost {
      */
     val readAheadSeconds: Int? get() = null
 
+    /** SRT receive latency in ms for a live relay stream without its own, or null for the player's default. */
+    val liveLatencyMs: Int? get() = null
+
     /** Invoked after a seek so the host can react (e.g. clear stale frames). */
     fun afterSeek()
 

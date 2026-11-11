@@ -7,6 +7,7 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
 import com.dreamdisplays.api.media.source.MediaResolverService
 import com.dreamdisplays.api.media.source.CustomMediaUrls
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.MediaStreamType
 import com.dreamdisplays.shared.policy.MediaHosts
@@ -19,7 +20,8 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.TimeUnit
 
 /**
- * Plays a URL that already is the media: a video file, an HLS playlist, or a DASH manifest.
+ * Plays a URL that already is the media: a video file, an HLS playlist, a DASH manifest, or a live relay stream
+ * (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`).
  */
 object DirectStreamResolver : MediaResolverService {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -53,6 +55,7 @@ object DirectStreamResolver : MediaResolverService {
     override fun resolve(source: MediaSource): ResolvedMedia {
         val url = source.toResolvableUrl()
             ?: throw UnsupportedOperationException("$source has no resolvable URL.")
+        if (LiveStreamUrls.isLive(url)) return resolveLive(url)
         cache.getIfPresent(url)?.let { return it }
 
         val declaredKind = (source as? MediaSource.DirectStream)?.kind
@@ -99,6 +102,28 @@ object DirectStreamResolver : MediaResolverService {
         }
         cache.put(url, resolved)
         return resolved
+    }
+
+    /**
+     * A relay stream needs no probe: there is nothing to ask over HTTP, and whether a publisher is on the air yet is
+     * only known once `FFmpeg` connects (the player keeps retrying until one is). Only the host is checked, through the
+     * same SSRF guard as every other link.
+     */
+    private fun resolveLive(url: String): ResolvedMedia {
+        if (!LiveStreamUrls.isValid(url)) throw DreamMediaException.NotFound("This live stream link is not valid.")
+        runCatching { MediaHostGuard.requireAllowed(url) }.getOrElse { e ->
+            throw if (e is MediaHostGuard.HostRefusedException) DreamMediaException.NotFound(UNREACHABLE_MESSAGE, e)
+            else DreamMediaException.Network(UNREACHABLE_MESSAGE, e)
+        }
+        return ResolvedMedia(
+            streams = [muxedStream(url.trim())],
+            metadata = MediaMetadata.UNKNOWN.copy(
+                title = LiveStreamUrls.displayName(url),
+                uploader = LiveStreamUrls.hostOf(url),
+            ),
+            isLive = true,
+            isSeekable = false,
+        )
     }
 
     /** Drops [url]'s cached verdicts, so the next open re-probes instead of re-serving a dead link. */

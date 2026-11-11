@@ -59,10 +59,14 @@ object CustomMediaUrls {
     private const val WRAPPERS = "<>()[]{}\"'`,;"
     private val DRIVE_PATH_ID = Regex("/file/d/([A-Za-z0-9_-]{8,})")
 
-    /** Cleans and rewrites [raw] to playable HTTP(S) URL; applies wrappers, scheme, share-link rewrites. */
+    /**
+     * Cleans and rewrites [raw] to a playable HTTP(S) URL; applies wrappers, scheme, share-link rewrites. A live relay
+     * URL ([LiveStreamUrls]) is kept as it is, only unwrapped.
+     */
     fun normalize(raw: String): String? {
         var value = raw.trim().trim { it in WRAPPERS }.trim()
         if (value.isEmpty()) return null
+        if (LiveStreamUrls.isLive(value)) return value.takeIf { LiveStreamUrls.isValid(it) }
         if (!value.contains("://")) {
             if (value.substringBefore('/').contains(':')) return null
             val host = value.substringBefore('/')
@@ -73,8 +77,12 @@ object CustomMediaUrls {
         return rewriteShareLink(parsed.uri) ?: parsed.value
     }
 
-    /** Classifies [url] by extension of last path segment (ignoring query); returns UNKNOWN if unrecognized. */
+    /**
+     * Classifies [url]: a relay scheme is [CustomMediaKind.LIVE], anything else goes by the extension of its last path
+     * segment (ignoring the query); UNKNOWN if unrecognized.
+     */
     fun classify(url: String): CustomMediaKind {
+        if (LiveStreamUrls.isLive(url)) return CustomMediaKind.LIVE
         val extension = extensionOf(url) ?: return CustomMediaKind.UNKNOWN
         MANIFEST_EXTENSIONS[extension]?.let { return it }
         return when (extension) {
@@ -103,6 +111,7 @@ object CustomMediaUrls {
 
     /** Best human label for [url]: decoded file name (no extension) or host; used for custom video title. */
     fun displayName(url: String): String {
+        if (LiveStreamUrls.isLive(url)) return LiveStreamUrls.displayName(url)
         val uri = runCatching { URI(url.trim()) }.getOrNull()
         val name = uri?.path?.substringAfterLast('/').orEmpty()
         if (name.isBlank()) return hostOf(url) ?: url

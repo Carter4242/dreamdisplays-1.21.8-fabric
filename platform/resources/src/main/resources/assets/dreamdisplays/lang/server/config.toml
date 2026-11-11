@@ -108,6 +108,8 @@ auto_pause_when_empty_seconds = 0
 
 [policy.network]
 # read_ahead_seconds = 30   # seconds of a direct video file (.mp4 / .webm link) clients keep downloaded ahead; 0 = off
+# live_latency_ms = 80      # SRT receive latency for live relay links (srt://...) that set none; 20-5000.
+#                           # Lower = closer to real time, higher = rides out more packet loss
 
 [custom_media]
 # Custom videos: links players paste themselves (direct .mp4 / .m3u8 files, file hosts,

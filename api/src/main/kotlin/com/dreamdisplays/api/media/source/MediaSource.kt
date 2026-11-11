@@ -78,6 +78,11 @@ sealed interface MediaSource {
 
     companion object {
         fun from(url: String): MediaSource {
+            // A relay URL is never anything else, and its host must never be read as a platform's
+            if (LiveStreamUrls.isLive(url.trim().trim { it in "<>()[]{}\"'`,;" })) {
+                CustomMediaUrls.normalize(url)?.let { return DirectStream(it, CustomMediaKind.LIVE) }
+                return Remote(url)
+            }
             YouTubeUrls.extractVideoId(url)?.let { return YouTube(it) }
 
             val parsed = MediaHttpUrl.parse(url) ?: MediaHttpUrl.parse("https://${url.trim()}")

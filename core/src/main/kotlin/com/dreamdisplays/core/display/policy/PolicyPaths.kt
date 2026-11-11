@@ -103,6 +103,9 @@ object PolicyPaths {
         Path("network.read_ahead_seconds", "network.readAheadSeconds", Kind.Whole(0, 120)) {
             it.network?.readAheadSeconds
         },
+        Path("network.live_latency_ms", "network.liveLatencyMs", Kind.Whole(20, 5_000)) {
+            it.network?.liveLatencyMs
+        },
     )
 
     private val byName = all.associateBy { it.name }

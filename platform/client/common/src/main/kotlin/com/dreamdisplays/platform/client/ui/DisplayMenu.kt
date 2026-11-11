@@ -288,7 +288,14 @@ class DisplayMenu private constructor(
                         key?.let { ScrubPreview.frameAt(it, nanos) }
                     }
                 },
-                waitingLabel = { if (!ds.isVideoStarted) ClientMessage.UI_WAITING.component().string else null },
+                waitingLabel = {
+                    when {
+                        ds.isWaitingForStream -> ClientMessage.UI_WAITING_STREAM.component().string
+                        !ds.isVideoStarted -> ClientMessage.UI_WAITING.component().string
+                        else -> null
+                    }
+                },
+                liveLabel = { if (ds.isLive) ClientMessage.UI_LIVE.component().string else null },
                 scheduleLabel = { scheduleCountdownText() },
                 chapters = { DisplayChapters.of(ds) },
             ) { nanos ->

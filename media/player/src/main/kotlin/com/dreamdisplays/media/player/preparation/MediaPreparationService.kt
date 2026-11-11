@@ -3,6 +3,7 @@ package com.dreamdisplays.media.player.preparation
 import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.player.PlaybackEnvironment
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.StreamPreferences
@@ -20,11 +21,12 @@ internal object MediaPreparationService {
 
     /**
      * Resolves [url] through the registry's [MediaResolverRegistry], selects tracks via [StreamSelector], and returns a
-     * [PreparedMedia] ready for playback. A direct media file is routed through [readAhead]'s buffer when one is given.
+     * [PreparedMedia] ready for playback. A direct media file is routed through [readAhead]'s buffer when one is given;
+     * a live relay stream gets its SRT latency ([liveLatencyMs] unless the URL sets one, see [LiveStreamUrls.playUrl]).
      */
     fun prepare(
         url: String, lang: String, quality: VideoQuality, env: PlaybackEnvironment,
-        readAhead: ReadAhead.Target? = null,
+        readAhead: ReadAhead.Target? = null, liveLatencyMs: Int? = null,
     ): PreparedMedia {
         val chain: MediaResolverRegistry = env.resolverChain()
         val selector: StreamSelector = env.streamSelector()
@@ -73,7 +75,11 @@ internal object MediaPreparationService {
             ?.takeIf { !resolved.isLive && resolved.isSeekable && video.url == audio.url && video.type.hasAudio }
             ?.let { ReadAhead.wrap(it, video.url) }
             ?.takeIf { it != video.url }
-        fun MediaStream.routed(): MediaStream = if (buffered != null && url == video.url) copy(url = buffered) else this
+        fun MediaStream.routed(): MediaStream = when {
+            buffered != null && url == video.url -> copy(url = buffered)
+            LiveStreamUrls.isLive(url) -> copy(url = LiveStreamUrls.playUrl(url, liveLatencyMs))
+            else -> this
+        }
 
         return PreparedMedia(
             streamSet = ActiveStreams(

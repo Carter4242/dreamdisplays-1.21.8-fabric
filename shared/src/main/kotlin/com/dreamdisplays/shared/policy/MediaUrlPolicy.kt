@@ -1,6 +1,7 @@
 package com.dreamdisplays.shared.policy
 
 import com.dreamdisplays.api.media.search.YouTubeVideoId
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.api.media.source.MediaHttpUrl
 
 /** Trust-boundary policy for client-supplied media URLs. */
@@ -17,7 +18,8 @@ object MediaUrlPolicy {
 
     /**
      * A bare 11-character YouTube ID (which may legitimately start with `-`), or a trimmed
-     * `http://` or `https://` URL with no whitespace or control characters, within [MAX_URL_LENGTH].
+     * `http://` or `https://` URL, or a live relay URL (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`, see
+     * [LiveStreamUrls]), with no whitespace or control characters, within [MAX_URL_LENGTH].
      */
     fun isAllowed(url: String): Boolean {
         if (url.isEmpty()) return true
@@ -26,6 +28,6 @@ object MediaUrlPolicy {
         if (s.isEmpty()) return false
         if (s.length > MAX_URL_LENGTH) return false
         if (YouTubeVideoId.parse(s) != null) return true
-        return MediaHttpUrl.isValid(s, MAX_URL_LENGTH)
+        return MediaHttpUrl.isValid(s, MAX_URL_LENGTH) || LiveStreamUrls.isValid(s, MAX_URL_LENGTH)
     }
 }

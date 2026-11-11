@@ -58,3 +58,24 @@ class MediaUrlPolicyTest {
         assertEquals("abcdefghijklmnop", MediaUrlPolicy.sanitizeLang("abcdefghijklmnopq"))
     }
 }
+
+class MediaUrlPolicyLiveTest {
+    @Test
+    fun relayLinksAreAllowed() {
+        for (url in [
+            "srt://relay.example.com:8890?streamid=read:room1",
+            "rtmp://203.0.113.5/live/room1",
+            "rtmps://relay.example.com/live/room1",
+            "rtsp://relay.example.com:8554/room1",
+        ]) assertTrue(MediaUrlPolicy.isAllowed(url), url)
+    }
+
+    @Test
+    fun brokenOrForeignRelayLinksAreRejected() {
+        assertFalse(MediaUrlPolicy.isAllowed("srt://"))
+        assertFalse(MediaUrlPolicy.isAllowed("srt://host:8890?streamid=read:a b"))
+        assertFalse(MediaUrlPolicy.isAllowed("udp://239.0.0.1:1234"))
+        assertFalse(MediaUrlPolicy.isAllowed("file:///etc/passwd"))
+        assertFalse(MediaUrlPolicy.isAllowed("srt://h:1?x=" + "a".repeat(MediaUrlPolicy.MAX_URL_LENGTH)))
+    }
+}

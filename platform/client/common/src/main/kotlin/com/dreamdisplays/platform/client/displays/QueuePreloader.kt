@@ -278,6 +278,8 @@ internal class PreloadHost(private val screen: DisplayScreen) : PlaybackHost {
 
     override val readAheadSeconds: Int? get() = display.readAheadSeconds
 
+    override val liveLatencyMs: Int? get() = display.liveLatencyMs
+
     /** Hands the player over: from now on it is the display's player in every respect. */
     fun adopt() {
         adopted = true

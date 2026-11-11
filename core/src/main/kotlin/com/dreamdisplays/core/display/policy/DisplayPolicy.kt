@@ -204,9 +204,13 @@ data class DisplayPolicy(
     data class Network(
         /** Seconds of a direct media file (MP4 / WebM link) kept downloaded ahead of playback; 0 turns it off. */
         val readAheadSeconds: Int? = null,
+        /** SRT receive latency (ms) for a live relay stream (`srt://` link) whose URL sets none. */
+        val liveLatencyMs: Int? = null,
     ) {
-        fun mergedOver(base: Network?): Network =
-            Network(readAheadSeconds = readAheadSeconds ?: base?.readAheadSeconds)
+        fun mergedOver(base: Network?): Network = Network(
+            readAheadSeconds = readAheadSeconds ?: base?.readAheadSeconds,
+            liveLatencyMs = liveLatencyMs ?: base?.liveLatencyMs,
+        )
     }
 
     /** True when no section sets anything, so there is nothing worth sending. */

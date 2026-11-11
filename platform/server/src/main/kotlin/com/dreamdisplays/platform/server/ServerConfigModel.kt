@@ -498,7 +498,10 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         reportIntervalSeconds = t.numberOrNull("policy.debug.report_interval_seconds")?.toInt(),
         logLevel = (t?.get("policy.debug.log_level") as? String)?.let(ClientLogLevel::fromWire)?.wire,
     )
-    val network = DisplayPolicy.Network(t.numberOrNull("policy.network.read_ahead_seconds")?.toInt())
+    val network = DisplayPolicy.Network(
+        readAheadSeconds = t.numberOrNull("policy.network.read_ahead_seconds")?.toInt(),
+        liveLatencyMs = t.numberOrNull("policy.network.live_latency_ms")?.toInt()?.coerceIn(20, 5_000),
+    )
     return DisplayPolicy(
         sync = sync.takeIf { it != DisplayPolicy.Sync() },
         audio = audio.takeIf { it != DisplayPolicy.Audio() },

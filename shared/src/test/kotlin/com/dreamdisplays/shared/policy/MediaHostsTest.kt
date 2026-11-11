@@ -64,3 +64,12 @@ class MediaHostsTest {
         assertEquals("::1", MediaHosts.hostOf("http://[::1]:8080/clip.mp4"))
     }
 }
+
+class MediaHostsLiveTest {
+    @kotlin.test.Test
+    fun relayLinkHostIsReadAndBelongsToNoPlatform() {
+        kotlin.test.assertEquals("relay.example.com", MediaHosts.hostOf("srt://Relay.Example.com:8890?streamid=read:a"))
+        kotlin.test.assertNull(MediaHosts.platformOf("srt://relay.example.com:8890"))
+        kotlin.test.assertNull(MediaHosts.refererFor("rtmp://relay.example.com/live/a"))
+    }
+}

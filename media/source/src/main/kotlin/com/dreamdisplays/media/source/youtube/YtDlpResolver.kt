@@ -1,6 +1,7 @@
 package com.dreamdisplays.media.source.youtube
 
 import com.dreamdisplays.api.media.model.DreamMediaException
+import com.dreamdisplays.api.media.source.CustomMediaKind
 import com.dreamdisplays.api.media.source.MediaMetadata
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
@@ -16,7 +17,9 @@ import java.io.IOException
 object YtDlpResolver : MediaResolverService {
     override val priority: Int = 0
 
-    override fun canResolve(source: MediaSource): Boolean = true
+    /** Everything except a live relay stream, which only `FFmpeg` itself can open (see [CustomMediaKind.LIVE]). */
+    override fun canResolve(source: MediaSource): Boolean =
+        !(source is MediaSource.DirectStream && source.kind == CustomMediaKind.LIVE)
 
     override fun prefetch(source: MediaSource): Boolean {
         val url = source.toResolvableUrl() ?: return false

@@ -21,11 +21,17 @@ enum class CustomMediaKind {
     /** An audio container (`.mp3`, `.flac`, ...): recognizable media, but a display needs a picture. */
     AUDIO_ONLY,
 
+    /**
+     * A real-time relay stream (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`, see [LiveStreamUrls]): always live,
+     * played straight by `FFmpeg` at the live edge, never probed over HTTP or sent to an extractor.
+     */
+    LIVE,
+
     /** Not recognizably direct media; the extractor chain (`NewPipe` / `yt-dlp`) decides. */
     UNKNOWN;
 
     /** True when the URL can be handed straight to the player without an extractor. */
-    val isDirect: Boolean get() = this == PROGRESSIVE || this == HLS || this == DASH
+    val isDirect: Boolean get() = this == PROGRESSIVE || this == HLS || this == DASH || this == LIVE
 
     /** True when the URL is a manifest whose variants are fetched rather than the media itself. */
     val isManifest: Boolean get() = this == HLS || this == DASH

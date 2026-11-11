@@ -42,6 +42,8 @@ class DisplayPlaybackHost(private val screen: DisplayScreen) : PlaybackHost {
 
     override val readAheadSeconds: Int? get() = screen.policy.network?.readAheadSeconds
 
+    override val liveLatencyMs: Int? get() = screen.policy.network?.liveLatencyMs
+
     override fun afterSeek() = screen.afterSeek()
 
     override fun beginQualityHandoff() = screen.beginQualityHandoff()

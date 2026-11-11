@@ -6,6 +6,7 @@ import com.dreamdisplays.api.media.model.FramePixelFormat
 import com.dreamdisplays.api.media.player.FrameUploaderFactory
 import com.dreamdisplays.api.media.player.GpuTextureRef
 import com.dreamdisplays.api.media.player.RenderExecutor
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
@@ -146,6 +147,9 @@ internal class PlaybackSessionManager(
             // The in-process decoder seeks through the same libav demuxer that gets this container
             // wrong, and unlike the process path it has no way to fall back to decoding forward.
             val seekByDecoding = streamSet.currentVideo.seekByDecoding
+            // A live relay stream runs at the live edge (no jitter buffer, see liveEdge) on the FFmpeg process:
+            // the in-process decoder only speaks http(s)
+            val liveEdge = LiveStreamUrls.isLive(safeUrl)
             if (alpha != null) {
                 val vp = MediaProcess.buildAlphaVideo(
                     ffmpeg, safeUrl, w, h, offsetNanos, alpha.decoder, fps, seekByDecoding = seekByDecoding,
@@ -158,7 +162,7 @@ internal class PlaybackSessionManager(
                 )
                 process = vp; thread = vt; return
             }
-            val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding &&
+            val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding && !liveEdge &&
                 !GoogleVideoRangeProxy.needsProxy(safeUrl) && lavServes(tempo)
             ) {
                 nativePipe.startInProcess(
@@ -182,6 +186,7 @@ internal class PlaybackSessionManager(
                     stopFlag = stop, terminated = terminated, getAudioClock = getAudioClock,
                     onFirstFrame = onFirstFrame, getBrightness = getBrightness, onEos = onEos,
                     parkFlag = parkFlag, presentPreview = presentPreview, tolerateLateness = tolerateLateness,
+                    liveEdge = liveEdge,
                 ) ?: throw IOException("Native FFmpeg session failed to start")
                 process = null; thread = vt; return
             }
@@ -194,6 +199,7 @@ internal class PlaybackSessionManager(
                 stopFlag = stop, terminated = terminated, getAudioClock = getAudioClock,
                 onFirstFrame = onFirstFrame, getBrightness = getBrightness, onEos = onEos,
                 parkFlag = parkFlag, presentPreview = presentPreview, tolerateLateness = tolerateLateness,
+                liveEdge = liveEdge,
             )
             process = vp; thread = vt
         }
@@ -506,6 +512,7 @@ internal class PlaybackSessionManager(
         if (terminated.get()) return
         liveSession = live
         if (live) setTempo(1.0) // A live edge cannot be played faster or slower
+        audio.liveEdge = live && LiveStreamUrls.isLive(streamSet.currentAudio.url)
         silentSession = false
 
         val ffmpeg = FFmpegBinary.getPath() ?: run {

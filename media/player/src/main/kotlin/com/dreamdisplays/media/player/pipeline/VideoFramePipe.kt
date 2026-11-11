@@ -84,12 +84,15 @@ internal class VideoFramePipe(
 
     override fun cleanup() = surface.cleanup()
 
-    /** Starts the video reader thread and returns it (already running). */
+    /**
+     * Starts the video reader thread and returns it (already running). A [liveEdge] session (a live relay stream)
+     * shows every frame the moment it is read, with no jitter buffer and no pacing against the audio clock.
+     */
     fun start(
         proc: Process, w: Int, h: Int, seekOffsetNanos: Long, sourceFps: Double, stopFlag: AtomicBoolean,
         terminated: AtomicBoolean, getAudioClock: () -> Long, onFirstFrame: () -> Unit, getBrightness: () -> Double,
         onEos: (stderr: String, normalEos: Boolean) -> Unit, parkFlag: AtomicBoolean? = null,
-        presentPreview: Boolean = true, tolerateLateness: Boolean = true,
+        presentPreview: Boolean = true, tolerateLateness: Boolean = true, liveEdge: Boolean = false,
     ): Thread {
         clear()
         expectedW = w
@@ -98,16 +101,20 @@ internal class VideoFramePipe(
         lastFrameReceivedNanos.set(System.nanoTime())
         // Must be the same rate FFmpeg was pinned to -r, or synthesized timestamps drift
         val frameNs = (1_000_000_000.0 / MediaProcess.outputFps(sourceFps)).toLong()
-        val prebuffer = FramePrebuffer.create(
+        val prebuffer = if (liveEdge) null else FramePrebuffer.create(
             surface, frameNs, getAudioClock, onFirstFrame, terminated, stopFlag, debugLabel, presentPreview,
             tolerateLateness, parkFlag, frameBytes = w * h * pixelFormat.bytesPerPixel,
-        ).also { activePrebuffer = it }
+        )
+        activePrebuffer = prebuffer
         // Feed the popout / PiP sink from the prebuffer's paced consumer so it stays in sync with the
         // in-world display; feeding at decode time would run the popout ahead by the buffer depth.
-        prebuffer.onPresent = { buf -> feedSink(buf, w, h) }
+        prebuffer?.onPresent = { buf -> feedSink(buf, w, h) }
         return daemon(
             {
-                read(proc, w, h, frameNs, seekOffsetNanos, stopFlag, terminated, getBrightness, onEos, prebuffer)
+                read(
+                    proc, w, h, frameNs, seekOffsetNanos, stopFlag, terminated, getBrightness, onEos, prebuffer,
+                    onFirstFrame,
+                )
             },
             "MediaPlayer-video",
         ).also { it.start() }
@@ -116,8 +123,10 @@ internal class VideoFramePipe(
     private fun read(
         proc: Process, w: Int, h: Int, frameNs: Long, seekOffsetNanos: Long, stopFlag: AtomicBoolean,
         terminated: AtomicBoolean, getBrightness: () -> Double,
-        onEos: (stderr: String, normalEos: Boolean) -> Unit, prebuffer: FramePrebuffer,
+        onEos: (stderr: String, normalEos: Boolean) -> Unit, prebuffer: FramePrebuffer?,
+        onFirstFrame: () -> Unit,
     ) {
+        var firstFrameArmed = false
         // Dimensions are fixed per session (mismatched frames are skipped in the loop), so the size never changes.
         val frameSize = w * h * pixelFormat.bytesPerPixel
         var spare = surface.allocateFrameBuffer(frameSize)
@@ -194,7 +203,17 @@ internal class VideoFramePipe(
                         continue
                     }
 
-                    if (MediaPlayer.captureSamples) {
+                    if (prebuffer == null) {
+                        // Live edge: shown now; the surface keeps only the newest frame for the next render frame
+                        if (!firstFrameArmed) {
+                            firstFrameArmed = true
+                            onFirstFrame()
+                        }
+                        if (MediaPlayer.captureSamples) {
+                            feedSink(spare, w, h)
+                            spare = surface.publish(spare, frameSize)
+                        }
+                    } else if (MediaPlayer.captureSamples) {
                         spare = prebuffer.submit(spare, videoPts, frameSize)
                         if (MediaPlayer.DEBUG) MediaPlayer.samplesIn.incrementAndGet()
                     } else {
@@ -213,9 +232,9 @@ internal class VideoFramePipe(
         // Normal EOF should drain queued frames; abort only for teardown / errors. This matters for
         // short replay / cached sources that can fill the prebuffer and EOF before live video is ready.
         if (!terminated.get() && !stopFlag.get() && normalEos) {
-            prebuffer.finish()
+            prebuffer?.finish()
         } else {
-            prebuffer.abort()
+            prebuffer?.abort()
         }
         if (activePrebuffer === prebuffer) activePrebuffer = null
 
