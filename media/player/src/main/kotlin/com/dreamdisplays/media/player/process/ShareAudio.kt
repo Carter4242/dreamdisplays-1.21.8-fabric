@@ -40,9 +40,10 @@ object ShareAudio {
     const val PULSE_DEFAULT_MONITOR = "@DEFAULT_MONITOR@"
 
     /**
-     * What to try for [choice] on [os], in order, given this game's [selfPid]; empty = no sound. "Except Minecraft"
-     * falls back to the whole device when process loopback is missing (older Windows). "Just one app" never widens to
-     * the whole PC on its own: that could stream a call or anything else the sharer did not mean to share.
+     * What to try for [choice] on [os], in order, given this game's [selfPid]; empty = no sound. Neither "Except
+     * Minecraft" nor "Just one app" ever widens to the whole PC on its own: that would stream the game, its voice chat
+     * (with this share's own playback, an echo) or a call the sharer did not mean to share. Older Windows (no process
+     * loopback) is never offered either; it gets "Whole PC" instead.
      */
     fun plans(choice: Choice, os: Os, selfPid: Long): List<Plan> = when (os) {
         Os.MAC -> emptyList()
@@ -50,7 +51,7 @@ object ShareAudio {
         Os.WINDOWS -> when (choice) {
             Choice.Off -> emptyList()
             Choice.WholePc -> listOf(Plan.DeviceLoopback)
-            Choice.ExceptGame -> listOf(Plan.ProcessLoopback(selfPid, include = false), Plan.DeviceLoopback)
+            Choice.ExceptGame -> listOf(Plan.ProcessLoopback(selfPid, include = false))
             is Choice.App -> listOf(Plan.ProcessLoopback(choice.pid, include = true))
         }
     }

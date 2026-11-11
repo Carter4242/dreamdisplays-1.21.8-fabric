@@ -13,9 +13,10 @@ class ShareAudioTest {
     private val spotify = Choice.App(200, "Spotify")
 
     @Test
-    fun `except minecraft excludes the game's own process tree and falls back to the whole device`() {
+    fun `except minecraft excludes the game's own process tree and never widens to the whole device`() {
+        // The whole device would add the game, its voice chat and this share's own playback (an echo)
         assertEquals(
-            listOf(Plan.ProcessLoopback(self, include = false), Plan.DeviceLoopback),
+            listOf(Plan.ProcessLoopback(self, include = false)),
             ShareAudio.plans(Choice.ExceptGame, Os.WINDOWS, self),
         )
         assertEquals(listOf(Plan.DeviceLoopback), ShareAudio.plans(Choice.WholePc, Os.WINDOWS, self))

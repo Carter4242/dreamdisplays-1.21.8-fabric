@@ -79,6 +79,10 @@ object ScreenShare {
         var shareUrl: String? = null
 
         var lastHeartbeatMs = 0L
+
+        /** The sharer was told this share runs without the sound they picked. */
+        @Volatile
+        var toldNoSound = false
     }
 
     private val lock = Any()
@@ -518,6 +522,11 @@ object ScreenShare {
             }
         }
         r.audio = null
+        // Sound was picked but none could be captured: the badge says "no sound", and the sharer is told once
+        if (ShareAudio.plans(r.audioChoice, audioOs, selfPid).isNotEmpty() && !r.toldNoSound) {
+            r.toldNoSound = true
+            notify(ClientMessage.SHARE_AUDIO_UNAVAILABLE.component().withStyle(ChatFormatting.YELLOW))
+        }
         return null
     }
 
