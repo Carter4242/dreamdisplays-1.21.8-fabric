@@ -1294,6 +1294,12 @@ class MediaPlayer(
             if (decision.refused) env.cacheInvalidator.streamRefused(url) else env.cacheInvalidator.invalidate(url)
             forgetResolvedStreamUrls()
         }
+        // The retry re-initializes, which opens at the primed position: make that where the picture stopped, not where
+        // this player first started (a CDN hiccup twenty minutes in must not rewind a Local video to the beginning)
+        if (!liveStream) {
+            val heard = sessionManager.currentPacingNanos()
+            primedStartPositionNanos = (if (heard >= 0L) heard else clock.currentTime()).coerceAtLeast(0L)
+        }
         lifecycle = PlayerState.Restarting
         RETRY_SCHEDULER.schedule({ dispatchInitialize() }, delayMs, TimeUnit.MILLISECONDS)
     }
@@ -1502,6 +1508,8 @@ class MediaPlayer(
         if (isPausedWarm()) freezePausedWarmSession()
         heldReady = false
         clock.reset(nanos)
+        // A retry or re-resolve still pending opens at the primed position: a seek made meanwhile moves it there
+        if (lifecycle == PlayerState.Restarting && !liveStream) primedStartPositionNanos = nanos
         val ss = streams ?: return
         if (warmingUp) {
             // Still opening a paused stream to hold it ready: open it at the new position instead
