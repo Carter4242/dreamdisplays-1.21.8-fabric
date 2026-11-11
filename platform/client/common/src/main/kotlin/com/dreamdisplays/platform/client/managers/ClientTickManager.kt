@@ -14,6 +14,7 @@ import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.displays.ViewerReporter
 import com.dreamdisplays.platform.client.input.*
 import com.dreamdisplays.platform.client.overlay.OverlayManager
+import com.dreamdisplays.platform.client.render.ShaderPackCompat
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.utils.MinecraftScreenUtil
 import com.dreamdisplays.platform.client.net.ProtocolRouter
@@ -36,6 +37,7 @@ object ClientTickManager {
     private var lastLevel: ClientLevel? = null
     private var lastConnection: ClientPacketListener? = null
     private var unloadCheckTick = 0
+    private var lastShaderPackActive: Boolean? = null
     private var hoveredDisplayScreen: DisplayScreen? = null
     private var lastHoveredId: UUID? = null
     private var tickCount = 0L
@@ -101,6 +103,8 @@ object ClientTickManager {
         val playerPos = player.blockPosition()
         DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
             ?.updateListener(ListenerPoseTracker.currentPose(minecraft))
+
+        rebuildDisplaysOnShaderPackChange(playerPos)
 
         unloadCheckTick++
         if (unloadCheckTick >= 10 && ClientStateManager.displaysEnabled && ServerOverrides.displaysEnabled &&
@@ -209,5 +213,28 @@ object ClientTickManager {
 
     private fun checkVersionAndSendPacket() {
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()?.advertise()
+    }
+
+    /**
+     * A display picks its drawing path (GPU YUV or plain RGBA) when its player is created, and a shader pack can only
+     * draw the RGBA one. When shaders are switched on or off mid-session, rebuild every loaded display through the same
+     * save-and-restore path used when the server turns displays off and on, so each reopens on the right path.
+     */
+    private fun rebuildDisplaysOnShaderPackChange(playerPos: net.minecraft.core.BlockPos) {
+        val active = runCatching { ShaderPackCompat.isShaderPackActive }.getOrDefault(false)
+        val previous = lastShaderPackActive
+        lastShaderPackActive = active
+        if (previous == null || previous == active) return
+        val screens = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual }
+        if (screens.isEmpty()) return
+        org.slf4j.LoggerFactory.getLogger(ClientTickManager::class.java)
+            .info("Shader pack turned {}; reloading {} display(s) on the matching render path.", if (active) "on" else "off", screens.size)
+        for (screen in screens) {
+            DisplayRegistry.saveScreenData(screen)
+            DisplayRegistry.unregisterScreen(screen)
+        }
+        if (ClientStateManager.displaysEnabled && ServerOverrides.displaysEnabled) {
+            DisplayLifecycleManager.restoreVisibleUnloadedScreens(playerPos)
+        }
     }
 }
