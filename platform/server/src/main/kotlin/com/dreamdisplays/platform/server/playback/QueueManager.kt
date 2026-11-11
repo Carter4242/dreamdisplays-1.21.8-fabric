@@ -51,11 +51,8 @@ object QueueManager {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /** Advance this long before the end, so no client wraps its looping player back to frame 0 first. */
+    /** Advance this long (wall time) before the end, so no client wraps its looping player back to frame 0 first. */
     private const val ADVANCE_EARLY_MS = 250L
-
-    /** A looping timeline the server ticked past the end of is still advanced within this long of the wrap. */
-    private const val LATE_GRACE_MS = 2_000L
     private const val ADD_COOLDOWN_MS = 150L
     private const val EDIT_COOLDOWN_MS = 150L
     private const val PRELOAD_COOLDOWN_MS = 100L
@@ -86,7 +83,7 @@ object QueueManager {
     private val queues = ConcurrentHashMap<UUID, DisplayQueue>()
     private val rosters = ConcurrentHashMap<UUID, FullscreenPrepareRoster>()
 
-    /** When each queue last went from empty to non-empty: a loop wrap before that is no end to advance at. */
+    /** When each queue last got something to advance to ([DisplayQueue.hasNext]): a loop wrap before that is no end. */
     private val armedAt = ConcurrentHashMap<UUID, Long>()
     private val addThrottle = ActionThrottle()
     private val editThrottle = ActionThrottle()
@@ -164,7 +161,7 @@ object QueueManager {
         var added = 0
         var stoppedBy: Result? = null
         synchronized(queue) {
-            if (queue.isEmpty()) armedAt[display.id] = now
+            if (!queue.hasNext()) armedAt[display.id] = now
             for (entry in valid) {
                 val item = QueueItem(
                     itemId = newItemId(),
@@ -286,20 +283,25 @@ object QueueManager {
     }
 
     /**
-     * Called every couple of ticks: advances every display whose timeline reached the end of its video while
-     * something is queued. Cheap when nothing is queued.
+     * Called every couple of ticks: advances every display whose timeline reached (or ran past, however late this
+     * tick comes) the end of its video while something is queued. Cheap when nothing is queued. With nothing to
+     * advance to the display's video just loops.
      */
     fun tick() {
         if (queues.isEmpty() || !settings().enabled) return
         val now = transport.nowMs()
         for ((displayId, queue) in queues) {
-            if (synchronized(queue) { queue.isEmpty() }) continue
+            val (hasNext, current) = synchronized(queue) { queue.hasNext() to queue.current }
+            if (!hasNext) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.virtual || !PlaybackPermissions.queueRuns(display.mode)) continue
             if (WatchPartyManager.hasSession(displayId) || TimelineManager.isHolding(displayId)) continue
             val timeline = TimelineManager.timelineOf(displayId) ?: continue
             val armed = armedAt[displayId] ?: Long.MIN_VALUE
-            if (!QueueTiming.advanceDue(timeline, now, ADVANCE_EARLY_MS, LATE_GRACE_MS, armed)) continue
+            // No reported duration (e.g. the plugin reloaded and no client re-reported it): use the playing queue entry's
+            val durationMs = timeline.durationMs.takeIf { it > 0L }
+                ?: current?.takeIf { it.url == display.url }?.durationMs ?: 0L
+            if (!QueueTiming.advanceDue(timeline, now, ADVANCE_EARLY_MS, armed, durationMs)) continue
             advance(display)
         }
     }

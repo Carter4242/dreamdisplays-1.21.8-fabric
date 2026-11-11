@@ -61,6 +61,12 @@ class DisplayQueue(
 
     fun isEmpty(): Boolean = list.isEmpty()
 
+    /**
+     * True when the end of the playing video should advance: something is queued. With nothing queued the display just
+     * loops its video, which is also what a [loop]ing queue whose only entry is playing would do.
+     */
+    fun hasNext(): Boolean = list.isNotEmpty()
+
     /** The entry that plays next, or null. */
     fun head(): QueueItem? = list.firstOrNull()
 
@@ -230,23 +236,26 @@ object QueueTiming {
     }
 
     /**
-     * True when the display should move on to the next entry: within [earlyMs] of the end, or (looping timeline)
-     * up to [lateGraceMs] past a wrap the server ticked too late to catch. A wrap before [armedAtMs] (when the queue
-     * got the entry it would advance to) does not count: that play-through ended before anything was waiting, so an
-     * add right after a loop wrap must not switch the video.
+     * True when the display should move on to the next entry: within [earlyMs] of wall time before the end of the
+     * current play-through, or once the timeline ran past an end since its anchor (a looping timeline wraps silently,
+     * and the server may tick well after the end, e.g. after a seek into the last second). The latest end only counts
+     * when it happened at or after [armedAtMs] (when the queue got the entry it would advance to): a play-through that
+     * ended before anything was waiting is no end to advance at, so an add right after a loop wrap waits for the next
+     * end. [durationMs] overrides the timeline's own when it has none (the playing queue entry's duration); with no
+     * duration at all (not reported yet, live stream) it is never due.
      */
     fun advanceDue(
-        timeline: Timeline, nowMs: Long, earlyMs: Long, lateGraceMs: Long, armedAtMs: Long = Long.MIN_VALUE,
+        timeline: Timeline, nowMs: Long, earlyMs: Long, armedAtMs: Long = Long.MIN_VALUE,
+        durationMs: Long = timeline.durationMs,
     ): Boolean {
-        val untilEnd = msUntilEnd(timeline, nowMs) ?: return false
-        if (untilEnd <= earlyMs) return true
-        if (!timeline.loop) return false
+        if (timeline.paused || durationMs <= 0L) return false
+        val rate = timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)
         val raw = rawPosition(timeline, nowMs)
-        if (raw < timeline.durationMs) return false
-        val sinceWrap = raw % timeline.durationMs
-        if (sinceWrap > lateGraceMs) return false
-        val wrappedAtMs = nowMs - (sinceWrap / timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)).roundToLong()
-        return wrappedAtMs >= armedAtMs
+        val within = if (timeline.loop) raw % durationMs else raw.coerceAtMost(durationMs)
+        if ((durationMs - within) / rate <= earlyMs) return true
+        if (raw < durationMs) return false
+        val sinceEnd = if (timeline.loop) within else raw - durationMs
+        return nowMs - (sinceEnd / rate).roundToLong() >= armedAtMs
     }
 
     /** Content position at [nowMs], unwrapped: advances at the timeline's speed, holds before a scheduled start. */
