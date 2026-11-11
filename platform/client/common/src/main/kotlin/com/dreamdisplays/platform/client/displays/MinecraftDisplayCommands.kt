@@ -157,6 +157,12 @@ class MinecraftDisplayCommands : DisplayExecutor {
         return screen.toDisplay()
     }
 
+    override fun setSpeed(displayId: DisplayId, rate: Double): DisplayInfo? {
+        val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
+        screen.requestSpeed(rate)
+        return screen.toDisplay()
+    }
+
     override fun startWatchParty(displayId: DisplayId, url: String?): DisplayInfo? {
         val screen = DisplayRegistry.screens[displayId.uuid] ?: return null
         if (!screen.canStartWatchPartyHere) return null

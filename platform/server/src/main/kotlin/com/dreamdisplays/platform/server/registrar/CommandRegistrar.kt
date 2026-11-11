@@ -48,6 +48,7 @@ object CommandRegistrar {
             infoBranch()
             listBranch()
             scheduleBranch()
+            queueBranch()
             fullscreenBranch()
             statsBranch()
             clientsBranch()
@@ -55,6 +56,7 @@ object CommandRegistrar {
             diagBranch()
             reloadBranch()
             policyBranch()
+            speedBranch()
             configBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
@@ -196,6 +198,23 @@ object CommandRegistrar {
         }
     }
 
+    private fun LiteralArgumentBuilder<CommandSourceStack>.speedBranch() {
+        literal("speed", tip("suggestSpeed")) {
+            requires { SpeedCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> SpeedCommand.execute(ctx.source.sender, target(ctx), null) }
+                argument("rate", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        SpeedCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
+                    }
+                }
+            }
+        }
+    }
+
     private fun LiteralArgumentBuilder<CommandSourceStack>.configBranch() {
         literal("config", tip("suggestConfig")) {
             requires { PolicyCommand.allowed(it.sender) }
@@ -271,6 +290,57 @@ object CommandRegistrar {
                 }
             }
         }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.queueBranch() {
+        literal("queue", tip("suggestQueue")) {
+            requires { it.sender.hasPermission(PaperServer.config.permissions.queue) }
+            target {
+                executesCommand { ctx -> queue(ctx, null) }
+                literal("list", tip("suggestQueueList")) { executesCommand { ctx -> queue(ctx, "list") } }
+                literal("add", tip("suggestQueueAdd")) {
+                    argument("url", StringArgumentType.greedyString()) {
+                        suggests(suggesting(tips) { _, _, typed -> DisplaySuggestions.links(typed) })
+                        executesCommand { ctx -> queue(ctx, "add", StringArgumentType.getString(ctx, "url")) }
+                    }
+                }
+                literal("remove", tip("suggestQueueRemove")) {
+                    then(queuePosition("position") { executesCommand { ctx -> queue(ctx, "remove", position(ctx)) } })
+                }
+                literal("move", tip("suggestQueueMove")) {
+                    then(queuePosition("position") {
+                        then(queuePosition("to") {
+                            executesCommand { ctx ->
+                                queue(ctx, "move", position(ctx), StringArgumentType.getString(ctx, "to"))
+                            }
+                        })
+                    })
+                }
+                literal("skip", tip("suggestQueueSkip")) { executesCommand { ctx -> queue(ctx, "skip") } }
+                literal("clear", tip("suggestQueueClear")) { executesCommand { ctx -> queue(ctx, "clear") } }
+                literal("loop", tip("suggestQueueLoop")) {
+                    literal("on", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "on") } }
+                    literal("off", tip("suggestQueueLoop")) { executesCommand { ctx -> queue(ctx, "loop", "off") } }
+                }
+            }
+        }
+    }
+
+    private fun queuePosition(
+        name: String,
+        block: RequiredArgumentBuilder<CommandSourceStack, String>.() -> Unit,
+    ): RequiredArgumentBuilder<CommandSourceStack, String> =
+        RequiredArgumentBuilder.argument<CommandSourceStack, String>(name, StringArgumentType.word()).apply {
+            suggests(suggesting(tips) { ctx, _, typed ->
+                QueueCommand.positions(target(ctx)).map { Suggestion(it) }.startingWith(typed)
+            })
+            block()
+        }
+
+    private fun position(ctx: CommandContext<CommandSourceStack>): String = StringArgumentType.getString(ctx, "position")
+
+    private fun queue(ctx: CommandContext<CommandSourceStack>, action: String?, vararg args: String) {
+        QueueCommand.execute(ctx.source.sender, target(ctx), action, args.toList())
     }
 
     private fun RequiredArgumentBuilder<CommandSourceStack, String>.scheduleAction(action: String, tooltip: String) {
@@ -391,6 +461,14 @@ object CommandRegistrar {
             literal("list", tip("suggestFullscreenList")) {
                 requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenList) }
                 executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
+            }
+        }
+        // In-world events: the same preparation without a fullscreen broadcast; alone it lists preparations
+        literal("prepare", tip("suggestPrepare")) {
+            requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
+            executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
+            fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                DisplaySuggestions.targets(typed, remote(ctx.source))
             }
         }
     }

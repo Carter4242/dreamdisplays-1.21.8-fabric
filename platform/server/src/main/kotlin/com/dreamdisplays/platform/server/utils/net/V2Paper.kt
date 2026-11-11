@@ -13,6 +13,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
@@ -74,6 +75,7 @@ object PaperV2Networking : PluginMessageListener {
     private fun serverFeatureWires(): List<String> = buildList {
         addAll(ServerFeature.playbackFeatureWires)
         if (WorldGuardRegions.isAvailable()) add(ServerFeature.REGION_ACCESS.wire)
+        if (PaperServer.config.settings.queue.enabled) add(ServerFeature.QUEUE.wire)
         if (PaperServer.config.settings.clients.error_reports) add(ServerFeature.CLIENT_ERROR_REPORTS.wire)
     }
 
@@ -93,6 +95,8 @@ object PaperV2Networking : PluginMessageListener {
             is RequestSync -> DisplayActions.requestSync(player, packet.id)
             is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs)
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
+            is QueueAction -> QueueActions.onAction(player, packet)
+            is QueuePreload -> QueueActions.onPreload(player, packet)
             is ClientErrorReport -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onReport(player, packet)
             is ClientEnvironment -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onEnvironment(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)
@@ -107,7 +111,7 @@ object PaperV2Networking : PluginMessageListener {
             )
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
-                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs)
+                DisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
             }
 
             is WatchPartyStart -> DisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)
@@ -120,6 +124,7 @@ object PaperV2Networking : PluginMessageListener {
                 packet.sessionId, player.uniqueId, FullscreenAckAction.fromWire(packet.action),
             )
 
+            is DisplayReadiness -> ReadinessTracker.onReport(player.uniqueId, packet)
             is FullscreenPrepareStatus -> FullscreenBroadcastManager.onPrepareStatus(
                 player.uniqueId, packet.prepareId, packet.displayId, FullscreenPrepareState.fromWire(packet.state),
             )

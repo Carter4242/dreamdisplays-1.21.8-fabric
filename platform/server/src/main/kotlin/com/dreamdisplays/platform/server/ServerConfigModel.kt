@@ -27,6 +27,7 @@ data class SettingsSection(
     val display: DisplayConfig = DisplayConfig(),
     val fullscreen: FullscreenConfig = FullscreenConfig(),
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
+    val queue: QueueConfig = QueueConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
     val policy: DisplayPolicy = DisplayPolicy.EMPTY,
     val clients: ClientsConfig = ClientsConfig(),
@@ -64,6 +65,7 @@ data class SettingsSection(
 
     /** How long a seeked / restarted synced display stays parked while viewers re-buffer (0 = no hold). */
     val seekHoldMs get() = display.seek_hold_seconds * 1000L
+    val startLeadMaxMs get() = display.start_lead_max_ms.toLong()
 
     /** Mode new displays are created in: [PlaybackMode.SYNCED] unless `default_mode = "local"`. */
     val defaultMode: PlaybackMode
@@ -91,6 +93,16 @@ data class SettingsSection(
     val fullscreenDefaultMode: FullscreenMode
         get() = runCatching { FullscreenMode.valueOf(fullscreen.default_mode.uppercase()) }
             .getOrDefault(FullscreenMode.STANDARD)
+
+    /**
+     * `[queue]` section: per-display "Up next" lists on synced / broadcast displays. Caps of 0 or less mean none;
+     * the owner of a display is exempt from [max_per_player] on it.
+     */
+    data class QueueConfig(
+        val enabled: Boolean = true,
+        val max_items: Int = 50,
+        val max_per_player: Int = 10,
+    )
 
     /** Reports section. */
     data class ReportsConfig(
@@ -122,6 +134,7 @@ data class SettingsSection(
         val max_displays_per_player: Int = 100,
         val resume_hold_seconds: Int = 1,
         val seek_hold_seconds: Int = 3,
+        val start_lead_max_ms: Int = 150,
         val default_mode: String = "synced",
         val auto_pause_when_empty_seconds: Int = 0,
     )
@@ -215,6 +228,7 @@ data class PermissionsSection(
     val nameOthers get() = permissions.name_others
     val schedule get() = permissions.schedule
     val scheduleOthers get() = permissions.schedule_others
+    val queue get() = permissions.queue
 
     data class PermissionsConfig(
         val create: String = "dreamdisplays.create",
@@ -245,6 +259,7 @@ data class PermissionsSection(
         val name_others: String = "dreamdisplays.name.others",
         val schedule: String = "dreamdisplays.schedule",
         val schedule_others: String = "dreamdisplays.schedule.others",
+        val queue: String = "dreamdisplays.queue",
     )
 }
 
@@ -297,6 +312,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_displays_per_player = t?.getLong("display.max_displays_per_player")?.toInt() ?: 100,
             resume_hold_seconds = t.numberOrNull("display.resume_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 1,
             seek_hold_seconds = t.numberOrNull("display.seek_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 3,
+            start_lead_max_ms = t.numberOrNull("display.start_lead_max_ms")?.toInt()?.coerceIn(0, 1_000) ?: 150,
             default_mode = (t?.get("display.default_mode") as? String) ?: "synced",
             auto_pause_when_empty_seconds = t.numberOrNull("display.auto_pause_when_empty_seconds")?.toInt()
                 ?.coerceIn(0, 86_400) ?: 0,
@@ -305,6 +321,11 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             enabled = t?.getBoolean("custom_media.enabled") ?: true,
             allowed_hosts = stringList(t, "custom_media.allowed_hosts"),
             blocked_hosts = stringList(t, "custom_media.blocked_hosts"),
+        ),
+        queue = SettingsSection.QueueConfig(
+            enabled = t?.getBoolean("queue.enabled") ?: true,
+            max_items = t.numberOrNull("queue.max_items")?.toInt()?.coerceIn(0, 500) ?: 50,
+            max_per_player = t.numberOrNull("queue.max_per_player")?.toInt()?.coerceIn(0, 500) ?: 10,
         ),
         policy = parsePolicy(t),
         fullscreen = SettingsSection.FullscreenConfig(
@@ -362,6 +383,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             name_others = t?.getString("permissions.name_others") ?: "dreamdisplays.name.others",
             schedule = t?.getString("permissions.schedule") ?: "dreamdisplays.schedule",
             schedule_others = t?.getString("permissions.schedule_others") ?: "dreamdisplays.schedule.others",
+            queue = t?.getString("permissions.queue") ?: "dreamdisplays.queue",
         )
     ),
     proxy = ProxySection(

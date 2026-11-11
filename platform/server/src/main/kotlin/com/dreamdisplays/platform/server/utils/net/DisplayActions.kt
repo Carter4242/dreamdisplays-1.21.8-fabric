@@ -20,6 +20,7 @@ import com.dreamdisplays.platform.server.meta.Scheduler.runAsync
 import com.dreamdisplays.platform.server.meta.VersionState
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
@@ -112,6 +113,7 @@ object DisplayActions {
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onVideoChanged(displayData)
+        QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
     }
 
@@ -152,23 +154,25 @@ object DisplayActions {
         TimelineManager.onModeChanged(displayData, positionMs)
     }
 
-    /** Applies a playback intent (play / pause / seek / restart) to a `SYNCED` display's server clock. */
-    fun playbackCommand(player: Player, displayId: UUID, action: PlaybackAction, positionMs: Long) {
+    /** Applies a playback intent (play / pause / seek / restart / speed) to a `SYNCED` display's server clock. */
+    fun playbackCommand(player: Player, displayId: UUID, action: PlaybackAction, positionMs: Long, rate: Double = 1.0) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         val before = TimelineManager.timelineOf(displayData.id)
         val atMs = System.currentTimeMillis()
-        if (!TimelineManager.onCommand(displayData, player.uniqueId, action, positionMs)) return
+        if (!TimelineManager.onCommand(displayData, player.uniqueId, action, positionMs, rate)) return
         val name = when (action) {
             PlaybackAction.PLAY -> "resume"
             PlaybackAction.PAUSE -> "pause"
             PlaybackAction.SEEK -> "seek"
             PlaybackAction.RESTART -> "restart"
+            PlaybackAction.SPEED -> "speed"
         }
-        // Where the shared timeline was when the command landed; a seek also says where it went
+        // Where the shared timeline was when the command landed; a seek or speed change also says where it went
         val details = buildMap {
             put("mode", displayData.mode.name.lowercase())
             if (before != null) put("wasPaused", before.paused.toString())
             if (action == PlaybackAction.SEEK) put("seekToMs", positionMs.toString())
+            if (action == PlaybackAction.SPEED) put("rate", rate.toString())
         }
         ClientErrorReports.logCommand(player, displayId, name, before?.positionAt(atMs) ?: positionMs, details)
     }
@@ -207,6 +211,7 @@ object DisplayActions {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
         TimelineManager.sendCurrent(displayData, player.uniqueId)
         WatchPartyManager.sendCurrent(displayData, player.uniqueId)
+        QueueManager.sendCurrent(displayData, player.uniqueId)
     }
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED / BROADCAST only). */

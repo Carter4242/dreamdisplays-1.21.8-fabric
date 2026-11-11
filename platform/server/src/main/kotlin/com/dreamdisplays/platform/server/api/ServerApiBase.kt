@@ -17,6 +17,7 @@ import com.dreamdisplays.api.server.ServerDisplays
 import com.dreamdisplays.core.addon.AddonManager
 import com.dreamdisplays.core.addon.ServerAddonBinder
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.utils.net.CustomMediaGate
 import com.dreamdisplays.shared.policy.CustomMediaPolicy
@@ -163,6 +164,7 @@ abstract class ServerDisplayBase internal constructor(
         save()
         broadcast()
         TimelineManager.onVideoChanged(data)
+        QueueManager.onVideoSetByHand(data)
         backend.urlChanged(data)
         return CommandResult.OK
     }

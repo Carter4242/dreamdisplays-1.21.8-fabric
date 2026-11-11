@@ -8,6 +8,7 @@ import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.managers.SelectionManager
 import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
@@ -74,6 +75,7 @@ class PlayerListener : Listener {
         V2PlayerTracker.clear(event.player.uniqueId)
         WatchPartyManager.onPlayerQuit(event.player.uniqueId)
         FullscreenBroadcastManager.onPlayerQuit(event.player.uniqueId)
+        ReadinessTracker.forgetPlayer(event.player.uniqueId)
         SelectionManager.resetSelection(event.player.uniqueId)
         DisplayManager.forgetNearbyPlayer(event.player.uniqueId)
         com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(event.player.uniqueId)
@@ -121,6 +123,7 @@ object VanillaPlayerListener {
         V2PlayerTracker.clear(playerId)
         WatchPartyManager.onPlayerQuit(playerId)
         FullscreenBroadcastManager.onPlayerQuit(playerId)
+        ReadinessTracker.forgetPlayer(playerId)
         SelectionManager.resetSelection(playerId)
     }
 }

@@ -69,9 +69,13 @@ message ClientHello {
   // WARNING: a default value decoded when value is missing
   optional bool supportsFullscreenPrepare = 28;
   // WARNING: a default value decoded when value is missing
+  optional bool supportsReadiness = 29;
+  // WARNING: a default value decoded when value is missing
   optional string buildCommit = 30;
   // WARNING: a default value decoded when value is missing
   optional int64 buildTimeMs = 31;
+  // WARNING: a default value decoded when value is missing
+  optional bool supportsQueue = 32;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerHello'
@@ -170,6 +174,10 @@ message DisplaySync {
   optional bool loop = 7;
   // WARNING: a default value decoded when value is missing
   optional int32 mode = 8;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 9;
+  // WARNING: a default value decoded when value is missing
+  optional int32 startInMs = 10;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RequestSync'
@@ -224,6 +232,8 @@ message PlaybackCommand {
   optional int32 action = 2;
   // WARNING: a default value decoded when value is missing
   optional int64 positionMs = 3;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 4;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.SetMode'
@@ -422,6 +432,72 @@ message FullscreenPrepareStatus {
   optional int32 state = 3;
 }
 
+// serial name 'com.dreamdisplays.core.protocol.common.packets.DisplayReadiness'
+message DisplayReadiness {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int32 state = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int64 positionMs = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int32 latencyMs = 4;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.QueueState'
+message QueueState {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  repeated QueueItemWire items = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool loop = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int32 maxItems = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int32 maxPerPlayer = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int64 revision = 6;
+  // WARNING: a default value decoded when value is missing
+  optional string currentItemId = 7;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.QueueAction'
+message QueueAction {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int32 action = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string itemId = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string url = 4;
+  // WARNING: a default value decoded when value is missing
+  optional string lang = 5;
+  // WARNING: a default value decoded when value is missing
+  optional string title = 6;
+  // WARNING: a default value decoded when value is missing
+  optional int64 durationMs = 7;
+  // WARNING: a default value decoded when value is missing
+  optional string thumbnailUrl = 8;
+  // WARNING: a default value decoded when value is missing
+  optional int32 toIndex = 9;
+  // WARNING: a default value decoded when value is missing
+  optional bool flag = 10;
+  // WARNING: a default value decoded when value is missing
+  repeated QueueItemWire items = 11;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.QueuePreload'
+message QueuePreload {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string itemId = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 state = 3;
+}
+
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ClientErrorReport'
 message ClientErrorReport {
   // WARNING: a default value decoded when value is missing
@@ -523,6 +599,26 @@ message Uuid {
   optional fixed64 msb = 1;
   // WARNING: a default value decoded when value is missing
   optional fixed64 lsb = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.QueueItemWire'
+message QueueItemWire {
+  // WARNING: a default value decoded when value is missing
+  optional string itemId = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string url = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string lang = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string title = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int64 durationMs = 5;
+  // WARNING: a default value decoded when value is missing
+  optional string thumbnailUrl = 6;
+  // WARNING: a default value decoded when value is missing
+  optional Uuid addedBy = 7;
+  // WARNING: a default value decoded when value is missing
+  optional string addedByName = 8;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ResolveAttemptReport'

@@ -49,6 +49,7 @@ object ClientTickManager {
 
         FullscreenOverlayManager.onClientTick(minecraft)
         FullscreenController.onClientTick()
+        DisplayWarmup.onClientTick()
         FullscreenPrepareController.onClientTick()
         DisplayRegistry.tickReconfirm()
         if (minecraft.level != null) {
@@ -64,6 +65,7 @@ object ClientTickManager {
                 lastLevel = level
                 if (newBackend) {
                     FullscreenPrepareController.reset()
+                    DisplayWarmup.reset()
                     DisplayRegistry.unloadAllForServerSwitch(newBackend = true)
                     hoveredDisplayScreen = null
                 }
@@ -71,7 +73,10 @@ object ClientTickManager {
             }
             if (level !== lastLevel) {
                 lastLevel = level
-                if (newBackend) FullscreenPrepareController.reset()
+                if (newBackend) {
+                    FullscreenPrepareController.reset()
+                    DisplayWarmup.reset()
+                }
                 DisplayRegistry.unloadAllForServerSwitch(newBackend)
                 hoveredDisplayScreen = null
                 checkVersionAndSendPacket()

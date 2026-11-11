@@ -8,6 +8,7 @@ import com.dreamdisplays.core.protocol.common.packets.ClientHello
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
+import com.dreamdisplays.core.protocol.common.packets.DisplayReadiness
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
@@ -15,6 +16,9 @@ import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
+import com.dreamdisplays.core.protocol.common.packets.QueueAction
+import com.dreamdisplays.core.protocol.common.packets.QueuePreload
+import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
@@ -70,6 +74,13 @@ enum class PacketType(
     // Fullscreen preparation; only sent to clients that advertise ClientHello.supportsFullscreenPrepare
     FULLSCREEN_PREPARE(42, FullscreenPrepare::class, PacketDirection.SERVER_TO_CLIENT),
     FULLSCREEN_PREPARE_STATUS(43, FullscreenPrepareStatus::class, PacketDirection.CLIENT_TO_SERVER),
+    DISPLAY_READINESS(44, DisplayReadiness::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Per-display "Up next" queue; ids start at 50 so packets added elsewhere in the 40s cannot collide.
+    // QUEUE_STATE is only sent to clients that advertise ClientHello.supportsQueue.
+    QUEUE_STATE(50, QueueState::class, PacketDirection.SERVER_TO_CLIENT),
+    QUEUE_ACTION(51, QueueAction::class, PacketDirection.CLIENT_TO_SERVER),
+    QUEUE_PRELOAD(52, QueuePreload::class, PacketDirection.CLIENT_TO_SERVER),
 
     // Client error reporting; only sent to servers that advertise ServerFeature.CLIENT_ERROR_REPORTS
     CLIENT_ERROR_REPORT(60, ClientErrorReport::class, PacketDirection.CLIENT_TO_SERVER),

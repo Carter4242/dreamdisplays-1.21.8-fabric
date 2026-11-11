@@ -135,7 +135,7 @@ object ForgeV2Networking {
             )
 
             is PlaybackCommand -> PlaybackAction.fromWire(packet.action)?.let {
-                VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs)
+                VanillaDisplayActions.playbackCommand(player, packet.id, it, packet.positionMs, packet.rate)
             }
 
             is WatchPartyStart -> VanillaDisplayActions.watchPartyStart(player, packet.id, packet.url, packet.lang)

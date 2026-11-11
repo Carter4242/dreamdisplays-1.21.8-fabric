@@ -44,10 +44,15 @@ default_volume = 50
 # Max displays one player may own at once. 0 or less means no limit
 max_displays_per_player = 0
 
-# Synced displays: after a resume / a seek or restart, the timeline stays paused this many seconds so every
-# viewer can line up on the same frame before playback starts together (0 to 60, 0 = start at once)
+# Synced displays: after a resume / a seek or restart, the timeline stays paused until every nearby viewer holds the
+# video ready at the new position (instant when it already was, e.g. resuming a paused display), for at most this
+# many seconds, then everyone starts together (0 to 60, 0 = start at once without waiting)
 resume_hold_seconds = 1
 seek_hold_seconds = 3
+
+# Starts are scheduled this far ahead at most (covering the slowest viewer's latency) so everyone begins on the
+# same frame; 0 starts on receipt (0 to 1000 ms)
+start_lead_max_ms = 150
 
 # Playback mode new displays start in: "synced" (everyone sees the same moment) or "local"
 default_mode = "synced"
@@ -117,6 +122,17 @@ allowed_hosts = []
 # blocked_hosts = ["bad.example"]
 blocked_hosts = []
 
+[queue]
+# "Up next": players queue videos from the display menu and a synced / broadcast display moves on to the next
+# one, for everyone, when the current video ends. Whoever may change a display's video may queue and skip;
+# the owner / admins may also reorder, clear and loop. Players without the new client version just see the
+# video change when the queue advances.
+enabled = true
+
+# Most videos one display may have waiting, and per player (the display's owner is exempt). 0 = no limit
+max_items = 50
+max_per_player = 10
+
 [fullscreen]
 # Default visual sub-mode when /display fullscreen start omits one: "STANDARD" or "IMMERSIVE"
 default_mode = "STANDARD"
@@ -179,6 +195,7 @@ name = "dreamdisplays.name"                                     # Default: every
 schedule = "dreamdisplays.schedule"                             # Default: everyone
 name_others = "dreamdisplays.name.others"                       # Default: operator
 schedule_others = "dreamdisplays.schedule.others"               # Default: operator
+queue = "dreamdisplays.queue"                                   # Default: operator (the /display queue command)
 delete_others = "dreamdisplays.delete.others"                   # Default: operator
 list = "dreamdisplays.list"                                     # Default: operator
 stats = "dreamdisplays.stats"                                   # Default: operator
