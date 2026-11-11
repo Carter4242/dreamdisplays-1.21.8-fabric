@@ -118,8 +118,9 @@ object VanillaOnCommand {
 
         val selfTarget = self?.uuid == target.uuid
 
-        if (!selfTarget &&
-            (self == null || !VanillaPermissions.has(
+        // The console (or a command block) may act on anyone; the command tree already allowed it this far
+        if (!selfTarget && self != null &&
+            (!VanillaPermissions.has(
                 self,
                 config.permissions.toggleOthers,
                 VanillaPermissions.Fallback.OP
