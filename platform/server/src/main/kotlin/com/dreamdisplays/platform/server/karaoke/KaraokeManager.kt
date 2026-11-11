@@ -178,6 +178,15 @@ object KaraokeManager {
     }
 
     /**
+     * [display]'s video was cleared: everyone singing there stops (there is no song). The line stays, with its songs
+     * queued: the next one to play brings its singer up as usual.
+     */
+    fun endSinging(display: DisplayData) {
+        val state = states[display.id] ?: return
+        state.singers.keys.toList().forEach { removeSinger(display, it, resend = false) }
+    }
+
+    /**
      * Makes [playerId] a singer on [display] with [leadMs] (null = the automatic lead), taking them off any other
      * display. Unless [duet], they replace the display's current singers. [resend]: send the changed singers their
      * timeline now (false when a new video is about to go out anyway). Returns the lead.

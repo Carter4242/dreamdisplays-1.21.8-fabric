@@ -15,6 +15,7 @@ import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.core.queue.LoopWraps
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.sync.DisplayFollowers
+import com.dreamdisplays.core.sync.EmptyDisplays
 import com.dreamdisplays.core.sync.ModeChanges
 import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.core.sync.TimelineRecords
@@ -151,7 +152,7 @@ object TimelineManager {
             val displayId = runCatching { UUID.fromString(record.displayId) }.getOrNull() ?: continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
-            if (display.url != record.url) continue
+            if (display.url != record.url || !EmptyDisplays.hasVideo(display.url)) continue
             timelines[displayId] = TimelineRecords.restore(record, now)
             durations.seed(displayId, display.url, record.mediaMs)
             restored++
@@ -175,6 +176,11 @@ object TimelineManager {
         if (!PlaybackPermissions.canPlayPause(ctx)) return false
         if (!commandThrottle.tryAcquire(senderId, COMMAND_COOLDOWN_MS)) return false
         if (senderId !in transport.nearbyPlayerIds(display)) return false
+        // No video: no clock to move; a play starts the queue when something is queued
+        if (!EmptyDisplays.hasVideo(display.url)) {
+            return EmptyDisplays.playStartsQueue(display.url, action, QueueManager.advancesAtEnd(display)) &&
+                    QueueManager.startFromEmpty(display)
+        }
         if (action == PlaybackAction.SPEED) return PlaybackPermissions.canChangeSpeed(ctx) && setSpeed(display, rate)
 
         val now = transport.nowMs()
@@ -243,6 +249,7 @@ object TimelineManager {
      * fullscreen start, a queue moving to its next item.
      */
     fun startWhenReady(display: DisplayData, deadlineMs: Long) {
+        if (!EmptyDisplays.hasVideo(display.url)) return
         val current = timelines[display.id] ?: return
         if (!current.paused) return
         startHolds[display.id] = deadlineMs
@@ -306,6 +313,7 @@ object TimelineManager {
      */
     fun applyScheduled(display: DisplayData, action: PlaybackAction): Boolean {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
+        if (!EmptyDisplays.hasVideo(display.url)) return false
         if (action != PlaybackAction.PLAY && action != PlaybackAction.PAUSE) return false
         val now = transport.nowMs()
         startHolds.remove(display.id)
@@ -391,7 +399,9 @@ object TimelineManager {
 
     /** Re-initializes the clock after a base-mode change and broadcasts the result. */
     fun onModeChanged(display: DisplayData, positionMs: Long = -1) {
-        val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
+        // An empty display has no clock in any mode
+        val shared = (display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST) &&
+                EmptyDisplays.hasVideo(display.url)
         // Synced <-> Broadcast run the same clock: it carries on as it is (paused, speed, a start hold)
         val existing = timelines[display.id]?.takeIf { shared }
         if (existing == null) {
@@ -433,6 +443,7 @@ object TimelineManager {
         display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null,
         restore: SavedPlayback? = null,
     ) {
+        if (!EmptyDisplays.hasVideo(display.url)) return onVideoCleared(display)
         // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length.
         // Tracked in Local too, so a switch back to a shared mode starts from this video's length.
         val knownMs = QueueTiming.scheduledDurationMs(durations.onVideoChanged(display.id, display.url))
@@ -473,6 +484,24 @@ object TimelineManager {
         startWhenReady(display, now + START_HOLD_MS)
     }
 
+    /**
+     * [display]'s video was taken off (its URL is empty now): it has no clock, length, start hold or readiness to wait
+     * for, so it never loops, holds or reaches an end until a video is set again.
+     */
+    fun onVideoCleared(display: DisplayData) {
+        durations.onVideoChanged(display.id, display.url)
+        display.duration = null
+        videoChangedAt[display.id] = transport.nowMs()
+        timelines.remove(display.id)
+        startHolds.remove(display.id)
+        loopRestarts.remove(display.id)
+        playThroughs.remove(display.id)
+        emptySince.remove(display.id)
+        lastBroadcast.remove(display.id)
+        endOfStream.forget(display.id)
+        ReadinessTracker.forgetHeldStates(display.id)
+    }
+
     /** The authoritative timeline of [displayId], or null when it has none (`LOCAL`, watch party, unknown). */
     fun timelineOf(displayId: UUID): Timeline? = timelines[displayId]
 
@@ -488,6 +517,7 @@ object TimelineManager {
      * queue's switch) never comes before the media's.
      */
     fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
+        if (!EmptyDisplays.hasVideo(display.url)) return
         val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
         if (!shared && display.mode != PlaybackMode.LOCAL) return
         val sinceChange = videoChangedAt[display.id]?.let { transport.nowMs() - it } ?: Long.MAX_VALUE
@@ -520,6 +550,7 @@ object TimelineManager {
             if (timeline.paused || startHolds.containsKey(displayId)) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
+            if (!EmptyDisplays.hasVideo(display.url)) continue
             val durationMs = knownDurationMs(display, timeline)
             if (wrappedUnseen(display, timeline, now, durationMs)) continue
             val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, durationMs) ?: continue
@@ -684,6 +715,10 @@ object TimelineManager {
 
     private fun ensureTimeline(display: DisplayData): Timeline? {
         if (WatchPartyManager.hasSession(display.id)) return null
+        if (!EmptyDisplays.hasVideo(display.url)) {
+            timelines.remove(display.id)
+            return null
+        }
         val durationMs = durationMsOf(display)
         return when (display.mode) {
             PlaybackMode.SYNCED, PlaybackMode.BROADCAST ->

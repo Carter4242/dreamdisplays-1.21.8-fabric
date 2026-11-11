@@ -261,6 +261,16 @@ object QueueManager {
         return if (advance(display) != null) Result.OK else Result.REFUSED
     }
 
+    /**
+     * A play on [display] while it has no video (cleared): starts the next queued entry, if any. A cleared display's
+     * queue never moves on by itself (it has no clock to reach an end); a skip or this does it.
+     */
+    fun startFromEmpty(display: DisplayData): Boolean {
+        if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return false
+        if (display.url.isNotBlank()) return false
+        return advance(display) != null
+    }
+
     /** A client's preload progress for the head entry of [display]. */
     fun onPreload(display: DisplayData, playerId: UUID, itemId: String, state: FullscreenPrepareState) {
         // Throttles repeats of one state only: LOADING then READY can come within a tick (a cached stream, or a lagging

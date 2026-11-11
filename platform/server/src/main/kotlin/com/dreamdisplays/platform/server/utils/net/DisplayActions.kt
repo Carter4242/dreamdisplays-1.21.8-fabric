@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.platform.server.karaoke.KaraokeManager
 import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
@@ -107,6 +108,45 @@ object DisplayActions {
         // A video set by hand ends any screen share on this display (the share no longer owns it)
         ScreenShareActions.onVideoSetByHand(displayId)
         applyVideo(displayData, url, sanitizedLang, player)
+    }
+
+    /**
+     * A client's request to clear [displayId]'s video (`SetVideo` with `clear`): anyone allowed to set its video may,
+     * from its range, like a set; an addon may veto it like one.
+     */
+    fun clearVideo(player: Player, displayId: UUID) {
+        val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
+        if (!PlaybackPermissions.canSetVideo(context(displayData, player))) return
+        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!setVideoThrottle.tryAcquire(displayId, SET_VIDEO_COOLDOWN_MS)) return
+        ServerApiHost.current?.askSetUrl(displayData, "", "", player.uniqueId)?.let { reason ->
+            if (reason.isNotEmpty()) MessageUtil.sendColoredMessage(player, reason)
+            return
+        }
+        clearVideo(displayData, player)
+    }
+
+    /**
+     * Takes [displayData]'s video off, with no permission checks (callers check; [actor] is logged): its URL becomes
+     * empty and is saved, and everyone who gets its updates (in range, far fullscreen viewers, PiP pinners) is told. Its
+     * clock and length go, a screen share there ends without bringing anything back, and karaoke there stops. The queue
+     * keeps its entries but does not start them: a skip or a play does. The command form calls this.
+     */
+    fun clearVideo(displayData: PaperDisplayData, actor: Player?) {
+        ScreenShareActions.onVideoSetByHand(displayData.id)
+        KaraokeManager.endSinging(displayData)
+        val previousUrl = displayData.url
+        displayData.url = ""
+        displayData.lang = ""
+        if (actor != null) ClientErrorReports.logCommand(
+            actor, displayData.id, "clear", null,
+            mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl),
+        )
+        runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
+        TimelineManager.onVideoCleared(displayData)
+        DisplayManager.broadcastUpdate(displayData)
+        QueueManager.onVideoSetByHand(displayData)
+        ServerApiHost.current?.urlChanged(displayData)
     }
 
     /**

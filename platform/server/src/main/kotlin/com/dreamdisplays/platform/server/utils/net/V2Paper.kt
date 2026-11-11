@@ -89,6 +89,7 @@ object PaperV2Networking : PluginMessageListener {
         if (PaperServer.config.settings.queue.enabled) add(ServerFeature.QUEUE.wire)
         if (PaperServer.config.settings.clients.error_reports) add(ServerFeature.CLIENT_ERROR_REPORTS.wire)
         if (com.dreamdisplays.platform.server.karaoke.KaraokeManager.available) add(ServerFeature.KARAOKE.wire)
+        add(ServerFeature.CLEAR_VIDEO.wire)
     }
 
     private fun maxDisplaysFor(hasBypass: Boolean): Int {
@@ -117,7 +118,11 @@ object PaperV2Networking : PluginMessageListener {
             is ClientEnvironment -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onEnvironment(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)
             is ReportDisplay -> DisplayManager.report(packet.id, player)
-            is SetVideo -> DisplayActions.setVideo(player, packet.id, packet.url, packet.lang)
+            is SetVideo -> if (packet.clear) {
+                DisplayActions.clearVideo(player, packet.id)
+            } else {
+                DisplayActions.setVideo(player, packet.id, packet.url, packet.lang)
+            }
             is SetLocked -> DisplayActions.setAccess(player, packet.id, packet.accessLevel())
             is SetMode -> DisplayActions.setMode(
                 player,
