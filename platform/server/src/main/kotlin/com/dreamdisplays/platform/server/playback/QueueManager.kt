@@ -418,6 +418,8 @@ object QueueManager {
                 changed(display)
                 return next
             }
+            // Refused: it never played, so a looping queue must not put it back as the entry that just finished
+            synchronized(queue) { queue.discardCurrent(next) }
         }
         changed(display)
         return null

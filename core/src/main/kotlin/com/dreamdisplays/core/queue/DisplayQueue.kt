@@ -140,6 +140,17 @@ class DisplayQueue(
         return next
     }
 
+    /**
+     * [item], just taken by [advance], was refused (an addon veto, an absent karaoke singer): it never played, so it is
+     * no current entry a looping queue would put back. False when something else is current.
+     */
+    fun discardCurrent(item: QueueItem): Boolean {
+        if (current?.itemId != item.itemId) return false
+        current = null
+        changed()
+        return true
+    }
+
     /** The display's video was changed outside the queue: whatever plays now is no queue entry. */
     fun onVideoSetByHand(url: String) {
         if (current == null || current?.url == url) return

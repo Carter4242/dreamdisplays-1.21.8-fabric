@@ -80,6 +80,22 @@ class DisplayQueueTest {
     }
 
     @Test
+    fun `a refused entry is dropped, not looped back`() {
+        val q = DisplayQueue(listOf(item("a"), item("b"), item("c")))
+        q.setLoop(true)
+        assertEquals("a", q.advance()?.itemId)
+        // b is refused when its turn comes: it goes, and c is tried next
+        val refused = q.advance()!!
+        assertEquals("b", refused.itemId)
+        assertTrue(q.discardCurrent(refused))
+        assertEquals("c", q.advance()?.itemId)
+        assertEquals(listOf("a"), q.items.map { it.itemId }, "b never comes round again")
+        assertEquals("a", q.advance()?.itemId)
+        assertEquals(listOf("c"), q.items.map { it.itemId })
+        assertEquals(false, q.discardCurrent(refused), "only the entry just taken")
+    }
+
+    @Test
     fun `a hand-set video is no queue entry`() {
         val q = DisplayQueue(listOf(item("a"), item("b")))
         q.setLoop(true)
