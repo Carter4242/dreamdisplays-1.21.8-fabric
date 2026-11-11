@@ -204,8 +204,11 @@ object DisplayManager {
     /** Sends a `DisplayInfo` packet describing [display] to the given [players]. */
     @PaperOnly
     fun sendUpdate(display: PaperDisplayData, players: List<Player>, forced: Boolean = false) {
+        val receivers = if (EmptyDisplays.hasVideo(display.url)) players
+        else players.filterNot { EmptyDisplays.hiddenFrom(display.url, V2PlayerTracker.helloOf(it.uniqueId)?.protocolVersion ?: 0) }
+        if (receivers.isEmpty()) return
         PacketUtil.sendDisplayInfo(
-            players,
+            receivers,
             display.id, display.ownerId, display.box.min, display.width, display.height,
             display.url, display.lang, display.facing, display.isSync, display.isLocked,
             display.access, display.mode, display.qualityCap, display.rotation,

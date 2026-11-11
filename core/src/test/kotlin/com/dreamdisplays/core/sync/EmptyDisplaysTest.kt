@@ -28,4 +28,12 @@ class EmptyDisplaysTest {
         assertFalse(EmptyDisplays.dropBeforeClear(12))
         assertFalse(EmptyDisplays.dropBeforeClear(13))
     }
+
+    @Test
+    fun `an empty display is never described to a client that can't take an empty url`() {
+        kotlin.test.assertTrue(EmptyDisplays.hiddenFrom("", 0))
+        kotlin.test.assertTrue(EmptyDisplays.hiddenFrom("  ", 11))
+        kotlin.test.assertFalse(EmptyDisplays.hiddenFrom("", 12))
+        kotlin.test.assertFalse(EmptyDisplays.hiddenFrom("https://youtu.be/x", 0))
+    }
 }
