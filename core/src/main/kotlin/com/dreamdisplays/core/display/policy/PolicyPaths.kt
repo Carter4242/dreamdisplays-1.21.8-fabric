@@ -36,6 +36,9 @@ object PolicyPaths {
 
     /** One settable field. [get] reads it from a policy (null = unset). */
     class Path(val name: String, val field: String, val kind: Kind, val get: (DisplayPolicy) -> Any?) {
+        /** Only settable server-wide (`/display config`), not as one display's override. */
+        val serverWideOnly: Boolean get() = this.field in DisplayPolicy.GLOBAL_ONLY
+
         /** Range or choices, for help / error text. */
         val hint: String
             get() = when (kind) {
@@ -65,6 +68,25 @@ object PolicyPaths {
             it.visibility?.maxDistanceBlocks
         },
         Path("quality.max_height", "quality.maxHeight", Kind.Whole(144, 4_320)) { it.quality?.maxHeight },
+        Path("client.enabled", "client.enabled", Kind.Bool) { it.client?.enabled },
+        Path("client.max_active_displays", "client.maxActiveDisplays", Kind.Whole(0, 16)) {
+            it.client?.maxActiveDisplays
+        },
+        Path("client.hardware_decoding", "client.hardwareDecoding", Kind.Bool) { it.client?.hardwareDecoding },
+        Path("client.audio_acoustics", "client.audioAcoustics", Kind.Choice(listOf("off", "basic", "advanced", "ultra"))) {
+            it.client?.audioAcoustics?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.unshaded_displays", "client.unshadedDisplays", Kind.Bool) { it.client?.unshadedDisplays },
+        Path("client.display_distance_chunks", "client.displayDistanceChunks", Kind.Whole(0, 32)) {
+            it.client?.displayDistanceChunks
+        },
+        Path("debug.sync_log_interval_seconds", "debug.syncLogIntervalSeconds", Kind.Whole(0, 3_600)) {
+            it.debug?.syncLogIntervalSeconds
+        },
+        Path("debug.verbose", "debug.verbose", Kind.Bool) { it.debug?.verbose },
+        Path("debug.report_interval_seconds", "debug.reportIntervalSeconds", Kind.Whole(0, 600)) {
+            it.debug?.reportIntervalSeconds
+        },
     )
 
     private val byName = all.associateBy { it.name }

@@ -32,6 +32,8 @@ data class DisplayPolicy(
     val audio: Audio? = null,
     val visibility: Visibility? = null,
     val quality: Quality? = null,
+    val client: Client? = null,
+    val debug: Debug? = null,
 ) {
     /** Playback sync to the server timeline (Synced / Broadcast / watch parties). */
     @Serializable
@@ -101,10 +103,84 @@ data class DisplayPolicy(
         fun mergedOver(base: Quality?): Quality = Quality(maxHeight = maxHeight ?: base?.maxHeight)
     }
 
+    /**
+     * Overrides for the player's own client settings; null fields keep the player's setting. Only [enabled] and
+     * [displayDistanceChunks] can differ per display, the rest apply to the whole client ([GLOBAL_ONLY]).
+     */
+    @Serializable
+    data class Client(
+        /** False: displays are not loaded or played at all (server-wide: every display; the kill switch). */
+        val enabled: Boolean? = null,
+        /** How many displays may play at once, nearest first; 0 = no limit. */
+        val maxActiveDisplays: Int? = null,
+        /** False forces software video decoding; applies to videos loaded after the change. */
+        val hardwareDecoding: Boolean? = null,
+        /** 3D acoustics tier for display audio. */
+        val audioAcoustics: Acoustics? = null,
+        /** Draw the video untouched by shader packs (false = let the shader pack grade it). */
+        val unshadedDisplays: Boolean? = null,
+        /** How far displays stay loaded, in chunks; 0 = follow the render / simulation distance. */
+        val displayDistanceChunks: Int? = null,
+    ) {
+        fun mergedOver(base: Client?): Client = Client(
+            enabled = enabled ?: base?.enabled,
+            maxActiveDisplays = maxActiveDisplays ?: base?.maxActiveDisplays,
+            hardwareDecoding = hardwareDecoding ?: base?.hardwareDecoding,
+            audioAcoustics = audioAcoustics ?: base?.audioAcoustics,
+            unshadedDisplays = unshadedDisplays ?: base?.unshadedDisplays,
+            displayDistanceChunks = displayDistanceChunks ?: base?.displayDistanceChunks,
+        )
+    }
+
+    @Serializable
+    enum class Acoustics {
+        @SerialName("off")
+        OFF,
+
+        @SerialName("basic")
+        BASIC,
+
+        @SerialName("advanced")
+        ADVANCED,
+
+        @SerialName("ultra")
+        ULTRA,
+    }
+
+    /** Client diagnostics the server can turn on remotely. Server-wide only. */
+    @Serializable
+    data class Debug(
+        /** Seconds between the `[dd-sync]` drift log lines per synced display; 0 = off. */
+        val syncLogIntervalSeconds: Int? = null,
+        /** True: the client logs its media and sync debug output. */
+        val verbose: Boolean? = null,
+        /** Seconds between the viewer reports clients send for every loaded display; 0 = off. */
+        val reportIntervalSeconds: Int? = null,
+    ) {
+        fun mergedOver(base: Debug?): Debug = Debug(
+            syncLogIntervalSeconds = syncLogIntervalSeconds ?: base?.syncLogIntervalSeconds,
+            verbose = verbose ?: base?.verbose,
+            reportIntervalSeconds = reportIntervalSeconds ?: base?.reportIntervalSeconds,
+        )
+    }
+
     /** True when no section sets anything, so there is nothing worth sending. */
     val isEmpty: Boolean
         get() = (sync == null || sync == Sync()) && (audio == null || audio == Audio()) &&
-                (visibility == null || visibility == Visibility()) && (quality == null || quality == Quality())
+                (visibility == null || visibility == Visibility()) && (quality == null || quality == Quality()) &&
+                (client == null || client == Client()) && (debug == null || debug == Debug())
+
+    /** What travels with one display: everything except the server-wide-only fields ([GLOBAL_ONLY]). */
+    fun forDisplay(): DisplayPolicy {
+        val perDisplay = client?.let { Client(enabled = it.enabled, displayDistanceChunks = it.displayDistanceChunks) }
+        return copy(client = perDisplay?.takeIf { it != Client() }, debug = null)
+    }
+
+    /** The server-wide part sent to every client on its own: the [client] and [debug] sections. */
+    fun serverWide(): DisplayPolicy = DisplayPolicy(
+        client = client?.takeIf { it != Client() },
+        debug = debug?.takeIf { it != Debug() },
+    )
 
     /** This policy with every field it leaves unset taken from [base]. */
     fun mergedOver(base: DisplayPolicy): DisplayPolicy = DisplayPolicy(
@@ -113,6 +189,8 @@ data class DisplayPolicy(
         audio = mergeSection(audio, base.audio, Audio::mergedOver),
         visibility = mergeSection(visibility, base.visibility, Visibility::mergedOver),
         quality = mergeSection(quality, base.quality, Quality::mergedOver),
+        client = mergeSection(client, base.client, Client::mergedOver),
+        debug = mergeSection(debug, base.debug, Debug::mergedOver),
     )
 
     /** Compact JSON bytes for the custom-data entry. */
@@ -124,6 +202,12 @@ data class DisplayPolicy(
 
         /** Schema major version this build understands. */
         const val VERSION = 1
+
+        /** Field paths that only work server-wide (`[policy.*]` defaults), never as one display's override. */
+        val GLOBAL_ONLY: Set<String> = setOf(
+            "client.maxActiveDisplays", "client.hardwareDecoding", "client.audioAcoustics", "client.unshadedDisplays",
+            "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds",
+        )
 
         /** No overrides at all. */
         val EMPTY = DisplayPolicy()
@@ -165,6 +249,8 @@ data class DisplayPolicy(
                 audio = section(root, "audio", Audio.serializer()),
                 visibility = section(root, "visibility", Visibility.serializer()),
                 quality = section(root, "quality", Quality.serializer()),
+                client = section(root, "client", Client.serializer()),
+                debug = section(root, "debug", Debug.serializer()),
             )
         }
 

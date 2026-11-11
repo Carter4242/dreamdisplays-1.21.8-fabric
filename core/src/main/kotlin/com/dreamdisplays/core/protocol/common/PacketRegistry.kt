@@ -19,6 +19,8 @@ import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
+import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
+import com.dreamdisplays.core.protocol.common.packets.ViewerReport
 import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
@@ -85,6 +87,8 @@ object PacketRegistry {
         Entry(PacketType.PIP_PIN, PipPin::class, PipPin.serializer()),
         Entry(PacketType.REPORT_DURATION, ReportDuration::class, ReportDuration.serializer()),
         Entry(PacketType.REMOTE_PLAYBACK_TOGGLE, RemotePlaybackToggle::class, RemotePlaybackToggle.serializer()),
+        Entry(PacketType.SERVER_POLICY, ServerPolicy::class, ServerPolicy.serializer()),
+        Entry(PacketType.VIEWER_REPORT, ViewerReport::class, ViewerReport.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }
