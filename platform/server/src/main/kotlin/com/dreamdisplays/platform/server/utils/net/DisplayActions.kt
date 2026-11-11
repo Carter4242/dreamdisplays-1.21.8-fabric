@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.ClientBuild
@@ -111,8 +112,12 @@ object DisplayActions {
     /**
      * Points [displayData] at [url] / [lang] and tells everyone: broadcast, timeline reset, queue, addons. [persist]
      * false keeps the stored URL as it was (a screen share's relay URL must never outlive the share in storage).
+     * [restore]: the video comes back paused where it was ([TimelineManager.onVideoChanged]) instead of starting.
      */
-    internal fun applyVideo(displayData: PaperDisplayData, url: String, lang: String, actor: Player?, persist: Boolean = true) {
+    internal fun applyVideo(
+        displayData: PaperDisplayData, url: String, lang: String, actor: Player?, persist: Boolean = true,
+        restore: SavedPlayback? = null,
+    ) {
         val previousUrl = displayData.url
         displayData.url = url
         displayData.lang = lang
@@ -123,7 +128,7 @@ object DisplayActions {
 
         if (persist) runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
-        TimelineManager.onVideoChanged(displayData)
+        TimelineManager.onVideoChanged(displayData, restore = restore)
         QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
     }

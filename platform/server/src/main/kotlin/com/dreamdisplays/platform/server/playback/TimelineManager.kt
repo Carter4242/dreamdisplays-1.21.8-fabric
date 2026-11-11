@@ -16,6 +16,7 @@ import com.dreamdisplays.core.queue.LoopWraps
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.core.sync.ModeChanges
+import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.core.sync.TimelineRecords
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -424,8 +425,14 @@ object TimelineManager {
      * [startAtMs] (a queue moving on at the end of the previous video): the new video starts at exactly that wall time,
      * with no hold, when anyone has it preloaded; they cut from the old video's last frame straight to the new one,
      * and anyone not ready joins late.
+     *
+     * [restore] (a screen share ended): the video the display had before comes back paused where it was, at its speed,
+     * with no start hold; someone presses play.
      */
-    fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null) {
+    fun onVideoChanged(
+        display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null,
+        restore: SavedPlayback? = null,
+    ) {
         // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length.
         // Tracked in Local too, so a switch back to a shared mode starts from this video's length.
         val knownMs = QueueTiming.scheduledDurationMs(durations.onVideoChanged(display.id, display.url))
@@ -434,6 +441,14 @@ object TimelineManager {
         videoChangedAt[display.id] = now
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         endOfStream.onVideoChanged(display.id, maxOf(now, startAtMs ?: now))
+        if (restore != null) {
+            startHolds.remove(display.id)
+            ReadinessTracker.forgetHeldStates(display.id)
+            val restored = restore.restoredTimeline(now, knownMs)
+            timelines[display.id] = restored
+            broadcast(display, restored)
+            return
+        }
         // The display keeps its speed across videos
         val speed = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
         if (startAtMs != null && readyAtStart.isNotEmpty()) {

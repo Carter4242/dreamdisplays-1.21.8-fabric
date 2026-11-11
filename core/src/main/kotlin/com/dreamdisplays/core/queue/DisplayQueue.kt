@@ -147,6 +147,17 @@ class DisplayQueue(
         changed()
     }
 
+    /**
+     * The display plays [item] again after something took it over for a while (a screen share ended): it is the playing
+     * entry once more, so a looping queue keeps it. Only when nothing else became current meanwhile. False otherwise.
+     */
+    fun resumeCurrent(item: QueueItem): Boolean {
+        if (current != null) return false
+        current = item
+        changed()
+        return true
+    }
+
     /** An independent copy (same entries, loop flag and current entry). */
     fun copy(): DisplayQueue = DisplayQueue(list, loop, current).also { it.revision = revision }
 

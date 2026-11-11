@@ -2,13 +2,18 @@ package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
+import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.share.ScreenShareServerRules
+import com.dreamdisplays.core.sync.SavedPlayback
 import com.dreamdisplays.core.share.ScreenShareServerRules.EndReason
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
+import com.dreamdisplays.platform.server.playback.QueueManager
+import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.utils.PlatformUtil
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
 import com.dreamdisplays.shared.playback.PlaybackPermissions
@@ -43,6 +48,10 @@ object ScreenShareActions {
         val streamId: String,
         val previousUrl: String,
         val previousLang: String,
+        /** Where the previous video stood when the share started (null: no shared clock, e.g. Local). */
+        val previousPlayback: SavedPlayback?,
+        /** The queue entry the previous video was, if any. */
+        val previousEntry: QueueItem?,
     ) {
         /** When the sharer's last heartbeat (or the start) arrived, epoch ms. */
         @Volatile
@@ -77,7 +86,11 @@ object ScreenShareActions {
 
         val live = PaperServer.config.settings.live
         val streamId = newStreamId()
-        val share = Share(displayId, player.uniqueId, streamId, display.url, display.lang)
+        val share = Share(
+            displayId, player.uniqueId, streamId, display.url, display.lang,
+            SavedPlayback.of(TimelineManager.timelineOf(display.id), System.currentTimeMillis()),
+            QueueManager.playingEntry(display),
+        )
         byDisplay[displayId] = share
         DisplayActions.applyVideo(display, LiveStreamUrls.fromTemplate(live.relay_play_url, streamId), "", player, persist = false)
         logger.info("{} started sharing their screen to display {}.", player.name, display.id)
@@ -195,9 +208,14 @@ object ScreenShareActions {
         if (ScreenShareServerRules.notifiesSharer(reason) && sharer != null) {
             reply(sharer, share.displayId, active = false, error = error)
         }
-        // Only while the display still shows this share: anything else was set since and stays
+        // Only while the display still shows this share: anything else was set since and stays. The previous video
+        // comes back paused where it was, at its speed, and still the queue entry it was; it never plays by itself.
         if (ScreenShareServerRules.restoresPreviousVideo(reason) && display != null && display.url.contains(share.streamId)) {
-            DisplayActions.applyVideo(display, share.previousUrl, share.previousLang, sharer, persist = false)
+            DisplayActions.applyVideo(
+                display, share.previousUrl, share.previousLang, sharer, persist = false,
+                restore = share.previousPlayback ?: SavedPlayback(0L, PlaybackSpeed.NORMAL),
+            )
+            QueueManager.resumePlayingEntry(display, share.previousEntry)
         }
         logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }

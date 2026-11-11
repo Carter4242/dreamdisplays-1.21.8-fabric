@@ -287,6 +287,22 @@ object QueueManager {
         if (after != before) changed(display)
     }
 
+    /** The queue entry [display] plays now, or null when its video is not one ([DisplayQueue.current]). */
+    fun playingEntry(display: DisplayData): QueueItem? {
+        val queue = queues[display.id] ?: return null
+        return synchronized(queue) { queue.current }?.takeIf { it.url == display.url }
+    }
+
+    /**
+     * [display] plays [item] again after a screen share (its URL is back): the queue counts it as playing once more,
+     * so a looping queue keeps it and karaoke knows the entry. Null [item]: nothing to put back.
+     */
+    fun resumePlayingEntry(display: DisplayData, item: QueueItem?) {
+        if (item == null || item.url != display.url) return
+        val queue = queues[display.id] ?: return
+        if (synchronized(queue) { queue.resumeCurrent(item) }) changed(display)
+    }
+
     /** True when [display]'s queue moves on to a next entry at the end of the video ([tick]). */
     fun advancesAtEnd(display: DisplayData): Boolean {
         if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return false
