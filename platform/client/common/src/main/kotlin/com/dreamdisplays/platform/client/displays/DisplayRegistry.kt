@@ -74,7 +74,10 @@ object DisplayRegistry {
         if (displayScreen.virtual) {
             ClientSettingsStore.remove(displayScreen.uuid)
         } else {
-            unloadedScreens[displayScreen.uuid] = displayScreen.toFullDisplayData()
+            // One whose world is unknown (only ever described as forced) could come back in the wrong world
+            if (DisplayDimensions.cacheableForRestore(displayScreen.dimensionKey)) {
+                unloadedScreens[displayScreen.uuid] = displayScreen.toFullDisplayData()
+            }
             ClientSettingsStore.setSavedTimeNanos(displayScreen.uuid, displayScreen.currentTimeNanos)
         }
         screens.remove(displayScreen.uuid)
@@ -97,8 +100,10 @@ object DisplayRegistry {
     private val awaitingReconfirm = ConcurrentHashMap<UUID, Long>()
 
     /**
-     * Level-change teardown: world-anchored displays go immediately, popout-active ones held for reconfirm grace.
-     * [newBackend] (a proxy moved the player to another server) also forgets the distance-restore cache, whose
+     * Level-change teardown: world-anchored displays go immediately, popout-active ones (PiP, window, fullscreen) are
+     * carried along. A dimension change on the same server keeps them for good: the server still knows them, and they
+     * stop being drawn in the world they are not in. [newBackend] (a proxy moved the player to another server) holds
+     * them only for the reconfirm grace, forgets their world, and also forgets the distance-restore cache, whose
      * entries belong to the previous server and would otherwise reappear at the same coordinates on this one.
      */
     fun unloadAllForServerSwitch(newBackend: Boolean) {
@@ -107,7 +112,10 @@ object DisplayRegistry {
         for (screen in screens.values.toList()) {
             if (screen.isPopoutActive) {
                 carried += screen.uuid
-                awaitingReconfirm[screen.uuid] = now + RECONFIRM_GRACE_MS
+                if (newBackend) {
+                    awaitingReconfirm[screen.uuid] = now + RECONFIRM_GRACE_MS
+                    screen.dimensionKey = ""
+                }
             } else {
                 // Per-display removal, never displaySystem.clearDisplays(): that one wipes every
                 // display it knows about, and the removal event closes the very popout being carried.
@@ -115,7 +123,7 @@ object DisplayRegistry {
             }
         }
         if (newBackend) unloadedScreens.clear() else unloadedScreens.keys.removeAll(carried)
-        awaitingReconfirm.keys.retainAll(carried)
+        if (newBackend) awaitingReconfirm.keys.retainAll(carried)
     }
 
     /** The new server re-announced [displayId]; it is no longer provisional. */

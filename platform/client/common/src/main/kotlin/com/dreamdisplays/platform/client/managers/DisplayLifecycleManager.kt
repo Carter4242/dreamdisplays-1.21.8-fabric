@@ -11,6 +11,7 @@ import com.dreamdisplays.shared.storage.DisplayData
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.services.DisplayStorage
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.displays.DisplayDimensions
 import com.dreamdisplays.platform.client.displays.DisplayPolicyCache
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
@@ -55,6 +56,9 @@ object DisplayLifecycleManager {
 
         DisplayRegistry.screens[packet.id]?.let {
             DisplayRegistry.markReconfirmed(packet.id)
+            it.dimensionKey = DisplayDimensions.learnedKey(
+                it.dimensionKey, packet.world, packet.forced, packet.virtual, currentDimensionKey(),
+            )
             it.updateData(packet)
             if (newMedia) it.onMediaGenChanged()
             DisplayRegistry.recordScreen(it)
@@ -69,9 +73,12 @@ object DisplayLifecycleManager {
         }
         val renderDistance = DisplayPolicyCache.renderDistanceFor(policy)
 
-        // Switched off by the server: remember it so it comes back as soon as the server allows it again
+        // Switched off by the server: remember it so it comes back as soon as the server allows it again (not a forced
+        // description without a world, which may come from another one)
         if (!ServerOverrides.displayEnabled(policy)) {
-            if (!packet.virtual) cacheUnloadedDisplay(packet, facing, mode, worldOf(packet))
+            if (!packet.virtual && (!packet.forced || packet.world.isNotEmpty())) {
+                cacheUnloadedDisplay(packet, facing, mode, worldOf(packet))
+            }
             return
         }
 
@@ -96,7 +103,8 @@ object DisplayLifecycleManager {
             packet.id, packet.ownerId, Vector3i(packet.x, packet.y, packet.z), facing,
             packet.width, packet.height, packet.url, packet.lang,
             mode, packet.qualityCap, DisplayRotation.fromQuarterTurns(packet.rotation),
-            worldOf(packet), packet.depth, packet.conforming, info = packet,
+            DisplayDimensions.keyForNewScreen(packet.world, packet.forced, packet.virtual, currentDimensionKey()),
+            packet.depth, packet.conforming, info = packet,
         )
     }
 
@@ -215,8 +223,17 @@ object DisplayLifecycleManager {
      */
     private fun worldOf(packet: DisplayInfo): String = displayWorld(packet.world, currentDimensionKey())
 
-    internal fun currentDimensionKey(): String =
-        Minecraft.getInstance().level?.let { dimensionKeyOf(it) } ?: ""
+    private class DimensionOf(val level: ClientLevel, val key: String)
+
+    @Volatile
+    private var dimensionOf: DimensionOf? = null
+
+    /** The player's current dimension id, or empty outside a world. Cached per level (read every frame per display). */
+    internal fun currentDimensionKey(): String {
+        val level = Minecraft.getInstance().level ?: return ""
+        dimensionOf?.takeIf { it.level === level }?.let { return it.key }
+        return dimensionKeyOf(level).also { dimensionOf = DimensionOf(level, it) }
+    }
 
     private fun dimensionKeyOf(level: ClientLevel): String =
         //? if >=1.21.11 {

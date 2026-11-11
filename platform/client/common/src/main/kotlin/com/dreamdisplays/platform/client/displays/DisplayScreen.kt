@@ -40,6 +40,7 @@ import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.core.share.ScreenShareViewerRules
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.Initializer
+import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager
 import com.dreamdisplays.platform.client.audio.ListenerPoseTracker
 import com.dreamdisplays.platform.client.audio.VoxelAcousticsProbe
 import com.dreamdisplays.platform.client.core.DreamServices
@@ -102,9 +103,8 @@ class DisplayScreen(
     var rotation: DisplayRotation = DisplayRotation.NONE,
 
     /**
-     * Dimension the display stands in. From a protocol-12 server it is the server's own world key
-     * (`DisplayInfo.world`, kept up to date by [updateData]); from older servers, the player's dimension when the
-     * display was first described.
+     * The display's world (dimension id), or empty while unknown (see [DisplayDimensions]). From a protocol-12 server it
+     * is the server's own world key (`DisplayInfo.world`).
      */
     var dimensionKey: String = "",
 
@@ -1054,10 +1054,17 @@ class DisplayScreen(
         mediaPlayer?.setQuality(VideoQuality.Fixed(playbackQualityHeight))
     }
 
-    /** Returns true if [pos] falls within the screen's block bounding box. */
-    fun isInScreen(pos: BlockPos): Boolean =
+    /**
+     * True when this display stands in the player's current world: only then is it drawn, clickable and loaded by
+     * distance. A virtual display, or one whose world is unknown, lives in its popouts only.
+     */
+    val isInWorldHere: Boolean
+        get() = DisplayDimensions.inWorldHere(virtual, dimensionKey, DisplayLifecycleManager.currentDimensionKey())
+
+    /** Returns true if [pos] falls within the screen's block bounding box in the player's current world. */
+    fun isInScreen(pos: BlockPos): Boolean = isInWorldHere && (
         PlacedDisplays.contains(uuid, width, height, depth, facing, pos)
-            ?: DisplayGeometry.isInBounds(pos.x, pos.y, pos.z, x, y, z, width, height, facing, depth)
+            ?: DisplayGeometry.isInBounds(pos.x, pos.y, pos.z, x, y, z, width, height, facing, depth))
 
     /** Returns the shortest Euclidean distance from [pos] to any block in the screen's bounding box. */
     fun getDistanceToScreen(pos: BlockPos): Double =
@@ -1226,7 +1233,7 @@ class DisplayScreen(
     fun refreshPrepareState(distance: Double = lastPrepareDistance) {
         lastPrepareDistance = distance
         val prepared = isPrepared
-        isHiddenForBroadcast = prepared && !isPopoutActive && (virtual || distance > renderDistance)
+        isHiddenForBroadcast = prepared && !isPopoutActive && (!isInWorldHere || distance > renderDistance)
         // Opening a paused stream to hold it ready may release a moment of sound: never let it be heard
         val silenced = isHiddenForBroadcast || (!isPopoutActive && isWarmingUp)
         if (silenced == prepareMuted) return

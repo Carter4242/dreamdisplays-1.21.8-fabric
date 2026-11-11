@@ -136,7 +136,9 @@ object ClientTickManager {
             } else {
                 displayScreen.renderDistance + DORMANT_HYSTERESIS_BLOCKS
             }
-            val outOfRange = threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
+            // A display in another world is out of range whatever its coordinates
+            val outOfRange = !displayScreen.isInWorldHere ||
+                    threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
             // Switched off by the server: everything goes, popouts and virtual displays included
             val serverDisabled = !ServerOverrides.displayEnabled(displayScreen.policy)
             // A display held for a fullscreen broadcast stays loaded at any distance until the broadcast takes it
