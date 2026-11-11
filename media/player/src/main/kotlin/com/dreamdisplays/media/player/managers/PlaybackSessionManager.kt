@@ -51,6 +51,12 @@ internal class PlaybackSessionManager(
 
     private val onAudioFailure: (stderr: String) -> Unit = {},
 
+    /**
+     * A live audio half broke (an exception in its pump, or FFmpeg exiting non-zero mid-stream). `isCurrent` says
+     * whether that half is still the session's, so a late report never restarts its replacement.
+     */
+    private val onAudioFault: (reason: String, stderr: String, isCurrent: () -> Boolean) -> Unit = { _, _, _ -> },
+
     private val onAudioTrackSwitchSettled: () -> Unit = {},
 
     private val renderExecutor: RenderExecutor,
@@ -320,6 +326,10 @@ internal class PlaybackSessionManager(
         audio.setDspStage(audioStage)
     }
 
+    /** Fault callback for the audio half stopped by [aStop]. */
+    private fun faultFor(aStop: AtomicBoolean): (String, String) -> Unit =
+        { reason, stderr -> onAudioFault(reason, stderr) { audioHalf?.stop === aStop && !aStop.get() } }
+
     /** Installs (or clears) the acoustics DSP stage after construction; see [MediaPlayer.attachAudioStage]. */
     fun setAudioStage(stage: AudioDspStage?) = audio.setDspStage(stage)
 
@@ -524,7 +534,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
+                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
                     ),
                     aStop,
                 )
@@ -585,7 +595,7 @@ internal class PlaybackSessionManager(
                         audio.start(
                             it, terminated, aStop,
                             contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                            startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
+                            startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
                         ),
                         aStop,
                     )
@@ -639,7 +649,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
+                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
                     ),
                     aStop,
                 )
@@ -703,7 +713,7 @@ internal class PlaybackSessionManager(
         val at = audio.start(
             ap, terminated, aStop,
             contentStartNanos = offsetNanos, originKnown = originKnown,
-            startGate = null, onUnexpectedEnd = onAudioFailure,
+            startGate = null, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop),
             catchUp = if (originKnown) AudioSink.CatchUp(offsetNanos, { clock.currentTime() }, tempo) else null,
             tempo = tempo,
         )
@@ -842,7 +852,7 @@ internal class PlaybackSessionManager(
                 MediaProcess.gracefulDestroy(ap)
                 onAudioTrackSwitchSettled()
             },
-            onUnexpectedEnd = onAudioFailure,
+            onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop),
             tempo = line.tempo,
         )
     }
@@ -967,7 +977,7 @@ internal class PlaybackSessionManager(
                 val at = audio.start(
                     ap, terminated, aStop,
                     contentStartNanos = liveOffsetNanos, originKnown = true,
-                    startGate = firstLiveFrame, onUnexpectedEnd = onAudioFailure, tempo = tempo,
+                    startGate = firstLiveFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
                 )
                 AudioHalf(ap, at, aStop)
             }

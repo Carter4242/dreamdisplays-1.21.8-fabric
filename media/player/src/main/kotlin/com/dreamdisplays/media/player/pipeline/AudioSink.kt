@@ -39,6 +39,13 @@ internal class AudioSink(private val debugLabel: String) {
         private const val CATCHUP_MAX_PASSES = 4
         private const val MAX_RESYNC_NANOS = 5_000_000_000L
 
+        /** How long to wait for FFmpeg to exit after its PCM ended, to read its exit code. */
+        private const val EXIT_WAIT_MS = 500L
+
+        /** At most one audio-fault WARN (with its stack trace) per this interval across all displays. */
+        private const val FAULT_WARN_INTERVAL_NANOS = 30_000_000_000L
+        private val lastFaultWarnNanos = AtomicLong(0L)
+
         /** Furthest a sync rate request may move playback from real time (5 %). */
         private const val MAX_RATE_OFFSET = 0.05
 
@@ -69,7 +76,20 @@ internal class AudioSink(private val debugLabel: String) {
         /** PCM nanos that carry [contentNanos] of content at [tempo] x. */
         fun contentToPcmNanos(contentNanos: Long, tempo: Double): Long =
             if (tempo == 1.0) contentNanos else (contentNanos / tempo).toLong()
+
+        /**
+         * Why a live audio half ended on its own (not stopped): null = nothing to report; [EndKind.FAULT] = it broke
+         * (an exception, or FFmpeg exited non-zero), restart it in place; [EndKind.ENDED] = the PCM stream just ended.
+         */
+        internal fun endKind(failure: Throwable?, pumped: Boolean, exitCode: Int?): EndKind? = when {
+            failure != null -> EndKind.FAULT
+            !pumped -> null
+            exitCode != null && exitCode != 0 -> EndKind.FAULT
+            else -> EndKind.ENDED
+        }
     }
+
+    internal enum class EndKind { FAULT, ENDED }
 
     /**
      * Sample of audio master clock (atomic read of position, session, and meaning).
@@ -258,11 +278,12 @@ internal class AudioSink(private val debugLabel: String) {
         onUnexpectedEnd: (String) -> Unit = {},
         catchUp: CatchUp? = null,
         tempo: Double = 1.0,
+        onFault: ((reason: String, stderr: String) -> Unit)? = null,
     ): Thread {
         val session = beginSession(contentStartNanos, originKnown, tempo)
         val stderrBuf = drainStderr(proc, stopFlag)
         return daemon(
-            { run(session, proc, terminated, stopFlag, startGate, stderrBuf, onUnexpectedEnd, catchUp) },
+            { run(session, proc, terminated, stopFlag, startGate, stderrBuf, onUnexpectedEnd, catchUp, onFault) },
             "MediaPlayer-audio",
         ).also { it.start() }
     }
@@ -282,6 +303,7 @@ internal class AudioSink(private val debugLabel: String) {
         onAborted: () -> Unit = {},
         onUnexpectedEnd: (String) -> Unit = {},
         tempo: Double = 1.0,
+        onFault: ((reason: String, stderr: String) -> Unit)? = null,
     ): Thread {
         val stderrBuf = drainStderr(proc, stopFlag)
         return daemon(
@@ -299,6 +321,7 @@ internal class AudioSink(private val debugLabel: String) {
                     stderrBuf,
                     onUnexpectedEnd,
                     tempo,
+                    onFault,
                 )
             },
             "MediaPlayer-audio-switch-line",
@@ -309,11 +332,13 @@ internal class AudioSink(private val debugLabel: String) {
         proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean, contentStartNanos: Long,
         originKnown: Boolean, catchUp: CatchUp?, shouldPromote: () -> Boolean, onPromoted: () -> Unit,
         onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit, tempo: Double,
+        onFault: ((String, String) -> Unit)?,
     ) {
         var newLine: SourceDataLine? = null
         var session: LineSession? = null
         var promoted = false
         var pumped = false
+        var failure: Throwable? = null
 
         fun isInterrupted() = terminated.get() || stopFlag.get()
         runCatching {
@@ -357,9 +382,10 @@ internal class AudioSink(private val debugLabel: String) {
             }
         }.onFailure { e ->
             if (isInterrupted()) return@onFailure
-            when (e) {
-                is IOException -> if (MediaPlayer.DEBUG) logger.warn("$debugLabel Switch read: ${e.message}.")
-                else -> logger.warn("$debugLabel Switch pipeline: ${e.message}.")
+            // Before the flip the old track still plays and onAborted keeps it; after it this is the live half
+            if (promoted) failure = e
+            else if (e !is IOException || MediaPlayer.DEBUG) {
+                logger.warn("$debugLabel [audio] switch line failed before going live; keeping the current track.", e)
             }
         }
 
@@ -372,8 +398,51 @@ internal class AudioSink(private val debugLabel: String) {
 
         if (!promoted) onAborted()
 
-        if (pumped && !isInterrupted()) {
-            onUnexpectedEnd(synchronized(stderrBuf) { stderrBuf.toString() })
+        if (promoted && !isInterrupted()) reportEnd(proc, failure, pumped, stderrBuf, onUnexpectedEnd, onFault)
+    }
+
+    /**
+     * Reports how a live half ended on its own: a fault (exception, FFmpeg exiting non-zero mid-stream) goes to
+     * [onFault] so the half is restarted in place right away, with one rate-limited WARN; a plain end of PCM to
+     * [onUnexpectedEnd] as before.
+     */
+    private fun reportEnd(
+        proc: Process, failure: Throwable?, pumped: Boolean, stderrBuf: StringBuilder,
+        onUnexpectedEnd: (String) -> Unit, onFault: ((String, String) -> Unit)?,
+    ) {
+        val exitCode = if (failure == null && pumped) exitCodeAfterEof(proc) else null
+        val stderr = synchronized(stderrBuf) { stderrBuf.toString() }
+        when (endKind(failure, pumped, exitCode)) {
+            null -> {}
+            EndKind.ENDED -> onUnexpectedEnd(stderr)
+            EndKind.FAULT -> {
+                val reason = failure?.let { "audio pipeline failed ($it)" }
+                    ?: "FFmpeg audio process exited with code $exitCode"
+                if (onFault == null) {
+                    if (failure != null) logger.warn("$debugLabel [audio] $reason.", failure)
+                    if (pumped) onUnexpectedEnd(stderr)
+                    return
+                }
+                warnFault("$reason; restarting the audio half in place", failure)
+                onFault(reason, stderr)
+            }
+        }
+    }
+
+    private fun exitCodeAfterEof(proc: Process): Int? = try {
+        if (proc.waitFor(EXIT_WAIT_MS, TimeUnit.MILLISECONDS)) proc.exitValue() else null
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt(); null
+    }
+
+    /** WARNs [message] with [cause]'s stack trace at most once per [FAULT_WARN_INTERVAL_NANOS]; DEBUG otherwise. */
+    private fun warnFault(message: String, cause: Throwable?) {
+        val now = System.nanoTime()
+        val last = lastFaultWarnNanos.get()
+        if ((last == 0L || now - last >= FAULT_WARN_INTERVAL_NANOS) && lastFaultWarnNanos.compareAndSet(last, now)) {
+            if (cause != null) logger.warn("$debugLabel [audio] $message.", cause) else logger.warn("$debugLabel [audio] $message.")
+        } else {
+            logger.debug("$debugLabel [audio] {}.", message, cause)
         }
     }
 
@@ -432,10 +501,11 @@ internal class AudioSink(private val debugLabel: String) {
     private fun run(
         session: LineSession, proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
         startGate: CountDownLatch?, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit,
-        catchUp: CatchUp? = null,
+        catchUp: CatchUp? = null, onFault: ((String, String) -> Unit)? = null,
     ) {
         var ln: SourceDataLine? = null
         var pumped = false
+        var failure: Throwable? = null
         runCatching {
             proc.inputStream.use { input ->
                 val opened = openLine() ?: run {
@@ -462,14 +532,8 @@ internal class AudioSink(private val debugLabel: String) {
                 pumped = true
             }
         }.onFailure { e ->
-            if (!terminated.get() && !stopFlag.get()) {
-                if (e is IOException) {
-                    // After the line started this silences the session while its video plays on
-                    logger.warn("$debugLabel [audio] read failed: ${e.message}.")
-                } else {
-                    logger.warn("$debugLabel Pipeline: ${e.message}.")
-                }
-            }
+            // Left alone this silences the session while its video plays on: reported below as a fault
+            if (!terminated.get() && !stopFlag.get()) failure = e
         }
 
         ln?.let {
@@ -479,8 +543,8 @@ internal class AudioSink(private val debugLabel: String) {
             runCatching { it.close() }
         }
 
-        if (pumped && !terminated.get() && !stopFlag.get()) {
-            onUnexpectedEnd(synchronized(stderrBuf) { stderrBuf.toString() })
+        if (!terminated.get() && !stopFlag.get()) {
+            reportEnd(proc, failure, pumped, stderrBuf, onUnexpectedEnd, onFault)
         }
     }
 

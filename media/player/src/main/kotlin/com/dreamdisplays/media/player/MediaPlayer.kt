@@ -12,6 +12,7 @@ import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.media.player.events.PlayerEvents
+import com.dreamdisplays.media.player.managers.AudioFaultBudget
 import com.dreamdisplays.media.player.managers.AudioStallDetector
 import com.dreamdisplays.media.player.managers.PlaybackSessionManager
 import com.dreamdisplays.media.player.managers.StatsReporter
@@ -102,6 +103,7 @@ class MediaPlayer(
     private var stallReResolves = 0
     private var audioRestartAttempts = 0
     private var lastAudioFailureNanos = 0L
+    private val audioFaults = AudioFaultBudget()
 
     /** The current session produced its first frame (a failure before that is a failure to open the stream). */
     @Volatile
@@ -163,6 +165,7 @@ class MediaPlayer(
         onStreamEnd = ::handleStreamEnd,
         onQualitySwitchAborted = { appliedAnyway -> handleQualitySwitchAborted(appliedAnyway) },
         onAudioFailure = { stderr -> handleAudioFailure(stderr) },
+        onAudioFault = { reason, stderr, isCurrent -> handleAudioFault(reason, stderr, isCurrent) },
         onAudioTrackSwitchSettled = { onControl { audioTrackSwitching = false } },
         renderExecutor = env.renderExecutor,
         uploaderFactory = env.uploaderFactory,
@@ -960,6 +963,7 @@ class MediaPlayer(
         sessionFirstFrame = false
         audioRestartAttempts = 0
         lastAudioFailureNanos = 0L
+        audioFaults.reset()
         sessionManager.start(
             streamSet,
             offsetNanos,
@@ -1220,6 +1224,28 @@ class MediaPlayer(
             return@onControl
         }
         handleSessionStall("audio ended: ${MediaUtil.truncate(stderr)}.")
+    }
+
+    /**
+     * A live audio half broke (the sink already logged why): restart it in place at the playhead right away, so the
+     * picture never plays on in silence. Live streams, sources without audio, the last seconds of a VOD and a fault
+     * that keeps recurring take the usual audio-failure path instead.
+     */
+    private fun handleAudioFault(reason: String, stderr: String, isCurrent: () -> Boolean): Unit = onControl {
+        if (terminated.get() || !isCurrent()) return@onControl
+        val ss = streams ?: return@onControl
+        val nearEnd = durationHintNanos > 0L && durationHintNanos - clock.currentTime() <= AUDIO_EOS_NEAR_END_GUARD_NS
+        if (liveStream || nearEnd || MediaProcess.indicatesNoAudioStream(stderr) ||
+            !audioFaults.allowRestart(System.nanoTime())
+        ) {
+            handleAudioFailure(stderr)
+            return@onControl
+        }
+        val at = getCurrentTime()
+        volume.reapply()
+        if (!sessionManager.restartAudio(ss, at)) {
+            logger.debug("$debugLabel Audio restart after a fault ($reason) not possible now; the self-heal retries.")
+        }
     }
 
     private fun restartAudioOrStall() {

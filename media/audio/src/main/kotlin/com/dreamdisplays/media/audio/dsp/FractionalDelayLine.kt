@@ -15,14 +15,14 @@ class FractionalDelayLine(private val capacity: Int = 128) {
 
     /** Returns the sample [delaySamples] behind the most recently pushed one (0 = most recent), interpolated. */
     fun read(delaySamples: Float): Float {
-        val d = delaySamples.coerceIn(0f, (capacity - 2).toFloat())
-        val pos = (writeIdx - 1 - d)
-        var wrapped = pos % capacity
-        if (wrapped < 0f) wrapped += capacity
-        val i0 = floor(wrapped).toInt()
-        val frac = wrapped - i0
-        val i1 = (i0 + 1) % capacity
-        return buf[i0] * (1f - frac) + buf[i1] * frac
+        val d = if (delaySamples.isNaN()) 0f else delaySamples.coerceIn(0f, (capacity - 2).toFloat())
+        // Index arithmetic stays in integers: wrapping a float position (writeIdx - 1 - d) lands on exactly
+        // `capacity` when it is a hair below 0 (64 - 1e-6 rounds to 64f), which indexed past the buffer.
+        val whole = floor(d).toInt()
+        val frac = d - whole
+        val newer = Math.floorMod(writeIdx - 1 - whole, capacity)
+        val older = if (newer == 0) capacity - 1 else newer - 1
+        return buf[newer] * (1f - frac) + buf[older] * frac
     }
 
     /** Clears the buffer (call on session reset so a stale tail never bleeds into fresh audio). */
