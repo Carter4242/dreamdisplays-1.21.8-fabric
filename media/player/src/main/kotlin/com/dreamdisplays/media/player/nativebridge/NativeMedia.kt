@@ -298,18 +298,12 @@ object NativeMedia {
         val cached = File("$CACHE_ROOT/${platformKey()}/$libName")
         val bytes = javaClass.getResourceAsStream("/dreamdisplays-natives/${platformKey()}/$libName")?.use { it.readBytes() }
             ?: return cached.takeIf { it.isFile && it.length() > 0 }
-        if (cached.isFile && cached.length() == bytes.size.toLong() && runCatching { cached.readBytes().contentEquals(bytes) }.getOrDefault(false)) {
-            return cached
-        }
-        val parent = cached.parentFile
-        if (!parent.exists() && !parent.mkdirs()) return null
-        val tmp = File(parent, "$libName.tmp")
-        tmp.writeBytes(bytes)
-        if (!tmp.renameTo(cached)) {
-            tmp.delete()
+        val installed = NativeLibraryInstall.install(bytes, cached.toPath()) ?: run {
+            logger.warn("Could not write $libName to ${cached.parentFile}.")
             return null
         }
-        return cached
+        if (installed != cached.toPath()) logger.info("$libName is locked by another game; loading ${installed.fileName}.")
+        return installed.toFile()
     }
 
     private fun platformKey(): String {
