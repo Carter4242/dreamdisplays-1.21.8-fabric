@@ -64,7 +64,8 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
             if (!observedEnd && playerId in state.observed) return@compute state
             val byPlayer = state.byPlayer + (playerId to reportedMs)
             val observed = if (observedEnd) state.observed + playerId else state.observed - playerId
-            val mediaMs = QueueTiming.observedMediaMs(byPlayer, observed, present)
+            // Never below the playing queue entry's own length, which whole-second metadata only rounds down
+            val mediaMs = QueueTiming.observedMediaMs(byPlayer, observed, present)?.coerceAtLeast(entryMs)
                 ?: QueueTiming.mediaDurationMs(entryMs, byPlayer.values, state.mediaMs)
             if (mediaMs != state.mediaMs) applied = mediaMs
             Current(url, byPlayer, mediaMs, state.lastReportAtMs + (playerId to nowMs), observed)

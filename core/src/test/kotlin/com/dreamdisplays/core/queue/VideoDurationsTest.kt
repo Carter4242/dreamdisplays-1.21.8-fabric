@@ -118,5 +118,11 @@ class VideoDurationsTest {
         alone.onVideoChanged(display, video)
         alone.report(display, video, other, 600_000, 0, 1_000, present = listOf(player, other))
         assertEquals(300_000L, alone.report(display, video, player, 300_000, 0, 1_000, observedEnd = true, present = listOf(player)))
+        // A queue entry's length is the least it runs, observed or not
+        val queued = VideoDurations()
+        queued.onVideoChanged(display, video)
+        queued.report(display, video, player, 400_000, 240_000, 1_000, present = listOf(player))
+        assertNull(queued.report(display, video, player, 200_000, 240_000, 5_000, observedEnd = true, present = listOf(player)))
+        assertEquals(240_000L, queued.mediaMsOf(display, video))
     }
 }
