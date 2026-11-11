@@ -84,6 +84,8 @@ class PipOverlay(
     private var targetX: Float = 0f
     private var targetY: Float = 0f
     private var posInitialized = false
+    private var layoutPipW = 0
+    private var layoutPipH = 0
     private var layoutW = 0
     private var layoutH = 0
 
@@ -231,8 +233,8 @@ class PipOverlay(
         val fh = texH
         val content = contentRect(fw, fh, contentAspect)
         val contentAspect = if (content.w > 0 && content.h > 0) content.w / content.h.toDouble() else 16.0 / 9.0
-        val pipW = (sw * sizeFraction).toInt().coerceAtLeast(80)
-        val pipH = (pipW / contentAspect).toInt().coerceAtLeast(45)
+        // Fitted to the viewport height too: a portrait video at the chosen width would run off the screen
+        val (pipW, pipH) = PipSizing.fit(sw, sh, sizeFraction, contentAspect, MARGIN)
 
         // Position is stored in GUI-scaled pixels. And always must be
         if (!posInitialized || sw != layoutW || sh != layoutH) {
@@ -244,7 +246,13 @@ class PipOverlay(
             posX = ax.toFloat(); posY = ay.toFloat()
             targetX = posX; targetY = posY
             layoutW = sw; layoutH = sh
+            layoutPipW = pipW; layoutPipH = pipH
             posInitialized = true
+        } else if (!dragging && !resizing && (pipW != layoutPipW || pipH != layoutPipH)) {
+            // The size changed under it (first frame of a portrait video, a new aspect): back to its anchor
+            val (ax, ay) = anchor.position(sw, sh, pipW, pipH, MARGIN)
+            targetX = ax.toFloat(); targetY = ay.toFloat()
+            layoutPipW = pipW; layoutPipH = pipH
         }
 
         if (mouseX != MinecraftOverlayRenderContext.NO_POINTER) updateDrag(mouseX, mouseY, sw, sh, pipW, pipH)
@@ -257,6 +265,7 @@ class PipOverlay(
             val (ax, ay) = anchor.position(sw, sh, pipW, pipH, MARGIN)
             posX = ax.toFloat(); posY = ay.toFloat()
             targetX = posX; targetY = posY
+            layoutPipW = pipW; layoutPipH = pipH
         }
 
         val cx = posX.toInt();
