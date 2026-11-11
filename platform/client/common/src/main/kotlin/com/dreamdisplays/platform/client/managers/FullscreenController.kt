@@ -30,7 +30,12 @@ object FullscreenController {
     fun handle(state: FullscreenState) {
         if (!state.active) {
             pending.remove(state.displayId)
-            DisplayRegistry.screens[state.displayId]?.let {
+            // Older servers end a session by its id alone (no display id)
+            val screen = DisplayRegistry.screens[state.displayId]
+                ?: state.sessionId.takeIf { it.isNotEmpty() }?.let { id ->
+                    DisplayRegistry.screens.values.firstOrNull { it.lastFullscreenState?.sessionId == id }
+                }
+            screen?.let {
                 it.lastFullscreenState = null
                 it.deactivateFullscreen()
             }

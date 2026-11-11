@@ -24,6 +24,8 @@ class DisplayPopoutManager(
     private var windowActive = false
     private var pipOverlay: PipOverlay? = null
     private var fullscreenOverlay: FullscreenOverlay? = null
+    // The PiP a forced fullscreen was minimized into: it belongs to that session and ends with it
+    private var pipFromFullscreen = false
     private var currentPlayer: MediaPlayer? = null
     private var contentAspect: () -> Double = { 16.0 / 9.0 }
 
@@ -114,6 +116,7 @@ class DisplayPopoutManager(
     ) {
         currentPlayer = player
         this.contentAspect = contentAspect
+        pipFromFullscreen = false
         popoutWindow?.let { win -> if (win.isOpen) win.close() }
         windowActive = false
         closeFullscreenOverlay()
@@ -147,11 +150,12 @@ class DisplayPopoutManager(
         emit(PopoutEvent.Opened(displayScreen.uuid.toString()))
     }
 
-    /** Closes only the fullscreen overlay, keeping window / PiP surfaces alive. */
+    /** Closes the fullscreen overlay (and the PiP it was minimized into), keeping other window / PiP surfaces alive. */
     fun deactivateFullscreen(player: MediaPlayer?) {
         player?.let { currentPlayer = it }
-        if (fullscreenOverlay == null) return
+        if (fullscreenOverlay == null && !pipFromFullscreen) return
         closeFullscreenOverlay()
+        if (pipFromFullscreen) closePipOverlay()
         rewireSink()
     }
 
@@ -166,6 +170,7 @@ class DisplayPopoutManager(
             initialSizeFraction = 0.33f,
             contentAspect = contentAspect
         )
+        pipFromFullscreen = pipOverlay != null
     }
 
     /** Closes every popout mode and detaches the frame sink. */
@@ -185,6 +190,7 @@ class DisplayPopoutManager(
         PipOverlayManager.remove(displayScreen)
         FullscreenOverlayManager.remove(displayScreen)
         fullscreenOverlay = null
+        pipFromFullscreen = false
         if (pipOverlay != null) {
             pipOverlay = null
             emit(PopoutEvent.Closed(displayScreen.uuid.toString()))
@@ -192,6 +198,7 @@ class DisplayPopoutManager(
     }
 
     private fun closePipOverlay() {
+        pipFromFullscreen = false
         val overlay = pipOverlay ?: return
         overlay.startClose()
         pipOverlay = null
