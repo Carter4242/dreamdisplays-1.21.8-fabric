@@ -81,6 +81,17 @@ class TimelineFollowerTest {
     }
 
     @Test
+    fun `drift is the short way round the loop, except past the server's loop end`() {
+        // Just before the end while the clock already restarted: barely behind
+        assertEquals(150, loopDrift(targetMs = 50, localMs = 11_050, loop = true, periodMs = 11_150))
+        // Media longer than the server's loop (60 s): 20 s into the tail while everyone restarted 20 s ago is far off
+        assertEquals(-60_000, loopDrift(targetMs = 20_000, localMs = 80_000, loop = true, periodMs = 60_000))
+        // Not looping: as it is
+        assertEquals(-70_000, loopDrift(targetMs = 10_000, localMs = 80_000, loop = false, periodMs = 60_000))
+        assertEquals(-30, loopDrift(targetMs = 59_990, localMs = 60_020, loop = true, periodMs = 60_000))
+    }
+
+    @Test
     fun `a whole-second clip held at its end waits for the server's restart instead of restarting itself`() {
         // Media 10 s, server loops at 11.15 s (whole-second slack + end safety)
         val period = followLoopMs(10_000, 11_150)

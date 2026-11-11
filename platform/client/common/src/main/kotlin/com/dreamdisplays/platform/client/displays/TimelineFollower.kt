@@ -375,7 +375,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val periodMs = loopPeriodMs()
         val target = wrapTimeline(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, periodMs)
         val localMs = screen.syncPositionNanos / 1_000_000L
-        val contentDrift = signedDrift(target - localMs, loop, periodMs)
+        val contentDrift = loopDrift(target, localMs, loop, periodMs)
         // drift > 0: this client is behind the server; < 0: ahead. Judged in real time, so a given content gap
         // counts for less at high speed (it passes sooner) and more at low speed.
         val drift = estimator.toRealMs(contentDrift.toDouble()).roundToLong()
@@ -545,7 +545,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         val periodMs = loopPeriodMs()
         val target = wrapTimeline(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, periodMs)
         val localMs = screen.syncPositionNanos / 1_000_000L
-        val driftMs = estimator.toRealMs(signedDrift(target - localMs, loop, periodMs).toDouble())
+        val driftMs = estimator.toRealMs(loopDrift(target, localMs, loop, periodMs).toDouble())
         if (!joinIsFarOff(driftMs, coldLeadMs)) return false
         logVerbose("[dd-sync] {} joined {}ms off the timeline: seeking there before showing it", shortId(), signed(driftMs))
         screen.clearRenderedFrameForTimeline()
@@ -708,12 +708,6 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private fun clampSeek(ms: Long, loop: Boolean): Long =
         clampTimelineSeek(ms, loop, loopPeriodMs(), mediaEndMs(), END_MARGIN_MS)
 
-    private fun signedDrift(rawDiff: Long, loop: Boolean, periodMs: Long): Long {
-        if (!loop || periodMs <= 0) return rawDiff
-        val half = periodMs / 2
-        return ((rawDiff % periodMs) + periodMs + half) % periodMs - half
-    }
-
     private fun oneWayLatencyMs(): Double = Companion.oneWayLatencyMs()
 
     companion object {
@@ -866,6 +860,20 @@ internal fun followDurationMs(localMs: Long, serverMs: Long): Long =
  */
 internal fun followLoopMs(localMs: Long, serverMs: Long): Long =
     if (serverMs > 0L) serverMs else localMs.coerceAtLeast(0L)
+
+/**
+ * Content drift (ms) of a player at [localMs] from the shared position [targetMs] (already wrapped into the loop of
+ * [periodMs]): positive when it is behind. Across the wrap it is the short way round, so a player just before the end
+ * is barely behind a clock that just restarted. A player at or past [periodMs] is beyond the server's loop end (its own
+ * media runs longer than the length the server loops at): the shared clock is never there, so it is measured as it is,
+ * and the follower goes back rather than play on into a tail nobody else sees.
+ */
+internal fun loopDrift(targetMs: Long, localMs: Long, loop: Boolean, periodMs: Long): Long {
+    val rawDiff = targetMs - localMs
+    if (!loop || periodMs <= 0 || localMs >= periodMs) return rawDiff
+    val half = periodMs / 2
+    return ((rawDiff % periodMs) + periodMs + half) % periodMs - half
+}
 
 /** [ms] wrapped into a loop of [periodMs] (unchanged, but not negative, when not looping or the period is unknown). */
 internal fun wrapTimeline(ms: Long, loop: Boolean, periodMs: Long): Long =
