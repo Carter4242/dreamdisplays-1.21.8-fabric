@@ -9,7 +9,10 @@ import com.dreamdisplays.api.Experimental
  */
 @Experimental
 interface AudioDspStage : AutoCloseable {
-    /** Processes [len] bytes of S16LE stereo PCM in [buf] in place; [legacyGain] = distance / volume. */
+    /**
+     * Processes [len] bytes of S16LE stereo PCM in [buf] in place. [legacyGain] is the source's whole playback gain
+     * (user volume and its caps, distance falloff to the audio radius, master volume); every tier must apply it.
+     */
     fun process(buf: ByteArray, len: Int, legacyGain: Double)
 
     /** Resets internal filter / delay-line state; called at the start of every fresh playback session. */

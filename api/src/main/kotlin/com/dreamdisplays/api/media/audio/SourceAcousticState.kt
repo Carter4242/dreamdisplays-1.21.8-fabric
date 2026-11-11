@@ -12,7 +12,7 @@ data class SourceAcousticState(
     /** Source plane */
     val plane: SourcePlane,
 
-    /** User volume. */
+    /** User volume, for information: the gain actually applied comes with each block ([AudioDspStage.process]). */
     val userVolume: Float,
 
     /** Muted? */

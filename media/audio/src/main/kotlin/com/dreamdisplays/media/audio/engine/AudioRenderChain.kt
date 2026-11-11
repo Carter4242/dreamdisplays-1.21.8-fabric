@@ -137,7 +137,9 @@ internal class AudioRenderChain(
         }
 
         val advanced = tier == AcousticQuality.ADVANCED || tier == AcousticQuality.ULTRA
-        val userGain = if (st.muted) 0f else st.userVolume
+        // The player's full gain (volume capped by the server, karaoke track gain, the display's radius falloff and
+        // the game's master volume), the same the OFF tier applies; the geometry gains below only shape it in space
+        val userGain = if (st.muted) 0f else legacyGain.toFloat()
         val makeupFrom = lastMakeup
         val makeupStep = (nextMakeup(normalize, dtBlock) - makeupFrom) / frames
         // A boost above 1 (karaoke singer track volume, volume over 100 %) is limited too, never hard-clipped

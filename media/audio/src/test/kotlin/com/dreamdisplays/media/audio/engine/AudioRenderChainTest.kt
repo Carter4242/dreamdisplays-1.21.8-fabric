@@ -106,6 +106,24 @@ class AudioRenderChainTest {
         assertTrue(kotlin.math.abs(jumpDb) < 1.0, "Volume jumped ${"%.1f".format(jumpDb)} dB across a reset.")
     }
 
+    @Test
+    fun `the spatial chain applies the pipeline gain, so the radius falloff silences it`() {
+        for (quality in [AcousticQuality.BASIC, AcousticQuality.ADVANCED, AcousticQuality.ULTRA]) {
+            fun settled(gain: Double): Double {
+                val chain = newChain(quality = quality)
+                chain.updateState(defaultState()) // userVolume 1: only the passed gain may scale the output
+                var last = 0.0
+                repeat(40) { last = rms(tone(0.1).also { chain.process(it, it.size, gain) }) }
+                return last
+            }
+            val full = settled(1.0)
+            val half = settled(0.5)
+            assertTrue(full > 0.01, "$quality: no output at full gain.")
+            assertEquals(0.5, half / full, 0.02, "$quality: gain 0.5 did not halve the output.")
+            assertEquals(0.0, settled(0.0), 1e-4, "$quality: still audible past the audio radius (gain 0).")
+        }
+    }
+
     private fun settledRms(quality: AcousticQuality, amplitude: Double): Double {
         val chain = newChain(quality = quality, binaural = false, normalization = true)
         chain.updateState(defaultState())
