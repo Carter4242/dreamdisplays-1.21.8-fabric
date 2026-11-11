@@ -44,6 +44,16 @@ object Initializer {
             System.setProperty("java.awt.headless", "false")
         }
         ClientPacketManager.bind(dreamDisplaysMod)
+        //? if >=1.21.6 <1.21.11 {
+        // Display audio follows the game's chosen output device and master volume
+        com.dreamdisplays.media.player.pipeline.AudioOutputHooks.preferredDeviceName = {
+            runCatching { net.minecraft.client.Minecraft.getInstance().options.soundDevice().get() }.getOrNull()
+        }
+        com.dreamdisplays.media.player.pipeline.AudioOutputHooks.masterVolume = {
+            net.minecraft.client.Minecraft.getInstance().options
+                .getSoundSourceVolume(net.minecraft.sounds.SoundSource.MASTER).toDouble()
+        }
+        //?}
 
         logger.info("Starting Dream Displays...")
         ClientStartupManager.start()

@@ -604,7 +604,7 @@ internal class AudioSink(private val debugLabel: String) {
     private fun openLine(info: DataLine.Info, fmt: AudioFormat): SourceDataLine? {
         repeat(OPEN_RETRIES) { attempt ->
             try {
-                return (AudioSystem.getLine(info) as SourceDataLine).also { it.open(fmt, LINE_BUFFER_BYTES) }
+                return AudioOutputHooks.getLine(info).also { it.open(fmt, LINE_BUFFER_BYTES) }
             } catch (e: LineUnavailableException) {
                 if (attempt == OPEN_RETRIES - 1) {
                     logger.warn("$debugLabel Line unavailable: ${e.message}.")

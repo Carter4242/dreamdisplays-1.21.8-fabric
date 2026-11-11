@@ -1,5 +1,7 @@
 package com.dreamdisplays.media.player
 
+import com.dreamdisplays.media.player.pipeline.AudioOutputHooks
+
 import kotlin.math.abs
 
 /** Combines the user-set volume with distance-based attenuation and pushes the effective value to the audio pipeline. */
@@ -13,10 +15,14 @@ internal class VolumeController(
     @Volatile
     private var lastAttenuation = 1.0
 
+    @Volatile
+    private var lastMaster = 1.0
+
     /** Sets the user-controlled volume (clamped to 0.0-2.0) and re-applies the effective value. */
     fun setUserVolume(volume: Float) {
         userVolume = volume.toDouble().coerceIn(0.0, 2.0)
-        applyVolume(userVolume * lastAttenuation)
+        lastMaster = AudioOutputHooks.masterVolumeOrFull()
+        applyVolume(userVolume * lastAttenuation * lastMaster)
     }
 
     /**
@@ -26,9 +32,11 @@ internal class VolumeController(
      */
     fun updateAttenuation(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true) {
         val attenuation = attenuation(distance, maxRadius, fullVolumeRadius, squared)
-        if (abs(attenuation - lastAttenuation) > 1e-5) {
+        val master = AudioOutputHooks.masterVolumeOrFull()
+        if (abs(attenuation - lastAttenuation) > 1e-5 || abs(master - lastMaster) > 1e-4) {
             lastAttenuation = attenuation
-            applyVolume(userVolume * attenuation)
+            lastMaster = master
+            applyVolume(userVolume * attenuation * master)
         }
     }
 
