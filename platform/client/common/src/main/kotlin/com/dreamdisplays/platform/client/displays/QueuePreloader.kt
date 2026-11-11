@@ -79,7 +79,16 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
      * The preloaded player for [url], detached and ready to become the display's player, or null. Any other preload
      * is dropped: the display is switching to something else.
      */
-    fun take(url: String, lang: String): MediaPlayer? {
+    fun take(url: String, lang: String): MediaPlayer? = takeDetached(url, lang)?.also { it.adopt() }?.player
+
+    /** A preloaded player taken out of the preloader but not yet the display's: still parked, silent and undrawn. */
+    class Taken(val player: MediaPlayer, private val host: PreloadHost) {
+        /** Hands the player over to the display ([PreloadHost.adopt]). */
+        fun adopt() = host.adopt()
+    }
+
+    /** Like [take], but the player stays inert until [Taken.adopt] (a switch scheduled a moment ahead). */
+    fun takeDetached(url: String, lang: String): Taken? {
         val current = preload ?: return null
         preload = null
         current.release()
@@ -87,12 +96,11 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
             current.player.stop()
             return null
         }
-        current.host.adopt()
         logger.info(
             "Display {}: starting the preloaded queue video ({}, {} ms after preloading began).",
             shortId(), current.phase.name.lowercase(), (System.nanoTime() - current.startedNanos) / 1_000_000L,
         )
-        return current.player
+        return Taken(current.player, current.host)
     }
 
     /** Drops any preload (display unloaded, mode change). */
@@ -112,6 +120,8 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         if (!DisplayQueues.supported) return false
         if (screen.effectiveMode != PlaybackMode.SYNCED && screen.effectiveMode != PlaybackMode.BROADCAST) return false
         if (screen.isDormant || screen.virtual || screen.errored) return false
+        // Switching to the previous preload at its scheduled start: the next one waits for that
+        if (screen.isQueueSwitchPending) return false
         if (head.url.isEmpty() || head.url == screen.videoUrl) return false
         if (!lookAhead) return true
         if (!screen.videoStarted || screen.isLive) return false
@@ -251,6 +261,8 @@ internal class PreloadHost(private val screen: DisplayScreen) : PlaybackHost {
     override val effectiveMode: PlaybackMode get() = display.effectiveMode
 
     override val shouldLoopOnEnd: Boolean get() = if (adopted) display.shouldLoopOnEnd else true
+
+    override val followsServerTimeline: Boolean get() = adopted && display.followsServerTimeline
 
     override var videoContentAspect: Double
         get() = if (adopted) display.videoContentAspect else localAspect

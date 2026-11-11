@@ -8,6 +8,7 @@ import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
+import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -32,6 +33,9 @@ object TimelineManager {
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
+
+    /** Older clients loop their own player at end of stream by seeking to 0; those reports are not seeks. */
+    private val endOfStream = EndOfStreamGuard()
 
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
 
@@ -101,12 +105,24 @@ object TimelineManager {
         if (action == PlaybackAction.SPEED) return PlaybackPermissions.canChangeSpeed(ctx) && setSpeed(display, rate)
 
         val now = transport.nowMs()
-        startHolds.remove(display.id)
+        val target = if (action == PlaybackAction.SEEK) clampSeek(positionMs, display) else 0L
+        when (endOfStream.classify(display.id, timelines[display.id], now, action, target, durationMsOf(display))) {
+            EndOfStreamGuard.Verdict.USER_SEEK -> {}
+            // A client's stream ended a moment before the shared clock: the queue moves on at the timeline's own
+            // end, or the timeline wraps by itself. Never a restart for everyone.
+            EndOfStreamGuard.Verdict.STREAM_ENDED -> {
+                logger.info("Display {}: a client looped at its end of stream; not taken as a seek.", display.id)
+                QueueManager.onClientStreamEnded(display)
+                return false
+            }
+            EndOfStreamGuard.Verdict.DUPLICATE -> return false
+        }
+        val holding = startHolds.remove(display.id) != null
         val current = timelines[display.id] ?: Timeline.start(now)
         val updated = when (action) {
             PlaybackAction.PLAY -> current.withPaused(false, now)
             PlaybackAction.PAUSE -> current.withPaused(true, now)
-            PlaybackAction.SEEK -> current.seekedTo(clampSeek(positionMs, display), now)
+            PlaybackAction.SEEK -> current.seekedTo(target, now)
             PlaybackAction.RESTART -> Timeline.start(now, rate = current.rate)
             PlaybackAction.SPEED -> return false // Handled above
         }
@@ -117,7 +133,8 @@ object TimelineManager {
         if (resumes || jumps) {
             holdThenRelease(
                 display, updated, now,
-                playAfter = resumes || action == PlaybackAction.RESTART || !current.paused,
+                // A start hold is a playing display waiting for its viewers: a seek in it plays after, too
+                playAfter = resumes || EndOfStreamGuard.playsAfterJump(action, current.paused, holding),
                 holdMs = if (resumes) resumeHoldMs() else seekHoldMs(),
             )
             return true
@@ -309,13 +326,28 @@ object TimelineManager {
      * Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused until every viewer has the
      * new video ready, for [START_HOLD_MS] at most. [readyAtStart]: players already holding the new video ready at 0
      * (the queue's preloads), so a start does not wait for them to say so again; when that is everyone it is instant.
+     *
+     * [startAtMs] (a queue moving on at the end of the previous video): the new video starts at exactly that wall time,
+     * with no hold, when anyone has it preloaded; they cut from the old video's last frame straight to the new one,
+     * and anyone not ready joins late.
      */
-    fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList()) {
+    fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
         val now = transport.nowMs()
+        endOfStream.onVideoChanged(display.id, maxOf(now, startAtMs ?: now))
         // The display keeps its speed across videos
         val speed = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
+        if (startAtMs != null && readyAtStart.isNotEmpty()) {
+            startHolds.remove(display.id)
+            ReadinessTracker.forgetDisplay(display.id)
+            readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
+            // Anchored at the start instant: until then the wire timeline says "starts in N ms" (DisplaySync.startInMs)
+            val scheduled = Timeline(0, maxOf(now, startAtMs), paused = false, loop = true, rate = speed)
+            timelines[display.id] = scheduled
+            broadcast(display, scheduled)
+            return
+        }
         val fresh = Timeline.start(now, paused = true, loop = true, rate = speed)
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
@@ -351,6 +383,7 @@ object TimelineManager {
     /** Forgets a removed display. */
     fun remove(displayId: UUID) {
         ReadinessTracker.forgetDisplay(displayId)
+        endOfStream.forget(displayId)
         emptySince.remove(displayId)
         timelines.remove(displayId)
         lastBroadcast.remove(displayId)

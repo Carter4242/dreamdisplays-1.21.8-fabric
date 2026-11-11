@@ -282,6 +282,22 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             return
         }
         if (screen.isPaused) return // Resume is still being applied
+        if (screen.isHeldAtEnd) {
+            // This client's stream ended before the shared clock: hold the last frame until the timeline wraps or is
+            // moved back (a queue's next entry replaces the player instead)
+            controller.resetMeasurement()
+            if (!screen.isQueueSwitchPending && durationMs > 0L && target < durationMs - END_HOLD_MS &&
+                now - lastSnapNanos >= SNAP_COOLDOWN_NANOS
+            ) {
+                lastSnapNanos = now
+                val startMs = target + contentMs(coldLeadMs, estimator.rate)
+                screen.seekVideoTo(clampSeek(startMs, loop, durationMs) * 1_000_000L)
+                expectLanding(LeadKind.COLD)
+                correctAfterLanding = true
+                note(Action.SEEK)
+            }
+            return
+        }
         if (!screen.isClockRunning()) {
             // Restarting after a seek / resume: nothing to measure yet
             controller.resetMeasurement()
@@ -508,7 +524,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** A scheduled start closer than this is played at once instead. */
         private const val MIN_SCHEDULE_MS = 2.0
 
-        private val START_SCHEDULER: java.util.concurrent.ScheduledExecutorService =
+        internal val START_SCHEDULER: java.util.concurrent.ScheduledExecutorService =
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
                 Thread(r, "DreamDisplays-ScheduledStart").apply { isDaemon = true }
             }
@@ -523,6 +539,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
         private const val NANOS_PER_MS = 1_000_000.0
         private const val END_MARGIN_MS = 500L
+
+        /** A player held at its end restarts once the shared clock is this far before the end (it wrapped / was seeked). */
+        private const val END_HOLD_MS = 2_000L
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
         private const val PREPARED_SNAP_TOLERANCE_MS = 250
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L

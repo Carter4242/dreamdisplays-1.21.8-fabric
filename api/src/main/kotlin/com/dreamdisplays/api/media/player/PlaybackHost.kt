@@ -35,6 +35,13 @@ interface PlaybackHost {
      */
     val shouldLoopOnEnd: Boolean
 
+    /**
+     * True when a server timeline drives this display (Synced, Broadcast, watch party): at the end of the stream the
+     * player then holds its last frame and leaves what comes next (the next queue entry, the timeline's own loop
+     * wrap, a pause) to that timeline, never looping or reporting on its own.
+     */
+    val followsServerTimeline: Boolean get() = false
+
     /** Content aspect ratio of the resolved video; the player updates this on (re)resolve. */
     var videoContentAspect: Double
 

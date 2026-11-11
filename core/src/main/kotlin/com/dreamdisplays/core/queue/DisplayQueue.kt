@@ -258,6 +258,40 @@ object QueueTiming {
         return nowMs - (sinceEnd / rate).roundToLong() >= armedAtMs
     }
 
+    /**
+     * Wall time at which the play-through of [timeline] that is ending ends: its anchor plus the content left divided
+     * by the speed, when that is at most [earlyMs] after [nowMs]. [nowMs] when that end is already past (a late tick
+     * just after a loop wrap counts as past). Null when unknown (paused, no duration). The next queue entry is
+     * scheduled to start at exactly this instant, so preloaded clients cut from the last frame straight to it.
+     */
+    fun switchAtMs(timeline: Timeline, nowMs: Long, earlyMs: Long, durationMs: Long = timeline.durationMs): Long? {
+        if (timeline.paused || durationMs <= 0L) return null
+        val rate = timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)
+        val raw = rawPosition(timeline, nowMs)
+        val endPosition = if (timeline.loop) (raw / durationMs + 1) * durationMs else durationMs
+        val endAt = timeline.serverTimeMs + ((endPosition - timeline.positionMs.coerceAtLeast(0L)) / rate).roundToLong()
+        return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt
+    }
+
+    /** Content ms before (or after a loop wrap past) the end within which a client's seek back to the start is its own end-of-stream loop. */
+    const val END_OF_STREAM_WINDOW_MS = 2_000L
+
+    /** A seek to at most this many ms is a restart from the beginning. */
+    const val RESTART_TARGET_MAX_MS = 1_000L
+
+    /**
+     * True when a client's seek to [targetMs] reaching a playing [timeline] at [nowMs] is that client's player looping
+     * at its own end of stream (older clients do that), not a viewer's seek: a jump back to the start while the shared
+     * timeline is within [END_OF_STREAM_WINDOW_MS] of the end, past it, or just wrapped.
+     */
+    fun isEndOfStreamLoop(timeline: Timeline, nowMs: Long, targetMs: Long, durationMs: Long = timeline.durationMs): Boolean {
+        if (timeline.paused || durationMs <= 0L || targetMs > RESTART_TARGET_MAX_MS) return false
+        val raw = rawPosition(timeline, nowMs)
+        if (raw >= durationMs && !timeline.loop) return true
+        val within = raw % durationMs
+        return within >= durationMs - END_OF_STREAM_WINDOW_MS || (raw >= durationMs && within <= END_OF_STREAM_WINDOW_MS)
+    }
+
     /** Content position at [nowMs], unwrapped: advances at the timeline's speed, holds before a scheduled start. */
     private fun rawPosition(timeline: Timeline, nowMs: Long): Long {
         if (nowMs <= timeline.serverTimeMs) return timeline.positionMs.coerceAtLeast(0L)

@@ -36,14 +36,14 @@ object QueueActions {
     }
 
     /** Switches [display] to queue entry [item] exactly like a player-set video; [readyPlayers] preloaded it. */
-    fun applyVideo(display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>): Boolean {
+    fun applyVideo(display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>, startAtMs: Long? = null): Boolean {
         val paper = display as? PaperDisplayData ?: return false
         if (ServerApiHost.current?.askSetUrl(paper, item.url, item.lang, item.addedBy) != null) return false
         paper.url = item.url
         paper.lang = item.lang
         runAsync { PaperServer.getInstance().storage.saveDisplay(paper) }
         DisplayManager.broadcastUpdate(paper)
-        TimelineManager.onVideoChanged(paper, readyPlayers)
+        TimelineManager.onVideoChanged(paper, readyPlayers, startAtMs)
         ServerApiHost.current?.urlChanged(paper)
         return true
     }

@@ -51,8 +51,12 @@ object QueueManager {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /** Advance this long (wall time) before the end, so no client wraps its looping player back to frame 0 first. */
-    private const val ADVANCE_EARLY_MS = 250L
+    /**
+     * Send the switch to the next entry at least this long (wall time) before the end; it is scheduled to start at the
+     * end instant itself, so this only has to cover the slowest viewer's one-way latency plus a [tick] period.
+     */
+    private const val ADVANCE_EARLY_MS = 300L
+    private const val TICK_MARGIN_MS = 150L
     private const val ADD_COOLDOWN_MS = 150L
     private const val EDIT_COOLDOWN_MS = 150L
     private const val PRELOAD_COOLDOWN_MS = 100L
@@ -71,8 +75,8 @@ object QueueManager {
      * Switches [display] to [item] the way a player-set video would (addon veto, save, broadcast, timeline reset with
      * a start held until every viewer is ready, [readyPlayers] counted ready already). Returns false when refused.
      */
-    var applyVideo: (display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>) -> Boolean =
-        { _, _, _ -> false }
+    var applyVideo: (display: DisplayData, item: QueueItem, readyPlayers: Collection<UUID>, startAtMs: Long?) -> Boolean =
+        { _, _, _, _ -> false }
 
     /**
      * Called just before [display] switches to queue entry [item] (karaoke: make its singer the active one, so the
@@ -301,16 +305,37 @@ object QueueManager {
             // No reported duration (e.g. the plugin reloaded and no client re-reported it): use the playing queue entry's
             val durationMs = timeline.durationMs.takeIf { it > 0L }
                 ?: current?.takeIf { it.url == display.url }?.durationMs ?: 0L
-            if (!QueueTiming.advanceDue(timeline, now, ADVANCE_EARLY_MS, armed, durationMs)) continue
-            advance(display)
+            val earlyMs = maxOf(
+                ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, transport.nearbyPlayerIds(display)) + TICK_MARGIN_MS,
+            )
+            if (!QueueTiming.advanceDue(timeline, now, earlyMs, armed, durationMs)) continue
+            advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs))
         }
+    }
+
+    /**
+     * A client's stream reached its end on [display] (an older client looping its player): with something queued,
+     * move on now, starting the next entry at the shared timeline's own end instant. Without, nothing: the timeline
+     * wraps by itself.
+     */
+    fun onClientStreamEnded(display: DisplayData) {
+        if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return
+        val queue = queues[display.id] ?: return
+        val current = synchronized(queue) { if (queue.hasNext()) queue.current else return }
+        if (WatchPartyManager.hasSession(display.id) || TimelineManager.isHolding(display.id)) return
+        val timeline = TimelineManager.timelineOf(display.id) ?: return
+        val durationMs = timeline.durationMs.takeIf { it > 0L }
+            ?: current?.takeIf { it.url == display.url }?.durationMs ?: 0L
+        val startAt = QueueTiming.switchAtMs(timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs)
+            ?: return
+        advance(display, startAt)
     }
 
     /**
      * Moves [display] on to the next entry. An entry the platform refuses (addon veto) is dropped and the next one
      * tried, a few at most. Returns the entry now playing, or null.
      */
-    private fun advance(display: DisplayData): QueueItem? {
+    private fun advance(display: DisplayData, startAtMs: Long? = null): QueueItem? {
         val queue = queues[display.id] ?: return null
         repeat(MAX_SKIPS_PER_ADVANCE) {
             val next = synchronized(queue) { queue.advance() } ?: run {
@@ -322,7 +347,7 @@ object QueueManager {
             val starts = runCatching { beforeStart(display, next) }
                 .onFailure { logger.warn("Queue start hook failed for display {}.", display.id, it) }
                 .getOrDefault(true)
-            val applied = starts && runCatching { applyVideo(display, next, ready) }
+            val applied = starts && runCatching { applyVideo(display, next, ready, startAtMs) }
                 .onFailure { logger.warn("Could not switch display {} to its next queued video.", display.id, it) }
                 .getOrDefault(false)
             if (applied) {

@@ -700,11 +700,14 @@ class DisplayScreen(
         media.load(videoUrl, lang, preservePausedState)
     }
 
-    /** Records the new [videoUrl] and [lang] when the media controller swaps players. */
-    internal fun onVideoSwapped(videoUrl: String, lang: String) {
+    /**
+     * Records the new [videoUrl] and [lang] when the media controller swaps players. [awaitTimeline] false: a queue
+     * entry starting on schedule, whose timeline is applied in the same step, so the picture is never held back.
+     */
+    internal fun onVideoSwapped(videoUrl: String, lang: String, awaitTimeline: Boolean = true) {
         this.videoUrl = videoUrl
         this.lang = lang
-        waitingForInitialTimeline = requiresServerTimeline()
+        waitingForInitialTimeline = awaitTimeline && requiresServerTimeline()
         waitingSinceNanos = if (waitingForInitialTimeline) System.nanoTime() else 0L
         pendingAudioTrackLangRestore = savedSettings.audioTrackLang
         pendingSubtitleLangRestore = savedSettings.subtitleTrackLang.takeIf { savedSettings.subtitlesEnabled }
@@ -836,6 +839,8 @@ class DisplayScreen(
     /** Applies the authoritative server timeline: matches pause state and corrects drift. */
     fun updateData(packet: DisplaySync) {
         if (watchParty != null) return
+        // The next queue entry's start, scheduled at the current video's end: kept for that instant
+        if (media.onTimelineWhileSwitching(packet)) return
         serverSpeed = PlaybackSpeed.clamp(packet.rate)
         // A speed change normally comes as a hold (paused): pause first, so the player is only retimed while it is
         // stopped. A playing packet retimes first, so the resume or seek the follower triggers runs at the new speed.
@@ -904,6 +909,12 @@ class DisplayScreen(
 
     /** True while this display follows a server timeline (Synced / Broadcast / watch party). */
     internal val followsServerTimeline: Boolean get() = requiresServerTimeline()
+
+    /** A preloaded queue entry is waiting for its scheduled start (the current video plays on until then). */
+    internal val isQueueSwitchPending: Boolean get() = media.isSwitchPending
+
+    /** The stream ended ahead of the server timeline and holds its last frame until that timeline moves on. */
+    internal val isHeldAtEnd: Boolean get() = mediaPlayer?.isHeldAtEnd() == true
 
     /** The current media/player generation, used by the sync controller to detect stale video swaps. */
     internal val mediaGeneration: Long get() = media.generationNow

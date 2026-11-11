@@ -122,6 +122,10 @@ class MediaPlayer(
     @Volatile
     private var requestedSpeed = PlaybackSpeed.NORMAL
 
+    /** Stream ended on a server-timeline display: parked on the last frame until that timeline moves it on. */
+    @Volatile
+    private var heldAtEnd = false
+
     private val events = PlayerEvents(
         onError = { e ->
             onControl { lifecycle = PlayerState.Error }
@@ -501,6 +505,9 @@ class MediaPlayer(
 
     /** @return `true` if the stream supports seeking. */
     fun canSeek(): Boolean = isReady && seekable
+
+    /** True while a server-timeline display holds its last frame after its stream ended ([PlaybackHost.followsServerTimeline]). */
+    fun isHeldAtEnd(): Boolean = heldAtEnd && lifecycle == PlayerState.Ended
 
     /** @return `true` once active playback is advancing (first frame arrived, not paused / parked). */
     fun isClockRunning(): Boolean =
@@ -940,6 +947,7 @@ class MediaPlayer(
 
     private fun startStreams(streamSet: ActiveStreams, offsetNanos: Long) {
         if (terminated.get()) return
+        heldAtEnd = false
         sessionManager.setTempo(effectiveSpeed())
         if (pauseRequested) {
             logger.debug("$debugLabel Start skipped: playback was paused while the media was being prepared.")
@@ -1119,11 +1127,15 @@ class MediaPlayer(
         }
 
         if (normalEos && !liveStream) {
-            if (host.shouldLoopOnEnd) {
+            val onEnd = EndOfStreamPolicy.onEnd(host.followsServerTimeline, host.shouldLoopOnEnd)
+            if (onEnd == EndOfStreamPolicy.Action.LOOP) {
                 restartFromBeginning()
             } else {
                 stopSession()
                 lifecycle = PlayerState.Ended
+                // A server timeline decides what follows; until then the last frame stays up
+                heldAtEnd = onEnd == EndOfStreamPolicy.Action.HOLD
+                if (heldAtEnd) logger.debug("$debugLabel Stream ended ahead of the server timeline; holding the last frame.")
                 host.onPlaybackEnded(durationHintNanos)
             }
             return@onControl
@@ -1320,6 +1332,7 @@ class MediaPlayer(
     }
 
     private fun doStop() {
+        heldAtEnd = false
         warmingUp = false
         heldReady = false
         lifecycle = PlayerState.Stopped
@@ -1334,6 +1347,8 @@ class MediaPlayer(
 
     private fun doSeek(nanos: Long, fire: Boolean) {
         if (!isReady || !seekable) return
+        val fromHeldEnd = heldAtEnd && lifecycle == PlayerState.Ended
+        heldAtEnd = false
         if (lifecycle == PlayerState.Ended) lifecycle = PlayerState.Paused
         if (isPausedWarm()) freezePausedWarmSession()
         heldReady = false
@@ -1351,6 +1366,9 @@ class MediaPlayer(
                 noteHitch(FailureStages.SEEK, "restart", "seek to ${nanos / 1_000_000} ms fell back to a stream restart")
                 startStreams(ss, nanos)
             }
+        } else if (fromHeldEnd && !host.isPaused) {
+            // Held on the last frame and the server timeline moved off the end (looped, or seeked back): play on
+            startStreams(ss, nanos)
         }
         if (fire) events.onSeek()
     }

@@ -26,6 +26,8 @@ class DisplayPlaybackHost(private val screen: DisplayScreen) : PlaybackHost {
 
     override val shouldLoopOnEnd: Boolean get() = !(screen.isFullscreenActive && !screen.isFullscreenLoop)
 
+    override val followsServerTimeline: Boolean get() = screen.followsServerTimeline
+
     override var videoContentAspect: Double
         get() = screen.videoContentAspect
         set(value) {

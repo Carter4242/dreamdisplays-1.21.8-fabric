@@ -4,6 +4,7 @@ import com.dreamdisplays.core.services.keys.MediaServices
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.platform.client.Initializer
@@ -13,6 +14,9 @@ import com.dreamdisplays.platform.client.player.platform.DreamPlaybackEnvironmen
 import com.dreamdisplays.platform.client.storage.WatchedVideoStore
 import kotlinx.atomicfu.atomic
 import net.minecraft.client.Minecraft
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 /**
  * Owns the media / player lifecycle for a single [DisplayScreen]: swapping in a fresh [MediaPlayer] on
@@ -39,10 +43,92 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
      */
     fun load(videoUrl: String, lang: String, preservePausedState: Boolean) {
         if (videoUrl == "") return
+        pendingSwitch?.let {
+            if (it.url == videoUrl && it.lang == lang) return // The same switch again
+            cancelPendingSwitch()
+        }
 
         // A queue entry this client preloaded in the background becomes the player as is: already resolved,
         // buffered and parked warm on its first frame
-        val preloaded = screen.queuePreloader.take(videoUrl, lang)
+        val taken = screen.queuePreloader.takeDetached(videoUrl, lang)
+        if (taken != null && screen.followsServerTimeline && player != null && videoStarted && !screen.isPaused) {
+            // The server switches a moment before the current video ends and schedules the next one at its end
+            // instant: this video plays on (or holds its last frame) until then, see onTimelineWhileSwitching
+            pendingSwitch = PendingSwitch(videoUrl, lang, preservePausedState, taken).also {
+                it.timer = schedule(SWITCH_FALLBACK_MS.toDouble()) { completePendingSwitch(it, seamless = false) }
+            }
+            return
+        }
+        taken?.adopt()
+        swapIn(videoUrl, lang, preservePausedState, taken?.player, seamless = false)
+    }
+
+    /** A queue switch waiting for its scheduled start: the current player keeps playing until then. */
+    private class PendingSwitch(
+        val url: String, val lang: String, val preservePausedState: Boolean, val taken: QueuePreloader.Taken,
+    ) {
+        var timer: ScheduledFuture<*>? = null
+    }
+
+    private var pendingSwitch: PendingSwitch? = null
+
+    /** True while a preloaded queue entry waits for its scheduled start. */
+    val isSwitchPending: Boolean get() = pendingSwitch != null
+
+    /**
+     * The new video's timeline arrived while its switch is pending. A start scheduled ahead ([DisplaySync.startInMs])
+     * is kept for that instant: the current video stays up to it, then the preloaded player takes over on its first
+     * frame, with no hold, placeholder or fade. Anything else switches now. Returns true when [packet] was taken
+     * (it is applied at the switch); false when the caller applies it as usual.
+     */
+    fun onTimelineWhileSwitching(packet: DisplaySync): Boolean {
+        val p = pendingSwitch ?: return false
+        val waitMs = if (packet.isPaused || packet.startInMs <= 0) 0.0
+        else packet.startInMs - TimelineFollower.oneWayLatencyMs()
+        if (waitMs < MIN_SCHEDULE_MS) {
+            completePendingSwitch(p, seamless = true)
+            return false
+        }
+        p.timer?.cancel(false)
+        val receivedNanos = System.nanoTime()
+        p.timer = schedule(waitMs) {
+            if (completePendingSwitch(p, seamless = true)) {
+                val elapsedMs = (System.nanoTime() - receivedNanos) / 1_000_000.0
+                screen.updateData(packet.copy(startInMs = (packet.startInMs - elapsedMs).roundToInt().coerceAtLeast(1)))
+            }
+        }
+        return true
+    }
+
+    private fun schedule(delayMs: Double, action: () -> Unit): ScheduledFuture<*> =
+        TimelineFollower.START_SCHEDULER.schedule({
+            Minecraft.getInstance().execute(action)
+        }, (delayMs * 1_000.0).toLong(), TimeUnit.MICROSECONDS)
+
+    private fun completePendingSwitch(p: PendingSwitch, seamless: Boolean): Boolean {
+        if (pendingSwitch !== p) return false
+        pendingSwitch = null
+        p.timer?.cancel(false)
+        p.taken.adopt()
+        swapIn(p.url, p.lang, p.preservePausedState, p.taken.player, seamless)
+        return true
+    }
+
+    private fun cancelPendingSwitch() {
+        val p = pendingSwitch ?: return
+        pendingSwitch = null
+        p.timer?.cancel(false)
+        p.taken.player.stop()
+    }
+
+    /**
+     * Replaces the current player with [preloaded] (adopted already) or a fresh one. [seamless]: a preloaded queue
+     * entry starting on schedule; the texture keeps the old video's last frame until the new one's first frame
+     * replaces it, with no placeholder or fade in between.
+     */
+    private fun swapIn(
+        videoUrl: String, lang: String, preservePausedState: Boolean, preloaded: MediaPlayer?, seamless: Boolean,
+    ) {
         if (preloaded == null) {
             DreamServices.registry.getOrNull(MediaServices.RESOLVER_REGISTRY)?.prefetch(MediaSource.from(videoUrl))
         }
@@ -55,7 +141,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         screen.timelineFollower.reset()
         oldPlayer?.stop()
 
-        screen.onVideoSwapped(videoUrl, lang)
+        screen.onVideoSwapped(videoUrl, lang, awaitTimeline = !seamless)
         DisplayRegistry.recordScreen(screen)
         // The adopted player stays parked until the server timeline starts it, so its warm session survives
         // the start hold instead of playing ahead and being snapped back with a stream restart.
@@ -74,7 +160,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         // Set the effective volume (incl. distance) now, before the bridge prelude (which starts at
         // construction) becomes audible — otherwise its first moment plays at the un-attenuated level.
         screen.primeNewPlayerVolume(newPlayer)
-        screen.prepareTextureDimensions()
+        if (!seamless) screen.prepareTextureDimensions()
 
         screen.attachPopout(newPlayer)
 
@@ -87,7 +173,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             reportDurationIfNeeded()
         }
 
-        Minecraft.getInstance().execute { screen.reloadTexture() }
+        if (!seamless) Minecraft.getInstance().execute { screen.reloadTexture() }
     }
 
     /** Applies volume, brightness, and paused state to the player, then seeks to the saved position. */
@@ -118,6 +204,14 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         Initializer.sendPacket(ReportDuration(screen.uuid, durationNanos / 1_000_000L))
     }
 
+    private companion object {
+        /** Switch anyway when the new video's timeline never comes. */
+        const val SWITCH_FALLBACK_MS = 2_000L
+
+        /** A scheduled start closer than this switches at once. */
+        const val MIN_SCHEDULE_MS = 2.0
+    }
+
     /** Runs [action] once the current player is initialized; guards against stale generations. */
     fun whenInitialized(action: () -> Unit) = whenInitialized(generation.value, action)
 
@@ -133,6 +227,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
 
     /** Detaches the current player and invalidates pending callbacks; returns it for final teardown. */
     fun shutdown(): MediaPlayer? {
+        cancelPendingSwitch()
         generation.incrementAndGet()
         videoStarted = false
         val current = player
