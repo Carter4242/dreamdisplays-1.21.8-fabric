@@ -68,6 +68,7 @@ object ClientPacketManager {
             is QueueState -> com.dreamdisplays.platform.client.displays.DisplayQueues.apply(packet)
             is KaraokeClockPing -> com.dreamdisplays.platform.client.karaoke.KaraokeClient.onClockPing(packet)
             is ScreenShareState -> com.dreamdisplays.platform.client.displays.ScreenShare.onState(packet)
+            is ReportRequest -> com.dreamdisplays.platform.client.displays.ReportRequests.handle(packet)
             else -> logger.debug("Ignoring non-client-bound packet {}.", packet::class.simpleName)
         }
     }
@@ -81,6 +82,8 @@ object ClientPacketManager {
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()
             ?.onServerCapabilities(packet)
         Initializer.sendPacket(SetDisplaysEnabled(ClientStateManager.displaysEnabled))
+        // A hello on a connection that already had one is a reloaded server, which forgot every report: send them again
+        com.dreamdisplays.platform.client.displays.ReportRequests.onServerHello()
         com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
     }
 
@@ -113,6 +116,7 @@ object ClientPacketManager {
         serverSnapshot = ServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.ServerMediaGens.reset()
+        com.dreamdisplays.platform.client.displays.ReportRequests.reset()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()

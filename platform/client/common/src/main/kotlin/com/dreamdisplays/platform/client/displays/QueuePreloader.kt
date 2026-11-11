@@ -218,6 +218,13 @@ internal class QueuePreloader(private val screen: DisplayScreen) {
         report(p, FullscreenPrepareState.FAILED)
     }
 
+    /** Sends the state last reported for the preloaded entry again (the server asked, or may have forgotten it). */
+    fun reReport() {
+        val p = preload ?: return
+        val state = p.reported ?: return
+        DisplayQueues.reportPreload(screen.uuid, p.item.itemId, state)
+    }
+
     private fun report(p: Preload, state: FullscreenPrepareState) {
         if (p.reported == state) return
         p.reported = state

@@ -477,6 +477,12 @@ class DisplayScreen(
     /** Preloads this display's next queue entry shortly before the current video ends. */
     internal val queuePreloader = QueuePreloader(this)
 
+    /** Sends this display's preload report again (the server asked for it, see [ReportRequests]). */
+    internal fun reReportPreload() = queuePreloader.reReport()
+
+    /** Sends what this client knows of the video's length again (the server asked for it, see [ReportRequests]). */
+    internal fun reReportDuration() = media.reportDuration(force = true)
+
     private val media = DisplayMediaController(this)
     private val watchPartyController = WatchPartyController(this)
     private val frameUploader = DisplayFrameUploader(uuid)

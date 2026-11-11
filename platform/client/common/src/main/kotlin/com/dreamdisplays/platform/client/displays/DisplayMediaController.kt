@@ -195,7 +195,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
                 screen.paused = true
                 player?.pause()
             }
-            reportDurationIfNeeded()
+            reportDuration()
         }
 
         if (!seamless) Minecraft.getInstance().execute { screen.reloadTexture() }
@@ -221,7 +221,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         DisplayRegistry.recordScreen(screen)
     }
 
-    private fun reportDurationIfNeeded() {
+    /** Reports the video's length to the server; [force]: the server asked, so it is sent even if sent before. */
+    internal fun reportDuration(@Suppress("UNUSED_PARAMETER") force: Boolean = false) {
         val mode = screen.effectiveMode
         if (mode != PlaybackMode.SYNCED && mode != PlaybackMode.BROADCAST) return
         val durationNanos = screen.mediaPlayerDurationNanos

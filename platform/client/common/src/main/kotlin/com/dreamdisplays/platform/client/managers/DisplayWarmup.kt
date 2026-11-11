@@ -185,6 +185,29 @@ object DisplayWarmup {
         )
     }
 
+    /**
+     * Sends what this client holds again, unchanged or not: for [displayId], or every display when null. A loaded
+     * display reports on the next tick; a display known here but not played reports ABSENT on the next tick; a display
+     * this client knows nothing of is reported ABSENT at once. Used when the server asks (`ReportRequest`) and on every
+     * server hello (a reloaded server has forgotten every report).
+     */
+    fun reReport(displayId: UUID?) {
+        if (displayId == null) {
+            tracks.values.forEach { it.reportedState = null }
+            reportedAbsent.clear()
+            return
+        }
+        tracks[displayId]?.let {
+            it.reportedState = null
+            return
+        }
+        reportedAbsent.remove(displayId)
+        val known = DisplayRegistry.screens.containsKey(displayId) || DisplayRegistry.unloadedScreens.containsKey(displayId)
+        if (!known && ClientPacketManager.serverSnapshot.hasFeature(ServerFeature.DISPLAY_READINESS)) {
+            send(displayId, ReadinessState.ABSENT, 0L)
+        }
+    }
+
     /** Forgets everything (disconnect / backend switch). */
     fun reset() {
         tracks.clear()
