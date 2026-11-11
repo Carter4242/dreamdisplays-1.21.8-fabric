@@ -4,7 +4,11 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
+import java.io.File
+import java.nio.file.AccessDeniedException
+import java.nio.file.NoSuchFileException
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -63,5 +67,37 @@ class JsonFileStoreTest {
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun aTargetBrieflyHeldOpenIsReplacedOnRetry() {
+        val store = JsonFileStore(Files.createTempDirectory("dreamdisplays-json-retry").toFile())
+        val tmp = File(store.dir, "a.json.tmp").apply { writeText("new") }
+        val target = File(store.dir, "a.json").apply { writeText("old") }
+        var busy = 2
+        val pauses = mutableListOf<Long>()
+        store.replace(tmp, target, move = { from, to, _ ->
+            if (busy-- > 0) throw AccessDeniedException(to.path)
+            from.renameTo(to.also { it.delete() })
+        }, pause = { pauses += it })
+        assertEquals("new", target.readText())
+        assertEquals(listOf(25L, 50L), pauses)
+    }
+
+    @Test
+    fun aTargetThatStaysLockedOrAMissingFileStillFails() {
+        val store = JsonFileStore(Files.createTempDirectory("dreamdisplays-json-retry").toFile())
+        val tmp = File(store.dir, "a.json.tmp")
+        val target = File(store.dir, "a.json")
+        var tries = 0
+        assertFailsWith<AccessDeniedException> {
+            store.replace(tmp, target, move = { _, to, _ -> tries++; throw AccessDeniedException(to.path) }, pause = {})
+        }
+        assertEquals(4, tries)
+        tries = 0
+        assertFailsWith<NoSuchFileException> {
+            store.replace(tmp, target, move = { from, _, _ -> tries++; throw NoSuchFileException(from.path) }, pause = {})
+        }
+        assertEquals(1, tries)
     }
 }

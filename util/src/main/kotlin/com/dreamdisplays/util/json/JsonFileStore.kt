@@ -7,7 +7,9 @@ import kotlinx.serialization.json.*
 import org.slf4j.Logger
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.nio.file.AccessDeniedException
 import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -24,6 +26,7 @@ class JsonFileStore(
 
         /** Store file payload field. */
         const val DATA_FIELD = "data"
+        const val REPLACE_ATTEMPTS = 4
     }
 
     /** Ensures [dir] exists, logging and returning false if it cannot be created. */
@@ -152,15 +155,38 @@ class JsonFileStore(
         }
     }
 
-    private fun replace(tmp: File, target: File) {
-        runCatching {
-            Files.move(
-                tmp.toPath(), target.toPath(),
-                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE,
-            )
-        }.recoverCatching { e ->
-            if (e !is AtomicMoveNotSupportedException) throw e
-            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }.getOrThrow()
+    /**
+     * Moves [tmp] over [target]. On Windows the target can be open for a moment elsewhere (antivirus, the search
+     * indexer), which fails the move: retried a few times, since a coalesced save is not asked for again.
+     */
+    internal fun replace(
+        tmp: File, target: File,
+        move: (from: File, to: File, atomic: Boolean) -> Unit = ::move,
+        pause: (Long) -> Unit = Thread::sleep,
+    ) {
+        var delayMs = 25L
+        for (attempt in 1..REPLACE_ATTEMPTS) {
+            try {
+                try {
+                    move(tmp, target, true)
+                } catch (_: AtomicMoveNotSupportedException) {
+                    move(tmp, target, false)
+                }
+                return
+            } catch (e: FileSystemException) {
+                val busy = e is AccessDeniedException || e.javaClass == FileSystemException::class.java
+                if (!busy || attempt == REPLACE_ATTEMPTS) throw e
+                pause(delayMs)
+                delayMs *= 2
+            }
+        }
+    }
+
+    private fun move(from: File, to: File, atomic: Boolean) {
+        if (atomic) {
+            Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } else {
+            Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 }
