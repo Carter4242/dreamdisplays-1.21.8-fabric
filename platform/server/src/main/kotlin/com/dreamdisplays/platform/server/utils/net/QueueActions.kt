@@ -59,10 +59,14 @@ object QueueActions {
             QueueActionType.REMOVE -> QueueManager.remove(display, ctx, player.uniqueId, packet.itemId)
             QueueActionType.MOVE -> QueueManager.move(display, ctx, player.uniqueId, packet.itemId, packet.toIndex)
             QueueActionType.SKIP -> {
-                com.dreamdisplays.platform.server.policy.ClientErrorReports.logCommand(
-                    player, display.id, "queue_skip", null, mapOf("mode" to display.mode.name.lowercase(), "url" to display.url),
-                )
-                QueueManager.skip(display, ctx, player.uniqueId)
+                // Only a skip that happened is logged: a refused one (not allowed, empty queue, throttled) costs no log
+                // write, so a client in range can't flood the log. The URL is read first: the skip replaces it.
+                val skipped = display.url
+                if (QueueManager.skip(display, ctx, player.uniqueId) == QueueManager.Result.OK) {
+                    com.dreamdisplays.platform.server.policy.ClientErrorReports.logCommand(
+                        player, display.id, "queue_skip", null, mapOf("mode" to display.mode.name.lowercase(), "url" to skipped),
+                    )
+                }
             }
             QueueActionType.CLEAR -> QueueManager.clear(display, ctx)
             QueueActionType.LOOP -> QueueManager.setLoop(display, ctx, packet.flag)
