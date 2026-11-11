@@ -223,6 +223,12 @@ internal class PlaybackSessionManager(
 
     private val audio = AudioSink(debugLabel)
 
+    /**
+     * Current audio-track switch; bumped by every restart of the audio half (seek, restart, speed, stop), so a switch
+     * still warming up from the old position / speed never goes live over the restarted one.
+     */
+    private val audioSwitchGeneration = AtomicLong()
+
     @Volatile
     private var liveSession = false
 
@@ -246,6 +252,7 @@ internal class PlaybackSessionManager(
         if (value == tempo) return
         tempo = value
         clock.setRate(value)
+        audioSwitchGeneration.incrementAndGet()
         // Pre-warmed tracks were spawned at the old speed
         audioWarmPool.invalidateAll()
     }
@@ -567,6 +574,8 @@ internal class PlaybackSessionManager(
         if (!isPlaying || terminated.get() || parkFlag.get()) return false
         // The shadows hold PCM for the position we are leaving; the refresh pass re-warms at the new one.
         audioWarmPool.invalidateAll()
+        // The seek reopens the audio on the current track (a pending switch's included) at the new position
+        audioSwitchGeneration.incrementAndGet()
         if (bridging) return false
         synchronized(switchLock) { if (incoming != null) return false }
         val old = active ?: return false
@@ -708,6 +717,7 @@ internal class PlaybackSessionManager(
     /** Replaces audio half of playing session with fresh process on same audio URL, leaving video unchanged. */
     fun restartAudio(streamSet: ActiveStreams, offsetNanos: Long): Boolean {
         if (!isPlaying || terminated.get() || parkFlag.get()) return false
+        audioSwitchGeneration.incrementAndGet()
         if (bridging) return false
         synchronized(switchLock) { if (incoming != null) return false }
         val ffmpeg = FFmpegBinary.getPath() ?: return false
@@ -744,7 +754,6 @@ internal class PlaybackSessionManager(
     }
 
     private val audioSwitchWarmupTimeoutNanos = 15_000_000_000L
-    private val audioSwitchGeneration = AtomicLong()
 
     /** Seamless audio-track switch for seekable content: spawns new track's FFmpeg on background thread, then swaps. */
     fun beginAudioTrackSwitch(streamSet: ActiveStreams): Boolean {
@@ -1270,6 +1279,7 @@ internal class PlaybackSessionManager(
     fun stop() {
         phase.set(Phase.Stopped)
         audioWarmPool.invalidateAll()
+        audioSwitchGeneration.incrementAndGet()
         audioFeeder = null
         masterClock.reset()
         parkFlag.set(false) // Release any parked readers so they observe the stop flags and exit
