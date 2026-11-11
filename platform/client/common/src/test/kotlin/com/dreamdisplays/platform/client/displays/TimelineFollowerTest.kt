@@ -101,4 +101,27 @@ class TimelineFollowerTest {
         assertEquals(400, clampTimelineSeek(11_550, loop = true, periodMs = 11_150, endMs = 0, marginMs = 500))
         assertEquals(0, clampTimelineSeek(-5, loop = false, periodMs = 0, endMs = 0, marginMs = 500))
     }
+
+    @Test
+    fun `a restart from the end that ends again at once confirms where the media really ends`() {
+        // Header (and server) 6:00, media ends at 3:00: the reopen at 3:20 ends without running, or within the probe
+        assertTrue(endedRightAfterRestart(restartFromMs = 200_000, endedAtMs = -1, probeMs = hold))
+        assertTrue(endedRightAfterRestart(restartFromMs = 200_000, endedAtMs = 200_400, probeMs = hold))
+        // A loop that played through is no such confirmation
+        assertFalse(endedRightAfterRestart(restartFromMs = 600, endedAtMs = 179_900, probeMs = hold))
+    }
+
+    @Test
+    fun `a player held at its confirmed end waits for the clock to come round instead of reopening every second`() {
+        val bound = heldEndBoundMs(periodMs = 360_150, confirmedEndMs = 180_000)
+        assertEquals(180_000, bound)
+        assertFalse(heldEndRestarts(200_000, bound, hold))
+        assertFalse(heldEndRestarts(359_000, bound, hold))
+        assertTrue(heldEndRestarts(500, bound, hold))
+        assertTrue(heldEndRestarts(100_000, bound, hold)) // Seeked back before it
+        assertEquals(10_150, heldEndBoundMs(periodMs = 10_150, confirmedEndMs = 0))
+        assertEquals(10_150, heldEndBoundMs(periodMs = 10_150, confirmedEndMs = 12_000))
+        assertEquals(9_000, heldEndBoundMs(periodMs = 0, confirmedEndMs = 9_000))
+    }
 }
+

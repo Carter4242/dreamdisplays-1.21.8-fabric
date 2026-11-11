@@ -41,6 +41,23 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     /** When a player held at its end was last restarted; apart from [lastSnapNanos], so it never delays a paused snap. */
     private var lastHeldRestartNanos = 0L
+
+    /** Position (content ms) last measured with the clock running, -1 when none since the last restart from the end. */
+    private var lastPlayingLocalMs = -1L
+
+    /** Where the stream held at its end ended (content ms; -1 = not held, or unknown). */
+    private var heldEndAtMs = -1L
+
+    /** Where the last restart from a held end started, and where the stream had ended before it (-1 = none). */
+    private var heldRestartFromMs = -1L
+    private var heldRestartEndedAtMs = -1L
+
+    /**
+     * Where this player's media really ends (content ms; 0 = unknown): a restart from its held end ended again at once,
+     * so the clock running on past this (a header, or a server length, longer than the media) is no reason to reopen
+     * the stream again every second; it holds until the clock wraps or is moved back before it.
+     */
+    private var confirmedEndMs = 0L
     private var coldAfterSnap = false
 
     /** The player is a preloaded queue item held ready on its first frame: tolerate a small paused offset. */
@@ -127,6 +144,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             lastStallEndNanos = 0L
             lastSnapNanos = 0L
             lastHeldRestartNanos = 0L
+            lastPlayingLocalMs = -1L
+            heldEndAtMs = -1L
+            heldRestartFromMs = -1L
+            heldRestartEndedAtMs = -1L
+            confirmedEndMs = 0L
             coldAfterSnap = false
             // The previous video's length must never wrap the next one's clock; its first timeline brings its own
             serverDurationMs = 0L
@@ -360,24 +382,34 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // This client's stream ended before the shared clock: hold the last frame until the timeline wraps or is
             // moved back (a queue's next entry replaces the player instead)
             controller.resetMeasurement()
-            if (!screen.isQueueSwitchPending && heldEndRestarts(target, periodMs, END_HOLD_MS) &&
+            noteHeldEnd()
+            val holdBoundMs = heldEndBoundMs(periodMs, confirmedEndMs)
+            if (!screen.isQueueSwitchPending && heldEndRestarts(target, holdBoundMs, END_HOLD_MS) &&
                 now - lastHeldRestartNanos >= SNAP_COOLDOWN_NANOS
             ) {
                 lastHeldRestartNanos = now
-                val startMs = target + contentMs(coldLeadMs, estimator.rate)
-                screen.seekVideoTo(clampSeek(startMs, loop) * 1_000_000L)
+                val startMs = clampSeek(target + contentMs(coldLeadMs, estimator.rate), loop)
+                heldRestartFromMs = startMs
+                heldRestartEndedAtMs = heldEndAtMs
+                heldEndAtMs = -1L
+                lastPlayingLocalMs = -1L
+                screen.seekVideoTo(startMs * 1_000_000L)
                 expectLanding(LeadKind.COLD)
                 correctAfterLanding = true
                 note(Action.SEEK)
             }
             return
         }
+        heldEndAtMs = -1L
         if (!screen.isClockRunning()) {
             // Restarting after a seek / resume: nothing to measure yet
             controller.resetMeasurement()
             landingRunningSinceNanos = 0L
             return
         }
+        lastPlayingLocalMs = localMs
+        // Played well past what was taken for the media's real end: it was not
+        if (confirmedEndMs > 0L && localMs > confirmedEndMs + END_HOLD_MS) confirmedEndMs = 0L
 
         if (jumpToLead) {
             jumpToLead = false
@@ -439,6 +471,20 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             pushRatio(decision.ratio, now)
             if (decision.ratio != 1.0) note(Action.RATE)
         }
+    }
+
+    /** The first tick held at the end: remember where it ended, and whether a restart from the end ended again at once. */
+    private fun noteHeldEnd() {
+        if (heldEndAtMs >= 0L) return
+        heldEndAtMs = lastPlayingLocalMs.coerceAtLeast(0L)
+        if (heldRestartFromMs >= 0L && heldRestartEndedAtMs > 0L &&
+            endedRightAfterRestart(heldRestartFromMs, lastPlayingLocalMs, END_HOLD_MS)
+        ) {
+            confirmedEndMs = heldRestartEndedAtMs
+            logVerbose("[dd-sync] {} media ends at {}ms; holding there until the clock comes round", shortId(), confirmedEndMs)
+        }
+        heldRestartFromMs = -1L
+        heldRestartEndedAtMs = -1L
     }
 
     /** Server resumed while this player is paused: start it so it lands on the live position. */
@@ -679,6 +725,20 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
  */
 internal fun heldEndRestarts(targetMs: Long, durationMs: Long, endHoldMs: Long): Boolean =
     durationMs > 0L && targetMs < durationMs - minOf(endHoldMs, durationMs / 2)
+
+/**
+ * The length a player held at its end measures the clock against ([heldEndRestarts]): the shared loop [periodMs], or
+ * where its media was found to really end ([confirmedEndMs], when known and shorter).
+ */
+internal fun heldEndBoundMs(periodMs: Long, confirmedEndMs: Long): Long =
+    if (confirmedEndMs > 0L && (periodMs <= 0L || confirmedEndMs < periodMs)) confirmedEndMs else periodMs
+
+/**
+ * Whether a restart from a held end, started at [restartFromMs], ended again right away: it never ran ([endedAtMs] -1)
+ * or ran less than [probeMs] past its start. The media then really ends where it ended before.
+ */
+internal fun endedRightAfterRestart(restartFromMs: Long, endedAtMs: Long, probeMs: Long): Boolean =
+    endedAtMs < 0L || endedAtMs <= restartFromMs + probeMs
 
 /**
  * Whether a timeline stamped [serverTimeMs] is older than the last one applied ([lastServerTimeMs]) and is dropped. An
