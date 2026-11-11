@@ -1,5 +1,7 @@
 package com.dreamdisplays.platform.client.render
 
+import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.utils.identifier
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
 import com.dreamdisplays.platform.client.Initializer
@@ -68,10 +70,13 @@ object DisplayYuvRenderTypes {
      * Single decision point for the GPU-YUV mode: the native library must produce planar frames and the runtime must
      * support the YUV pipeline. A shader pack rules it out, because displays are also drawn inside the level pass
      * (that is what puts them behind water and glass) and no pack knows how to read the three planes: it would
-     * swap this pipeline's program out and sample the Y plane as if it were RGB.
+     * swap this pipeline's program out and sample the Y plane as if it were RGB. The server can rule it out too
+     * (`client.gpuYuv`, or `client.videoDecoder = jvm`, which leaves no planar frames to draw).
      */
     val active: Boolean
         get() = !ShaderPackCompat.isShaderPackActive
+                && ServerOverrides.settings.gpuYuv
+                && ServerOverrides.settings.videoDecoder != DisplayPolicy.VideoDecoder.JVM
                 //? if >=1.21.11 {
                 && (isSupported || Yuv262Reflect.isAvailable)
                 //?} else

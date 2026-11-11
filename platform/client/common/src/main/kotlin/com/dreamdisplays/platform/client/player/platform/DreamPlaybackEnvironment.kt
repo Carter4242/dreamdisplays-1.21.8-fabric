@@ -4,6 +4,7 @@ import com.dreamdisplays.core.services.keys.MediaServices
 import com.dreamdisplays.api.media.player.*
 import com.dreamdisplays.api.media.source.MediaResolverRegistry
 import com.dreamdisplays.api.media.stream.StreamSelector
+import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.core.runtime.get
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.media.source.direct.DirectStreamResolver
@@ -37,6 +38,13 @@ object DreamPlaybackEnvironment : PlaybackEnvironment {
         // Under a shader pack an alpha video plays opaque, on exactly the path every other video takes there: the
         // pack also draws displays inside its own level pass, where a translucent one has never been tested.
         override val transparentVideoAllowed: Boolean get() = !ShaderPackCompat.isShaderPackActive
+
+        // The server's rescue switches for a decode path that misbehaves on some machines (`client.videoDecoder`)
+        override val nativePipeAllowed: Boolean
+            get() = ServerOverrides.settings.videoDecoder != DisplayPolicy.VideoDecoder.JVM
+
+        override val inProcessDecodeAllowed: Boolean
+            get() = ServerOverrides.settings.videoDecoder == DisplayPolicy.VideoDecoder.AUTO
     }
 
     override val renderExecutor: RenderExecutor =

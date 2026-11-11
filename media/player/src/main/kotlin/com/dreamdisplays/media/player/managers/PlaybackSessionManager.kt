@@ -72,6 +72,12 @@ internal class PlaybackSessionManager(
 
     /** Whether a video with an alpha channel may play with transparency; read whenever a channel launches. */
     private val transparencyAllowed: () -> Boolean = { true },
+
+    /** Whether the native frame pipe may be used; read whenever a video channel is created. */
+    private val nativePipeAllowed: () -> Boolean = { true },
+
+    /** Whether in-process (libav) decoding may be used; read whenever a video channel launches. */
+    private val inProcessAllowed: () -> Boolean = { true },
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -105,7 +111,9 @@ internal class PlaybackSessionManager(
      */
     private inner class VideoChannel(val alpha: AlphaVideo.Plan? = null) {
         val nativePipe: NativeVideoFramePipe? =
-            if (alpha == null && NativeMedia.isAvailable) NativeVideoFramePipe(debugLabel, uploaderFactory, gpuYuvActive)
+            if (alpha == null && NativeMedia.isAvailable && nativePipeAllowed()) {
+                NativeVideoFramePipe(debugLabel, uploaderFactory, gpuYuvActive)
+            }
             else null
         private val jvmPipe: VideoFramePipe? = when {
             nativePipe != null -> null
@@ -167,7 +175,7 @@ internal class PlaybackSessionManager(
                 )
                 process = vp; thread = vt; return
             }
-            val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding && !liveEdge &&
+            val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && inProcessAllowed() && !seekByDecoding && !liveEdge &&
                 !GoogleVideoRangeProxy.needsProxy(safeUrl) && lavServes(tempo) && lavMayOpen(safeUrl)
             ) {
                 nativePipe.startInProcess(

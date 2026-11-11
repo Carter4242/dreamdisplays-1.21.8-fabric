@@ -194,6 +194,8 @@ class MediaPlayer(
         gpuYuvActive = env.config.gpuYuvActive,
         audioStage = audioStage,
         transparencyAllowed = { env.config.transparentVideoAllowed },
+        nativePipeAllowed = { env.config.nativePipeAllowed },
+        inProcessAllowed = { env.config.inProcessDecodeAllowed },
     )
 
     /**

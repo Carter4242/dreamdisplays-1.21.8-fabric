@@ -25,4 +25,20 @@ interface PlaybackConfig {
      * @since 1.10.x
      */
     val transparentVideoAllowed: Boolean get() = true
+
+    /**
+     * Whether decoding may go through the native frame pipe (the mod's native library). When false every video runs as
+     * an `FFmpeg` process into the plain JVM pipe (RGBA). Read whenever a video channel is created.
+     *
+     * @since 1.10.x
+     */
+    val nativePipeAllowed: Boolean get() = true
+
+    /**
+     * Whether in-process decoding (libav inside the game) may be used; when false the native pipe is fed by an `FFmpeg`
+     * process. Read whenever a video channel launches.
+     *
+     * @since 1.10.x
+     */
+    val inProcessDecodeAllowed: Boolean get() = true
 }

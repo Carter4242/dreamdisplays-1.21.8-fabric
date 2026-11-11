@@ -7,6 +7,7 @@ import com.mojang.blaze3d.opengl.GlStateManager
 import com.mojang.blaze3d.platform.GlStateManager
 //?}
 import com.dreamdisplays.api.media.sink.DecodedVideoFrame
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.core.render.TextureHandle
 import com.dreamdisplays.core.render.TextureUploaderService
 import com.dreamdisplays.platform.client.render.AsyncTextureUploader.Companion.PBO_COUNT
@@ -54,8 +55,12 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
     private var managedTexW: Int = -1
     private var managedTexH: Int = -1
 
+    /**
+     * Persistently mapped slots: the driver offers buffer storage and the server has not asked for plain uploads
+     * (`client.textureUpload = basic`). Fixed for this uploader's life, so no slot ever mixes the two kinds of storage.
+     */
     private val persistentMapSupported: Boolean by lazy {
-        runCatching {
+        ServerOverrides.settings.persistentUploads && runCatching {
             val caps = GL.getCapabilities()
             caps.OpenGL44 || caps.GL_ARB_buffer_storage
         }.getOrDefault(false)

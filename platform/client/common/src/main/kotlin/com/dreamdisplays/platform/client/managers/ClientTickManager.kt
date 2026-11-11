@@ -38,7 +38,7 @@ object ClientTickManager {
     private var lastLevel: ClientLevel? = null
     private var lastConnection: ClientPacketListener? = null
     private var unloadCheckTick = 0
-    private var lastShaderPackActive: Boolean? = null
+    private var lastRenderPath: RenderPath? = null
     private var hoveredDisplayScreen: DisplayScreen? = null
     private var lastHoveredId: UUID? = null
     private var tickCount = 0L
@@ -219,20 +219,36 @@ object ClientTickManager {
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()?.advertise()
     }
 
+    /** What a player fixes when it is created: its drawing, decoding, upload and sound paths. */
+    private data class RenderPath(
+        val shaderPack: Boolean,
+        val decoder: com.dreamdisplays.core.display.policy.DisplayPolicy.VideoDecoder,
+        val gpuYuv: Boolean,
+        val persistentUploads: Boolean,
+        val audioBackend: String,
+    )
+
     /**
-     * A display picks its drawing path (GPU YUV or plain RGBA) when its player is created, and a shader pack can only
-     * draw the RGBA one. When shaders are switched on or off mid-session, rebuild every loaded display through the same
-     * save-and-restore path used when the server turns displays off and on, so each reopens on the right path.
+     * A display picks its drawing path (GPU YUV or plain RGBA), decoder, texture uploads and sound output when its player
+     * is created, and a shader pack can only draw the RGBA one. When shaders are switched on or off mid-session, or the
+     * server switches one of those paths (`client.videoDecoder`, `gpuYuv`, `textureUpload`, `audioBackend`), rebuild
+     * every loaded display through the same save-and-restore path used when the server turns displays off and on, so
+     * each reopens on the right path.
      */
     private fun rebuildDisplaysOnShaderPackChange(playerPos: net.minecraft.core.BlockPos) {
         val active = runCatching { ShaderPackCompat.isShaderPackActive }.getOrDefault(false)
-        val previous = lastShaderPackActive
-        lastShaderPackActive = active
-        if (previous == null || previous == active) return
+        val server = ServerOverrides.settings
+        val path = RenderPath(
+            active, server.videoDecoder, server.gpuYuv, server.persistentUploads,
+            server.audioBackend(ClientStateManager.config.audioBackend),
+        )
+        val previous = lastRenderPath
+        lastRenderPath = path
+        if (previous == null || previous == path) return
         val screens = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual }
         if (screens.isEmpty()) return
         org.slf4j.LoggerFactory.getLogger(ClientTickManager::class.java)
-            .info("Shader pack turned {}; reloading {} display(s) on the matching render path.", if (active) "on" else "off", screens.size)
+            .info("Playback path changed ({}); reloading {} display(s) on it.", path, screens.size)
         for (screen in screens) {
             DisplayRegistry.saveScreenData(screen)
             DisplayRegistry.unregisterScreen(screen)
