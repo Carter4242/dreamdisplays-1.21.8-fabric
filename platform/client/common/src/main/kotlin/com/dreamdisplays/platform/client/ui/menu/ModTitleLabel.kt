@@ -48,18 +48,14 @@ class ModTitleLabel {
         hoverArea = UiRect(x, y - 1, totalW, font.lineHeight + 2)
     }
 
-    /** Opens the Modrinth versions page if an update arrow is shown and the click hits the label. */
+    /** Opens this mod's releases page if an update arrow is shown and the click hits the label. */
     fun handleClick(mx: Int, my: Int): Boolean {
         if (!UpdateCheck.shouldShowArrow()) return false
         if (hoverArea?.contains(mx, my) != true) return false
         try {
-            Desktop.getDesktop().browse(URI.create(MODRINTH_URL))
+            Desktop.getDesktop().browse(URI.create(UpdateCheck.RELEASES_PAGE))
         } catch (_: Exception) {
         }
         return true
-    }
-
-    companion object {
-        private const val MODRINTH_URL = "https://modrinth.com/plugin/dreamdisplays/versions"
     }
 }
