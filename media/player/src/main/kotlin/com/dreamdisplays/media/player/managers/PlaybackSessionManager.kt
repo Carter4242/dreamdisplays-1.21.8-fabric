@@ -602,8 +602,9 @@ internal class PlaybackSessionManager(
             try {
                 channel.launch(ffmpeg, streamSet, w, h, offsetNanos, hwAccel, onFirstFrame = {
                     clock.markFirstFrame()
-                    firstVideoFrame.countDown()
+                    // Before the audio gate opens: a warm-up parked by this callback must not release any sound
                     onFirstFrame()
+                    firstVideoFrame.countDown()
                 }, onEos = onStreamEnd, parkFlag = parkFlag)
             } catch (e: Exception) {
                 aStop.set(true)
@@ -1138,14 +1139,18 @@ internal class PlaybackSessionManager(
                 incoming == null &&
                 (audioHalf != null || silentSession)
 
-    fun suspend(allowExternalProcess: Boolean = false, retainBuffered: Boolean = false): Boolean {
-        if (!(if (allowExternalProcess) canHoldWarm() else canPark()) || parkFlag.get()) return false
-        parkFlag.set(true)
+    /**
+     * Parks the session warm. [atNanos] is the position it is known to stand at (a session parked as its playout
+     * begins); null reads the pacing clock. May run on the pipeline thread (see [com.dreamdisplays.media.player.WarmUpHold]).
+     */
+    fun suspend(allowExternalProcess: Boolean = false, retainBuffered: Boolean = false, atNanos: Long? = null): Boolean {
+        if (!(if (allowExternalProcess) canHoldWarm() else canPark())) return false
+        if (!parkFlag.compareAndSet(false, true)) return false
         // Nothing may switch tracks while dormant, so holding idle FFmpeg processes would be pure cost.
         audioWarmPool.invalidateAll()
         audio.pauseForPark()
         if (!retainBuffered) active?.pipe?.trimForPark()
-        val frozen = pacingClockNanos().takeIf { it >= 0L } ?: clock.currentTime()
+        val frozen = atNanos ?: pacingClockNanos().takeIf { it >= 0L } ?: clock.currentTime()
         clock.moveTo(frozen)
         phase.set(Phase.Parked(frozen, System.nanoTime()))
         logger.debug("$debugLabel [park] session parked warm at ${ms(frozen)}ms.")

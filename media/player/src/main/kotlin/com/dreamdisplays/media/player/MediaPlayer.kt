@@ -87,6 +87,9 @@ class MediaPlayer(
     @Volatile
     private var warmUpStartedNanos = 0L
 
+    /** Parks a [warmUpPaused] session on the pipeline thread the moment its playout begins (see [WarmUpHold]). */
+    private val warmUpHold = WarmUpHold()
+
     /** A [warmUpPaused] call has not reached the control thread yet. */
     @Volatile
     private var warmUpPending = false
@@ -300,13 +303,15 @@ class MediaPlayer(
     /** Resumes playback from the current seek position. No-op if already playing. */
     fun play() = safeExecute {
         if (!isReady || terminated.get()) return@safeExecute
+        // A warm-up its pipeline already parked is resumed like any warm pause
+        val warmUpHeld = warmUpHold.disarm() && sessionManager.isParked()
         pauseRequested = false
         // Mid warm-up the stream is already opening at the paused position: let it simply play on
         warmingUp = false
         heldReady = false
         // Every resume (plain, held ready, scheduled start, adopted warm) plays at the current volume
         volume.reapply()
-        if (isPausedWarm()) {
+        if (isPausedWarm() || warmUpHeld) {
             sessionManager.resume()
             lifecycle = PlayerState.Playing
             startWatchdog()
@@ -330,10 +335,15 @@ class MediaPlayer(
 
     /** Pauses playback, capturing the current position for later resume. */
     fun pause() = safeExecute {
+        val warmUpHeld = warmUpHold.disarm() && sessionManager.isParked()
         pauseRequested = true
         warmingUp = false
         // Already parked warm: pausing again must not throw the open session away
         if (isPausedWarm()) return@safeExecute
+        if (warmUpHeld) {
+            lifecycle = PlayerState.Paused
+            return@safeExecute
+        }
         if (!sessionManager.isPlaying) return@safeExecute
         if (!liveStream) {
             watchdog.stop()
@@ -1049,6 +1059,7 @@ class MediaPlayer(
         audioRestartAttempts = 0
         lastAudioFailureNanos = 0L
         audioFaults.reset()
+        if (warmingUp) warmUpHold.arm(offsetNanos) else warmUpHold.disarm()
         sessionManager.start(
             streamSet,
             offsetNanos,
@@ -1104,7 +1115,12 @@ class MediaPlayer(
             if (relayStream) logger.info("$debugLabel Live stream is on the air.")
         }
         retryPolicy.reset()
-        if (warmingUp) safeExecute(::finishWarmUp)
+        if (warmingUp) {
+            warmUpHold.onPlayoutStart { at ->
+                sessionManager.suspend(allowExternalProcess = true, retainBuffered = true, atNanos = at)
+            }
+            safeExecute(::finishWarmUp)
+        }
     }
 
     private fun startWarmUp(positionNanos: Long) {
@@ -1137,10 +1153,15 @@ class MediaPlayer(
     /** Parks a [warmUpPaused] session the moment its playout begins: decoded cushion, connection and audio all open. */
     private fun finishWarmUp() {
         if (!warmingUp || terminated.get()) return
+        // Normally already parked by the pipeline, exactly where it opened; parking here instead lands as late as this
+        // call was scheduled, times the speed
+        val heldAtStart = warmUpHold.disarm() && sessionManager.isParked()
         warmingUp = false
         pauseRequested = true
         watchdog.stop()
-        if (sessionManager.isPlaying && sessionManager.suspend(allowExternalProcess = true, retainBuffered = true)) {
+        if (heldAtStart ||
+            sessionManager.isPlaying && sessionManager.suspend(allowExternalProcess = true, retainBuffered = true)
+        ) {
             lifecycle = PlayerState.Paused
             heldReady = true
             logger.debug("$debugLabel Held ready at ${ms(clock.originNanos)}ms.")
@@ -1514,6 +1535,7 @@ class MediaPlayer(
 
     private fun doStop() {
         heldAtEnd = false
+        warmUpHold.disarm()
         warmingUp = false
         heldReady = false
         lifecycle = PlayerState.Stopped
