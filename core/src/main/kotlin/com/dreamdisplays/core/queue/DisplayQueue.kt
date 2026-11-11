@@ -354,6 +354,17 @@ object QueueTiming {
         return maxOf(best, floorMs, 0L)
     }
 
+    /**
+     * The media duration observed ends settle on, or null when they don't decide it: every reporter in [present] (the
+     * players watching now) has reported where its stream actually ended ([observed]), and the largest of those ends
+     * wins. Null when nobody present reported, or one of them only knows a header length.
+     */
+    fun <K> observedMediaMs(reportsMs: Map<K, Long>, observed: Set<K>, present: Collection<K>): Long? {
+        val reporters = present.filter { it in reportsMs }
+        if (reporters.isEmpty() || reporters.any { it !in observed }) return null
+        return reporters.maxOf { reportsMs.getValue(it) }.takeIf { it > 0L }
+    }
+
     /** Content ms before (or after a loop wrap past) the end within which a client's seek back to the start is its own end-of-stream loop. */
     const val END_OF_STREAM_WINDOW_MS = 2_000L
 

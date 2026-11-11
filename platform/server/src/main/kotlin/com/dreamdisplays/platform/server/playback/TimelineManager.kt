@@ -512,22 +512,29 @@ object TimelineManager {
     /**
      * Applies a media duration [senderId]'s client measured for [display]'s video [url] (empty from older clients).
      * Only a report on the display's current video counts, from a viewer in range or a far follower (fullscreen, PiP).
+     * [observedEnd]: where the client's stream actually ended, not a header length.
      *
-     * [QueueTiming.mediaDurationMs] settles on the largest report (bounded by the playing queue entry's duration, never
-     * below it, never shrinking); the timeline runs [QueueTiming.scheduledDurationMs] of it, so its end (and the
-     * queue's switch) never comes before the media's.
+     * [com.dreamdisplays.core.queue.VideoDurations] settles on the largest report (bounded by the playing queue entry's
+     * duration, never below it, never shrinking), unless everyone watching observed an earlier end; the timeline runs
+     * [QueueTiming.scheduledDurationMs] of it, so its end (and the queue's switch) never comes before the media's.
      */
-    fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
+    fun onDurationReported(
+        display: DisplayData, senderId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L,
+        observedEnd: Boolean = false,
+    ) {
         if (!EmptyDisplays.hasVideo(display.url)) return
         val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
         if (!shared && display.mode != PlaybackMode.LOCAL) return
         val sinceChange = videoChangedAt[display.id]?.let { transport.nowMs() - it } ?: Long.MAX_VALUE
         if (!DurationReports.accepts(durationMs, url, mediaGen, display.url, display.mediaGen, sinceChange)) return
         val nearby = transport.nearbyPlayerIds(display)
-        if (!DisplayFollowers.mayReportDuration(senderId, nearby, extraReceivers(display.id), pinReceivers(display.id))) return
+        val extra = extraReceivers(display.id)
+        val pinners = pinReceivers(display.id)
+        if (!DisplayFollowers.mayReportDuration(senderId, nearby, extra, pinners)) return
         // Report cooldowns start afresh with each video ([VideoDurations])
         val mediaMs = durations.report(
             display.id, display.url, senderId, durationMs, QueueManager.playingEntryDurationMs(display), transport.nowMs(),
+            observedEnd, (nearby + extra + pinners).toSet(),
         ) ?: return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L

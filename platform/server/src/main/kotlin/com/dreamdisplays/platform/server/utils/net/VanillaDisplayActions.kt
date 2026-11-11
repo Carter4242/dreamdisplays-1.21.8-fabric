@@ -274,9 +274,12 @@ object VanillaDisplayActions {
     }
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED/BROADCAST only). */
-    fun reportDuration(player: ServerPlayer, displayId: java.util.UUID, durationMs: Long, url: String = "") {
+    fun reportDuration(
+        player: ServerPlayer, displayId: java.util.UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L,
+        observedEnd: Boolean = false,
+    ) {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
-        TimelineManager.onDurationReported(displayData, player.uuid, durationMs, url)
+        TimelineManager.onDurationReported(displayData, player.uuid, durationMs, url, mediaGen, observedEnd)
     }
 
     private fun context(display: VanillaDisplayData, player: ServerPlayer) =

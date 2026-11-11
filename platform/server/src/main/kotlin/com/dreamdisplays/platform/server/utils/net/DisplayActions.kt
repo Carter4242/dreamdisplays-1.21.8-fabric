@@ -328,9 +328,11 @@ object DisplayActions {
     private const val MEDIA_GEN_PROTOCOL = 12
 
     /** Applies a client-reported media duration to the display's server timeline (SYNCED / BROADCAST only). */
-    fun reportDuration(player: Player, displayId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
+    fun reportDuration(
+        player: Player, displayId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L, observedEnd: Boolean = false,
+    ) {
         val displayData = DisplayManager.getDisplayData(displayId) ?: return
-        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs, url, mediaGen)
+        TimelineManager.onDurationReported(displayData, player.uniqueId, durationMs, url, mediaGen, observedEnd)
     }
 
     private fun context(display: PaperDisplayData, player: Player) =

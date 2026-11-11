@@ -80,4 +80,43 @@ class VideoDurationsTest {
         assertNull(durations.report(display, video, player, 30_000, entryMs = 0, nowMs = 1_000))
         assertEquals(mediaMs, durations.onVideoChanged(display, video))
     }
+
+    @Test
+    fun `observed ends lower an overstated header once everyone there has seen the end`() {
+        val durations = VideoDurations()
+        val other = UUID.fromString("00000000-0000-0000-0000-00000000bbbb")
+        val viewers = listOf(player, other)
+        durations.onVideoChanged(display, video)
+        // Both headers say 6:00; the media is 3:00
+        assertEquals(360_000L, durations.report(display, video, player, 360_000, 0, 1_000, present = viewers))
+        assertNull(durations.report(display, video, other, 360_000, 0, 1_000, present = viewers))
+        // One stream ends at 3:00: the other viewer still only knows the header, so nothing is cut short
+        assertNull(durations.report(display, video, player, 180_020, 0, 181_000, observedEnd = true, present = viewers))
+        assertEquals(360_000L, durations.mediaMsOf(display, video))
+        // The other's ends there too: now it is 3:00 for everyone, and remembered for this video
+        assertEquals(180_040L, durations.report(display, video, other, 180_040, 0, 181_050, observedEnd = true, present = viewers))
+        // Their client re-sends its header length later (a report request): the measured end stays
+        assertNull(durations.report(display, video, other, 360_000, 0, 200_000, present = viewers))
+        assertEquals(180_040L, durations.mediaMsOf(display, video))
+        assertEquals(180_040L, durations.onVideoChanged(display, video))
+    }
+
+    @Test
+    fun `one early stream end never shortens the video for the others`() {
+        val durations = VideoDurations()
+        val other = UUID.fromString("00000000-0000-0000-0000-00000000bbbb")
+        durations.onVideoChanged(display, video)
+        durations.report(display, video, player, 600_000, 0, 1_000, present = listOf(player, other))
+        durations.report(display, video, other, 600_000, 0, 1_000, present = listOf(player, other))
+        // A cut download ends one stream at 1:00, within the report cooldown of its header report
+        assertNull(durations.report(display, video, player, 60_000, 0, 1_500, observedEnd = true, present = listOf(player, other)))
+        assertEquals(600_000L, durations.mediaMsOf(display, video))
+        // An observed end longer than the header raises it at once, as any longer report does
+        assertEquals(620_000L, durations.report(display, video, other, 620_000, 0, 5_000, observedEnd = true, present = listOf(player, other)))
+        // Someone who reported and left does not count against a lower consensus of those still there
+        val alone = VideoDurations()
+        alone.onVideoChanged(display, video)
+        alone.report(display, video, other, 600_000, 0, 1_000, present = listOf(player, other))
+        assertEquals(300_000L, alone.report(display, video, player, 300_000, 0, 1_000, observedEnd = true, present = listOf(player)))
+    }
 }
