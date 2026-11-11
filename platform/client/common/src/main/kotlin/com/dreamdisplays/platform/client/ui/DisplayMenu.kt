@@ -143,7 +143,8 @@ class DisplayMenu private constructor(
                 // Volume's fraction maps to 0-200%, so a 5%-of-displayed-value stop is 0.025 of the fraction.
                 step = 0.025,
             ) { playback.setVolume(displayId, it.toFloat()) })
-        volume.enabledWhen = videoReady
+        // Volume and mute are stored on the display and applied when its player starts, so they work while loading
+        volume.enabledWhen = notErrored
         volume.visibleWhen = notErrored
 
         quality = addUi(
@@ -250,7 +251,7 @@ class DisplayMenu private constructor(
             IconButton(
                 icon = { IconButton.modIcon(if (ds.muted) "mute" else "sound") },
             ) { playback.mute(displayId, !ds.muted) })
-        muteButton.enabledWhen = videoReady
+        muteButton.enabledWhen = notErrored
         muteButton.visibleWhen = notErrored
 
         popoutButton = addUi(IconButton("popout") {
@@ -905,9 +906,9 @@ class DisplayMenu private constructor(
             }
             KEY_LEFT -> if (canSeek) seekTo(ds.currentTimeNanos - seekStep) else return false
             KEY_RIGHT -> if (canSeek) seekTo(ds.currentTimeNanos + seekStep) else return false
-            KEY_UP -> if (videoReady) nudgeVolume(volumeStep) else return false
-            KEY_DOWN -> if (videoReady) nudgeVolume(-volumeStep) else return false
-            KEY_M -> if (videoReady) playback.mute(displayId, !ds.muted) else return false
+            KEY_UP -> nudgeVolume(volumeStep)
+            KEY_DOWN -> nudgeVolume(-volumeStep)
+            KEY_M -> playback.mute(displayId, !ds.muted)
             in DIGIT_KEYS, in NUMPAD_DIGIT_KEYS -> {
                 if (!canSeek) return false
                 val digit = DIGIT_KEYS.indexOf(key).takeIf { it >= 0 } ?: NUMPAD_DIGIT_KEYS.indexOf(key)
