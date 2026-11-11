@@ -335,7 +335,10 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             pushRatio(1.0, now) // Live streams never get position correction
             return
         }
-        if (!screen.canSeek()) return
+        if (!screen.canSeek()) {
+            restartUnseekableHeldEnd(now)
+            return
+        }
         val settings = screen.syncSettings
         controller.settings = settings
         // The shared clock wraps where the server's does (its timeline's length), not at this player's media length:
@@ -471,6 +474,21 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             pushRatio(decision.ratio, now)
             if (decision.ratio != 1.0) note(Action.RATE)
         }
+    }
+
+    /**
+     * A stream that cannot seek and holds its last frame can only start over from its beginning: it does once the
+     * shared clock has come round (a loop restart that arrived as a plain playing timeline, not paused first, which
+     * restarts it by itself).
+     */
+    private fun restartUnseekableHeldEnd(now: Long) {
+        if (estimator.paused || screen.isPaused || !screen.isHeldAtEnd || screen.isQueueSwitchPending) return
+        val periodMs = loopPeriodMs()
+        val target = wrapTimeline(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, periodMs)
+        if (!heldEndRestarts(target, periodMs, END_HOLD_MS) || now - lastHeldRestartNanos < SNAP_COOLDOWN_NANOS) return
+        lastHeldRestartNanos = now
+        screen.restartHeldEndFromStart()
+        note(Action.SEEK)
     }
 
     /** The first tick held at the end: remember where it ended, and whether a restart from the end ended again at once. */

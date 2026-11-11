@@ -1093,6 +1093,11 @@ class DisplayScreen(
     /** The stream ended ahead of the server timeline and holds its last frame until that timeline moves on. */
     internal val isHeldAtEnd: Boolean get() = mediaPlayer?.isHeldAtEnd() == true
 
+    /** Plays a stream held at its end again from its beginning (one that cannot seek has no other way back). */
+    internal fun restartHeldEndFromStart() {
+        mediaPlayer?.takeIf { it.isHeldAtEnd() }?.play()
+    }
+
     /** The current media/player generation, used by the sync controller to detect stale video swaps. */
     internal val mediaGeneration: Long get() = media.generationNow
 
