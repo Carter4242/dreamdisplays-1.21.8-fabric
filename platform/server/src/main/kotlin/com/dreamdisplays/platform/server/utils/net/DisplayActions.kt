@@ -291,6 +291,8 @@ object DisplayActions {
             player.uniqueId,
         )?.let { return MessageUtil.sendMessage(player, it) }
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // A party would take the display over without ending the share or dropping its private picture
+        if (ScreenShareActions.isSharing(displayId)) return
         WatchPartyManager.start(displayData, player.uniqueId, url, MediaUrlPolicy.sanitizeLang(lang))
     }
 

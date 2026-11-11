@@ -275,6 +275,9 @@ object ScreenShareActions {
 
     private const val OPERATOR_STOPPED = "An operator stopped your screen share."
 
+    /** True while [displayId] shows a screen share or one is about to start on it. */
+    fun isSharing(displayId: UUID): Boolean = byDisplay.containsKey(displayId) || starting.containsKey(displayId)
+
     /** Displays with a share running now or about to start (waiting for its relay lease), for commands. */
     fun sharedDisplays(): Set<UUID> = byDisplay.keys + starting.keys
 
