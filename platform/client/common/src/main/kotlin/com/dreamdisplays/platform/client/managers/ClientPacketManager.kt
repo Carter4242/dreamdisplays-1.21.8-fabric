@@ -97,6 +97,7 @@ object ClientPacketManager {
     /** Resets per-server negotiation state on disconnect. */
     fun reset() {
         serverSnapshot = ServerHello()
+        com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         FullscreenController.reset()
     }
 }

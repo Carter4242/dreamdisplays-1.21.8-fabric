@@ -476,9 +476,12 @@ class MediaPlayer(
     fun setVolume(volume: Float) = this.volume.setUserVolume(volume)
 
     /** Seeds volume up-front (before audio starts) to avoid loud burst on reappear. */
-    fun primeVolume(userVolume: Float, distance: Double, maxRadius: Double) {
+    fun primeVolume(
+        userVolume: Float, distance: Double, maxRadius: Double,
+        fullVolumeRadius: Double = 0.0, squared: Boolean = true,
+    ) {
         volume.setUserVolume(userVolume)
-        volume.updateAttenuation(distance, maxRadius)
+        volume.updateAttenuation(distance, maxRadius, fullVolumeRadius, squared)
     }
 
     /** Sets the brightness multiplier applied to each frame before GPU upload (0.0–2.0). */
@@ -587,9 +590,9 @@ class MediaPlayer(
         capturePreparedMedia()?.streamSet?.currentVideo?.seekByDecoding == true
 
     /** Updates distance-based volume attenuation (call every tick from game thread). */
-    fun tick(distance: Double, maxRadius: Double) {
+    fun tick(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true) {
         if (!isReady) return
-        volume.updateAttenuation(distance, maxRadius)
+        volume.updateAttenuation(distance, maxRadius, fullVolumeRadius, squared)
     }
 
     private fun onControl(action: () -> Unit) {

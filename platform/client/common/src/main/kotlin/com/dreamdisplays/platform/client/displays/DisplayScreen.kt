@@ -350,7 +350,15 @@ class DisplayScreen(
     }
 
     private fun effectiveQuality(requested: VideoQuality = quality): VideoQuality {
-        val base = if (qualityCap > 0) VideoQuality.Fixed(qualityCap) else requested
+        val policyCap = policy.quality?.maxHeight?.takeIf { it > 0 } ?: 0
+        val cap = listOf(qualityCap, policyCap).filter { it > 0 }.minOrNull() ?: 0
+        val requestedHeight = requested.targetHeight
+        val base = when {
+            cap <= 0 -> requested
+            qualityCap > 0 -> VideoQuality.Fixed(cap)
+            requestedHeight == null || requestedHeight > cap -> VideoQuality.Fixed(cap)
+            else -> requested
+        }
         return applyDistanceSteps(base)
     }
 
@@ -388,7 +396,7 @@ class DisplayScreen(
     private var focusMuted: Boolean = false
 
     /** Distance in blocks past which the display is unloaded; mirrors the client's own render distance option. */
-    val renderDistance: Int get() = clientRenderDistanceBlocks()
+    val renderDistance: Int get() = DisplayPolicyCache.renderDistanceFor(policy)
 
     /** Last known playback position in nanoseconds, restored on reconnect. */
     var savedTimeNanos: Long = 0
@@ -503,8 +511,12 @@ class DisplayScreen(
         if (bytes == null && policyBytes == null && policy === DisplayPolicy.CLIENT_DEFAULTS) return
         policyBytes = bytes
         val effective = (DisplayPolicy.decode(bytes) ?: DisplayPolicy.EMPTY).mergedOver(DisplayPolicy.CLIENT_DEFAULTS)
+        val previous = policy
         policy = effective
         syncSettings = SyncSettings.from(effective.sync)
+        // Live policy edits (e.g. /display reload) take effect without the player touching anything
+        if (previous.audio != effective.audio) applyEffectiveVolume()
+        if (previous.quality != effective.quality) reloadQuality()
     }
 
     /** Anchor block position of the display (cached). */
@@ -878,8 +890,21 @@ class DisplayScreen(
 
     /** Passes [volume] directly to the media player without persisting to settings. */
     fun setVideoVolume(volume: Float) {
-        mediaPlayer?.setVolume(volume)
+        mediaPlayer?.setVolume(capVolume(volume))
     }
+
+    /** [volume] limited to the server's `audio.maxVolume` for this display, when set. */
+    private fun capVolume(volume: Float): Float =
+        policy.audio?.maxVolume?.let { minOf(volume, it.toFloat().coerceIn(0f, 2f)) } ?: volume
+
+    /** Distance at which this display's sound fades out: the server's `audio.radiusBlocks`, else the client's. */
+    private fun audioRadius(): Double =
+        if (isPopoutActive) Double.MAX_VALUE
+        else policy.audio?.radiusBlocks?.takeIf { it > 0 } ?: ClientStateManager.config.defaultDistance.toDouble()
+
+    private fun audioFullVolumeRadius(): Double = policy.audio?.fullVolumeBlocks?.coerceAtLeast(0.0) ?: 0.0
+
+    private fun audioSquaredFalloff(): Boolean = policy.audio?.falloff != DisplayPolicy.Falloff.LINEAR
 
     /** Applies effective volume (0 if muted/unfocused, else user volume). */
     internal fun applyEffectiveVolume() {
@@ -1126,8 +1151,10 @@ class DisplayScreen(
     /** Primes player volume before prelude audio to avoid blast on return. */
     internal fun primeNewPlayerVolume(mp: MediaPlayer) {
         val player = Minecraft.getInstance().player ?: return
-        val maxRadius = if (isPopoutActive) Double.MAX_VALUE else ClientStateManager.config.defaultDistance.toDouble()
-        mp.primeVolume(if (muted || focusMuted) 0f else volume, getDistanceToScreen(player.blockPosition()), maxRadius)
+        mp.primeVolume(
+            if (muted || focusMuted) 0f else capVolume(volume), getDistanceToScreen(player.blockPosition()),
+            audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff(),
+        )
     }
 
     /** Whether this display can be parked warm when it leaves render distance (Local VOD on the
@@ -1186,9 +1213,8 @@ class DisplayScreen(
 
     /** Called every game tick to update distance-based volume attenuation from [pos]. */
     fun tick(pos: BlockPos) {
-        val maxRadius = if (isPopoutActive) Double.MAX_VALUE else ClientStateManager.config.defaultDistance.toDouble()
         val distance = getDistanceToScreen(pos)
-        mediaPlayer?.tick(distance, maxRadius)
+        mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         timelineFollower.tick()
         restoreAudioTrackIfPending()
         restoreSubtitleTrackIfPending()
@@ -1265,6 +1291,10 @@ class DisplayScreen(
         private val ERROR_RETRY_COOLDOWN = 15.seconds
 
         /** Initial per-display volume for newly seen displays. */
+        /** Starting volume for a display the player hasn't seen: the server's `audio.startVolume` when set. */
+        internal fun defaultVolume(policy: DisplayPolicy?): Float =
+            policy?.audio?.startVolume?.toFloat()?.coerceIn(0f, 1f) ?: defaultVolume()
+
         internal fun defaultVolume(): Float {
             val serverDefault = ClientPacketManager.serverSnapshot.defaultVolume
             if (serverDefault >= 0f) return serverDefault.coerceIn(0f, MAX_SERVER_DEFAULT_VOLUME) // No to bad servers
