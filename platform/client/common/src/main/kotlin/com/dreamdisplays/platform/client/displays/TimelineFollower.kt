@@ -163,11 +163,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             return
         }
         applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
-        val startServerTimeMs = serverTimeMs + startInMs
         scheduledStart = START_SCHEDULER.schedule({
-            // The player is told on the client thread like every other packet: at most a frame later
+            // The player is told on the client thread like every other packet: at most a frame later. It keeps the
+            // packet's own stamp: a pause or seek the server stamped before the start instant, arriving after this
+            // fired, is newer than this packet and must still apply.
             Minecraft.getInstance().execute {
-                if (applyWord.get() == word) applyNow(targetMs, startServerTimeMs, false, loop, 0.0, rate)
+                if (applyWord.get() == word) applyNow(targetMs, serverTimeMs, false, loop, 0.0, rate)
             }
         }, (waitMs * 1_000.0).toLong(), java.util.concurrent.TimeUnit.MICROSECONDS)
     }
@@ -180,7 +181,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     private fun applyNow(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, comp: Double, rate: Double) {
         val packet = synchronized(lock) {
-            if (serverTimeMs in 1..<lastServerTimeMs) return
+            if (isStaleTimeline(serverTimeMs, lastServerTimeMs)) return
             if (serverTimeMs > 0L) lastServerTimeMs = serverTimeMs
             val now = System.nanoTime()
             latencyCompMs = comp
@@ -643,3 +644,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
  */
 internal fun heldEndRestarts(targetMs: Long, durationMs: Long, endHoldMs: Long): Boolean =
     durationMs > 0L && targetMs < durationMs - minOf(endHoldMs, durationMs / 2)
+
+/**
+ * Whether a timeline stamped [serverTimeMs] is older than the last one applied ([lastServerTimeMs]) and is dropped. An
+ * unstamped one (0) is always taken; one with the same stamp (a scheduled start firing) too.
+ */
+internal fun isStaleTimeline(serverTimeMs: Long, lastServerTimeMs: Long): Boolean = serverTimeMs in 1..<lastServerTimeMs
