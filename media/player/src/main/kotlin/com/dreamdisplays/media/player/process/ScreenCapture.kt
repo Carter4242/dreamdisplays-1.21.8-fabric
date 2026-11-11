@@ -648,8 +648,13 @@ object ScreenCapture {
                 addAll(["-probesize", "32", "-analyzeduration", "0", "-i", audio.path])
             }
 
-            // Silence made in real time (-re: a generator would otherwise run as fast as it can)
-            ShareAudio.Input.Silence -> addAll(["-re", "-f", "lavfi", "-i", "anullsrc=r=${ShareAudio.SILENCE_RATE}:cl=stereo"])
+            ShareAudio.Input.Silence -> {
+                // Counts from 0 at FFmpeg's start ([audioStart]): shifted onto the share's clock like the pipe's sound,
+                // or it would sit up to a timeline period away from the picture's server-clock stamps
+                if (audioStart != clockBase) addAll(["-itsoffset", seconds(audioStart - clockBase)])
+                // Made in real time (-re: a generator would otherwise run as fast as it can)
+                addAll(["-re", "-f", "lavfi", "-i", "anullsrc=r=${ShareAudio.SILENCE_RATE}:cl=stereo"])
+            }
 
             is ShareAudio.Input.Pulse -> {
                 // 10 ms fragments (PulseAudio's default buffers far more); stamped with the wall clock

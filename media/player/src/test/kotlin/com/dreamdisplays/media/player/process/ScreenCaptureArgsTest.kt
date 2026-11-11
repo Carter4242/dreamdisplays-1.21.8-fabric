@@ -219,6 +219,11 @@ class ScreenCaptureArgsTest {
         assertFalse("anullsrc" in withSound.joinToString(" "))
         // A GDI-captured window too
         assertTrue("anullsrc=r=96000:cl=stereo" in ScreenCapture.args("FFMPEG", Source.GDIGRAB, window, Encoder.X264, "rtmp://h/live/x"))
+        // On the share's clock: the silence starts at FFmpeg's launch, shifted from the clock base like piped sound
+        val stamped = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x",
+            clockBaseMicros = base, audioStartMicros = base + 3_250_000L)
+        val at = stamped.indexOf("anullsrc=r=96000:cl=stereo")
+        assertEquals(listOf("-itsoffset", "3.250000", "-re", "-f", "lavfi", "-i"), stamped.subList(at - 6, at))
         // A screen without sound stays picture-only (no audio delay at the muxer)
         val screen = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x")
         assertTrue("-an" in screen)
