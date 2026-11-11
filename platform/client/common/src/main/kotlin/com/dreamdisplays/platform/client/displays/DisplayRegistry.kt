@@ -55,13 +55,9 @@ object DisplayRegistry {
         displayScreen.quality = VideoQuality.parse(clientSettings.quality)
         displayScreen.muted = clientSettings.muted
         displayScreen.acousticsEnabled = clientSettings.acousticsEnabled
-        // Disk-persisted fallback (survives a full game restart); overridden below by the
-        // same-session cache when present, which is fresher.
+        // Every unload writes the resume position here (the session snapshot in DisplayStorage is only written by
+        // saveScreenData, so after a dimension change it is the older of the two and must not win)
         displayScreen.savedTimeNanos = clientSettings.savedTimeNanos
-
-        DisplayStorage.getDisplayData(displayScreen.uuid)?.let { saved ->
-            displayScreen.savedTimeNanos = saved.currentTimeNanos
-        }
 
         screens[displayScreen.uuid] = displayScreen
         recordScreen(displayScreen)
