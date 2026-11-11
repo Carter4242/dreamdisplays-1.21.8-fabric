@@ -386,7 +386,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             restartUnseekableHeldEnd(now)
             return
         }
-        val settings = screen.syncSettings
+        val settings = com.dreamdisplays.platform.client.replay.ReplayHooks.syncSettings(screen.syncSettings, estimator.rate)
         controller.settings = settings
         // The shared clock wraps where the server's does (its timeline's length), not at this player's media length:
         // between the two the server has not restarted yet, and this player holds its last frame

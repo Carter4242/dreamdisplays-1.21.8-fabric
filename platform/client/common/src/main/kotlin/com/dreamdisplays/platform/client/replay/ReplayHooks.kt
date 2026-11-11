@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.replay
 
+import com.dreamdisplays.core.display.policy.SyncSettings
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.render.DisplayUnlitRenderTypes
 import com.dreamdisplays.platform.client.utils.identifier
@@ -48,6 +49,31 @@ object ReplayHooks {
     }
 
     private val cards = EnumMap<ReplayCard, RenderType>(ReplayCard::class.java)
+
+    /**
+     * The sync settings a display follows its timeline with: [base] outside replays. In a replay, where nobody else
+     * watches the same display and a seek costs nothing shared, drift is seeked away as soon as it is about
+     * [REPLAY_DRIFT_CONTENT_MS] of content at the timeline's [rate], rather than left to a 1 % rate change up to 1.5 s.
+     */
+    fun syncSettings(base: SyncSettings, rate: Double): SyncSettings {
+        val b = bridge ?: return base
+        return if (b.inReplay()) replaySyncSettings(base, rate) else base
+    }
+
+    /** Content ms a replay lets a display drift before it seeks. */
+    const val REPLAY_DRIFT_CONTENT_MS = 400.0
+
+    internal fun replaySyncSettings(base: SyncSettings, rate: Double): SyncSettings {
+        // The follower judges drift in real time: at 4x, 400 ms of content is 100 ms
+        val threshold = (REPLAY_DRIFT_CONTENT_MS / rate.coerceIn(0.1, 10.0)).toInt().coerceIn(100, base.seekThresholdMs)
+        return base.copy(
+            seekThresholdMs = threshold,
+            deadBandMs = minOf(base.deadBandMs, threshold / 2),
+            seekCooldownMs = minOf(base.seekCooldownMs, REPLAY_SEEK_COOLDOWN_MS),
+        )
+    }
+
+    private const val REPLAY_SEEK_COOLDOWN_MS = 2_000
 }
 
 /** Why a display shows a card in a replay instead of its media. */
