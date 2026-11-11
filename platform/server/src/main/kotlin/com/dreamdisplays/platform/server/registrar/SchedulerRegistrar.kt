@@ -55,6 +55,8 @@ object SchedulerRegistrar {
             step("loop ends") { TimelineManager.tickEnds() }
             // Karaoke stages (who hears a singer, their pings) stay at most a tenth of a second old
             step("karaoke tick") { KaraokeManager.tick() }
+            // Sharers and their viewers learn the server's clock, so share latency can be measured end to end
+            step("share clock pings") { pingShareParticipants() }
         }
         val settings = PaperServer.config.settings
         if (settings.updatesEnabled) {
@@ -115,5 +117,19 @@ object SchedulerRegistrar {
         } else {
             plugin.server.scheduler.runTaskTimerAsynchronously(plugin, task, delayTicks.coerceAtLeast(0L), intervalTicks.coerceAtLeast(1L))
         }
+    }
+
+    private fun pingShareParticipants() {
+        val ids = com.dreamdisplays.platform.server.utils.net.ScreenShareActions.clockParticipants { displayId ->
+            com.dreamdisplays.platform.server.policy.ClientDiagnostics.viewers(displayId).map { it.playerId }
+        }
+        if (ids.isEmpty()) return
+        com.dreamdisplays.platform.server.karaoke.KaraokeMeasurements.pingSingers(
+            ids,
+            capable = { com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(it)?.supportsKaraoke == true },
+            send = { id, ping ->
+                org.bukkit.Bukkit.getPlayer(id)?.let { com.dreamdisplays.platform.server.utils.net.PaperV2Networking.send([it], ping) }
+            },
+        )
     }
 }

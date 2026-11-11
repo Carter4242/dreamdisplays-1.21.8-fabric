@@ -169,7 +169,8 @@ object KaraokeMeasurements {
                 val interval = if (player.clock.samples < WARMUP_SAMPLES) WARMUP_INTERVAL_NANOS else PING_INTERVAL_NANOS
                 if (now - player.lastPingNanos < interval) return@synchronized null
                 player.lastPingNanos = now
-                KaraokeClockPing(player.nextPingSeq++, System.nanoTime())
+                val offset = player.clock.offsetNanos(now)
+                KaraokeClockPing(player.nextPingSeq++, System.nanoTime(), offset ?: 0L, offset != null)
             } ?: continue
             send(singerId, ping)
         }

@@ -111,10 +111,12 @@ object KaraokeClient {
     fun onClockPing(ping: KaraokeClockPing) {
         val received = System.nanoTime()
         Initializer.sendPacket(KaraokeClockPong(ping.seq, ping.serverNanos, received, System.nanoTime()))
+        com.dreamdisplays.platform.client.displays.ShareClock.onPing(ping)
     }
 
     /** Disconnected: forget everything about that server. */
     fun reset() {
+        com.dreamdisplays.platform.client.displays.ShareClock.reset()
         leads.clear()
         setActive(null)
         lastReportTick = Long.MIN_VALUE / 2

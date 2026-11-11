@@ -140,7 +140,7 @@ object MediaProcess {
     fun videoArgs(
         ffmpeg: String, url: String, w: Int, h: Int, offsetNanos: Long, hwAccel: HwAccelBackend,
         transport: VideoTransport, fps: Double, alreadyResolved: Boolean = false,
-        seekByDecoding: Boolean = false, dropToFps: Boolean = false,
+        seekByDecoding: Boolean = false, dropToFps: Boolean = false, liveStampsPath: String? = null,
     ): List<String> {
         val nv12 = transport == VideoTransport.RAW_NV12
         val outFormat = if (nv12) "nv12" else "rgb24"
@@ -166,6 +166,8 @@ object MediaProcess {
                 // Every decoded picture goes out the moment it exists: no constant-rate resampling (which holds a
                 // frame back to decide whether to duplicate or drop it), and no output buffering
                 addAll(["-fps_mode", "passthrough", "-flush_packets", "1"])
+                // Each frame's stream timestamp, for share latency (see LiveFrameStamps)
+                if (liveStampsPath != null) addAll(com.dreamdisplays.media.player.pipeline.LiveFrameStamps.ffmpegArgs(liveStampsPath))
             } else {
                 addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
             }

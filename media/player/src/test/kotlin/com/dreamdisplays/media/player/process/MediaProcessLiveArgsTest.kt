@@ -105,4 +105,18 @@ class MediaProcessLiveArgsTest {
         assertEquals("1", MediaProcess.audioOutputArgs(44100, liveEdge = true).valueOf("-flush_packets"))
         assertFalse("-flush_packets" in MediaProcess.audioOutputArgs(44100))
     }
+
+    @Test
+    fun `a live picture writes each frame's stream timestamp for share latency`() {
+        val url = "rtmp://203.0.113.5/live/ddabc"
+        val a = MediaProcess.videoArgs("FFMPEG", url, 640, 360, 0, HwAccelBackend.NONE, MediaProcess.VideoTransport.RAW_NV12,
+            30.0, alreadyResolved = true, liveStampsPath = "STAMPS")
+        assertEquals("STAMPS", a.valueOf("-stats_mux_pre"))
+        assertEquals("{n} {pts} {tb}", a.valueOf("-stats_mux_pre_fmt"))
+        assertTrue("-copyts" in a && a.indexOf("-copyts") > a.indexOf(url))
+        assertEquals("-", a.last())
+        val plain = MediaProcess.videoArgs("FFMPEG", url, 640, 360, 0, HwAccelBackend.NONE, MediaProcess.VideoTransport.RAW_NV12,
+            30.0, alreadyResolved = true)
+        assertFalse("-stats_mux_pre" in plain || "-copyts" in plain)
+    }
 }

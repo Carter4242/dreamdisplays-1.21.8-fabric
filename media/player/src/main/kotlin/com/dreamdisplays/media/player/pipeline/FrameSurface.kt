@@ -31,6 +31,7 @@ internal class FrameSurface(
 
         const val SHOW_NOW = Long.MIN_VALUE
         const val MAX_DISPLAY_QUEUE = 4
+        const val NO_TAG = -1L
     }
 
     @Volatile
@@ -41,7 +42,17 @@ internal class FrameSurface(
         maxReusableBuffers = n.coerceAtLeast(MAX_REUSABLE_FRAME_BUFFERS)
     }
 
-    private class Queued(@JvmField val buf: ByteBuffer, @JvmField val pts: Long)
+    private class Queued(@JvmField val buf: ByteBuffer, @JvmField val pts: Long, @JvmField val tag: Long = NO_TAG)
+
+    /**
+     * Told (render thread) of each tagged frame ([publish]'s `tag`) right after it reached the GPU: the moment a live
+     * frame is shown, for [LiveFrameStamps].
+     */
+    @Volatile
+    var onShown: ((tag: Long, nanos: Long) -> Unit)? = null
+
+    /** Tag of the frame [takeDueFrame] last returned. Render thread only. */
+    private var takenTag = NO_TAG
 
     private val displayQueue = ArrayDeque<Queued>()
 
@@ -98,6 +109,7 @@ internal class FrameSurface(
             val uploaded = uploader.uploadInterleaved(target, buf, pixelFormat)
             if (uploaded) {
                 textureReady.set(true)
+                reportShown()
                 if (MediaPlayer.DEBUG) {
                     recordUpload(System.nanoTime() - start, "Upload", actualW, actualH)
                     MediaPlayer.framesToGpu.incrementAndGet()
@@ -129,6 +141,7 @@ internal class FrameSurface(
             val uploaded = uploader.uploadPlanar(y, u, v, buf)
             if (uploaded) {
                 textureReady.set(true)
+                reportShown()
                 if (MediaPlayer.DEBUG) {
                     recordUpload(System.nanoTime() - start, "Planar upload", actualW, actualH)
                     MediaPlayer.framesToGpu.incrementAndGet()
@@ -161,8 +174,8 @@ internal class FrameSurface(
      * Hands [frame] (already paced by the caller) to the render thread, due at once, and returns a fresh spare
      * buffer of at least [nextSize] bytes for the reader to fill next.
      */
-    fun publish(frame: ByteBuffer, nextSize: Int): ByteBuffer {
-        enqueue(frame, SHOW_NOW)
+    fun publish(frame: ByteBuffer, nextSize: Int, tag: Long = NO_TAG): ByteBuffer {
+        enqueue(frame, SHOW_NOW, tag)
         return takeReusableFrameBuffer(nextSize) ?: allocateFrameBuffer(nextSize)
     }
 
@@ -209,10 +222,16 @@ internal class FrameSurface(
         }
     }
 
+    private fun reportShown() {
+        val tag = takenTag
+        if (tag != NO_TAG) onShown?.invoke(tag, System.nanoTime())
+    }
+
     private fun takeDueFrame(): ByteBuffer? {
         val clock = displayClock?.invoke() ?: -1L
         val horizon = if (clock >= 0L) clock + displayToleranceNs else Long.MAX_VALUE
         var chosen: ByteBuffer? = null
+        var chosenTag = NO_TAG
         synchronized(displayQueue) {
             while (true) {
                 val head = displayQueue.firstOrNull() ?: break
@@ -224,18 +243,20 @@ internal class FrameSurface(
                     recycleFrameBuffer(it)
                 }
                 chosen = head.buf
+                chosenTag = head.tag
             }
         }
+        if (chosen != null) takenTag = chosenTag
         return chosen
     }
 
-    private fun enqueue(frame: ByteBuffer, pts: Long) {
+    private fun enqueue(frame: ByteBuffer, pts: Long, tag: Long = NO_TAG) {
         synchronized(displayQueue) {
             val last = displayQueue.lastOrNull()
             if (last != null && (pts == SHOW_NOW || (last.pts != SHOW_NOW && pts < last.pts))) {
                 drainQueueLocked(countDrops = true)
             }
-            displayQueue.addLast(Queued(frame, pts))
+            displayQueue.addLast(Queued(frame, pts, tag))
             while (displayQueue.size > MAX_DISPLAY_QUEUE) {
                 readyDrops.incrementAndGet()
                 if (MediaPlayer.DEBUG) MediaPlayer.framesDropped.incrementAndGet()

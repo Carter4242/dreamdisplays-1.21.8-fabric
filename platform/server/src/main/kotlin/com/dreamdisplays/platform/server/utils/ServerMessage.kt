@@ -108,6 +108,7 @@ enum class ServerMessage(val key: String) {
     VIEWER_STATS_ERROR("viewerStatsError"),
     VIEWER_STATS_HEADER("viewerStatsHeader"),
     VIEWER_STATS_LINE("viewerStatsLine"),
+    VIEWER_STATS_SHARE_LATENCY("viewerStatsShareLatency"),
     VIEWER_STATS_NONE("viewerStatsNone"),
     VIEWER_STATS_SUMMARY("viewerStatsSummary"),
 

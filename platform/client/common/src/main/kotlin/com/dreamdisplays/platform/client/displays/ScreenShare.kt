@@ -9,6 +9,7 @@ import com.dreamdisplays.core.share.ScreenShareCaptureRules
 import com.dreamdisplays.core.share.ScreenShareCaptureRules.StopReason
 import com.dreamdisplays.core.share.ScreenShareServerRules
 import com.dreamdisplays.media.player.process.CaptureLifetime
+import com.dreamdisplays.core.share.ShareTimeline
 import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
@@ -52,9 +53,17 @@ object ScreenShare {
         val urlBeforeShare: String?,
         /** The server asked for x264 only. */
         val softwareOnly: Boolean = false,
-        val settings: ScreenCapture.Settings = ScreenCapture.Settings(),
+        settings: ScreenCapture.Settings = ScreenCapture.Settings(),
         val audioChoice: ShareAudio.Choice = ShareAudio.Choice.Off,
+        /** The server's caps for this share (0: none) and its bitrate (0: the client's default). */
+        val serverMaxFps: Int = 0,
+        val serverMaxHeight: Int = 0,
+        val serverBitrateKbps: Int = 0,
     ) {
+        /** What the capture runs at: set again once the plan is known (60 fps where it measures safe). */
+        @Volatile
+        var settings: ScreenCapture.Settings = settings
+
         @Volatile
         var process: Process? = null
 
@@ -277,15 +286,17 @@ object ScreenShare {
             }
             pending.remove(state.id)
             current?.let { stop(it, StopReason.SERVER_ENDED) }
-            val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight)
+            val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight).withServerBitrate(state.bitrateKbps)
             // The server's sound lever wins over the sharer's pick
             val audio = if (state.noSound) ShareAudio.Choice.Off else asked.audio
             if (state.noSound && asked.audio != ShareAudio.Choice.Off) {
                 notify(ClientMessage.SHARE_AUDIO_SERVER_OFF.component().withStyle(ChatFormatting.YELLOW))
             }
             launch(
-                Running(state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings, audio)
-                    .also { it.nonce = asked.nonce },
+                Running(
+                    state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings,
+                    audio, state.maxFps, state.maxHeight, state.bitrateKbps,
+                ).also { it.nonce = asked.nonce },
                 state.publishUrl,
             )
             return
@@ -402,6 +413,7 @@ object ScreenShare {
     private fun shareMonitor(r: Running, ffmpeg: String, monitor: ScreenCapture.Monitor, publishUrl: String) {
         val choice = ScreenCapture.choose(ffmpeg, monitor, r.softwareOnly)
         if (r.stopped) return
+        r.settings = settingsFor(r, ffmpeg, choice.plan)
         // The plan only came after something failed on this PC: worth knowing, though the player sees nothing
         if (choice.attempts.any { !it.ok } && plannedFallbacksReported.add(ffmpeg + choice.monitor.deviceName + choice.plan)) {
             report(r, choice, choice.plan, "", "planned_fallback", final = false,
@@ -428,6 +440,7 @@ object ScreenShare {
             return
         }
         logger.warn("Screen share with {} ended at once ({}); retrying with {}.", choice.plan, first.reason, safe)
+        r.settings = settingsFor(r, ffmpeg, safe)
         val retry = runShare(r, ffmpeg, choice.monitor, safe, publishUrl, announce = false, onSettled = {
             ScreenCapture.rememberChoice(ffmpeg, monitor, r.softwareOnly, ScreenCapture.Choice(choice.monitor, safe, choice.attempts))
             report(r, choice, safe, first.output, "fallback_ok", final = false,
@@ -454,6 +467,7 @@ object ScreenShare {
         }
         WinWindows.unminimize(window)
         val plan = ScreenCapture.windowPlan(ffmpeg, r.softwareOnly)
+        r.settings = settingsFor(r, ffmpeg, plan)
         if (r.stopped) return
         val started = runShare(r, ffmpeg, window, plan, publishUrl, announce = true) ?: return
         if (r.stopped) return
@@ -469,6 +483,7 @@ object ScreenShare {
             return
         }
         logger.warn("Window share with {} ended at once ({}); retrying with {}.", plan, first.reason, retryPlan)
+        r.settings = settingsFor(r, ffmpeg, retryPlan)
         val retry = runShare(r, ffmpeg, window, retryPlan, publishUrl, announce = false) ?: return
         if (r.stopped) return
         fail(r, retry.reason)
@@ -538,6 +553,16 @@ object ScreenShare {
 
     private const val LOST_RECOVERY_MS = 60_000L
 
+    /**
+     * What [r] captures at with [plan]: 60 fps where the plan's encoder measured fast enough and the server allows it
+     * (else 30), the bitrate default for that rate (or the server's), within the server's caps.
+     */
+    private fun settingsFor(r: Running, ffmpeg: String, plan: ScreenCapture.Plan): ScreenCapture.Settings {
+        val fps = runCatching { ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, r.settings.maxHeight, r.serverMaxFps) }
+            .getOrDefault(30)
+        return ScreenCapture.Settings.forFps(fps).limitedTo(r.serverMaxFps, r.serverMaxHeight).withServerBitrate(r.serverBitrateKbps)
+    }
+
     /** True (and sound turned off for the rest of [r]) when the run with sound died at once on its sound input. */
     private fun retryWithoutSound(r: Running, ended: Ended): Boolean {
         if (r.audio == null || ended.ranMs >= EARLY_EXIT_MS || !SOUND_INPUT_FAILURE.containsMatchIn(ended.output)) return false
@@ -563,14 +588,22 @@ object ScreenShare {
         r: Running, ffmpeg: String, target: ScreenCapture.Target, plan: ScreenCapture.Plan, publishUrl: String,
         announce: Boolean, onSettled: (() -> Unit)? = null,
     ): Ended? {
-        val baseMicros = ScreenCapture.wallClockMicros()
+        // One instant on both clocks: the wall clock FFmpeg stamps by, System.nanoTime the sound pipe and the
+        // server's clock (via the clock sync) run on. The stream's timestamps count from a server-clock epoch, so each
+        // one says when its frame was captured (see ShareTimeline); without the clock sync, from now.
+        val wallMicros = ScreenCapture.wallClockMicros()
         val baseNanos = System.nanoTime()
+        val baseMicros = ShareClock.offsetNanos?.let { offset ->
+            val server = ShareTimeline.serverMicros(baseNanos, offset)
+            wallMicros - (server - ShareTimeline.epoch(server))
+        } ?: wallMicros
         if (!r.withAudio) r.audio = null
         val input = if (r.withAudio) startAudio(r, baseNanos) else null
         val windowCapture = (target as? ScreenCapture.Window)?.let { ScreenCapture.windowCapture(ffmpeg) }
             ?: ScreenCapture.WindowCapture(ScreenCapture.Source.GFXCAPTURE, false)
         val args = ScreenCapture.args(
             ffmpeg, plan.source, target, plan.encoder, publishUrl, r.settings, input, baseMicros, windowCapture,
+            audioStartMicros = wallMicros,
         )
         val proc = synchronized(lock) {
             // Started and registered under the lock, so a stop racing this (first run or retry) either sees the

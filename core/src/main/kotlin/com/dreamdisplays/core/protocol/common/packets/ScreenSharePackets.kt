@@ -48,7 +48,8 @@ data class ScreenShareState(
     @ProtoNumber(6) val maxFps: Int = 0,
     /** Picture height cap for this share (the width follows), 0 = the client's default. */
     @ProtoNumber(7) val maxHeight: Int = 0,
-    // 8: bitrateKbps (share-latency)
+    /** Video bitrate for this share in kbps, 0 = the client's default; clients clamp it to 1000..20000. */
+    @ProtoNumber(8) val bitrateKbps: Int = 0,
     /**
      * The [ScreenShareRequest.nonce] this answers, or the running share's own: a client applies an inactive state only
      * to the pending start or running capture with the same nonce. 0 = an older server (match by display).
@@ -65,5 +66,5 @@ data class ScreenShareState(
     /** Never prints [publishUrl]: it carries the relay's publish credentials. */
     override fun toString(): String =
         "ScreenShareState(id=$id, active=$active, publishUrl=${if (publishUrl.isEmpty()) "" else "<redacted>"}, error=$error, " +
-            "encoder=$encoder, maxFps=$maxFps, maxHeight=$maxHeight, nonce=$nonce, noSound=$noSound)"
+            "encoder=$encoder, maxFps=$maxFps, maxHeight=$maxHeight, bitrateKbps=$bitrateKbps, nonce=$nonce, noSound=$noSound)"
 }

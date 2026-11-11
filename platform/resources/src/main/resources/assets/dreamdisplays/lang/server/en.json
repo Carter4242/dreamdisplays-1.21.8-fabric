@@ -321,6 +321,7 @@
   "policyServerWideOnly": "&7D |&f &e%s&f only works server-wide; set it with &e/display config policy.%s",
   "viewerStatsHeader": "&7D |&f Viewers of display &e%s&f (%s reporting):",
   "viewerStatsLine": "&7D | &f%s &7%s &fdrift &e%s &frate &e%s &flat &e%s &7action %s, seeks %s, stalls %s &f%s &7at %s &8%ss ago &7hitches &e%s",
+  "viewerStatsShareLatency": "&7D |   &fshare latency &e%sms &7p50, &e%sms &7p95 &8(%s frames)",
   "viewerStatsError": "&7D | &f%s &c%s&7: %s &8%ss ago",
   "viewerStatsSummary": "&7D |&f %s viewers, %s in sync, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring, %s buffering",
   "viewerStatsNone": "&7D |&f No viewer reports for display &e%s&f (clients report every few seconds while it is loaded)",

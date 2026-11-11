@@ -73,8 +73,8 @@ class ScreenCaptureArgsTest {
         assertEquals("libx264", a.valueOf("-c:v"))
         assertEquals("ultrafast", a.valueOf("-preset"))
         assertEquals("zerolatency", a.valueOf("-tune"))
-        assertEquals("4000k", a.valueOf("-b:v"))
-        assertEquals("4000k", a.valueOf("-maxrate"))
+        assertEquals("6000k", a.valueOf("-b:v"))
+        assertEquals("6000k", a.valueOf("-maxrate"))
         assertTrue(a.valueOf("-filter_complex")!!.endsWith("format=yuv420p[v]"))
     }
 
@@ -106,7 +106,7 @@ class ScreenCaptureArgsTest {
         for (e in Encoder.entries) {
             val a = ScreenCapture.encoderArgs(e, ScreenCapture.Settings())
             assertEquals(e.ffmpegName, a.valueOf("-c:v"))
-            assertEquals("4000k", a.valueOf("-maxrate"))
+            assertEquals("6000k", a.valueOf("-maxrate"))
             assertFalse("-look_ahead" in a)
         }
     }
@@ -213,6 +213,7 @@ class ScreenCaptureArgsTest {
         val withSound = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x", audio = pipe, clockBaseMicros = 5)
         assertEquals(withSound.valueOf("-c:a"), a.valueOf("-c:a"))
         assertEquals(withSound.valueOf("-ar"), a.valueOf("-ar"))
+        assertEquals(ShareAudio.AAC_RATE.toString(), a.valueOf("-ar"))
         assertEquals(withSound.valueOf("-b:a"), a.valueOf("-b:a"))
         assertEquals(withSound.valueOf("-filter_complex"), a.valueOf("-filter_complex"))
         assertFalse("anullsrc" in withSound.joinToString(" "))
@@ -282,7 +283,8 @@ class ScreenCaptureArgsTest {
         assertEquals("[v]", a.valueOf("-map"))
         // The picture is no -i input (it lives in the filter graph); the one input is the silent track
         assertEquals(1, a.count { it == "-i" })
-        assertEquals("expr:gte(t,n_forced)", a.valueOf("-force_key_frames"))
+        assertEquals(ScreenCapture.KEYFRAME_EVERY_SECOND, a.valueOf("-force_key_frames"))
+        assertFalse("-an" in a)
         val older = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x")
         assertFalse("dup_frames" in older.valueOf("-filter_complex")!!)
         assertFalse("-force_key_frames" in ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/a"))
@@ -341,9 +343,9 @@ class ScreenCaptureArgsTest {
         val pipeAt = a.indexOf("P")
         assertEquals("wav", a[a.subList(0, pipeAt).lastIndexOf("-f") + 1])
         assertEquals("10584", a.subList(0, pipeAt).valueOf("-max_size"))
-        // Output: stereo 48 kHz whatever came in
+        // Output: stereo AAC at 96 kHz (10.7 ms frames) whatever came in
         assertEquals("2", a.subList(pipeAt, a.size).valueOf("-ac"))
-        assertEquals("48000", a.subList(pipeAt, a.size).valueOf("-ar"))
+        assertEquals("96000", a.subList(pipeAt, a.size).valueOf("-ar"))
     }
 
     @Test
@@ -377,5 +379,48 @@ class ScreenCaptureArgsTest {
     fun `window labels name the program, then the title`() {
         assertEquals("Google Chrome - Video - YouTube", ScreenCapture.label(window))
         assertEquals("Notepad", ScreenCapture.label(window.copy(app = "Notepad", title = "notepad")))
+    }
+
+    @Test
+    fun `a share without sound still stamps every frame with its capture clock`() {
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x", clockBaseMicros = base)
+        assertTrue("setpts=(RTCTIME-$base)/(TB*1000000)" in a.valueOf("-filter_complex")!!)
+        assertTrue("-an" in a)
+        assertTrue("-copyts" in a)
+        assertEquals("1:1000", a.valueOf("-enc_time_base:v"))
+        assertFalse("-max_interleave_delta" in a)
+        // No clock base: exactly the old picture-only command
+        val plain = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x")
+        assertFalse("-copyts" in plain || "RTCTIME" in plain.valueOf("-filter_complex")!!)
+    }
+
+    @Test
+    fun `sound that starts after the clock base is placed by its own offset`() {
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/live/x", audio = pipe,
+            clockBaseMicros = base, audioStartMicros = base + 3_600_250_000L)
+        assertEquals(listOf("3600.250000"), a.valuesOf("-itsoffset"))
+        assertTrue(a.indexOf("-itsoffset") < a.indexOf(pipe.path))
+    }
+
+    @Test
+    fun `bitrate defaults follow the frame rate and the server's bitrate is clamped`() {
+        assertEquals(6_000, ScreenCapture.Settings.forFps(30).bitrateKbps)
+        assertEquals(8_000, ScreenCapture.Settings.forFps(60).bitrateKbps)
+        assertEquals(60, ScreenCapture.Settings.forFps(60).fps)
+        val s = ScreenCapture.Settings()
+        assertEquals(s, s.withServerBitrate(0))
+        assertEquals(12_000, s.withServerBitrate(12_000).bitrateKbps)
+        assertEquals(1_000, s.withServerBitrate(200).bitrateKbps)
+        assertEquals(20_000, s.withServerBitrate(50_000).bitrateKbps)
+        assertEquals("1500k", ScreenCapture.encoderArgs(Encoder.X264, s.withServerBitrate(6_000)).valueOf("-bufsize"))
+    }
+
+    @Test
+    fun `sixty fps needs a capture that keeps up and the server's leave`() {
+        assertEquals(30, ScreenCapture.chooseFps("FFMPEG", Source.GDIGRAB, Encoder.NVENC, 1080, 0))
+        assertEquals(30, ScreenCapture.chooseFps("FFMPEG", Source.DDAGRAB, Encoder.NVENC, 1080, 30))
+        assertEquals(24, ScreenCapture.chooseFps("FFMPEG", Source.DDAGRAB, Encoder.NVENC, 1080, 24))
+        assertEquals(2.71, ScreenCapture.benchRealSeconds("frame=  120\nbench: utime=3.125s stime=0.218s rtime=2.710s\n"))
+        assertEquals(null, ScreenCapture.benchRealSeconds("no bench here"))
     }
 }

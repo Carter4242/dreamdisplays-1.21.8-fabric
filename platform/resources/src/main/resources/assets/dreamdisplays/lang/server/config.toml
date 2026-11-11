@@ -157,9 +157,13 @@ relay_control_token = ""
 # itself. "software": x264 only, for everyone (if shares fail on many PCs). Sent with every share start, so changing
 # it needs no client update.
 share_encoder = "auto"
-# Caps for every share (0 = the client's default: 30 fps, 1080p). Lower them to lighten sharers' PCs and the relay.
+# Caps for every share (0 = the client's default: 30 fps, or 60 where the sharer's PC measures safe; 1080p). Lower
+# them to lighten sharers' PCs and the relay.
 share_max_fps = 0
 share_max_height = 0
+# Video bitrate for every share in kbps (0 = the client's default: 6000 at 30 fps, 8000 at 60). Clients keep it within
+# 1000..20000. More bits: sharper text while scrolling, but each frame takes longer to upload on the sharer's line.
+share_bitrate_kbps = 0
 # false: shares never carry sound, whatever the sharer picks (sent with every share start).
 share_sound = true
 

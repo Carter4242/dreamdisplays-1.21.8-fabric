@@ -72,6 +72,7 @@ object ViewerReporter {
             else -> ViewerState.PLAYING
         }
         val hitches = ClientErrorReporter.hitchSummary(screen.uuid)
+        val shareLatency = shareLatency(screen)
         return ViewerReport(
             id = screen.uuid,
             state = state.wire,
@@ -90,6 +91,27 @@ object ViewerReporter {
             hitchesLastMinute = hitches.count,
             hitchTopCause = hitches.topCause,
             worstGapMs = hitches.worstGapMs,
+            shareLatencyP50Ms = shareLatency?.first ?: 0,
+            shareLatencyP95Ms = shareLatency?.second ?: 0,
+            shareLatencySamples = shareLatency?.third ?: 0,
         )
     }
+
+    /**
+     * A live screen share's glass-to-glass latency on this display (p50, p95 ms, frames), from the last few seconds of
+     * shown frames; null when it is no live session, the clock is unknown, or the sharer did not stamp the server clock.
+     */
+    private fun shareLatency(screen: DisplayScreen): Triple<Int, Int, Int>? {
+        val offset = ShareClock.offsetNanos ?: return null
+        val samples = com.dreamdisplays.media.player.pipeline.LiveFrameStamps.of(screen.uuid.toString())?.recent(LATENCY_FRAMES)
+            ?: return null
+        val micros = com.dreamdisplays.core.share.ShareTimeline.latenciesMicros(samples, offset)
+        // Mostly implausible: a sharer without the server clock (older client, or no sync yet) — nothing to report
+        if (micros.size < samples.size / 2) return null
+        val (p50, p95) = com.dreamdisplays.core.share.ShareTimeline.p50p95Ms(micros) ?: return null
+        return Triple(p50, p95, micros.size)
+    }
+
+    /** About ten seconds of a 30 fps share. */
+    private const val LATENCY_FRAMES = 300
 }

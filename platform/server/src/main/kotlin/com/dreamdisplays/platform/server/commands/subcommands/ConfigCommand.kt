@@ -80,6 +80,7 @@ object ConfigCommand {
         Key("live.share_encoder", PolicyPaths.Kind.Choice(listOf("auto", "software"))) { it.live.share_encoder },
         Key("live.share_max_fps", PolicyPaths.Kind.Whole(0, 60)) { it.live.share_max_fps },
         Key("live.share_max_height", PolicyPaths.Kind.Whole(0, 2160)) { it.live.share_max_height },
+        Key("live.share_bitrate_kbps", PolicyPaths.Kind.Whole(0, 20_000)) { it.live.share_bitrate_kbps },
         Key("live.share_sound", PolicyPaths.Kind.Bool) { it.live.share_sound },
         Key("live.relay_control_url", PolicyPaths.Kind.Text(Regex("""(?i)https://[^\s"]+"""), "<https URL of the relay lease service>")) {
             it.live.relay_control_url.ifEmpty { null }

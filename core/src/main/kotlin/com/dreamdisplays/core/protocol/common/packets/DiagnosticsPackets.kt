@@ -62,6 +62,14 @@ data class ViewerReport(
     @ProtoNumber(16) val hitchTopCause: String = "",
     /** Longest frame gap in the last minute, in ms. */
     @ProtoNumber(17) val worstGapMs: Int = 0,
+    /**
+     * A live screen share on this display: glass-to-glass latency (the sharer's capture to this viewer's presentation
+     * in game, both on the server's clock), median and 95th percentile over the last [shareLatencySamples] frames, ms.
+     * 0 samples: none measured (not a share, no clock sync yet, or an older sharer).
+     */
+    @ProtoNumber(18) val shareLatencyP50Ms: Int = 0,
+    @ProtoNumber(19) val shareLatencyP95Ms: Int = 0,
+    @ProtoNumber(20) val shareLatencySamples: Int = 0,
 ) : DreamPacket
 
 /** Coarse display state in a [ViewerReport]. */

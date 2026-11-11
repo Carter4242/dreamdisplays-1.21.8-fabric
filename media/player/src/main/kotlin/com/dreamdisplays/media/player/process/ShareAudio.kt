@@ -126,12 +126,23 @@ object ShareAudio {
         data object Silence : Input
     }
 
-    /** The silent track's rate (encoded like any share sound). */
-    const val SILENCE_RATE = 96_000
+    /**
+     * The silent track's rate: made at the rate every share sound is encoded at ([AAC_RATE]), so nothing resamples it.
+     */
+    const val SILENCE_RATE = AAC_RATE
 
-    /** What the stream carries: AAC at this rate, stereo 48 kHz. */
+    /** What the stream carries: AAC at [AAC_BITRATE], stereo, [AAC_RATE]. */
     const val AAC_BITRATE = "160k"
+
+    /** The rate sound is captured at (PulseAudio). */
     const val OUTPUT_RATE = 48_000
+
+    /**
+     * AAC's sample rate. An AAC frame is 1024 samples and the encoder looks one frame ahead, and the muxer holds the
+     * picture until the sound of the same moment is encoded: at 96 kHz a frame is 10.7 ms instead of 21.3, which
+     * measured 121 -> 84 ms glass-to-decode for the picture (and 68 -> 39 ms for the sound) through MediaMTX.
+     */
+    const val AAC_RATE = 96_000
 }
 
 /**

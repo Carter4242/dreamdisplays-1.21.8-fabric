@@ -247,6 +247,21 @@ object ScreenShareActions {
     fun sharedDisplays(): Set<UUID> = byDisplay.keys.toSet()
 
     /**
+     * Everyone a share's latency is measured between: each sharer and the players reporting on their display. They
+     * get the karaoke clock pings, which carry their clock offset back, so the share's timestamps and the viewers'
+     * presentation times meet on the server's clock.
+     */
+    fun clockParticipants(viewersOf: (UUID) -> Collection<UUID>): Set<UUID> {
+        if (byDisplay.isEmpty()) return emptySet()
+        val ids = HashSet<UUID>()
+        for (share in byDisplay.values) {
+            ids += share.sharerId
+            ids += viewersOf(share.displayId)
+        }
+        return ids
+    }
+
+    /**
      * Once a second (global tick): ends every share whose display shows something else now, or whose sharer is gone, in
      * another world, out of range, or silent for longer than [ScreenShareServerRules.HEARTBEAT_TIMEOUT_MS].
      */
@@ -338,8 +353,10 @@ object ScreenShareActions {
         val live = PaperServer.config.settings.live
         PaperV2Networking.send(
             [player],
-            ScreenShareState(displayId, active, publishUrl, error, live.share_encoder, live.share_max_fps, live.share_max_height)
-                .copy(nonce = nonce, noSound = !live.share_sound),
+            ScreenShareState(
+                displayId, active, publishUrl, error, live.share_encoder, live.share_max_fps, live.share_max_height,
+                live.share_bitrate_kbps,
+            ).copy(nonce = nonce, noSound = !live.share_sound),
         )
     }
 

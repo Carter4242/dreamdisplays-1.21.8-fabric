@@ -62,7 +62,7 @@ object ScreenCapture {
     /** What to capture and how hard to encode it. */
     data class Settings(
         val fps: Int = 30,
-        val bitrateKbps: Int = 4_000,
+        val bitrateKbps: Int = DEFAULT_KBPS_30,
         val maxWidth: Int = 1920,
         val maxHeight: Int = 1080,
         /** SRT latency (ms) for the publisher's leg when the publish URL sets none. */
@@ -76,6 +76,57 @@ object ScreenCapture {
             val kbps = (bitrateKbps.toLong() * f * h / (fps.toLong() * this.maxHeight)).toInt().coerceAtLeast(500)
             return copy(fps = f, maxWidth = w, maxHeight = h and 1.inv(), bitrateKbps = kbps.coerceAtMost(bitrateKbps))
         }
+
+        /** These settings at the server's bitrate [kbps] (0: keep), kept within [MIN_KBPS]..[MAX_KBPS]. */
+        fun withServerBitrate(kbps: Int): Settings =
+            if (kbps <= 0) this else copy(bitrateKbps = kbps.coerceIn(MIN_KBPS, MAX_KBPS))
+
+        companion object {
+            /** The defaults at [fps]: [DEFAULT_KBPS_60] from 60 fps up, else [DEFAULT_KBPS_30]. */
+            fun forFps(fps: Int): Settings = Settings(fps = fps, bitrateKbps = if (fps >= 60) DEFAULT_KBPS_60 else DEFAULT_KBPS_30)
+        }
+    }
+
+    // ---- 60 fps ----
+
+    /** Encode time per frame (ms) at or below which a plan's encoder is trusted with 60 fps (a frame lasts 16.7). */
+    const val SIXTY_BUDGET_MS = 8.0
+
+    private val sixty = ConcurrentHashMap<String, Double>()
+
+    /**
+     * How long [encoder] takes per frame here at 60 fps and [settings]' size (ms), measured once on a synthetic moving
+     * picture: the run with the encoder less the same run without it. Blocks ~2 s the first time; off the render thread.
+     */
+    fun encodeMsPerFrame(ffmpeg: String, encoder: Encoder, settings: Settings): Double =
+        sixty.getOrPut("$ffmpeg|$encoder|${settings.maxWidth}x${settings.maxHeight}") {
+            val frames = 120
+            val pixFmt = if (encoder.hardware) "nv12" else "yuv420p"
+            val src = listOf(ffmpeg, "-hide_banner", "-nostats", "-benchmark", "-f", "lavfi", "-i",
+                "testsrc2=s=${settings.maxWidth}x${settings.maxHeight}:r=60", "-frames:v", frames.toString(), "-pix_fmt", pixFmt)
+            val bare = exec(src + listOf("-f", "null", "-"), 20)
+            val coded = exec(src + encoderArgs(encoder, settings.copy(fps = 60)) + listOf("-g", "60", "-bf", "0", "-f", "null", "-"), 20)
+            val a = benchRealSeconds(bare.output)
+            val b = benchRealSeconds(coded.output)
+            val ms = if (!bare.ok || !coded.ok || a == null || b == null) Double.MAX_VALUE else (b - a).coerceAtLeast(0.0) * 1000.0 / frames
+            logger.info("Screen share: {} encodes a {}x{} frame in {} ms.", encoder.ffmpegName, settings.maxWidth, settings.maxHeight,
+                if (ms == Double.MAX_VALUE) "?" else String.format(Locale.ROOT, "%.2f", ms))
+            ms
+        }
+
+    /** `-benchmark`'s `rtime=` (wall seconds of the run), or null. */
+    internal fun benchRealSeconds(output: String): Double? =
+        Regex("""bench: .*rtime=([0-9.]+)s""").find(output)?.groupValues?.get(1)?.toDoubleOrNull()
+
+    /**
+     * The frame rate to share at: 60 where the source keeps up with it and [encoder] measured within
+     * [SIXTY_BUDGET_MS] a frame, and the server allows it ([serverMaxFps], 0 = no cap); else 30.
+     */
+    fun chooseFps(ffmpeg: String, source: Source, encoder: Encoder, maxHeight: Int, serverMaxFps: Int): Int {
+        val cap = if (serverMaxFps > 0) serverMaxFps else 60
+        if (cap < 60 || source == Source.GDIGRAB || source == Source.X11GRAB) return minOf(30, cap)
+        val probe = Settings.forFps(60).limitedTo(0, maxHeight)
+        return if (encodeMsPerFrame(ffmpeg, encoder, probe) <= SIXTY_BUDGET_MS) 60 else 30
     }
 
     /** How one screen is shared: where the picture comes from and what encodes it. */
@@ -429,24 +480,27 @@ object ScreenCapture {
 
     /**
      * Full `FFmpeg` argv capturing [target] with [source], encoding with [encoder], publishing to [publishUrl], with
-     * sound from [audio] when set. With sound, picture and sound both run on the wall clock less [clockBaseMicros]
-     * ([wallClockMicros] taken just before the launch; [ShareAudio.Input.Pipe]'s first sample stands for that instant):
-     * each capture stamps its own frames, so neither waits for the other to start.
+     * sound from [audio] when set. With a [clockBaseMicros] (or sound) every timestamp is the wall clock less that base:
+     * each capture stamps its own frames, so neither input waits for the other to start, and the stream's PTS says
+     * when each frame was captured (see `ShareTimeline`). [ShareAudio.Input.Pipe]'s first sample stands for the wall
+     * clock instant [audioStartMicros].
      */
     fun args(
         ffmpeg: String, source: Source, target: Target, encoder: Encoder, publishUrl: String,
         settings: Settings = Settings(), audio: ShareAudio.Input? = null, clockBaseMicros: Long = 0,
         windowCapture: WindowCapture = WindowCapture(Source.GFXCAPTURE, dupFrames = false),
+        audioStartMicros: Long = clockBaseMicros,
     ): List<String> = buildList {
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
         // A window without sound still carries a silent track: a still window sends no frames, and without any packets
         // the viewers' connection times out and reconnects (a screen keeps sending frames, and skips the audio delay)
         val sound = audio ?: if (target is Window) ShareAudio.Input.Silence else null
-        val video = videoArgs(source, target, encoder, settings, if (sound != null) clockBaseMicros else null, windowCapture)
+        val clocked = sound != null || clockBaseMicros > 0
+        val video = videoArgs(source, target, encoder, settings, if (clocked) clockBaseMicros else null, windowCapture)
         addAll(video.inputs)
         // Inputs first, then everything about the output
-        if (sound != null) audioInput(sound, clockBaseMicros)
+        if (sound != null) audioInput(sound, clockBaseMicros, audioStartMicros)
         addAll(video.output)
         val fps = settings.fps.toString()
         if (sound == null) {
@@ -454,14 +508,17 @@ object ScreenCapture {
         } else {
             if (video.inputCount > 0) addAll(["-map", "0:v:0"])
             addAll(["-map", "${video.inputCount}:a:0"])
-            audioOutput()
         }
+        if (clocked) addAll(["-copyts", "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000"])
+        // The silent track is encoded like any share sound (AAC at 96 kHz)
+        if (sound != null) audioOutput()
         addAll(encoderArgs(encoder, settings))
         // A keyframe every second (a viewer joining waits at most that long) and no B-frames (each one is a frame
         // of delay at the encoder)
         addAll(["-g", fps, "-keyint_min", fps, "-bf", "0"])
         // A window sends frames only as it draws: keyframes by time, so a viewer joining still waits at most a second
-        if (target is Window) addAll(["-force_key_frames", "expr:gte(t,n_forced)"])
+        // (relative to the last one: t is the capture clock, not zero at the start)
+        if (target is Window) addAll(["-force_key_frames", KEYFRAME_EVERY_SECOND])
         val dest = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
         val muxer = publishMuxer(dest)
         addAll(["-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0"])
@@ -581,12 +638,13 @@ object ScreenCapture {
      * inputs already on the shifted wall clock), so `FFmpeg` does not start each input at zero on its own; the picture
      * keeps its exact capture times (millisecond encoder clock, no frame-rate grid to round onto).
      */
-    private fun MutableList<String>.audioInput(audio: ShareAudio.Input, clockBase: Long) {
+    private fun MutableList<String>.audioInput(audio: ShareAudio.Input, clockBase: Long, audioStart: Long) {
         when (audio) {
             is ShareAudio.Input.Pipe -> {
-                // PCM counts its own time from sample 0, which the client lays at the clock base itself; read in 10 ms
-                // packets (raw PCM would come in 85 ms ones, and the muxer would hold the picture back for each)
+                // PCM counts its own time from sample 0, which the client lays at [audioStart]; read in 10 ms packets
+                // (raw PCM would come in 85 ms ones, and the muxer would hold the picture back for each)
                 addAll(["-f", "wav", "-ignore_length", "1", "-max_size", audio.format.tenMillisBytes.toString()])
+                if (audioStart != clockBase) addAll(["-itsoffset", seconds(audioStart - clockBase)])
                 addAll(["-probesize", "32", "-analyzeduration", "0", "-i", audio.path])
             }
 
@@ -602,10 +660,20 @@ object ScreenCapture {
     }
 
     private fun MutableList<String>.audioOutput() {
-        addAll(["-copyts", "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000"])
         addAll(["-c:a", "aac", "-aac_coder", "fast", "-b:a", ShareAudio.AAC_BITRATE])
-        addAll(["-ar", ShareAudio.OUTPUT_RATE.toString(), "-ac", "2"])
+        addAll(["-ar", ShareAudio.AAC_RATE.toString(), "-ac", "2"])
     }
+
+    /** `-force_key_frames`: the first frame, then one a second after the last forced one (any clock origin). */
+    internal const val KEYFRAME_EVERY_SECOND = "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,1))"
+
+    /** Default bitrates (kbps): measured on scrolling text, 4000 -> 6000 lifts x264's SSIM 0.946 -> 0.959. */
+    const val DEFAULT_KBPS_30 = 6_000
+    const val DEFAULT_KBPS_60 = 8_000
+
+    /** Bounds for a server-set bitrate (kbps). */
+    const val MIN_KBPS = 1_000
+    const val MAX_KBPS = 20_000
 
     /** [micros] as `FFmpeg` seconds, exact to the microsecond. */
     internal fun seconds(micros: Long): String =

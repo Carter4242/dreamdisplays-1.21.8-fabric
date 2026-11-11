@@ -71,6 +71,13 @@ object ViewerStatsCommand {
             age,
             hitches(r),
         )
+        // A live screen share: capture on the sharer's PC to presentation in this viewer's game
+        if (r.shareLatencySamples > 0) {
+            ServerMessage.VIEWER_STATS_SHARE_LATENCY.sendTo(
+                sender, r.shareLatencyP50Ms.coerceIn(0, 99_999).toString(), r.shareLatencyP95Ms.coerceIn(0, 99_999).toString(),
+                r.shareLatencySamples.coerceAtMost(99_999).toString(),
+            )
+        }
     }
 
     /** `3/min (gc, worst 180ms)`, or `0/min`: the viewer's playback hitches in the last minute and their top cause. */

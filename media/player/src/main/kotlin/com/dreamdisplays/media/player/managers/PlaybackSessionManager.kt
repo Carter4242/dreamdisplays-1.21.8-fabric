@@ -120,6 +120,10 @@ internal class PlaybackSessionManager(
         @Volatile
         var thread: Thread? = null
 
+        /** A live session's frame timestamps (see [LiveFrameStamps]), while it runs. */
+        @Volatile
+        var liveStamps: LiveFrameStamps? = null
+
         /**
          * True when decoding via in-process libav (only path that supports warm park).
          */
@@ -178,16 +182,20 @@ internal class PlaybackSessionManager(
                 process = null; thread = lavThread; inProcess = true; return
             }
             if (nativePipe != null) {
+                val stamps = if (liveEdge) LiveFrameStamps(debugLabel.substringBefore('/')) else null
                 val args = MediaProcess.videoArgs(
                     ffmpeg, safeUrl, w, h, offsetNanos, hwAccel, MediaProcess.VideoTransport.RAW_NV12, fps,
                     alreadyResolved = true, seekByDecoding = seekByDecoding, dropToFps = dropToFps,
+                    liveStampsPath = stamps?.path,
                 )
+                liveStamps?.close()
+                liveStamps = stamps?.also { it.start() }
                 val vt = nativePipe.start(
                     args = args, w = w, h = h, seekOffsetNanos = offsetNanos, sourceFps = fps,
                     stopFlag = stop, terminated = terminated, getAudioClock = getAudioClock,
                     onFirstFrame = onFirstFrame, getBrightness = getBrightness, onEos = onEos,
                     parkFlag = parkFlag, presentPreview = presentPreview, tolerateLateness = tolerateLateness,
-                    liveEdge = liveEdge,
+                    liveEdge = liveEdge, liveStamps = stamps,
                 ) ?: throw IOException("Native FFmpeg session failed to start")
                 process = null; thread = vt; return
             }
@@ -219,6 +227,8 @@ internal class PlaybackSessionManager(
             MediaProcess.gracefulDestroy(process)
             thread?.let { joinSafely(it) }
             nativePipe?.release()
+            liveStamps?.close()
+            liveStamps = null
         }
     }
 

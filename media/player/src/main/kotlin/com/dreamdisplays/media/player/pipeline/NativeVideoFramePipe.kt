@@ -71,6 +71,10 @@ internal class NativeVideoFramePipe(
     private val outputFormat = FramePixelFormat.RGBA32
     private val surface = FrameSurface(debugLabel, uploaderFactory, outputFormat)
 
+    /** Frames read in this live session so far: the number FFmpeg gives the next one (see [LiveFrameStamps]). */
+    @Volatile
+    private var liveFrames = 0L
+
     @Volatile
     private var activePrebuffer: FramePrebuffer? = null
     private var popoutRgba: ByteBuffer? = null
@@ -148,9 +152,12 @@ internal class NativeVideoFramePipe(
         stopFlag: AtomicBoolean, terminated: AtomicBoolean, getAudioClock: () -> Long, onFirstFrame: () -> Unit,
         getBrightness: () -> Double, onEos: (stderr: String, normalEos: Boolean) -> Unit,
         parkFlag: AtomicBoolean? = null, presentPreview: Boolean = true, tolerateLateness: Boolean = true,
-        liveEdge: Boolean = false,
+        liveEdge: Boolean = false, liveStamps: LiveFrameStamps? = null,
     ): Thread? {
         prepare(w, h, parkFlag)
+        // Live frames are numbered as FFmpeg numbers them, and each one shown is reported with its number
+        liveFrames = 0L
+        surface.onShown = liveStamps?.let { stamps -> { tag: Long, nanos: Long -> stamps.onPresented(tag, nanos) } }
         handle = NativeMedia.videoOpen(args, w, h).takeIf { it != 0L } ?: run {
             logger.error("$debugLabel Native FFmpeg session failed to start.")
             return null
@@ -444,6 +451,7 @@ internal class NativeVideoFramePipe(
             spare.limit(frameSize).position(0)
 
             lastFrameReceivedNanos.set(System.nanoTime())
+            val liveFrame = liveFrames++
 
             val hasLavPts = lav && rawLavPtsNanos != NativeMedia.LAV_NO_PTS_NANOS
             val framePts = if (hasLavPts) {
@@ -505,7 +513,7 @@ internal class NativeVideoFramePipe(
                 armFirstFrameClock()
                 if (MediaPlayer.captureSamples) {
                     feedPopout(spare, w, h, frameSize, metrics)
-                    spare = surface.publish(spare, frameSize)
+                    spare = surface.publish(spare, frameSize, liveFrame)
                     if (MediaPlayer.DEBUG) {
                         MediaPlayer.samplesIn.incrementAndGet(); metrics.recordPublished()
                     }

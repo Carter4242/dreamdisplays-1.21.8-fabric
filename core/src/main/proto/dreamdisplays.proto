@@ -444,6 +444,12 @@ message ViewerReport {
   optional string hitchTopCause = 16;
   // WARNING: a default value decoded when value is missing
   optional int32 worstGapMs = 17;
+  // WARNING: a default value decoded when value is missing
+  optional int32 shareLatencyP50Ms = 18;
+  // WARNING: a default value decoded when value is missing
+  optional int32 shareLatencyP95Ms = 19;
+  // WARNING: a default value decoded when value is missing
+  optional int32 shareLatencySamples = 20;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare'
@@ -676,6 +682,10 @@ message KaraokeClockPing {
   optional int32 seq = 1;
   // WARNING: a default value decoded when value is missing
   optional int64 serverNanos = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int64 clientOffsetNanos = 3;
+  // WARNING: a default value decoded when value is missing
+  optional bool clientOffsetKnown = 4;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong'
@@ -726,6 +736,8 @@ message ScreenShareState {
   optional int32 maxFps = 6;
   // WARNING: a default value decoded when value is missing
   optional int32 maxHeight = 7;
+  // WARNING: a default value decoded when value is missing
+  optional int32 bitrateKbps = 8;
   // WARNING: a default value decoded when value is missing
   optional int64 nonce = 9;
   // WARNING: a default value decoded when value is missing

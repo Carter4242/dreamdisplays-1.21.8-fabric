@@ -53,11 +53,17 @@ data class KaraokeOffsetReport(
     @ProtoNumber(4) val windowMs: Int = 0,
 ) : DreamPacket
 
-/** Server -> client: clock offset probe; the client answers at once with [KaraokeClockPong]. [serverNanos]: send time. */
+/**
+ * Server -> client: clock offset probe; the client answers at once with [KaraokeClockPong]. [serverNanos]: send time.
+ * [clientOffsetNanos] (when [clientOffsetKnown]): the server's current estimate of this client's `System.nanoTime`
+ * minus its own, from earlier exchanges, so the client can read the server's clock (screen share latency stamps).
+ */
 @Serializable
 data class KaraokeClockPing(
     @ProtoNumber(1) val seq: Int = 0,
     @ProtoNumber(2) val serverNanos: Long = 0,
+    @ProtoNumber(3) val clientOffsetNanos: Long = 0,
+    @ProtoNumber(4) val clientOffsetKnown: Boolean = false,
 ) : DreamPacket
 
 /** Client -> server: answer to [KaraokeClockPing], with the client's own receive and send times (`System.nanoTime`). */
