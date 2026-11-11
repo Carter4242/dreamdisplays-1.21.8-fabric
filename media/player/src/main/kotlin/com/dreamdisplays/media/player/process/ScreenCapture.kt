@@ -251,6 +251,8 @@ object ScreenCapture {
         val t0 = System.nanoTime()
         return runCatching {
             val p = ProcessBuilder(args).redirectErrorStream(true).start()
+            // A capture probe dies with the game too (a stuck one would otherwise run on after a crash)
+            CaptureLifetime.adopt(p)
             runCatching { p.outputStream.close() }
             val out = StringBuilder()
             val reader = Thread({

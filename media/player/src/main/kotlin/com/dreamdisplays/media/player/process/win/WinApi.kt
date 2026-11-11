@@ -34,6 +34,10 @@ internal object WinApi {
 
         fun ConnectNamedPipe(pipe: Pointer, overlapped: Pointer?): Boolean
         fun WriteFile(file: Pointer, buffer: ByteArray, bytes: Int, written: IntByReference, overlapped: Pointer?): Boolean
+        fun CreateJobObjectW(attributes: Pointer?, name: WString?): Pointer?
+        fun SetInformationJobObject(job: Pointer, infoClass: Int, info: Pointer, length: Int): Boolean
+        fun AssignProcessToJobObject(job: Pointer, process: Pointer): Boolean
+        fun OpenProcess(access: Int, inherit: Boolean, pid: Int): Pointer?
     }
 
     interface Mmdevapi : StdCallLibrary {

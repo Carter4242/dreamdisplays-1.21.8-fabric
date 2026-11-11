@@ -8,6 +8,7 @@ import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.core.share.ScreenShareCaptureRules
 import com.dreamdisplays.core.share.ScreenShareCaptureRules.StopReason
 import com.dreamdisplays.core.share.ScreenShareServerRules
+import com.dreamdisplays.media.player.process.CaptureLifetime
 import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
@@ -453,7 +454,8 @@ object ScreenShare {
                 stopAudio(r)
                 return null
             }
-            runCatching { ProcessBuilder(args).redirectErrorStream(true).start() }.getOrElse {
+            // Under CaptureLifetime: the capture dies with the game even when the JVM is killed outright
+            runCatching { ProcessBuilder(CaptureLifetime.command(args)).redirectErrorStream(true).start() }.getOrElse {
                 stopAudio(r)
                 fail(r, LiveStreamUrls.redactCredentials(it.message ?: "could not start FFmpeg"))
                 return null

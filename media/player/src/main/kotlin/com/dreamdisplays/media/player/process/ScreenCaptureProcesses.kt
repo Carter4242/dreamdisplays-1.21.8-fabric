@@ -6,8 +6,9 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Every screen-capture `FFmpeg` this JVM started, so none can outlive its share: [kill] ends one at once with its whole
- * process tree (`destroyForcibly`, no graceful quit), [reap] is the watchdog that kills any that should not run, and a
- * JVM shutdown hook kills whatever is left when the game quits.
+ * process tree (`destroyForcibly`, no graceful quit), [reap] is the watchdog that kills any that should not run, a
+ * JVM shutdown hook kills whatever is left when the game quits, and [CaptureLifetime] kills them when the JVM dies
+ * without running that hook.
  */
 object ScreenCaptureProcesses {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -21,9 +22,10 @@ object ScreenCaptureProcesses {
         }.onFailure { logger.warn("Could not register the screen capture shutdown hook: {}", it.toString()) }
     }
 
-    /** Starts tracking [proc]; call right after it started. */
+    /** Starts tracking [proc] and ties it to this game's lifetime ([CaptureLifetime.adopt]); call right after it started. */
     fun register(proc: Process) {
         tracked += proc
+        CaptureLifetime.adopt(proc)
     }
 
     /** Capture processes started here that are still running. Cheap (no process-table walk): fine once per frame. */
