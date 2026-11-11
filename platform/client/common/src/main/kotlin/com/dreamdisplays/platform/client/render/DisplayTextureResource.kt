@@ -147,13 +147,11 @@ class DisplayTextureResource(private val uuid: UUID) {
     }
 
     private fun textureDimensions(blockWidth: Int, blockHeight: Int, qualityHeight: Int): Pair<Int, Int> {
-        val width = ((blockWidth / blockHeight.toDouble()) * qualityHeight).toInt()
-        val dims = width.toEvenDimension() to qualityHeight.toEvenDimension()
+        // Capped to a size every GPU can allocate; the decoder reads these dimensions back, so it scales to match
+        val dims = TextureSizing.dimensions(blockWidth, blockHeight, qualityHeight)
         // The alpha decode applies the same cap to the same size, so the two always agree
         return if (alphaMode) AlphaVideo.capDims(dims.first, dims.second) else dims
     }
-
-    private fun Int.toEvenDimension(): Int = (this and 1.inv()).coerceAtLeast(2)
 
     /**
      * Releases any existing textures (current and pending) and allocates fresh GPU textures and a
