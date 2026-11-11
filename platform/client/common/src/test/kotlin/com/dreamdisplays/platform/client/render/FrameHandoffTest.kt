@@ -109,4 +109,39 @@ class FrameHandoffTest {
         repeat(16) { assertEquals(7.toByte(), next.buffer.get(it)) }
         handoff.release()
     }
+
+    @Test
+    fun twoProducersAtOnceNeverShareABuffer() {
+        val handoff = FrameHandoff<String>()
+        handoff.publish(frame(1), 16, "a")
+        // A (an old player still stopping) reserves a buffer and is descheduled while copying
+        val a = assertNotNull(handoff.reserve())
+        // B (its successor) keeps publishing meanwhile: it must never be handed A's buffer
+        repeat(6) { i ->
+            val b = handoff.reserve() ?: return@repeat
+            assertTrue(b.slot != a.slot, "producer B was handed the buffer producer A is writing")
+            assertTrue(handoff.commit(b, handoff.fill(b, frame(10 + i), 16), "b$i"))
+        }
+        assertTrue(handoff.commit(a, handoff.fill(a, frame(9), 16), "a2"))
+        val newest = assertNotNull(handoff.borrowNewest(0))
+        assertEquals("a2", newest.meta)
+        repeat(16) { assertEquals(9.toByte(), newest.buffer.get(it)) }
+        handoff.release()
+    }
+
+    @Test
+    fun aFrameBeingWrittenWhenClearedIsNeverPublished() {
+        val handoff = FrameHandoff<String>()
+        val before = assertNotNull(handoff.reserve())
+        val filled = handoff.fill(before, frame(4), 16)
+        handoff.clear()
+        // A producer starting after the clear does not get the buffer still being written
+        val after = assertNotNull(handoff.reserve())
+        assertTrue(after.slot != before.slot)
+        assertFalse(handoff.commit(before, filled, "stale"))
+        assertNull(handoff.borrowNewest(0))
+        assertTrue(handoff.commit(after, handoff.fill(after, frame(5), 16), "fresh"))
+        assertEquals("fresh", handoff.borrowNewest(0)?.meta)
+        handoff.release()
+    }
 }

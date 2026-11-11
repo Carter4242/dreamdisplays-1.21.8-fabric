@@ -189,6 +189,10 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         videoStarted = false
         screen.mediaError = null
         screen.timelineFollower.reset()
+        // The old player's decoder runs on for a moment after stop(): it must not feed the popouts and menu preview
+        // the new player is about to feed (two producers on one frame handoff)
+        oldPlayer?.setPopoutSink(null)
+        oldPlayer?.setPreviewSink(null)
         oldPlayer?.stop()
 
         screen.onVideoSwapped(videoUrl, lang, awaitTimeline = !seamless)

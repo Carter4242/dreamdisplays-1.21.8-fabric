@@ -17,24 +17,41 @@ class FrameHandoff<M : Any> {
     private val pool = arrayOfNulls<ByteBuffer>(SLOTS)
     private var newest = -1
     private var borrowed = -1
-    private var writing = -1
+
+    /** Slots a producer is copying into (one bit each): never handed to another producer or the consumer. */
+    private var writing = 0
     private var newestMeta: M? = null
     private var version = 0L
 
+    /** Bumped by [clear]: a producer that reserved its slot before it may not publish. */
+    private var epoch = 0L
+
+    /** A slot reserved by one producer for one frame. */
+    internal class Reservation(val slot: Int, val epoch: Long)
+
     /**
      * Copies [size] bytes of [src] (from its position; [src]'s position and limit are left as they were) and publishes
-     * them as the newest frame. Producer thread. Returns false when [src] holds fewer than [size] bytes.
+     * them as the newest frame. Producer thread; several producers may call it at once (an old player still stopping
+     * while its successor starts). Returns false when [src] holds fewer than [size] bytes, when every buffer is in use
+     * (that frame is skipped), or when [clear] ran while it was copying.
      */
     fun publish(src: ByteBuffer, size: Int, meta: M): Boolean {
         if (size <= 0 || src.remaining() < size) return false
-        // Two producers at once (an old player still stopping) can leave no free slot: that frame is skipped
-        val slot = synchronized(lock) {
-            val free = (0 until SLOTS).firstOrNull { it != newest && it != borrowed && it != writing }
-                ?: return false
-            writing = free
-            free
-        }
-        var buf = pool[slot]
+        val reservation = reserve() ?: return false
+        return commit(reservation, fill(reservation, src, size), meta)
+    }
+
+    /** Reserves a buffer that is not the newest, not borrowed and not being written by another producer. */
+    internal fun reserve(): Reservation? = synchronized(lock) {
+        val free = (0 until SLOTS).firstOrNull { it != newest && it != borrowed && (writing and (1 shl it)) == 0 }
+            ?: return null
+        writing = writing or (1 shl free)
+        Reservation(free, epoch)
+    }
+
+    /** Copies the frame into the reserved buffer (allocating it when missing or too small); no lock held. */
+    internal fun fill(reservation: Reservation, src: ByteBuffer, size: Int): ByteBuffer {
+        var buf = synchronized(lock) { pool[reservation.slot] }
         if (buf == null || buf.capacity() < size) {
             buf = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
         }
@@ -43,15 +60,18 @@ class FrameHandoff<M : Any> {
         view.limit(view.position() + size)
         buf.put(view)
         buf.flip()
-        synchronized(lock) {
-            if (writing != slot) return false // Cleared meanwhile
-            writing = -1
-            pool[slot] = buf
-            newest = slot
-            newestMeta = meta
-            version++
-        }
-        return true
+        return buf
+    }
+
+    /** Publishes the filled buffer unless [clear] ran since [reservation] was taken. */
+    internal fun commit(reservation: Reservation, buf: ByteBuffer, meta: M): Boolean = synchronized(lock) {
+        writing = writing and (1 shl reservation.slot).inv()
+        if (reservation.epoch != epoch) return false // Cleared meanwhile: a picture from before must not come back
+        pool[reservation.slot] = buf
+        newest = reservation.slot
+        newestMeta = meta
+        version++
+        true
     }
 
     /**
@@ -79,15 +99,16 @@ class FrameHandoff<M : Any> {
 
     /**
      * Forgets every held frame: nothing published so far can be borrowed again. A frame still borrowed stays valid
-     * until released; a frame being written when this runs is dropped. Any thread.
+     * until released; a frame being written when this runs is dropped, and its buffer stays out of reach of new
+     * producers until that copy is done. Any thread.
      */
     fun clear() {
         synchronized(lock) {
             for (i in 0 until SLOTS) if (i != borrowed) pool[i] = null
             newest = -1
-            writing = -1
             newestMeta = null
             version++
+            epoch++
         }
     }
 
