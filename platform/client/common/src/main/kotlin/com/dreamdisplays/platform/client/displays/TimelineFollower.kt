@@ -386,7 +386,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             val tolerance = if (held) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
             // A singer's preloaded queue entry is held at the start, while their timeline runs the karaoke lead ahead:
             // keep the warm hold and jump the lead in place once it plays, rather than snap to a cold start
-            if (warmAdopted && karaokeLeadMs > 0 && drift > tolerance && drift <= tolerance + karaokeLeadMs) {
+            if (warmAdopted && heldForLead(drift, tolerance.toLong(), karaokeLeadMs.toLong(), estimator.rate)) {
                 jumpToLead = true
                 return
             }
@@ -781,6 +781,14 @@ internal fun heldEndBoundMs(periodMs: Long, confirmedEndMs: Long): Long =
  */
 internal fun endedRightAfterRestart(restartFromMs: Long, endedAtMs: Long, probeMs: Long): Boolean =
     endedAtMs < 0L || endedAtMs <= restartFromMs + probeMs
+
+/**
+ * Whether a singer's warm-held player, paused [driftMs] behind its timeline (content ms, as paused drift is), is only
+ * the karaoke lead [leadMs] (real ms; as much content as it covers at [rate]) behind, give or take [toleranceMs]: it
+ * keeps its warm hold and jumps the lead once it plays.
+ */
+internal fun heldForLead(driftMs: Long, toleranceMs: Long, leadMs: Long, rate: Double): Boolean =
+    leadMs > 0L && driftMs > toleranceMs && driftMs <= toleranceMs + (leadMs * rate).roundToLong()
 
 /** How late (ms, never negative) a scheduled start due at [dueNanos] runs at [nowNanos]: time the video already played. */
 internal fun startLatenessMs(dueNanos: Long, nowNanos: Long): Double = ((nowNanos - dueNanos) / 1_000_000.0).coerceAtLeast(0.0)
