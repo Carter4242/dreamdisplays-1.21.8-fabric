@@ -233,6 +233,8 @@ internal class VideoFramePipe(
         // short replay / cached sources that can fill the prebuffer and EOF before live video is ready.
         if (!terminated.get() && !stopFlag.get() && normalEos) {
             prebuffer?.finish()
+            // The end is reported below: let the queued tail play first (see awaitTailPlayed)
+            prebuffer?.awaitTailPlayed { parked?.get() == true }
         } else {
             prebuffer?.abort()
         }

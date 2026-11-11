@@ -129,6 +129,30 @@ internal class FramePrebuffer(
     }
 
     /**
+     * Producer side at end of file: plays out what is still queued (a cushion of up to [PREBUFFER_MS], never started
+     * if the file was too short to fill it) and returns once it has gone out, so the end is reported with the last
+     * frames shown and heard instead of that much early. Gives up on teardown, a seek flush, [interrupt] (a park or
+     * a pending seek), or after a bound sized to the queue. True when the queue played out.
+     */
+    fun awaitTailPlayed(interrupt: () -> Boolean = { false }): Boolean {
+        seekStartGate = null
+        primed = true
+        val budgetNs = ((queue.size + 2L) * frameNs * 2L + TAIL_SLACK_NANOS).coerceAtMost(MAX_TAIL_WAIT_NANOS)
+        val deadline = System.nanoTime() + budgetNs
+        while (alive() && !flushRequested && consumer?.isAlive != false) {
+            if (queue.isEmpty() && pending.get() == null) return true
+            if (runCatching(interrupt).getOrDefault(true) || System.nanoTime() >= deadline) return false
+            try {
+                Thread.sleep(TAIL_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return false
+    }
+
+    /**
      * Called from the control thread the moment a seek is requested: drops queued pre-seek frames and unblocks both a
      * stuck producer and consumer.
      */
@@ -395,6 +419,9 @@ internal class FramePrebuffer(
         private const val BEHIND_WARN_NANOS = 80_000_000L
         private const val PREBUFFER_MS = 400L
         private const val PRIME_DEADLINE_NANOS = 800_000_000L
+        private const val TAIL_POLL_MS = 5L
+        private const val TAIL_SLACK_NANOS = 500_000_000L
+        private const val MAX_TAIL_WAIT_NANOS = 3_000_000_000L
 
         private const val OUTSIDE_QUEUE_FRAMES = 2 + FrameSurface.MAX_DISPLAY_QUEUE
         private const val MIN_BUDGET_CAPACITY = 6

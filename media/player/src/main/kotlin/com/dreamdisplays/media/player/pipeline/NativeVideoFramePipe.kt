@@ -408,6 +408,15 @@ internal class NativeVideoFramePipe(
                     // End of file: report it now, but keep the session open for a moment so the loop restart
                     // (or a sync seek) that usually follows can seek in place instead of reopening the stream.
                     eofReported = true
+                    // The demuxer is done, the picture and sound are not: the last frames are still queued
+                    prebuffer?.awaitTailPlayed { pendingLavSeek != null || parked?.get() == true }
+                    if (terminated.get() || stopFlag.get()) break
+                    if (pendingLavSeek != null) {
+                        // Seeked (a sync correction, a loop) while the tail played: that is no end at all
+                        eofReported = false
+                        spare.clear()
+                        continue
+                    }
                     onEos(NativeMedia.lavError(lavHandle), true)
                     if (awaitSeekAfterEof(terminated, stopFlag)) {
                         spare.clear()
@@ -514,6 +523,8 @@ internal class NativeVideoFramePipe(
         synchronized(lavSeekMonitor) { readerDone = true }
         if (!terminated.get() && !stopFlag.get() && rc == NativeMedia.READ_EOF) {
             prebuffer?.finish()
+            // Reported below: let the queued tail play first (see awaitTailPlayed)
+            if (!eofReported) prebuffer?.awaitTailPlayed { parked?.get() == true }
         } else {
             prebuffer?.abort()
         }
