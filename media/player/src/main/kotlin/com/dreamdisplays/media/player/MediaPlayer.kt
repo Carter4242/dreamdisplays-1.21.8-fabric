@@ -881,8 +881,13 @@ class MediaPlayer(
 
             if (terminated.get()) return
 
+            // A re-resolve (retry, stall, live quality change) keeps the dub and subtitles this viewer picked; the
+            // resolver itself only knows the language the player was created with
+            val previous = media
+            val streamSet = MediaStreamSelector.keepAudioTrack(prepared.streamSet, previous?.streams?.currentAudio?.audioIdentity)
+            val keepSubtitles = if (previous != null && subtitles.enabled) subtitles.currentLang else null
             val resolved = ResolvedMedia(
-                streams = prepared.streamSet,
+                streams = streamSet,
                 live = prepared.isLive,
                 seekable = prepared.isSeekable,
                 durationNanos = prepared.durationNanos,
@@ -891,6 +896,7 @@ class MediaPlayer(
             media = resolved
             host.videoContentAspect = prepared.streamSet.currentVideo.contentAspect()
             subtitles.reset(prepared.availableSubtitles)
+            keepSubtitles?.let(subtitles::select)
 
             if (DEBUG) {
                 logger.debug(
@@ -906,7 +912,7 @@ class MediaPlayer(
             val primed = primedStartPositionNanos.takeIf { it >= 0L } ?: 0L
             val initialOffset = if (liveStream) 0L else replayBootstrap?.positionNanos ?: primed
 
-            safeExecute { if (!terminated.get()) startStreams(prepared.streamSet, initialOffset) }
+            safeExecute { if (!terminated.get()) startStreams(streamSet, initialOffset) }
         }.onSuccess {
             loadRetry.reset()
             // A load that worked after an automatic retry clears whatever the earlier attempt showed

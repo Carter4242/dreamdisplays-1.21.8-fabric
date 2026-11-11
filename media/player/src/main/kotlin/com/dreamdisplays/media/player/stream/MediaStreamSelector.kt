@@ -49,6 +49,17 @@ object MediaStreamSelector {
      *
      * @return the updated set, or null when there's no matching track, or it's already current.
      */
+    /**
+     * [fresh] (a new resolve of the same media) playing the audio track [identity] (language or name) when it has one,
+     * so a re-resolve keeps the dub the viewer picked; otherwise [fresh] unchanged.
+     */
+    internal fun keepAudioTrack(fresh: ActiveStreams, identity: String?): ActiveStreams {
+        if (identity == null || fresh.currentAudio.audioIdentity == identity) return fresh
+        val match = fresh.availableAudio.filter { !it.type.hasVideo && it.audioIdentity == identity }
+            .maxByOrNull { it.bitrate ?: 0 } ?: return fresh
+        return switchAudioTrack(fresh, match.url) ?: fresh
+    }
+
     internal fun switchAudioTrack(streams: ActiveStreams, targetUrl: String): ActiveStreams? {
         val best = streams.availableAudio.firstOrNull { it.url == targetUrl }
             ?.takeIf { it.url != streams.currentAudio.url } ?: return null
