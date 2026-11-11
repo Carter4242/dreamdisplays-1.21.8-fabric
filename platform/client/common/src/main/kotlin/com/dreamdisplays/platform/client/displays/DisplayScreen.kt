@@ -1721,16 +1721,7 @@ class DisplayScreen(
             ownShareMuted = ownShare
             applyEffectiveVolume()
         }
-        val hidden = privatePictureHidden()
-        // Once when the picture goes stale, if any copy of it is up (texture drawn, popout, menu preview)
-        if (hidden && !privatePictureWasHidden && ScreenSharePrivacy.isPrivateStream(videoUrl) &&
-            (hasEverRendered || isPopoutActive || previewFrameCache != null)
-        ) {
-            // A stall (a Wi-Fi hitch, a still window) is not the end of the share: the viewer's fullscreen / PiP stay
-            // open, blank; the share's end changes the display's URL, which closes them
-            dropPrivatePicture("live stream not delivering", closeSurfaces = false)
-        }
-        privatePictureWasHidden = hidden
+        tickPrivatePicture()
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
         tickPolicyGain()
@@ -1770,6 +1761,23 @@ class DisplayScreen(
                 environment = probeEnvironment(plane, distance),
             ),
         )
+    }
+
+    /**
+     * Drops a private stream's picture once it goes stale. Every tick, also with no world (a proxy's configuration
+     * phase), where the rest of [tick] does not run but a popout window still shows the picture.
+     */
+    internal fun tickPrivatePicture() {
+        val hidden = privatePictureHidden()
+        // Once when the picture goes stale, if any copy of it is up (texture drawn, popout, menu preview)
+        if (hidden && !privatePictureWasHidden && ScreenSharePrivacy.isPrivateStream(videoUrl) &&
+            (hasEverRendered || isPopoutActive || previewFrameCache != null)
+        ) {
+            // A stall (a Wi-Fi hitch, a still window) is not the end of the share: the viewer's fullscreen / PiP stay
+            // open, blank; the share's end changes the display's URL, which closes them
+            dropPrivatePicture("live stream not delivering", closeSurfaces = false)
+        }
+        privatePictureWasHidden = hidden
     }
 
     private fun probeEnvironment(plane: SourcePlane, distance: Double): AcousticEnvironment {

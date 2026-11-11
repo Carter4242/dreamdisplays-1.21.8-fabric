@@ -92,6 +92,9 @@ object ClientTickManager {
             }
             wasInMultiplayer = true
         } else {
+            // No world (a proxy's configuration phase, loading): displays are not ticked, but an ended share's picture
+            // must still go from a popout window
+            DisplayRegistry.getScreens().forEach { it.tickPrivatePicture() }
             val screen = MinecraftScreenUtil.currentScreen(minecraft)
             val leftForGood = screen is TitleScreen || screen is JoinMultiplayerScreen
             if (wasInMultiplayer && leftForGood) {
