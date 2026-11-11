@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.runtime.security
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.util.net.DreamHttpClient
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
@@ -82,6 +83,10 @@ object MediaHostGuard {
 
     /** Like [isAllowed], but tells a refused host apart from one whose name just failed to resolve. */
     fun verdict(url: String): HostVerdict {
+        if (!hasAllowedScheme(url)) {
+            logger.warn("Blocked media URL with an unsupported scheme: ${url.take(40)}")
+            return HostVerdict.NON_PUBLIC
+        }
         if (allowPrivate || isTrustedLocal(url)) return HostVerdict.PUBLIC
         val host = hostOf(url) ?: run {
             logger.warn("Blocked media URL with no parseable host: ${url.take(120)}")
@@ -186,6 +191,16 @@ object MediaHostGuard {
         }.onFailure { e ->
             logger.debug("Redirect probe failed for ${url.take(120)}: ${e.message}.")
         }
+    }
+
+    /**
+     * Media is only ever fetched over `http(s)` or a live relay protocol. Anything else (`file:` above all: a
+     * `file://host/share` URL is an SMB connection on Windows, leaking the user's NTLM hash) is refused outright.
+     */
+    internal fun hasAllowedScheme(url: String): Boolean {
+        val trimmed = url.trim()
+        return trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true) ||
+                LiveStreamUrls.isLive(trimmed)
     }
 
     private fun isYouTubeCdn(url: String): Boolean =

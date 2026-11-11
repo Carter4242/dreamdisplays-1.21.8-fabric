@@ -86,6 +86,9 @@ internal object YtDlpOutputParser {
     }
 
     private fun isSupportedProtocol(protocol: String?, url: String): Boolean {
+        // Every stream is fetched over HTTP(S). A page yt-dlp extracts can name anything (a `file://host/share`
+        // link opens an SMB connection on Windows), so the URL's own scheme decides, never the protocol label.
+        if (!url.startsWith("https://", ignoreCase = true) && !url.startsWith("http://", ignoreCase = true)) return false
         if (protocol.isNullOrBlank()) return true
         if (protocol.startsWith("http")) return true
         if ("m3u8" in protocol) return true

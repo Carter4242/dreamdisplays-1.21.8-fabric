@@ -10,6 +10,7 @@ import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.media.player.MediaPlayer
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.nativebridge.NativeMedia
+import com.dreamdisplays.media.player.nativebridge.lavMayOpen
 import com.dreamdisplays.media.player.pipeline.*
 import com.dreamdisplays.media.player.process.AlphaVideo
 import com.dreamdisplays.media.player.process.FFmpegBinary
@@ -163,7 +164,7 @@ internal class PlaybackSessionManager(
                 process = vp; thread = vt; return
             }
             val lavThread = if (nativePipe != null && NativeMedia.lavAvailable && !seekByDecoding && !liveEdge &&
-                !GoogleVideoRangeProxy.needsProxy(safeUrl) && lavServes(tempo)
+                !GoogleVideoRangeProxy.needsProxy(safeUrl) && lavServes(tempo) && lavMayOpen(safeUrl)
             ) {
                 nativePipe.startInProcess(
                     url = safeUrl, w = w, h = h, seekOffsetNanos = offsetNanos,
