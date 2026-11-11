@@ -193,14 +193,15 @@ object DirectStreamResolver : MediaResolverService {
         if (kind == CustomMediaKind.DASH) {
             throw DreamMediaException.NotFound("DASH manifests need the extractor chain, not the direct player.")
         }
-        val durationNanos = if (probe.acceptsRanges) {
-            DirectMediaDuration.probe(probe.finalUrl, CustomMediaUrls.extensionOf(originalUrl), probe.contentLength)
-        } else {
-            null
-        }
+        val header = DirectMediaDuration.probeHeader(
+            probe.finalUrl, CustomMediaUrls.extensionOf(originalUrl), probe.contentType, probe.contentLength,
+            wantDuration = probe.acceptsRanges,
+        )
+        val durationNanos = header.durationNanos
         logger.debug(
-            "Direct file {}: type={} length={} ranges={} duration={}ns.",
+            "Direct file {}: type={} length={} ranges={} duration={}ns video={}.",
             originalUrl.take(120), probe.contentType, probe.contentLength, probe.acceptsRanges, durationNanos,
+            header.video,
         )
         // A seekable file of known size can be played through the client's read-ahead buffer
         val length = probe.contentLength
@@ -211,7 +212,7 @@ object DirectStreamResolver : MediaResolverService {
             )
         }
         return ResolvedMedia(
-            streams = [muxedStream(probe.finalUrl)],
+            streams = [muxedStream(probe.finalUrl, video = header.video)],
             metadata = metadataFor(originalUrl, durationNanos, probe.fileName),
             // A file the server will not range-seek behaves like a stream: it can only play forward
             isLive = false,
@@ -313,10 +314,13 @@ object DirectStreamResolver : MediaResolverService {
         return video + audio
     }
 
-    private fun muxedStream(url: String, seekByDecoding: Boolean = false): MediaStream = MediaStream(
+    private fun muxedStream(
+        url: String, seekByDecoding: Boolean = false, video: MatroskaTracks.Video? = null,
+    ): MediaStream = MediaStream(
         url = url,
         type = MediaStreamType.VIDEO_AUDIO,
-        codec = null,
+        // Only an alpha track needs its codec named: it picks the decoder that keeps the alpha channel
+        codec = video?.takeIf { it.hasAlpha }?.codec,
         width = null,
         height = null,
         fps = null,
@@ -324,6 +328,7 @@ object DirectStreamResolver : MediaResolverService {
         audioTrackName = null,
         audioTrackLang = null,
         seekByDecoding = seekByDecoding,
+        hasAlpha = video?.hasAlpha == true,
     )
 
     private fun metadataFor(url: String, durationNanos: Long?, fileName: String?): MediaMetadata =

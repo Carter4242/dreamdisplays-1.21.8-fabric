@@ -46,6 +46,40 @@ object MediaProcess {
 
         /** Headerless NV12 rawvideo for the native pipeline, pinned to BT.709 so it can convert with a fixed matrix. */
         RAW_NV12,
+
+        /**
+         * Headerless straight-alpha RGBA rawvideo, parsed by the JVM [VideoFramePipe]. Only for sources with an alpha
+         * channel (see [AlphaVideo]); the letterbox bars are transparent.
+         */
+        RAW_RGBA,
+    }
+
+    /** Builds the FFmpeg process for an alpha source: RGBA frames, decoded by [decoder] (null = FFmpeg's default). */
+    @Throws(IOException::class)
+    fun buildAlphaVideo(
+        ffmpeg: String, url: String, w: Int, h: Int, offsetNanos: Long, decoder: String?, fps: Double,
+        seekByDecoding: Boolean = false,
+    ): Process = ProcessBuilder(alphaVideoArgs(ffmpeg, url, w, h, offsetNanos, decoder, fps, seekByDecoding)).start()
+
+    /**
+     * Full FFmpeg argv for an alpha source. Software decode only: FFmpeg's own VP8 / VP9 decoders (and every hardware
+     * one) drop the alpha side channel, so [decoder] forces libvpx for those, as an input option.
+     */
+    internal fun alphaVideoArgs(
+        ffmpeg: String, url: String, w: Int, h: Int, offsetNanos: Long, decoder: String?, fps: Double,
+        seekByDecoding: Boolean = false,
+    ): List<String> {
+        val fit = "min($w/iw\\,$h/ih)"
+        val vf = "scale=w=min($w\\,iw*$fit):h=min($h\\,ih*$fit):flags=bilinear," +
+                "pad=w=$w:h=$h:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0,setsar=1,format=rgba"
+        return baseCommand(
+            ffmpeg, url, offsetNanos, HwAccelBackend.NONE, alreadyResolved = true, seekByDecoding = seekByDecoding,
+            decoder = decoder,
+        ).apply {
+            addAll(["-an", "-vf", vf])
+            addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
+            addAll(["-f", "rawvideo", "-"])
+        }
     }
 
     /** Builds FFmpeg process to read video frames from [url] at offset, scaled and cropped to [w]x[h]. */
@@ -170,6 +204,7 @@ object MediaProcess {
         hwAccel: HwAccelBackend,
         alreadyResolved: Boolean = false,
         seekByDecoding: Boolean = false,
+        decoder: String? = null,
     ): MutableList<String> {
         val safeUrl = if (alreadyResolved) url else MediaHostGuard.resolveSafeUrl(url)
         // This container's demuxer cannot be trusted with a jump, so the best available seek is a
@@ -177,7 +212,7 @@ object MediaProcess {
         val trimmed =
             if (seekByDecoding && offsetNanos > 0) HlsSeekPlaylist.trim(safeUrl, offsetNanos) else null
         val input = if (trimmed == null) GoogleVideoRangeProxy.wrap(safeUrl) else safeUrl
-        return inputCommand(ffmpeg, input, offsetNanos, hwAccel, seekByDecoding, trimmed)
+        return inputCommand(ffmpeg, input, offsetNanos, hwAccel, seekByDecoding, trimmed, decoder)
     }
 
     /** Input half of `FFmpeg` invocation with playlist trim already decided. */
@@ -188,6 +223,7 @@ object MediaProcess {
         hwAccel: HwAccelBackend,
         seekByDecoding: Boolean,
         trimmed: HlsSeekPlaylist.Trimmed?,
+        decoder: String? = null,
     ): MutableList<String> {
         return mutableListOf<String>().apply {
             add(ffmpeg)
@@ -221,6 +257,8 @@ object MediaProcess {
             // in-place seek (see native/lav/src/session.rs, which dropped the same flag for the
             // same reason).
             addAll(["-probesize", "1M", "-analyzeduration", "1000000"])
+            // A decoder choice is an input option, so it has to come before -i
+            if (decoder != null) addAll(["-c:v", decoder])
             when {
                 trimmed != null -> {
                     // Forcing the demuxer is required: FFmpeg will not probe a playlist out of a

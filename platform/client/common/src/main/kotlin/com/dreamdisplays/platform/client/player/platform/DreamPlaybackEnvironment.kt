@@ -15,6 +15,7 @@ import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.render.DisplayYuvRenderTypes
 import com.dreamdisplays.platform.client.render.GpuFrameUploader
+import com.dreamdisplays.platform.client.render.ShaderPackCompat
 import net.minecraft.client.Minecraft
 
 /**
@@ -31,6 +32,10 @@ object DreamPlaybackEnvironment : PlaybackEnvironment {
         override val isPremium: Boolean get() = ClientStateManager.isPremium
 
         override val gpuYuvActive: Boolean get() = DisplayYuvRenderTypes.active
+
+        // Under a shader pack an alpha video plays opaque, on exactly the path every other video takes there: the
+        // pack also draws displays inside its own level pass, where a translucent one has never been tested.
+        override val transparentVideoAllowed: Boolean get() = !ShaderPackCompat.isShaderPackActive
     }
 
     override val renderExecutor: RenderExecutor =

@@ -132,7 +132,14 @@ class MediaPlayer(
         uploaderFactory = env.uploaderFactory,
         gpuYuvActive = env.config.gpuYuvActive,
         audioStage = audioStage,
+        transparencyAllowed = { env.config.transparentVideoAllowed },
     )
+
+    /**
+     * True when the live video is decoded with its alpha channel (straight-alpha RGBA frames): the host must then draw
+     * it from an RGBA texture with blending. Changes only when a new video channel starts.
+     */
+    val videoHasAlpha: Boolean get() = sessionManager.outputAlpha
 
     @Volatile
     private var controlThread: Thread? = null

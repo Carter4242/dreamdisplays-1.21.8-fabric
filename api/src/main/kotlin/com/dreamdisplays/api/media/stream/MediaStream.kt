@@ -38,6 +38,14 @@ data class MediaStream(
 
     /** True when seeking requires decoding from start instead of seeking via demuxer. */
     val seekByDecoding: Boolean = false,
+
+    /**
+     * True when the video carries an alpha channel (e.g. WebM VP8 / VP9 with `AlphaMode`), so the player may decode it
+     * with transparency.
+     *
+     * @since 1.10.x
+     */
+    val hasAlpha: Boolean = false,
 ) {
     /**
      * Key that identifies this audio track across separate resolves of the same video. Prefers [audioTrackLang]
