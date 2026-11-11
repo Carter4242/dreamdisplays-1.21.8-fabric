@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.managers
 
+import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.platform.server.PaperServer.Companion.config
 import com.dreamdisplays.platform.server.PaperServer.Companion.getInstance
@@ -209,7 +210,7 @@ object DisplayManager {
             inRegion = WorldGuardRegions.isProtectedTerritory(display.pos1),
             isRegionMember = { WorldGuardRegions.isRegionMember(it, display.pos1) },
             depth = display.depth, conforming = display.conforming,
-            customData = display.customData.toMap(),
+            customData = DisplayPolicies.wireCustomData(display),
         )
     }
 

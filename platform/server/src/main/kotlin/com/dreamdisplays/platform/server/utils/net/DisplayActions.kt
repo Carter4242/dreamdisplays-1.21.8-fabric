@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
@@ -267,7 +268,7 @@ object DisplayActions {
                 inRegion = WorldGuardRegions.isProtectedTerritory(display.pos1),
                 isRegionMember = { WorldGuardRegions.isRegionMember(it, display.pos1) },
                 depth = display.depth, conforming = display.conforming,
-                customData = display.customData.toMap(),
+                customData = DisplayPolicies.wireCustomData(display),
             )
         }
     }

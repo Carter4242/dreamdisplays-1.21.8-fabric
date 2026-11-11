@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server
 
+import com.dreamdisplays.core.display.policy.DisplayPolicy
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.shared.policy.CustomMediaPolicy
@@ -25,6 +26,8 @@ data class SettingsSection(
     val display: DisplayConfig = DisplayConfig(),
     val fullscreen: FullscreenConfig = FullscreenConfig(),
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
+    /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
+    val policy: DisplayPolicy = DisplayPolicy.EMPTY,
 ) {
     // Reports
     val webhookUrl get() = reports.webhook_url
@@ -269,6 +272,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             allowed_hosts = stringList(t, "custom_media.allowed_hosts"),
             blocked_hosts = stringList(t, "custom_media.blocked_hosts"),
         ),
+        policy = parsePolicy(t),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
             allow_forced = t?.getBoolean("fullscreen.allow_forced") ?: true,
@@ -330,6 +334,39 @@ private fun TomlTable?.intOr(key: String, default: Int): Int {
     table.getLong(key)?.toInt()?.let { return it }
     table.getDouble(key)?.toInt()?.let { return it }
     return default
+}
+
+private fun TomlTable?.numberOrNull(key: String): Number? = this?.get(key) as? Number
+
+private fun TomlTable?.boolOrNull(key: String): Boolean? = this?.get(key) as? Boolean
+
+/**
+ * Reads the `[policy.*]` tables. Absent keys stay null (= client default); a wrongly typed value is
+ * ignored the same way rather than failing the whole config.
+ */
+internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
+    val sync = DisplayPolicy.Sync(
+        enabled = t.boolOrNull("policy.sync.enabled"),
+        deadBandMs = t.numberOrNull("policy.sync.dead_band_ms")?.toInt(),
+        maxRatePct = t.numberOrNull("policy.sync.max_rate_pct")?.toDouble(),
+        seekThresholdMs = t.numberOrNull("policy.sync.seek_threshold_ms")?.toInt(),
+        seekCooldownMs = t.numberOrNull("policy.sync.seek_cooldown_ms")?.toInt(),
+    )
+    val audio = DisplayPolicy.Audio(
+        radiusBlocks = t.numberOrNull("policy.audio.radius_blocks")?.toDouble(),
+        falloff = (t?.get("policy.audio.falloff") as? String)?.trim()?.uppercase()
+            ?.let { name -> DisplayPolicy.Falloff.entries.firstOrNull { it.name == name } },
+        startVolume = t.numberOrNull("policy.audio.start_volume")?.toDouble(),
+        maxVolume = t.numberOrNull("policy.audio.max_volume")?.toDouble(),
+    )
+    val visibility = DisplayPolicy.Visibility(t.numberOrNull("policy.visibility.max_distance_blocks")?.toDouble())
+    val quality = DisplayPolicy.Quality(t.numberOrNull("policy.quality.max_height")?.toInt())
+    return DisplayPolicy(
+        sync = sync.takeIf { it != DisplayPolicy.Sync() },
+        audio = audio.takeIf { it != DisplayPolicy.Audio() },
+        visibility = visibility.takeIf { it != DisplayPolicy.Visibility() },
+        quality = quality.takeIf { it != DisplayPolicy.Quality() },
+    )
 }
 
 private fun stringList(t: TomlTable?, key: String): List<String> =

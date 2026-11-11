@@ -8,6 +8,7 @@ import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.metrics.TelemetryMetrics
 import com.dreamdisplays.platform.server.playback.*
+import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
 import com.dreamdisplays.platform.server.registrar.ChannelRegistrar
 import com.dreamdisplays.platform.server.registrar.CommandRegistrar
@@ -70,6 +71,13 @@ class PaperServer : JavaPlugin() {
         )
         storage.createSchema()
         DisplayManager.register(storage.loadAllPaperDisplays())
+        DisplayPolicies.defaults = { Companion.config.settings.policy }
+        DisplayPolicies.onOverrideChanged = { display ->
+            (display as? PaperDisplayData)?.let {
+                Scheduler.runAsync { storage.saveDisplay(it) }
+                DisplayManager.broadcastUpdate(it)
+            }
+        }
 
         WatchPartyManager.init(PaperPlaybackTransport)
         TimelineManager.init(PaperPlaybackTransport)

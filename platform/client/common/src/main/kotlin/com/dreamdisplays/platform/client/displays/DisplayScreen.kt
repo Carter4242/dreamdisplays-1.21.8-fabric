@@ -17,6 +17,8 @@ import com.dreamdisplays.api.media.audio.AcousticEnvironment
 import com.dreamdisplays.api.media.audio.AcousticQuality
 import com.dreamdisplays.api.media.audio.SourceAcousticState
 import com.dreamdisplays.api.media.audio.SourcePlane
+import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.core.display.policy.SyncSettings
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
@@ -480,6 +482,31 @@ class DisplayScreen(
     /** Data addons keep on this display, as the server last sent it. */
     var customData: Map<String, ByteArray> = emptyMap()
 
+    private var policyBytes: ByteArray? = null
+
+    /**
+     * Server-controlled behaviour for this display ([DisplayPolicy]), with the client defaults filled in for
+     * everything the server leaves unset. Re-read only when the server sends different policy bytes.
+     */
+    @Volatile
+    var policy: DisplayPolicy = DisplayPolicy.CLIENT_DEFAULTS
+        private set
+
+    /** [policy]'s sync section, resolved and clamped. */
+    @Volatile
+    var syncSettings: SyncSettings = SyncSettings.DEFAULT
+        private set
+
+    private fun updatePolicy(data: Map<String, ByteArray>) {
+        val bytes = data[DisplayPolicy.KEY]
+        if (bytes != null && policyBytes != null && bytes.contentEquals(policyBytes)) return
+        if (bytes == null && policyBytes == null && policy === DisplayPolicy.CLIENT_DEFAULTS) return
+        policyBytes = bytes
+        val effective = (DisplayPolicy.decode(bytes) ?: DisplayPolicy.EMPTY).mergedOver(DisplayPolicy.CLIENT_DEFAULTS)
+        policy = effective
+        syncSettings = SyncSettings.from(effective.sync)
+    }
+
     /** Anchor block position of the display (cached). */
     val pos: BlockPos; get() = blockPos ?: BlockPos(x, y, z).also { blockPos = it }
 
@@ -635,6 +662,7 @@ class DisplayScreen(
     fun updateData(packet: DisplayInfo) {
         virtual = packet.virtual
         customData = acceptedCustomData(packet)
+        updatePolicy(customData)
         x = packet.x
         y = packet.y
         z = packet.z

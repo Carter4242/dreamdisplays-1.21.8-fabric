@@ -7,6 +7,7 @@ import com.dreamdisplays.platform.server.managers.VanillaSelectionVisualizer
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.meta.Updater
 import com.dreamdisplays.platform.server.playback.*
+import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.platform.server.proxy.VanillaProxyBridge
 import com.dreamdisplays.platform.server.api.VanillaServerApi
 import com.dreamdisplays.platform.server.storage.StorageBackend
@@ -34,6 +35,7 @@ object VanillaBootstrap {
         VanillaServerState.storage = storage
         storage.createSchema()
         DisplayManager.register(storage.loadAllVanillaDisplays())
+        DisplayPolicies.defaults = { VanillaServerState.config.settings.policy }
         VanillaPlaybackTransport.bind(server)
         WatchPartyManager.init(VanillaPlaybackTransport)
         TimelineManager.init(VanillaPlaybackTransport)

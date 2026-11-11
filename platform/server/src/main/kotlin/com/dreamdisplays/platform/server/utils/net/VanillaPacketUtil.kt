@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.utils.net
 
+import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.packets.ClearCache
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
@@ -37,7 +38,7 @@ object VanillaPacketUtil {
                 scheduledAction = display.scheduledAction?.wire ?: -1,
                 access = display.access.wire,
                 depth = display.depth, conforming = display.conforming,
-                customData = display.customData.toMap(),
+                customData = DisplayPolicies.wireCustomData(display),
             ),
         )
     }

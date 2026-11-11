@@ -8,7 +8,10 @@ dependencies {
     api(project(":shared"))
     api(libs.kotlinxSerializationProtobuf)
     compileOnly(libs.slf4jApi)
+    // Display policy JSON; every runtime that loads it (server plugin, client mods) already ships this
+    compileOnly(libs.kotlinxSerializationJson)
     testImplementation(libs.slf4jApi)
+    testImplementation(libs.kotlinxSerializationJson)
 }
 
 // Regenerates the committed .proto schema artifact from the @Serializable wire classes.

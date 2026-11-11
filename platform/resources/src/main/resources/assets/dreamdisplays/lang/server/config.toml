@@ -44,6 +44,16 @@ default_volume = 50
 # Max displays one player may own at once. 0 or less means no limit
 max_displays_per_player = 0
 
+# Display policy: server-controlled client behaviour, sent with every display.
+# Anything left unset uses the client's own default. A display can override any of these for itself.
+[policy.sync]
+# Playback sync for Synced / Broadcast displays and watch parties
+# enabled = true            # false = no gentle rate correction (large drift is still fixed by seeking)
+# dead_band_ms = 40         # drift below this is left alone
+# max_rate_pct = 1.0        # largest speed change used to close drift (1.0 = 0.99x to 1.01x)
+# seek_threshold_ms = 1500  # drift above this is fixed by seeking instead
+# seek_cooldown_ms = 8000   # minimum time between corrective seeks
+
 [custom_media]
 # Custom videos: links players paste themselves (direct .mp4 / .m3u8 files, file hosts,
 # and any other site the resolver can open)
