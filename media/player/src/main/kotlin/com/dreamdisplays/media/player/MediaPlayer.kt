@@ -60,6 +60,11 @@ class MediaPlayer(
     private val audioStage: AudioDspStage? = null,
     /** Where the stream first opens (ns, -1 = the start): the shared clock's position, known before the player was made. */
     initialStartNanos: Long = -1L,
+    /**
+     * A display that follows a shared clock whose position is not known yet: the first open of a seekable stream waits
+     * for it ([primeStartPosition], a seek) rather than open at the start and be heard and seen there (see [FirstStartHold]).
+     */
+    holdFirstStartForTimeline: Boolean = false,
 ) {
     private val debugLabel = "${host.reportId}/${Integer.toHexString(System.identityHashCode(this))}"
     private val terminated = AtomicBoolean(false)
@@ -142,6 +147,14 @@ class MediaPlayer(
     /** Set once a session's streams were actually opened (not skipped for a pause): see [coldResumeOffsetNanos]. */
     @Volatile
     private var streamsEverStarted = false
+
+    /** Whether the first open may still wait for the shared clock's position ([holdFirstStartForTimeline]). */
+    @Volatile
+    private var startHeldForTimeline = holdFirstStartForTimeline
+
+    /** The resolved streams of a first open waiting for the shared clock's position; control thread. */
+    @Volatile
+    private var heldStart: ActiveStreams? = null
 
     /** Playback speed the viewer asked for (see [setPlaybackSpeed]); live / unseekable media plays at 1 anyway. */
     @Volatile
@@ -326,6 +339,8 @@ class MediaPlayer(
             return@safeExecute
         }
         if (sessionManager.isPlaying) return@safeExecute
+        // The first open waits for the shared clock's position: it plays from there once that is known
+        if (heldStart != null) return@safeExecute
         val ss = streams ?: return@safeExecute
         noteHitch(FailureStages.RESUME, if (liveStream) "re_resolve" else "cold_restart", "resumed without a warm session")
         if (liveStream) {
@@ -439,9 +454,13 @@ class MediaPlayer(
      */
     fun getCurrentTime(): Long {
         sessionManager.parkedPositionNanos()?.let { return it }
-        if (!isReady || !sessionManager.isPlaying) return clock.originNanos
+        if (!isReady || !sessionManager.isPlaying) return idlePositionNanos()
         return clock.currentTime()
     }
+
+    /** Where a player that is not playing stands: where it will first open, before it ever did; else the clock's origin. */
+    private fun idlePositionNanos(): Long =
+        FirstStartHold.idlePositionNanos(streamsEverStarted, liveStream, primedStartPositionNanos, clock.originNanos)
 
     /**
      * Position to save / resume from.
@@ -458,7 +477,7 @@ class MediaPlayer(
      */
     fun getSyncPositionNanos(): Long {
         sessionManager.parkedPositionNanos()?.let { return it }
-        if (!isReady || !sessionManager.isPlaying) return clock.originNanos
+        if (!isReady || !sessionManager.isPlaying) return idlePositionNanos()
         val heard = sessionManager.currentPacingNanos()
         return if (heard >= 0L) heard else clock.currentTime()
     }
@@ -531,7 +550,21 @@ class MediaPlayer(
 
     /** Primes the first live start offset before initialization opens the decoder. */
     fun primeStartPosition(nanos: Long) {
-        if (nanos >= 0L && !sessionManager.isPlaying) primedStartPositionNanos = nanos
+        if (nanos < 0L || sessionManager.isPlaying) return
+        primedStartPositionNanos = nanos
+        // A first open waiting for this position goes ahead now, there
+        if (heldStart != null) safeExecute(::releaseHeldStart)
+    }
+
+    /** Opens the held first start ([heldStart]) at the primed position (else the clock's origin), if still held. */
+    private fun releaseHeldStart() {
+        startHeldForTimeline = false
+        val ss = heldStart ?: return
+        heldStart = null
+        if (terminated.get()) return
+        val offset = primedStartPositionNanos.takeIf { it >= 0L } ?: clock.originNanos
+        logger.debug("$debugLabel First open released at ${ms(offset)}ms.")
+        startStreams(ss, offset)
     }
 
     /** `true` when this player resumed from a cached replay bootstrap (already positioned at the saved time). */
@@ -929,10 +962,28 @@ class MediaPlayer(
                 stats.start()
             }
 
-            val primed = primedStartPositionNanos.takeIf { it >= 0L } ?: 0L
-            val initialOffset = if (liveStream) 0L else replayBootstrap?.positionNanos ?: primed
-
-            safeExecute { if (!terminated.get()) startStreams(streamSet, initialOffset) }
+            safeExecute {
+                if (terminated.get()) return@safeExecute
+                // Read here, on the control thread: a position primed while the media resolved counts
+                val primed = primedStartPositionNanos.takeIf { it >= 0L }
+                if (FirstStartHold.holds(
+                        startHeldForTimeline, streamsEverStarted, liveStream, seekable, primed != null,
+                        replayBootstrap != null,
+                    )
+                ) {
+                    // A display on a shared clock whose position is not known yet (its timeline is a packet away):
+                    // opened at the start, it would be seen and heard there before the timeline moved it
+                    heldStart = streamSet
+                    lifecycle = PlayerState.Paused
+                    logger.debug("$debugLabel First open held until the shared clock's position is known.")
+                    RETRY_SCHEDULER.schedule(
+                        { safeExecute(::releaseHeldStart) }, FirstStartHold.MAX_HOLD_MS, TimeUnit.MILLISECONDS,
+                    )
+                    return@safeExecute
+                }
+                startHeldForTimeline = false
+                startStreams(streamSet, if (liveStream) 0L else replayBootstrap?.positionNanos ?: primed ?: 0L)
+            }
         }.onSuccess {
             loadRetry.reset()
             // A load that worked after an automatic retry clears whatever the earlier attempt showed
@@ -1580,6 +1631,12 @@ class MediaPlayer(
         // A retry or re-resolve still pending opens at the primed position: a seek made meanwhile moves it there; so
         // does a seek before the stream was ever opened (its first play opens there)
         if ((lifecycle == PlayerState.Restarting || !streamsEverStarted) && !liveStream) primedStartPositionNanos = nanos
+        // A first open waiting for the shared clock's position: this is it
+        if (heldStart != null) {
+            releaseHeldStart()
+            if (fire) events.onSeek()
+            return
+        }
         val ss = streams ?: return
         if (warmingUp) {
             // Still opening a paused stream to hold it ready: open it at the new position instead
@@ -1796,3 +1853,24 @@ internal fun coldResumeOffsetNanos(ended: Boolean, everStarted: Boolean, primedN
         !everStarted && primedNanos >= 0L -> primedNanos
         else -> originNanos
     }
+
+/**
+ * A display's first stream open while the shared clock's position is unknown (see `MediaPlayer`'s
+ * `holdFirstStartForTimeline`): a display back in range is described a packet before its timeline, and a cached resolve
+ * can open the stream in between, at the video's start, seen and heard there until the timeline arrives and moves it.
+ */
+internal object FirstStartHold {
+    /** Opens anyway after this long without a position (an older server, a timeline that never comes). */
+    const val MAX_HOLD_MS = 5_000L
+
+    /**
+     * Whether the first open waits: asked for ([requested]), nothing opened yet ([everStarted]), a seekable VOD (a live
+     * or unseekable stream opens where it can), and no start known yet ([startKnown]; a replay [bootstrap] is one).
+     */
+    fun holds(requested: Boolean, everStarted: Boolean, live: Boolean, seekable: Boolean, startKnown: Boolean, bootstrap: Boolean): Boolean =
+        requested && !everStarted && !live && seekable && !startKnown && !bootstrap
+
+    /** Where a player that is not playing stands: its primed first open before it ever opened, else [originNanos]. */
+    fun idlePositionNanos(everStarted: Boolean, live: Boolean, primedNanos: Long, originNanos: Long): Long =
+        if (!everStarted && !live && primedNanos >= 0L) primedNanos else originNanos
+}

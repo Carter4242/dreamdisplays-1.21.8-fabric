@@ -208,6 +208,9 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         val newPlayer = preloaded?.also { it.attachAudioStage(audioStage) } ?: MediaPlayer(
             videoUrl, lang, DisplayPlaybackHost(screen), DreamPlaybackEnvironment,
             screen.takeReplayBootstrap(videoUrl), audioStage, initialStartNanos = primedStart,
+            // On a shared clock, its first open waits for the clock's position (the timeline right behind the
+            // description), never opening at the start to be seen and heard there first
+            holdFirstStartForTimeline = screen.followsServerTimeline,
         )
         player = newPlayer
         // Before the stream opens, so the first session already plays at the display's speed
