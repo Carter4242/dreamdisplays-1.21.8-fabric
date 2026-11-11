@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.direct
 
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.io.IOException
@@ -211,10 +212,13 @@ internal object DirectMediaDuration {
         val response = DreamHttpClient.executeLimited(
             url,
             maxBytes = window,
-            options = DreamHttpClient.RequestOptions(
-                headers = DreamHttpClient.headersOf("Range" to "bytes=$first-$last"),
-                connectTimeoutMs = 10_000L,
-                readTimeoutMs = 15_000L,
+            options = MediaHostGuard.guarded(
+                url,
+                DreamHttpClient.RequestOptions(
+                    headers = DreamHttpClient.headersOf("Range" to "bytes=$first-$last"),
+                    connectTimeoutMs = 10_000L,
+                    readTimeoutMs = 15_000L,
+                ),
             ),
         )
         if (response.code == 429 || response.code in 500..599) throw IOException("HTTP ${response.code}")

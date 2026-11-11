@@ -1,6 +1,7 @@
 package com.dreamdisplays.media.player.process
 
 import com.dreamdisplays.media.player.util.daemon
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import kotlinx.io.IOException
 import org.slf4j.LoggerFactory
@@ -60,7 +61,7 @@ internal class HlsAudioFeeder(
         try {
             while (alive()) {
                 val playlist = try {
-                    parse(DreamHttpClient.readText(playlistUrl, PLAYLIST_OPTIONS))
+                    parse(DreamHttpClient.readText(playlistUrl, MediaHostGuard.guarded(playlistUrl, PLAYLIST_OPTIONS)))
                 } catch (e: IOException) {
                     if (!alive()) return
                     if (++playlistFailures > MAX_PLAYLIST_FAILURES) {
@@ -98,8 +99,9 @@ internal class HlsAudioFeeder(
                     }
                     val newInit = segment.initUrl != pipedInitUrl
                     val bytes = try {
-                        if (newInit) initBytes = segment.initUrl?.let { DreamHttpClient.readBytes(it, SEGMENT_OPTIONS) }
-                        DreamHttpClient.readBytes(segment.url, SEGMENT_OPTIONS)
+                        // Segment and init URLs come from the playlist's body, so each is re-checked on its own
+                        if (newInit) initBytes = segment.initUrl?.let { DreamHttpClient.readBytes(it, MediaHostGuard.guarded(it, SEGMENT_OPTIONS)) }
+                        DreamHttpClient.readBytes(segment.url, MediaHostGuard.guarded(segment.url, SEGMENT_OPTIONS))
                     } catch (e: IOException) {
                         if (!alive()) return
                         if (++segmentFailures > MAX_SEGMENT_FAILURES) {

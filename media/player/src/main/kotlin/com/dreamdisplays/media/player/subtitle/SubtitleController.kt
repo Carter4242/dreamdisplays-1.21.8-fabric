@@ -2,6 +2,7 @@ package com.dreamdisplays.media.player.subtitle
 
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.media.player.util.daemon
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ExecutorService
@@ -54,7 +55,7 @@ internal class SubtitleController(private val debugLabel: String, private val is
         val requestId = ++fetchId
         EXECUTOR.submit {
             val cues = runCatching {
-                WebVttParser.parse(DreamHttpClient.readText(track.url))
+                WebVttParser.parse(DreamHttpClient.readText(track.url, MediaHostGuard.guarded(track.url)))
             }.onFailure { e ->
                 logger.debug("$debugLabel subtitle fetch failed for lang=$wanted: ${e.message}.")
             }.getOrDefault([])

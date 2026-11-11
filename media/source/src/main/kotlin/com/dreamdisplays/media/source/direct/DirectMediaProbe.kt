@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.direct
 
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.net.URLDecoder
@@ -140,7 +141,7 @@ internal object DirectMediaProbe {
     }
 
     private fun head(url: String): Response = runCatching<Response> {
-        val response = DreamHttpClient.execute(url, requestOptions("HEAD"))
+        val response = DreamHttpClient.execute(url, requestOptions(url, "HEAD"))
         if (!response.isSuccessful) Response.Status(response.code) else Response.Ok(response.toResult())
     }.getOrElse {
         logger.debug("HEAD probe failed for {}: {}.", url.take(120), it.message)
@@ -151,7 +152,7 @@ internal object DirectMediaProbe {
         val response = DreamHttpClient.executeLimited(
             url,
             maxBytes = SNIFF_BYTES,
-            options = requestOptions("GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
+            options = requestOptions(url, "GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
         )
         if (!response.isSuccessful) return@runCatching Response.Status(response.code)
         val contentRange = response.headerValue("content-range")
@@ -169,7 +170,7 @@ internal object DirectMediaProbe {
 
     private fun sniff(url: String, contentLength: Long?): Sniff = runCatching<Sniff> {
         val response = DreamHttpClient.executeLimited(
-            url, maxBytes = SNIFF_BYTES, options = requestOptions("GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
+            url, maxBytes = SNIFF_BYTES, options = requestOptions(url, "GET", range = "bytes=0-${SNIFF_BYTES - 1}"),
         )
         when {
             response.isSuccessful -> magicContentType(response.body)?.let { Sniff.Recognized(it) }
@@ -221,14 +222,17 @@ internal object DirectMediaProbe {
                 (text.startsWith("<?xml") && head.contains("<MPD", ignoreCase = true))
     }
 
-    private fun requestOptions(method: String, range: String? = null) = DreamHttpClient.RequestOptions(
-        method = method,
-        headers = range?.let { DreamHttpClient.headersOf("Range" to it) } ?: emptyMap(),
-        connectTimeoutMs = CONNECT_TIMEOUT_MS,
-        readTimeoutMs = READ_TIMEOUT_MS,
-        // The caller already redirect-resolved the URL through the SSRF guard; do not let OkHttp
-        // silently follow a fresh redirect to an unvalidated (possibly internal) host.
-        followRedirects = false,
+    private fun requestOptions(url: String, method: String, range: String? = null) = MediaHostGuard.guarded(
+        url,
+        DreamHttpClient.RequestOptions(
+            method = method,
+            headers = range?.let { DreamHttpClient.headersOf("Range" to it) } ?: emptyMap(),
+            connectTimeoutMs = CONNECT_TIMEOUT_MS,
+            readTimeoutMs = READ_TIMEOUT_MS,
+            // The caller already redirect-resolved the URL through the SSRF guard; do not let OkHttp
+            // silently follow a fresh redirect to an unvalidated (possibly internal) host.
+            followRedirects = false,
+        ),
     )
 
     private fun DreamHttpClient.HttpResponse.toResult(

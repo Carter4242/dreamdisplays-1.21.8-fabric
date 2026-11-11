@@ -10,6 +10,7 @@ import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.util.AsyncMemo
 import com.dreamdisplays.util.DreamCoroutines
 import com.dreamdisplays.util.net.DreamHttpClient
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import com.mojang.blaze3d.platform.NativeImage
@@ -305,16 +306,20 @@ object Thumbnails {
 
     private fun fetch(url: String): ByteArray? {
         return try {
+            // Thumbnail URLs come from the server and from extracted pages, so they get the media fetches' guard
             val response = DreamHttpClient.execute(
                 url,
-                DreamHttpClient.RequestOptions(
-                    headers = DreamHttpClient.headersOf(
-                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-                        "Accept" to "image/jpeg,image/png,image/webp",
-                        *listOfNotNull(refererFor(url)?.let { "Referer" to it }).toTypedArray(),
+                MediaHostGuard.guarded(
+                    url,
+                    DreamHttpClient.RequestOptions(
+                        headers = DreamHttpClient.headersOf(
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                            "Accept" to "image/jpeg,image/png,image/webp",
+                            *listOfNotNull(refererFor(url)?.let { "Referer" to it }).toTypedArray(),
+                        ),
+                        connectTimeoutMs = 8_000,
+                        readTimeoutMs = 15_000,
                     ),
-                    connectTimeoutMs = 8_000,
-                    readTimeoutMs = 15_000,
                 ),
             )
             if (response.code != 200) {

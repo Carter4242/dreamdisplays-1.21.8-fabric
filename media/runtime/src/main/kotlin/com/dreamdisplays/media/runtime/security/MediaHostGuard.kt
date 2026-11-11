@@ -115,6 +115,27 @@ object MediaHostGuard {
         return HostVerdict.PUBLIC
     }
 
+    /**
+     * Refuses a connection to a non-public address. Applied by [DreamHttpClient] to the address each connection
+     * actually reached, so it also covers what [verdict] cannot see: redirect hops, and a host that resolved to a
+     * public address for the check and to a private one for the fetch (DNS rebinding).
+     */
+    val publicAddressesOnly = DreamHttpClient.AddressPolicy { host, address ->
+        if (!allowPrivate && isNonPublic(address)) {
+            throw HostRefusedException("Refusing to connect to non-public address ${address.hostAddress} (host=$host).")
+        }
+    }
+
+    /**
+     * [options] for fetching media [url] on the JVM: restricted to [publicAddressesOnly], unless the guard is off or
+     * [url] is one of this client's own loopback endpoints.
+     */
+    fun guarded(
+        url: String,
+        options: DreamHttpClient.RequestOptions = DreamHttpClient.RequestOptions(),
+    ): DreamHttpClient.RequestOptions =
+        if (allowPrivate || isTrustedLocal(url)) options else options.copy(addressPolicy = publicAddressesOnly)
+
     /** Forgets what is known about [url] and its host, so the next check probes for real. */
     fun invalidate(url: String) {
         resolvedUrls.invalidate(url)
@@ -153,6 +174,7 @@ object MediaHostGuard {
         var hops = 0
         while (hops < maxRedirects) {
             val peek = peekRedirectLocation(current)
+            (peek.exceptionOrNull() as? HostRefusedException)?.let { throw it }
             val location = peek.getOrNull()
             if (location == null) {
                 // A walk cut short by a network error is only a best guess (the link may well
@@ -182,10 +204,13 @@ object MediaHostGuard {
         return runCatching {
             DreamHttpClient.peekRedirectLocation(
                 url.trim(),
-                DreamHttpClient.RequestOptions(
-                    headers = DreamHttpClient.headersOf("Range" to "bytes=0-0"),
-                    connectTimeoutMs = 8_000,
-                    readTimeoutMs = 10_000,
+                guarded(
+                    url,
+                    DreamHttpClient.RequestOptions(
+                        headers = DreamHttpClient.headersOf("Range" to "bytes=0-0"),
+                        connectTimeoutMs = 8_000,
+                        readTimeoutMs = 10_000,
+                    ),
                 ),
             )
         }.onFailure { e ->

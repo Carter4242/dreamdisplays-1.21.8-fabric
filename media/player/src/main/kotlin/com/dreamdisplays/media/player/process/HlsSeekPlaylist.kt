@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.net.URI
@@ -124,7 +125,7 @@ internal object HlsSeekPlaylist {
             DreamHttpClient.executeLimited(
                 url,
                 maxBytes = MAX_PLAYLIST_BYTES,
-                options = DreamHttpClient.RequestOptions(readTimeoutMs = 10_000L, callTimeoutMs = 12_000L),
+                options = MediaHostGuard.guarded(url, DreamHttpClient.RequestOptions(readTimeoutMs = 10_000L, callTimeoutMs = 12_000L)),
             ).bodyString()
         }.getOrElse {
             logger.debug("Could not read {} for a trimmed seek: {}.", url.take(80), it.message)

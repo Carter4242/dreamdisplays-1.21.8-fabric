@@ -2,6 +2,7 @@ package com.dreamdisplays.util.net
 
 import kotlinx.io.IOException
 import com.dreamdisplays.shared.policy.MediaHosts
+import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,6 +10,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.slf4j.LoggerFactory
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
@@ -58,6 +60,16 @@ object DreamHttpClient {
         .retryOnConnectionFailure(true)
         .build()
 
+    /**
+     * Decides whether a request may talk to [InetAddress]es [host] resolved to; throws an [IOException] to refuse.
+     * Checked twice: on the name's lookup (so nothing is dialed), and on the address each connection really reached
+     * (redirect hops, IP-literal hosts, which skip the lookup, and a name that re-resolves between check and use).
+     */
+    fun interface AddressPolicy {
+        @Throws(IOException::class)
+        fun check(host: String, address: InetAddress)
+    }
+
     data class RequestOptions(
         val method: String = "GET",
         val headers: Map<String, List<String>> = emptyMap(),
@@ -69,6 +81,8 @@ object DreamHttpClient {
         val callTimeoutMs: Long = 0L,
         val followRedirects: Boolean = true,
         val proxyUrl: String? = null,
+        /** Vets every address this request connects to, redirect hops included; null connects anywhere. */
+        val addressPolicy: AddressPolicy? = null,
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -86,6 +100,7 @@ object DreamHttpClient {
             if (!body.contentEquals(other.body)) return false
             if (contentType != other.contentType) return false
             if (proxyUrl != other.proxyUrl) return false
+            if (addressPolicy != other.addressPolicy) return false
 
             return true
         }
@@ -101,6 +116,7 @@ object DreamHttpClient {
             result = 31 * result + (body?.contentHashCode() ?: 0)
             result = 31 * result + contentType.hashCode()
             result = 31 * result + proxyUrl.hashCode()
+            result = 31 * result + addressPolicy.hashCode()
             return result
         }
     }
@@ -273,6 +289,20 @@ object DreamHttpClient {
             .writeTimeout(options.writeTimeoutMs, TimeUnit.MILLISECONDS)
         if (options.callTimeoutMs > 0L) builder.callTimeout(options.callTimeoutMs, TimeUnit.MILLISECONDS)
         proxyFor(options.proxyUrl)?.let(builder::proxy)
+        options.addressPolicy?.let { policy ->
+            builder.dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    Dns.SYSTEM.lookup(hostname).onEach { policy.check(hostname, it) }
+            })
+            builder.addNetworkInterceptor { chain ->
+                // Behind a proxy the socket reaches the proxy, which resolves the target itself
+                val route = chain.connection()?.route()
+                if (route != null && route.proxy.type() == Proxy.Type.DIRECT) {
+                    policy.check(chain.request().url.host, route.socketAddress.address)
+                }
+                chain.proceed(chain.request())
+            }
+        }
         return builder.build()
     }
 

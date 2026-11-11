@@ -295,7 +295,7 @@ object DirectStreamResolver : MediaResolverService {
         DreamHttpClient.executeLimited(
             url,
             maxBytes = MAX_PLAYLIST_BYTES,
-            options = DreamHttpClient.RequestOptions(readTimeoutMs = 10_000L, callTimeoutMs = 12_000L),
+            options = MediaHostGuard.guarded(url, DreamHttpClient.RequestOptions(readTimeoutMs = 10_000L, callTimeoutMs = 12_000L)),
         ).bodyString()
     }.getOrNull()
 
