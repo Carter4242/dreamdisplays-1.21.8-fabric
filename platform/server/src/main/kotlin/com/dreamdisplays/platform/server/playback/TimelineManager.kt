@@ -248,7 +248,7 @@ object TimelineManager {
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */
     fun sendCurrent(display: DisplayData, playerId: UUID) {
         val timeline = ensureTimeline(display) ?: return
-        transport.sendTo(playerId, timeline.toSync(display.id, display.mode, transport.nowMs()))
+        transport.sendTo(playerId, syncPacket(display, timeline, transport.nowMs()))
     }
 
     /** Re-initializes the clock after a base-mode change and broadcasts the result. */
@@ -271,9 +271,10 @@ object TimelineManager {
 
     /**
      * Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused until every viewer has the
-     * new video ready, for [START_HOLD_MS] at most.
+     * new video ready, for [START_HOLD_MS] at most. [readyAtStart]: players already holding the new video ready at 0
+     * (the queue's preloads), so a start does not wait for them to say so again; when that is everyone it is instant.
      */
-    fun onVideoChanged(display: DisplayData) {
+    fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList()) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
         val now = transport.nowMs()
@@ -283,8 +284,15 @@ object TimelineManager {
         timelines[display.id] = fresh
         // What clients held ready belongs to the old video
         ReadinessTracker.forgetDisplay(display.id)
+        readyAtStart.forEach { ReadinessTracker.markReady(display.id, it, 0L) }
         startWhenReady(display, now + START_HOLD_MS)
     }
+
+    /** The authoritative timeline of [displayId], or null when it has none (`LOCAL`, watch party, unknown). */
+    fun timelineOf(displayId: UUID): Timeline? = timelines[displayId]
+
+    /** True while [displayId] sits in a start hold (paused, about to start by itself). */
+    fun isHolding(displayId: UUID): Boolean = startHolds.containsKey(displayId)
 
     /**
      * Applies a client-reported media duration for [display]'s current video.
@@ -405,10 +413,13 @@ object TimelineManager {
         }
     }
 
+    /** The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`). */
+    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now)
+
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()
         lastBroadcast[display.id] = now
-        val sync = timeline.toSync(display.id, display.mode, now)
+        val sync = syncPacket(display, timeline, now)
         transport.broadcast(display, sync)
         val extra = extraReceivers(display.id)
         if (extra.isEmpty()) return

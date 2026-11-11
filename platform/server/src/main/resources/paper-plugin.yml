@@ -87,3 +87,5 @@ permissions:
     default: op
   dreamdisplays.speed:
     default: op
+  dreamdisplays.queue:
+    default: op

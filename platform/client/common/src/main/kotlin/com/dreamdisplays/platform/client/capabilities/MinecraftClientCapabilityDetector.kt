@@ -71,6 +71,7 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
             timeZoneOffsetMinutes = safeInt { ZoneId.systemDefault().rules.getOffset(Instant.now()).totalSeconds / 60 },
             supportsFullscreenPrepare = true,
             supportsReadiness = true,
+            supportsQueue = true,
         )
     }
 

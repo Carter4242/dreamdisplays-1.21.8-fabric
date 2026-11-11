@@ -304,6 +304,12 @@ class MediaPlayer(
      */
     fun canPark(): Boolean = isReady && sessionManager.canPark()
 
+    /**
+     * Installs the acoustics stage on a player built without one: a queue item preloaded in the background gets its
+     * display's stage only when it is adopted, so it never feeds the display's DSP while the current video plays.
+     */
+    fun attachAudioStage(stage: AudioDspStage?) = sessionManager.setAudioStage(stage)
+
     /** Parks the player warm while its display sits out of render distance. */
     fun park() = safeExecute {
         watchdog.stop()

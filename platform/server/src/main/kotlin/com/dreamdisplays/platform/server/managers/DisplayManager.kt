@@ -22,6 +22,7 @@ import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.playback.ScheduledPlaybackManager
+import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.ServerMessage
@@ -121,6 +122,7 @@ object DisplayManager {
             WatchPartyManager.remove(display.id)
             FullscreenBroadcastManager.onDisplayRemoved(display.id)
             PipPinManager.onDisplayRemoved(display.id)
+            QueueManager.onDisplayRemoved(display.id)
             ScheduledPlaybackManager.onDisplayRemoved(display.id)
             delete(display)
             ServerApiHost.current?.removed(display)
@@ -289,6 +291,7 @@ object DisplayManager {
         WatchPartyManager.remove(displayData.id)
         FullscreenBroadcastManager.onDisplayRemoved(displayData.id)
         PipPinManager.onDisplayRemoved(displayData.id)
+        QueueManager.onDisplayRemoved(displayData.id)
         displays.remove(displayData.id)
         proximityIndex.forgetDisplay(displayData.id)
         ServerApiHost.current?.removed(displayData)
@@ -441,6 +444,7 @@ object DisplayManager {
         WatchPartyManager.remove(data.id)
         FullscreenBroadcastManager.onDisplayRemoved(data.id)
         PipPinManager.onDisplayRemoved(data.id)
+        QueueManager.onDisplayRemoved(data.id)
         ServerCoroutines.io.launch { VanillaServerState.storage?.deleteDisplay(data) }
         if (receivers.isNotEmpty()) VanillaPacketUtil.sendDelete(receivers, data.id)
         ServerApiHost.current?.removed(data)

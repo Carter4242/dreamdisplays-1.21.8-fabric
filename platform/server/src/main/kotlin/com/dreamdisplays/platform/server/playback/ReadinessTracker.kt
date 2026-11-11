@@ -6,6 +6,7 @@ import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import com.dreamdisplays.shared.playback.ReadinessRoster
 import com.dreamdisplays.shared.playback.ReadinessState
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -19,12 +20,14 @@ import java.util.concurrent.CopyOnWriteArrayList
  * - [viewersOf]: whom a start of a display waits for;
  * - [waitingFor]: which of them are not yet ready at a position (empty = start now);
  * - [leadMs]: how far ahead to anchor the start;
- * - [addListener]: hear when a report changes, to re-check [waitingFor].
+ * - [addListener]: hear when a report changes, to re-check [waitingFor];
+ * - [markReady]: vouch for a client (e.g. it preloaded the next video), so a start need not wait for its report.
  * Starting itself goes through [TimelineManager.startWhenReady].
  */
 object ReadinessTracker {
     private val roster = ReadinessRoster()
     private val listeners = CopyOnWriteArrayList<(UUID) -> Unit>()
+    private val latencyMs = ConcurrentHashMap<UUID, Int>()
 
     /** Largest scheduled-start lead in ms (0 = start on receipt); the platform points this at `display.start_lead_max_ms`. */
     var startLeadMaxMs: () -> Long = { 150L }
@@ -34,8 +37,17 @@ object ReadinessTracker {
 
     /** Applies a client's report and tells the listeners. */
     fun onReport(playerId: UUID, packet: DisplayReadiness) {
+        latencyMs[playerId] = packet.latencyMs
         roster.report(packet.id, playerId, ReadinessState.fromWire(packet.state), packet.positionMs, packet.latencyMs)
         listeners.forEach { it(packet.id) }
+    }
+
+    /**
+     * Records that [playerId] holds [displayId] ready at [positionMs] without a report from it, because the caller
+     * knows better (the queue: the client preloaded the video that is about to become the display's).
+     */
+    fun markReady(displayId: UUID, playerId: UUID, positionMs: Long) {
+        roster.report(displayId, playerId, ReadinessState.READY, positionMs, latencyMs[playerId] ?: 0)
     }
 
     /** Calls [listener] with the display id whenever a client reports on it. */
@@ -61,7 +73,10 @@ object ReadinessTracker {
     /** [playerId]'s last report on [displayId], or null. */
     fun reportOf(displayId: UUID, playerId: UUID): ReadinessRoster.Report? = roster.reportOf(displayId, playerId)
 
-    fun forgetPlayer(playerId: UUID) = roster.forgetPlayer(playerId)
+    fun forgetPlayer(playerId: UUID) {
+        latencyMs.remove(playerId)
+        roster.forgetPlayer(playerId)
+    }
 
     fun forgetDisplay(displayId: UUID) = roster.forgetDisplay(displayId)
 }

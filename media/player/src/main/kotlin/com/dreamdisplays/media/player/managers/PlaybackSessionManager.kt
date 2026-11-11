@@ -305,6 +305,9 @@ internal class PlaybackSessionManager(
         audio.setDspStage(audioStage)
     }
 
+    /** Installs (or clears) the acoustics DSP stage after construction; see [MediaPlayer.attachAudioStage]. */
+    fun setAudioStage(stage: AudioDspStage?) = audio.setDspStage(stage)
+
     private val switchLock = Any()
 
     @Volatile

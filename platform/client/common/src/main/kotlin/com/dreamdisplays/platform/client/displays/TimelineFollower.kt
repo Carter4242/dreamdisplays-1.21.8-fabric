@@ -39,6 +39,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private var lastSnapNanos = 0L
     private var coldAfterSnap = false
 
+    /** The player is a preloaded queue item held ready on its first frame: tolerate a small paused offset. */
+    private var warmAdopted = false
+
     private var appliedRatio = 1.0
     private var lastRatioPushNanos = 0L
     private var lastDriftMs = 0.0
@@ -84,10 +87,19 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             landingRunningSinceNanos = 0L
             lastSnapNanos = 0L
             coldAfterSnap = false
+            warmAdopted = false
             // The new player starts at rate 1; only our bookkeeping needs to follow
             appliedRatio = 1.0
             intervalAction = Action.NONE
         }
+    }
+
+    /**
+     * The new player is a preloaded queue item held ready on its first frame (see `QueuePreloader`). Like a display
+     * prepared for a broadcast, it tolerates a small paused offset instead of snapping and dropping its warm stream.
+     */
+    fun onWarmAdopted() {
+        synchronized(lock) { warmAdopted = true }
     }
 
     /** Re-applies a timeline packet that arrived before the media player existed or finished init. */
@@ -231,8 +243,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             if (!screen.isPaused) return // The pause itself is still being applied
             // Being opened warm at the server position for a broadcast: a snap now would only close it again
             if (screen.isWarmingUp) return
-            // A display held ready tolerates a little offset rather than drop its open stream
-            val held = screen.isPrepared || screen.isHeldReady
+            // A display held ready (prepared, held by DisplayWarmup, or a queue preload just adopted) tolerates a little
+            // offset rather than drop its open stream
+            val held = screen.isPrepared || screen.isHeldReady || warmAdopted
             val tolerance = if (held) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
             if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
                 screen.seekVideoTo(target * 1_000_000L)
@@ -283,6 +296,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private fun resumeAligned() {
         val cold = coldAfterSnap || !screen.resumesWarm()
         coldAfterSnap = false
+        warmAdopted = false
         if (cold && !screen.isLive && screen.canSeek() && estimator.hasTimeline && !estimator.paused) {
             // A cold start restarts the stream from the parked position and lands that much later; start
             // ahead by the learned restart time instead.

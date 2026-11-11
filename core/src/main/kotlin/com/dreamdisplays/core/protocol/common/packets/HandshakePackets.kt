@@ -48,6 +48,8 @@ data class ClientHello(
     @ProtoNumber(30) val buildCommit: String = "",
     /** When the client jar was built, epoch ms; 0 from older jars. */
     @ProtoNumber(31) val buildTimeMs: Long = 0,
+    /** True when the client shows the "Up next" queue and preloads its next item; older clients never get QueueState. */
+    @ProtoNumber(32) val supportsQueue: Boolean = false,
 ) : DreamPacket
 
 /** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */
