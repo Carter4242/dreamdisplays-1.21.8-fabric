@@ -112,19 +112,28 @@ internal class OpenAlSourceLine private constructor(
     /** Recycles played buffers, updates [playedFrames] and restarts the source after an underrun. */
     private fun refresh() {
         ifOpen {
-            var processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED)
-            while (processed-- > 0 && queued.isNotEmpty()) {
-                val buffer = AL10.alSourceUnqueueBuffers(source)
-                val (_, frames) = queued.removeFirst()
-                unqueuedFrames += frames
-                freeBuffers.addLast(buffer)
-            }
+            recycleProcessed()
             val offset = AL10.alGetSourcei(source, AL11.AL_SAMPLE_OFFSET).toLong()
             val position = (unqueuedFrames + offset).coerceAtMost(writtenFrames)
             if (position > playedFrames) playedFrames = position
             if (started && queued.isNotEmpty() && AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING) {
                 AL10.alSourcePlay(source)
             }
+        }
+    }
+
+    /**
+     * Unqueues the buffers the source has played. Must run before any [AL10.alSourcePlay] on a source that is not
+     * playing: after an underrun it is STOPPED with every buffer processed but still queued, and playing it again would
+     * restart from the head of the queue, replaying them. Call with the context current.
+     */
+    private fun recycleProcessed() {
+        var processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED)
+        while (processed-- > 0 && queued.isNotEmpty()) {
+            val buffer = AL10.alSourceUnqueueBuffers(source)
+            val (_, frames) = queued.removeFirst()
+            unqueuedFrames += frames
+            freeBuffers.addLast(buffer)
         }
     }
 
@@ -160,6 +169,8 @@ internal class OpenAlSourceLine private constructor(
                 continue
             }
             ifOpen {
+                // Ran dry since the monitor's last pass: drop what already played, or the restart below replays it
+                if (started && AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING) recycleProcessed()
                 val buffer = freeBuffers.pollFirst() ?: AL10.alGenBuffers()
                 staging.clear()
                 staging.put(b, off + done, n).flip()
@@ -179,6 +190,7 @@ internal class OpenAlSourceLine private constructor(
     override fun start() {
         ifOpen {
             started = true
+            recycleProcessed()
             if (queued.isNotEmpty()) AL10.alSourcePlay(source)
         }
     }
