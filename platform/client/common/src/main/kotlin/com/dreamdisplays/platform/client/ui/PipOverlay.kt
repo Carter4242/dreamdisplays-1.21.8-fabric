@@ -188,6 +188,8 @@ class PipOverlay(
                 Initializer.MOD_ID, "pip/${displayScreen.uuid}-${UUID.randomUUID()}"
             )
             mc.textureManager.register(textureId!!, tex)
+            // Drawn smaller (or larger) than the frame: nearest sampling shimmers on every edge and on text
+            TextureUploadUtil.applyBilinearFilter(tex)
             dynamicTexture = tex; texW = fw; texH = fh
         }
 

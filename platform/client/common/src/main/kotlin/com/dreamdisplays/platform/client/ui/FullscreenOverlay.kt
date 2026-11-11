@@ -121,6 +121,8 @@ class FullscreenOverlay(
                 Initializer.MOD_ID, "fullscreen/${displayScreen.uuid}-${UUID.randomUUID()}"
             )
             mc.textureManager.register(textureId!!, tex)
+            // Scaled to the screen by a non-integer factor: nearest sampling is blocky
+            TextureUploadUtil.applyBilinearFilter(tex)
             dynamicTexture = tex; texW = fw; texH = fh
         }
 
