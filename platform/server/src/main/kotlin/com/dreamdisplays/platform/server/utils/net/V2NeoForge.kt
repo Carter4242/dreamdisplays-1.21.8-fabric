@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.shared.playback.FullscreenAckAction
+import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.WatchPartyAction
@@ -103,6 +104,10 @@ object NeoForgeV2Networking {
             is SetDisplaysEnabled -> PlayerManager.setDisplaysEnabled(player.uuid, packet.enabled)
             is FullscreenAck -> FullscreenBroadcastManager.handleAck(
                 packet.sessionId, player.uuid, FullscreenAckAction.fromWire(packet.action),
+            )
+
+            is FullscreenPrepareStatus -> FullscreenBroadcastManager.onPrepareStatus(
+                player.uuid, packet.prepareId, packet.displayId, FullscreenPrepareState.fromWire(packet.state),
             )
 
             is PipPin -> if (packet.pinned) {

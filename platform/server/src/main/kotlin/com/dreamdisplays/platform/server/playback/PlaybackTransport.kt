@@ -37,6 +37,9 @@ interface PlaybackTransport {
     /** Squared distance from [playerId] to (`x`, `y`, `z`) in [world], or null when offline or in a different world. */
     fun playerDistanceSq(playerId: UUID, world: String, x: Double, y: Double, z: Double): Double?
 
+    /** True if [playerId] is online in the world [display] stands in (always true for a virtual display). */
+    fun isInDisplayWorld(playerId: UUID, display: DisplayData): Boolean = true
+
     /** Sends [display]'s `DisplayInfo` to one [playerId], regardless of render distance. */
     fun sendDisplayInfo(playerId: UUID, display: DisplayData, forced: Boolean)
 

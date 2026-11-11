@@ -215,6 +215,14 @@ object VanillaCommandTree {
             position = { source -> source.position.let { Triple(it.x, it.y, it.z) } },
             tooltips = tips,
         ).nodes()
+        val prepareFlags = FullscreenFlags(
+            run = ::runFullscreenPrepare,
+            network = { false },
+            players = { VanillaFullscreenCommand.onlinePlayerNames(it) },
+            position = { source -> source.position.let { Triple(it.x, it.y, it.z) } },
+            tooltips = tips,
+            order = FullscreenFlags.PREPARE_ORDER,
+        ).nodes()
 
         literal("fullscreen", tip("suggestFullscreen")) {
             executesCommand { ctx ->
@@ -227,10 +235,21 @@ object VanillaCommandTree {
             literal("start", tip("suggestFullscreenStart")) {
                 requires { permitted(it, { p -> p.fullscreenStart }, VanillaPermissions.Fallback.OP) }
                 literal("id", tip("suggestFullscreenId")) {
-                    fullscreenSource(flags) { ctx, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) }
+                    fullscreenSource(flags, ::runFullscreenStart) { ctx, typed -> DisplaySuggestions.targets(typed, remote(ctx.source)) }
                 }
                 literal("url", tip("suggestFullscreenUrl")) {
-                    fullscreenSource(flags) { _, typed -> DisplaySuggestions.links(typed) }
+                    fullscreenSource(flags, ::runFullscreenStart) { _, typed -> DisplaySuggestions.links(typed) }
+                }
+            }
+            literal("prepare", tip("suggestFullscreenPrepare")) {
+                requires { permitted(it, { p -> p.fullscreenStart }, VanillaPermissions.Fallback.OP) }
+                literal("id", tip("suggestFullscreenId")) {
+                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                        DisplaySuggestions.targets(typed, remote(ctx.source))
+                    }
+                }
+                literal("url", tip("suggestFullscreenUrl")) {
+                    fullscreenSource(prepareFlags, ::runFullscreenPrepare) { _, typed -> DisplaySuggestions.links(typed) }
                 }
             }
             literal("stop", tip("suggestFullscreenStop")) {
@@ -249,11 +268,12 @@ object VanillaCommandTree {
 
     private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenSource(
         flags: List<CommandNode<CommandSourceStack>>,
+        run: (CommandContext<CommandSourceStack>) -> Int,
         items: (CommandContext<CommandSourceStack>, String) -> List<Suggestion>,
     ) {
         argument("id", BareTokenArgumentType) {
             suggests(suggesting(tips) { ctx, _, typed -> items(ctx, typed) })
-            executes { ctx -> runFullscreenStart(ctx) }
+            executes { ctx -> run(ctx) }
             flags.forEach { then(it) }
         }
     }
@@ -319,6 +339,23 @@ object VanillaCommandTree {
 
     private fun <T : Any> tryArg(ctx: CommandContext<CommandSourceStack>, name: String, type: Class<T>): T? =
         runCatching { ctx.getArgument(name, type) }.getOrNull()
+
+    private fun runFullscreenPrepare(ctx: CommandContext<CommandSourceStack>): Int {
+        val nodeNames = ctx.nodes.map { it.node.name }
+        return VanillaFullscreenCommand.prepare(
+            ctx,
+            id = StringArgumentType.getString(ctx, "id"),
+            options = FullscreenPrepareOptions(
+                players = tryArg(ctx, "players", String::class.java),
+                radiusBlocks = tryArg(ctx, "blocks", Double::class.javaObjectType),
+                radiusX = tryArg(ctx, "x", Double::class.javaObjectType),
+                radiusY = tryArg(ctx, "y", Double::class.javaObjectType),
+                radiusZ = tryArg(ctx, "z", Double::class.javaObjectType),
+                quality = tryArg(ctx, "quality", String::class.java),
+                rewind = "rewind" in nodeNames,
+            ),
+        )
+    }
 
     private fun runFullscreenStart(ctx: CommandContext<CommandSourceStack>): Int {
         val nodeNames = ctx.nodes.map { it.node.name }

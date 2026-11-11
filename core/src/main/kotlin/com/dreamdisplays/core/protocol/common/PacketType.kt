@@ -8,6 +8,8 @@ import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
+import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
+import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
@@ -61,7 +63,11 @@ enum class PacketType(
 
     // Diagnostics / remote client control; ids start at 40 so packets added elsewhere in the 20s cannot collide
     SERVER_POLICY(40, ServerPolicy::class, PacketDirection.SERVER_TO_CLIENT),
-    VIEWER_REPORT(41, ViewerReport::class, PacketDirection.CLIENT_TO_SERVER);
+    VIEWER_REPORT(41, ViewerReport::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Fullscreen preparation; only sent to clients that advertise ClientHello.supportsFullscreenPrepare
+    FULLSCREEN_PREPARE(42, FullscreenPrepare::class, PacketDirection.SERVER_TO_CLIENT),
+    FULLSCREEN_PREPARE_STATUS(43, FullscreenPrepareStatus::class, PacketDirection.CLIENT_TO_SERVER);
 
     companion object {
         private val byId = entries.associateBy { it.id }

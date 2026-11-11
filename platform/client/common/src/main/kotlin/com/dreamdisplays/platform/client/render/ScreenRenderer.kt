@@ -55,7 +55,8 @@ object ScreenRenderer {
         DisplayCulling.begin(camera, cameraPos)
         for (displayScreen in DisplayRegistry.getScreens()) {
             if (displayScreen.isDormant || !displayScreen.hasTexture) continue
-            if (!DisplayCulling.isVisible(displayScreen)) {
+            // Held out of sight for a fullscreen broadcast: decoding on, but never drawn in the world
+            if (displayScreen.isHiddenForBroadcast || !DisplayCulling.isVisible(displayScreen)) {
                 if (!replay) displayScreen.fitTextureWhileHidden()
                 continue
             }

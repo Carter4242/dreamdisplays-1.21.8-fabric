@@ -132,6 +132,24 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         }
     }
 
+    /** Where the server holds this display paused, in ns of media time, or null when it is not paused (or unknown). */
+    fun pausedTargetNanos(): Long? {
+        synchronized(lock) {
+            if (!estimator.hasTimeline || !estimator.paused) return null
+            val durationMs = screen.mediaPlayerDurationNanos / 1_000_000L
+            val target = estimator.targetMs(System.nanoTime() / NANOS_PER_MS).roundToLong()
+            return clampSeek(target, loop, durationMs) * 1_000_000L
+        }
+    }
+
+    /**
+     * The paused player is being re-opened warm at the server position ([DisplayScreen.holdReadyForBroadcast]), so an
+     * earlier paused snap no longer means the next resume starts cold.
+     */
+    fun onHeldReady() {
+        synchronized(lock) { coldAfterSnap = false }
+    }
+
     /** Called every client tick for a loaded display: measures drift and corrects it. */
     fun tick() {
         synchronized(lock) {
@@ -165,7 +183,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             controller.resetMeasurement()
             landing = null
             if (!screen.isPaused) return // The pause itself is still being applied
-            if (abs(drift) > settings.deadBandMs && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
+            // Being opened warm at the server position for a broadcast: a snap now would only close it again
+            if (screen.isWarmingUp) return
+            // A display held ready for a broadcast tolerates a little offset rather than drop its warm stream
+            val tolerance = if (screen.isPrepared) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
+            if (abs(drift) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
                 screen.seekVideoTo(target * 1_000_000L)
                 lastSnapNanos = now
                 coldAfterSnap = true
@@ -342,6 +364,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private const val NANOS_PER_MS = 1_000_000.0
         private const val END_MARGIN_MS = 500L
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
+        private const val PREPARED_SNAP_TOLERANCE_MS = 250
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L
         private const val RATIO_REFRESH_NANOS = 1_000_000_000L
         private const val MAX_LEAD_MS = 8_000L
