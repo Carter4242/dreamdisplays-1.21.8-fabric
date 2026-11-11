@@ -393,6 +393,14 @@ object CommandRegistrar {
                     literal("add", tip("suggestKaraokeSingerAdd")) {
                         then(karaokePlayer(online = true) {
                             executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player")) }
+                            literal("duet", tip("suggestKaraokeSingerDuet")) {
+                                executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player"), "duet") }
+                                argument("lead", StringArgumentType.word()) {
+                                    executesCommand { ctx ->
+                                        karaoke(ctx, "singer", "add", arg(ctx, "player"), "duet", arg(ctx, "lead"))
+                                    }
+                                }
+                            }
                             argument("lead", StringArgumentType.word()) {
                                 executesCommand { ctx -> karaoke(ctx, "singer", "add", arg(ctx, "player"), arg(ctx, "lead")) }
                             }

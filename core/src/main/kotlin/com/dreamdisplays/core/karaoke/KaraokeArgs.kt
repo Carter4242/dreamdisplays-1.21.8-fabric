@@ -8,7 +8,8 @@ sealed interface KaraokeAction {
     data class Toggle(val on: Boolean) : KaraokeAction
     data object Status : KaraokeAction
     data class Trim(val ms: Long) : KaraokeAction
-    data class SingerAdd(val player: String, val leadMs: Long?) : KaraokeAction
+    /** [duet]: sing alongside the current singers; otherwise [player] replaces them. */
+    data class SingerAdd(val player: String, val leadMs: Long?, val duet: Boolean = false) : KaraokeAction
     data class SingerRemove(val player: String) : KaraokeAction
     data class SingerTrim(val player: String, val ms: Long) : KaraokeAction
     data class Join(val url: String) : KaraokeAction {
@@ -61,12 +62,16 @@ object KaraokeArgs {
         val op = rest.firstOrNull()?.lowercase() ?: return null
         val player = rest.getOrNull(1) ?: return null
         return when (op) {
-            "add" -> when (rest.size) {
-                2 -> KaraokeAction.SingerAdd(player, null)
-                3 -> rest[2].toLongOrNull()?.takeIf { it in 0..MAX_LEAD_MS }?.let { KaraokeAction.SingerAdd(player, it) }
-                    ?: KaraokeAction.Invalid(KaraokeAction.Reason.BAD_LEAD)
+            "add" -> {
+                val duet = rest.getOrNull(2)?.equals("duet", ignoreCase = true) == true
+                val tail = rest.drop(if (duet) 3 else 2)
+                when (tail.size) {
+                    0 -> KaraokeAction.SingerAdd(player, null, duet)
+                    1 -> tail[0].toLongOrNull()?.takeIf { it in 0..MAX_LEAD_MS }?.let { KaraokeAction.SingerAdd(player, it, duet) }
+                        ?: KaraokeAction.Invalid(KaraokeAction.Reason.BAD_LEAD)
 
-                else -> null
+                    else -> null
+                }
             }
 
             "remove" -> if (rest.size == 2) KaraokeAction.SingerRemove(player) else null

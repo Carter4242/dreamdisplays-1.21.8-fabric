@@ -27,6 +27,7 @@ import org.bukkit.util.BoundingBox
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -52,6 +53,9 @@ object KaraokeManager {
         val maxLeadMs: Long = 1_500L,
         val latency: KaraokeLatency = KaraokeLatency(),
         val skipAbsent: Boolean = true,
+        val fromSinger: Boolean = true,
+        val coSingerVolume: Double = 0.15,
+        val debug: Boolean = false,
     )
 
     /** A singer on a display. [itemId]: the queue entry they sing, when they came from the line. */
@@ -148,23 +152,27 @@ object KaraokeManager {
 
     /**
      * Makes [playerId] a singer on [display] with [leadMs] (null = the automatic lead), taking them off any other
-     * display. [resend]: send them the shifted timeline now (false when a new video is about to go out anyway).
-     * Returns the lead.
+     * display. Unless [duet], they replace the display's current singers. [resend]: send the changed singers their
+     * timeline now (false when a new video is about to go out anyway). Returns the lead.
      */
     fun addSinger(
         display: DisplayData, playerId: UUID, name: String, leadMs: Long?,
-        itemId: String? = null, resend: Boolean = true,
+        itemId: String? = null, resend: Boolean = true, duet: Boolean = false,
     ): Long {
         singerDisplay[playerId]?.takeIf { it != display.id }?.let { other ->
             DisplayManager.getDisplayData(other)?.let { removeSinger(it, playerId) }
         }
         val state = states.computeIfAbsent(display.id) { State() }
-        val lead = leadMs ?: autoLeadMs(display, playerId)
-        val trim = state.singers[playerId]?.trimMs ?: 0L
-        state.singers[playerId] = Singer(playerId, name, lead, trim, itemId)
+        if (!duet) state.singers.keys.filter { it != playerId }.forEach { removeSinger(display, it, resend) }
+        val previous = state.singers[playerId]
+        val wanted = leadMs ?: autoLeadMs(display, playerId)
+        // Already singing with about this lead: keep it, and spare them a paused resync
+        val unchanged = previous != null && abs(wanted - previous.leadMs) < LEAD_DEADBAND_MS
+        val lead = if (unchanged) previous!!.leadMs else wanted
+        state.singers[playerId] = Singer(playerId, name, lead, previous?.trimMs ?: 0L, itemId)
         singerDisplay[playerId] = display.id
         refresh()
-        if (resend) resendTimeline(display, playerId)
+        if (resend && !unchanged) resendTimeline(display, playerId)
         return lead
     }
 
@@ -379,18 +387,29 @@ object KaraokeManager {
         if (!state.enabled || state.singers.isEmpty()) return null
         val box = display.box
         val radius = audioRadius(display)
+        val s = settings()
         val singers = state.singers.values.associate {
-            it.playerId to StageSinger(it.leadMs, state.trimMs + it.trimMs, Bukkit.getPlayer(it.playerId)?.ping?.toLong() ?: 0L)
+            val player = Bukkit.getPlayer(it.playerId)
+            val present = player != null && player.world == display.pos1.world &&
+                    distanceToBox(player.location.x, player.location.y, player.location.z, box) <= radius
+            it.playerId to StageSinger(it.leadMs, state.trimMs + it.trimMs, player?.ping?.toLong() ?: 0L, present)
         }
         val halfDiagonal = sqrt(box.widthX * box.widthX + box.height * box.height + box.widthZ * box.widthZ) / 2.0
+        val timeline = TimelineManager.timelineOf(display.id)
+        val now = PaperPlaybackTransport.nowMs()
         return KaraokeStage(
             displayId = display.id,
             displayLabel = display.shortLabel,
             x = box.centerX, y = box.centerY, z = box.centerZ,
             distance = radius + halfDiagonal,
-            latency = settings().latency,
+            latency = s.latency,
             singers = singers,
-            listeners = listenersOf(display, singers.keys),
+            listeners = listenersOf(display, singers.keys, everyone = s.fromSinger),
+            fromSinger = s.fromSinger,
+            songPlaying = timeline != null && !timeline.paused && timeline.serverTimeMs <= now &&
+                    !TimelineManager.isHolding(display.id),
+            coSingerVolume = s.coSingerVolume,
+            debug = s.debug,
         )
     }
 
@@ -398,13 +417,15 @@ object KaraokeManager {
     fun listenersNear(display: DisplayData): List<StageListener> =
         (display as? PaperDisplayData)?.let { listenersOf(it, states[display.id]?.singers?.keys.orEmpty()) }.orEmpty()
 
-    /** Players in [display]'s audio range, except [singers]. */
-    private fun listenersOf(display: PaperDisplayData, singers: Set<UUID>): List<StageListener> {
+    /** Players in [display]'s audio range (with [everyone], all in its world, flagged), except [singers]. */
+    private fun listenersOf(display: PaperDisplayData, singers: Set<UUID>, everyone: Boolean = false): List<StageListener> {
         val world = display.pos1.world ?: return emptyList()
         val radius = audioRadius(display)
-        return world.players.filter {
-            it.uniqueId !in singers && distanceToBox(it.location.x, it.location.y, it.location.z, display.box) <= radius
-        }.map { StageListener(it.uniqueId, it.ping.toLong()) }
+        return world.players.mapNotNull {
+            if (it.uniqueId in singers) return@mapNotNull null
+            val inRange = distanceToBox(it.location.x, it.location.y, it.location.z, display.box) <= radius
+            if (inRange || everyone) StageListener(it.uniqueId, it.ping.toLong(), inRange) else null
+        }
     }
 
     /** Where the display's sound fades out: its `audio.radius_blocks` policy, else the client default. */
@@ -429,9 +450,8 @@ object KaraokeManager {
         val timeline = TimelineManager.timelineOf(display.id) ?: return
         val now = transport.nowMs()
         if (!timeline.paused && timeline.serverTimeMs <= now && !TimelineManager.isHolding(display.id)) {
-            val lead = leads[display.id]?.get(playerId) ?: 0L
             val paused = timeline.withPaused(true, now).toSync(display.id, display.mode, now)
-            transport.sendTo(playerId, KaraokeTiming.withLead(paused, lead))
+            transport.sendTo(playerId, TimelineManager.shiftedFor(display.id, playerId, paused))
         }
         TimelineManager.sendCurrent(display, playerId)
     }
@@ -448,10 +468,15 @@ object KaraokeManager {
             maxLeadMs = it.max_lead_ms.toLong(),
             latency = KaraokeLatency(it.singer_output_capture_ms.toLong(), it.listener_buffer_output_ms.toLong()),
             skipAbsent = it.absent_singer != "play",
+            fromSinger = it.voice_source != "display",
+            coSingerVolume = it.co_singer_volume,
+            debug = it.debug,
         )
     }
 
     private const val DEFAULT_AUDIO_RADIUS = 96.0
+    /** A singer's lead changes by at least this much, or not at all. */
+    private const val LEAD_DEADBAND_MS = 30L
     private const val MAX_PING_FOR_LEAD_MS = 400L
     /** Under the queue's own early advance (250 ms), so a queued next song takes over first. */
     private const val SONG_END_MS = 100L

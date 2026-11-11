@@ -2,6 +2,8 @@ package com.dreamdisplays.platform.server.karaoke
 
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import com.dreamdisplays.core.karaoke.BurstAnchor
+import com.dreamdisplays.core.karaoke.KaraokeRoute
+import com.dreamdisplays.core.karaoke.KaraokeRouting
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import de.maxhenkel.voicechat.api.BukkitVoicechatService
 import de.maxhenkel.voicechat.api.VoicechatApi
@@ -9,20 +11,26 @@ import de.maxhenkel.voicechat.api.VoicechatPlugin
 import de.maxhenkel.voicechat.api.VoicechatServerApi
 import de.maxhenkel.voicechat.api.events.EventRegistration
 import de.maxhenkel.voicechat.api.events.MicrophonePacketEvent
-import de.maxhenkel.voicechat.api.packets.LocationalSoundPacket
+import de.maxhenkel.voicechat.api.Position
+import de.maxhenkel.voicechat.api.ServerPlayer
+import de.maxhenkel.voicechat.api.opus.OpusDecoder
+import de.maxhenkel.voicechat.api.opus.OpusEncoder
+import de.maxhenkel.voicechat.api.packets.MicrophonePacket
 import org.bukkit.Bukkit
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Consumer
+import kotlin.math.sqrt
 
 /**
  * Karaoke's Simple Voice Chat add-on. Loaded by name from [KaraokeManager] only when voice chat is installed.
  *
- * Every mic packet of an active singer is taken out of voice chat's normal routing (so nobody hears it raw, not even
- * players outside the display's range) and re-sent to each listener in the display's range as locational sound from
- * the display, at the time that lands it on the beat for that listener: see [KaraokeTiming] for the math and
- * [BurstAnchor] for how frames are put on a jitter-free grid. Sends are scheduled per listener on [VoiceEmitter].
+ * Every mic packet of a singer in the display's range is taken out of voice chat's normal routing ([KaraokeRouting]
+ * says who hears it how): the other singers get it at once from the singer like normal voice chat (re-encoded at
+ * `co_singer_volume` while a song plays), and each listener gets locational sound from the singer (or the display),
+ * at the time that lands it on the beat for them: see [KaraokeTiming] for the math and [BurstAnchor] for how frames
+ * are put on a jitter-free grid. Sends are scheduled per listener on [VoiceEmitter].
  */
 @PaperOnly
 class SvcKaraokeVoice : KaraokeVoice {
@@ -62,6 +70,7 @@ class SvcKaraokeVoice : KaraokeVoice {
         service = null
         api = null
         emitter.shutdown()
+        voices.values.forEach { it.close() }
         voices.clear()
     }
 
@@ -70,7 +79,7 @@ class SvcKaraokeVoice : KaraokeVoice {
     override fun stats(singerId: UUID): SingerVoiceStats? = voices[singerId]?.stats(System.nanoTime())
 
     override fun forget(singerId: UUID) {
-        voices.remove(singerId)
+        voices.remove(singerId)?.close()
     }
 
     private inner class Addon : VoicechatPlugin {
@@ -94,34 +103,95 @@ class SvcKaraokeVoice : KaraokeVoice {
         val singerId = event.senderConnection?.player?.uuid ?: return
         val stage = KaraokeManager.stageOfSinger(singerId) ?: return
         val singer = stage.singers[singerId] ?: return
-        // Nobody hears a singer's raw voice, wherever they are; only the aligned copy below
+        // Away from the display (or offline): voice chat routes them as usual
+        if (!singer.present) return
+        // Nobody hears a singer's raw voice; only the copies below
         event.cancel()
         val api = api ?: return
         val now = System.nanoTime()
         val mic = event.packet
-        val packet = mic.locationalSoundPacketBuilder()
-            .channelId(channelOf(singerId))
-            .position(api.createPosition(stage.x, stage.y, stage.z))
-            .distance(stage.distance.toFloat())
-            .build()
-        val seq = packet.sequenceNumber
+        val sender = event.senderConnection?.player ?: return
+        val proximity = api.voiceChatDistance
+        val singing = stage.singers.keys
         val voice = voices.computeIfAbsent(singerId) { SingerVoice() }
-        val burst = voice.onFrame(now, seq, mic.opusEncodedData.isEmpty())
+        val stop = mic.opusEncodedData.isEmpty()
+
+        // Other singers: at once and from the singer, like normal voice chat
+        val volume = KaraokeRouting.coSingerVolume(stage.songPlaying, stage.coSingerVolume)
+        var coSingerData: ByteArray? = null
+        for (otherId in singing) {
+            if (otherId == singerId || volume <= 0.0) continue
+            val other = api.getConnectionOf(otherId) ?: continue
+            val near = isNear(other.player, sender, proximity)
+            if (KaraokeRouting.route(singerId, otherId, singing, false, near, stage.fromSinger) != KaraokeRoute.NORMAL) continue
+            val data = coSingerData ?: voice.scaled(api, mic.opusEncodedData, volume).also { coSingerData = it }
+            val packet = mic.entitySoundPacketBuilder()
+                .opusEncodedData(data)
+                .whispering(mic.isWhispering)
+                .distance(proximity.toFloat())
+                .build()
+            if (voice.startStream(otherId) && stage.debug) {
+                logger.info(
+                    "Karaoke voice {} -> {} (singer): entity sound, distance {}, volume {}, connected {}.",
+                    singerId, otherId, proximity.toInt(), volume, other.isConnected,
+                )
+            }
+            api.sendEntitySoundPacketTo(other, packet)
+        }
+
+        val seq = mic.locationalSoundPacketBuilder().position(api.createPosition(0.0, 0.0, 0.0)).build().sequenceNumber
+        val burst = voice.onFrame(now, seq, stop)
         if (burst < 0) return
         for (listener in stage.listeners) {
+            val connection = api.getConnectionOf(listener.playerId) ?: continue
+            val near = stage.fromSinger && isNear(connection.player, sender, proximity)
+            val route = KaraokeRouting.route(singerId, listener.playerId, singing, listener.inRange, near, stage.fromSinger)
+            if (route != KaraokeRoute.ALIGNED) continue
             val delayMs = KaraokeTiming.emitDelayMs(singer.leadMs, singer.pingMs, listener.pingMs, singer.trimMs, stage.latency)
             val shift = voice.shiftFor(burst, listener.playerId, delayMs * 1_000_000L)
             val provisional = voice.estimate(burst, seq, lock = false) ?: return
+            if (voice.startStream(listener.playerId) && stage.debug) {
+                logger.info(
+                    "Karaoke voice {} -> {} (listener): locational sound from the {}, distance >= {}, delay {} ms, " +
+                            "in display range {}, near singer {}, connected {}.",
+                    singerId, listener.playerId, if (stage.fromSinger) "singer" else "display", distanceFor(stage, null).toInt(),
+                    delayMs, listener.inRange, near, connection.isConnected,
+                )
+            }
             emitter.schedule(provisional + shift - LOOKAHEAD_SLACK_NANOS) { nowNanos ->
-                send(voice, burst, seq, shift, listener.playerId, packet, nowNanos)
+                send(voice, burst, seq, shift, singerId, listener.playerId, stage, mic, nowNanos)
             }
         }
     }
 
-    /** Sends [packet] to [listenerId] once its target time is reached; returns a later time while it isn't. */
+    /** Same world and within [distance] of [other]. */
+    private fun isNear(player: ServerPlayer, other: ServerPlayer, distance: Double): Boolean {
+        if (player.serverLevel.serverLevel != other.serverLevel.serverLevel) return false
+        return distanceOf(player.position, other.position) <= distance
+    }
+
+    private fun distanceOf(a: Position, b: Position): Double {
+        val dx = a.x - b.x
+        val dy = a.y - b.y
+        val dz = a.z - b.z
+        return sqrt(dx * dx + dy * dy + dz * dz)
+    }
+
+    /**
+     * How far a listener copy carries: the display's range from its centre, or from the singer at [singerPos] far
+     * enough to still reach the whole display range, and never less than voice chat's own distance.
+     */
+    private fun distanceFor(stage: KaraokeStage, singerPos: Position?): Double {
+        if (!stage.fromSinger || singerPos == null) return stage.distance
+        val api = api ?: return stage.distance
+        val toCentre = distanceOf(singerPos, api.createPosition(stage.x, stage.y, stage.z))
+        return maxOf(api.voiceChatDistance, stage.distance + toCentre)
+    }
+
+    /** Sends the frame to [listenerId] once its target time is reached; returns a later time while it isn't. */
     private fun send(
-        voice: SingerVoice, burst: Int, seq: Long, shift: Long, listenerId: UUID,
-        packet: LocationalSoundPacket, nowNanos: Long,
+        voice: SingerVoice, burst: Int, seq: Long, shift: Long, singerId: UUID, listenerId: UUID,
+        stage: KaraokeStage, mic: MicrophonePacket, nowNanos: Long,
     ): Long? {
         val target = (voice.estimate(burst, seq, lock = false) ?: return null) + shift
         if (target - nowNanos > EARLY_TOLERANCE_NANOS) return target
@@ -129,6 +199,14 @@ class SvcKaraokeVoice : KaraokeVoice {
         voice.estimate(burst, seq, lock = true)
         val api = api ?: return null
         val connection = api.getConnectionOf(listenerId) ?: return null
+        // From the singer: where they are now, so the voice follows them
+        val singerPos = if (stage.fromSinger) api.getConnectionOf(singerId)?.player?.position else null
+        val position = singerPos ?: api.createPosition(stage.x, stage.y, stage.z)
+        val packet = mic.locationalSoundPacketBuilder()
+            .channelId(channelOf(singerId))
+            .position(position)
+            .distance(distanceFor(stage, singerPos).toFloat())
+            .build()
         api.sendLocationalSoundPacketTo(connection, packet)
         voice.onSent(listenerId, nowNanos - target, nowNanos)
         return null
@@ -140,9 +218,40 @@ class SvcKaraokeVoice : KaraokeVoice {
         private val shifts = LinkedHashMap<Int, HashMap<UUID, Long>>()
         private val lastLate = HashMap<UUID, Long>()
         private val worstLate = HashMap<UUID, Long>()
+        private val streams = HashSet<UUID>()
+        private var decoder: OpusDecoder? = null
+        private var encoder: OpusEncoder? = null
         private var frames = 0L
         private var sent = 0L
         private var late = 0L
+
+        /** True the first time [receiverId] gets this singer's voice (for the debug log). */
+        @Synchronized
+        fun startStream(receiverId: UUID): Boolean = streams.add(receiverId)
+
+        /** [data] re-encoded at [volume] (0..1); the empty end-of-burst frame passes through and resets the codecs. */
+        @Synchronized
+        fun scaled(api: VoicechatServerApi, data: ByteArray, volume: Double): ByteArray {
+            if (volume >= 1.0) return data
+            if (data.isEmpty()) {
+                decoder?.resetState()
+                encoder?.resetState()
+                return data
+            }
+            val dec = decoder ?: api.createDecoder().also { decoder = it }
+            val enc = encoder ?: api.createEncoder().also { encoder = it }
+            val pcm = dec.decode(data)
+            for (i in pcm.indices) pcm[i] = (pcm[i] * volume).toInt().toShort()
+            return enc.encode(pcm)
+        }
+
+        @Synchronized
+        fun close() {
+            decoder?.close()
+            encoder?.close()
+            decoder = null
+            encoder = null
+        }
 
         @Synchronized
         fun onFrame(nowNanos: Long, seq: Long, stop: Boolean): Int {

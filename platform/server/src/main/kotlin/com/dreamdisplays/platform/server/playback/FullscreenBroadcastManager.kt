@@ -490,7 +490,8 @@ object FullscreenBroadcastManager {
     private fun sendPrepareTimeline(preparation: Preparation, playerId: UUID, now: Long) {
         val timeline = preparation.timeline
         if (timeline != null) {
-            transport.sendTo(playerId, timeline.toSync(preparation.display.id, PlaybackMode.BROADCAST, now))
+            val sync = timeline.toSync(preparation.display.id, PlaybackMode.BROADCAST, now)
+            transport.sendTo(playerId, TimelineManager.shiftedFor(preparation.display.id, playerId, sync))
         } else {
             TimelineManager.sendCurrent(preparation.display, playerId)
         }
@@ -629,7 +630,8 @@ object FullscreenBroadcastManager {
     private fun sendTimeline(session: Session, playerId: UUID, now: Long) {
         val timeline = session.timeline
         if (timeline != null) {
-            transport.sendTo(playerId, timeline.toSync(session.display.id, PlaybackMode.BROADCAST, now))
+            val sync = timeline.toSync(session.display.id, PlaybackMode.BROADCAST, now)
+            transport.sendTo(playerId, TimelineManager.shiftedFor(session.display.id, playerId, sync))
         } else {
             TimelineManager.sendCurrent(session.display, playerId)
         }

@@ -26,6 +26,7 @@ class BurstAnchor(
     private val newBurstGapNanos: Long = 200_000_000L,
     private val reanchorNanos: Long = 40_000_000L,
     private val historySize: Int = 16,
+    private val keptBursts: Int = 32,
 ) {
     private class Burst(val id: Int, var baseSeq: Long) {
         var lastSeq = baseSeq - 1
@@ -44,6 +45,12 @@ class BurstAnchor(
     private var current: Burst? = null
     private var previous: Burst? = null
     private val history = ArrayDeque<Long>()
+
+    /**
+     * Recent bursts, newest last, so [estimate] still knows a burst whose frames are held back for longer than the
+     * bursts after it last (voice activation sends a burst per phrase, often shorter than a listener's delay).
+     */
+    private val kept = ArrayDeque<Burst>()
 
     /** Bursts started so far. */
     var bursts: Int = 0
@@ -101,7 +108,7 @@ class BurstAnchor(
         return sorted[sorted.size / 2]
     }
 
-    private fun find(id: Int): Burst? = current?.takeIf { it.id == id } ?: previous?.takeIf { it.id == id }
+    private fun find(id: Int): Burst? = kept.lastOrNull { it.id == id }
 
     private fun burstFor(arrivalNanos: Long, seq: Long): Burst? {
         val cur = current
@@ -129,7 +136,11 @@ class BurstAnchor(
         cur?.let(::learn)
         previous = cur
         bursts++
-        return Burst(nextId++, seq).also { current = it }
+        return Burst(nextId++, seq).also {
+            current = it
+            kept.addLast(it)
+            while (kept.size > keptBursts) kept.removeFirst()
+        }
     }
 
     /** Moves [burst]'s first frame back to [seq]; every offset is relative to it, so they all shift by the same. */

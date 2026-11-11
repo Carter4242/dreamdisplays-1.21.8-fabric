@@ -16,7 +16,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build` and every `[policy.*]` default), then
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, some `[karaoke]` keys and every `[policy.*]` default), then
  * reloads the config the way `/display reload` does.
  *
  * The file is edited in place, one line at a time ([TomlLineEditor]), so comments and layout survive; the
@@ -50,6 +50,9 @@ object ConfigCommand {
         },
         Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
         Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
+        Key("karaoke.voice_source", PolicyPaths.Kind.Choice(listOf("singer", "display"))) { it.karaoke.voice_source },
+        Key("karaoke.co_singer_volume", PolicyPaths.Kind.Decimal(0.0, 1.0)) { it.karaoke.co_singer_volume },
+        Key("karaoke.debug", PolicyPaths.Kind.Bool) { it.karaoke.debug },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }

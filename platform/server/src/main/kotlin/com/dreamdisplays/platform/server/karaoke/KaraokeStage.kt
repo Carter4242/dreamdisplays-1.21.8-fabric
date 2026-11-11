@@ -8,8 +8,9 @@ import java.util.*
  * ([KaraokeManager.tick]) and read from voice chat's network thread. Plain data: nothing here touches Simple Voice
  * Chat classes, so the plugin runs without it.
  *
- * Singers' voices are re-sent as locational sound from [x] / [y] / [z] (the display's centre) carrying [distance]
- * blocks, so in range they mix into the display's own sound like a PA and fade the same way.
+ * Singers' voices are re-sent as locational sound carrying at least [distance] blocks: from [x] / [y] / [z] (the
+ * display's centre, like a PA) or, with [fromSinger], from wherever the singer is when each frame goes out.
+ * [songPlaying]: the display's timeline runs, so singers hear each other at [coSingerVolume] (else normally).
  */
 data class KaraokeStage(
     val displayId: UUID,
@@ -21,13 +22,23 @@ data class KaraokeStage(
     val latency: KaraokeLatency,
     val singers: Map<UUID, StageSinger>,
     val listeners: List<StageListener>,
+    val fromSinger: Boolean = true,
+    val songPlaying: Boolean = false,
+    val coSingerVolume: Double = 1.0,
+    val debug: Boolean = false,
 )
 
-/** A singer's lead, total trim (display + own) and ping, in ms. */
-data class StageSinger(val leadMs: Long, val trimMs: Long, val pingMs: Long)
+/**
+ * A singer's lead, total trim (display + own) and ping, in ms. [present]: online and in the display's audio range;
+ * otherwise voice chat routes their voice as usual.
+ */
+data class StageSinger(val leadMs: Long, val trimMs: Long, val pingMs: Long, val present: Boolean = true)
 
-/** A player in the display's audio range who is not singing on it, with their ping in ms. */
-data class StageListener(val playerId: UUID, val pingMs: Long)
+/**
+ * A player in the display's world who is not singing on it, with their ping in ms. [inRange]: in the display's audio
+ * range (with `voice_source = "display"` only those are listed).
+ */
+data class StageListener(val playerId: UUID, val pingMs: Long, val inRange: Boolean = true)
 
 /** Voice statistics of one singer since they started singing, for `/display karaoke ... status`. */
 data class SingerVoiceStats(

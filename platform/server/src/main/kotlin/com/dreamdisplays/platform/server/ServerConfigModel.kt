@@ -108,7 +108,8 @@ data class SettingsSection(
 
     /**
      * `[karaoke]` section: singers' timeline lead and the latency constants the voice alignment uses (needs Simple
-     * Voice Chat). [default_lead_ms] 0 = automatic per singer. [absent_singer] is `skip` or `play`.
+     * Voice Chat). [default_lead_ms] 0 = automatic per singer. [absent_singer] is `skip` or `play`. [voice_source] is
+     * `singer` or `display`. [co_singer_volume] 0..1. [debug] logs each karaoke voice stream as it starts.
      */
     data class KaraokeConfig(
         val default_lead_ms: Int = 0,
@@ -118,6 +119,9 @@ data class SettingsSection(
         val singer_output_capture_ms: Int = 60,
         val listener_buffer_output_ms: Int = 120,
         val absent_singer: String = "skip",
+        val voice_source: String = "singer",
+        val co_singer_volume: Double = 0.15,
+        val debug: Boolean = false,
     )
 
     /** Reports section. */
@@ -355,6 +359,9 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             singer_output_capture_ms = t.numberOrNull("karaoke.singer_output_capture_ms")?.toInt()?.coerceIn(0, 1_000) ?: 60,
             listener_buffer_output_ms = t.numberOrNull("karaoke.listener_buffer_output_ms")?.toInt()?.coerceIn(0, 1_000) ?: 120,
             absent_singer = t?.getString("karaoke.absent_singer")?.lowercase()?.takeIf { it == "skip" || it == "play" } ?: "skip",
+            voice_source = (t?.get("karaoke.voice_source") as? String)?.lowercase()?.takeIf { it == "singer" || it == "display" } ?: "singer",
+            co_singer_volume = t.numberOrNull("karaoke.co_singer_volume")?.toDouble()?.coerceIn(0.0, 1.0) ?: 0.15,
+            debug = t.boolOrNull("karaoke.debug") ?: false,
         ),
         policy = parsePolicy(t),
         fullscreen = SettingsSection.FullscreenConfig(

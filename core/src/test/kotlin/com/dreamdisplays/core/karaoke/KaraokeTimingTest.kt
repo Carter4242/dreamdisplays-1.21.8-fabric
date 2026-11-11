@@ -91,4 +91,26 @@ class KaraokeTimingTest {
         assertEquals(300L, singer.currentTimeMs)
         assertFalse(singer.isPaused)
     }
+
+    @Test
+    fun aSpeedChangeAndAReadinessGatedStartKeepTheSingerOffset() {
+        val lead = 300L
+        // Playing at 1x, switched to 4x and back: held paused at the position, then a scheduled start
+        var t = Timeline(positionMs = 5_000, serverTimeMs = 0, paused = false, durationMs = 600_000, loop = true)
+        t = t.withRate(4.0, nowMs = 1_000).withPaused(true, nowMs = 1_000)
+        val held4x = t.toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 1_500)
+        assertEquals(held4x.currentTimeMs + lead * 4, KaraokeTiming.withLead(held4x, lead).currentTimeMs)
+        t = t.withPaused(false, nowMs = 2_000).withRate(1.0, nowMs = 3_000).withPaused(true, nowMs = 3_000)
+        val held = t.toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 3_100)
+        assertEquals(held.currentTimeMs + lead, KaraokeTiming.withLead(held, lead).currentTimeMs)
+        // Every viewer ready: start 150 ms ahead on the same frame
+        val start = t.copy(paused = false, serverTimeMs = 3_250).toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 3_100)
+        val singer = KaraokeTiming.withLead(start, lead)
+        assertEquals(start.currentTimeMs + lead, singer.currentTimeMs)
+        assertEquals(start.startInMs, singer.startInMs)
+        assertEquals(1.0, singer.rate)
+        // And once it runs
+        val running = t.copy(paused = false, serverTimeMs = 3_250).toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 4_000)
+        assertEquals(running.currentTimeMs + lead, KaraokeTiming.withLead(running, lead).currentTimeMs)
+    }
 }

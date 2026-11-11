@@ -158,6 +158,17 @@ listener_buffer_output_ms = 120
 # it without a singer
 absent_singer = "skip"
 
+# Where listeners hear a singer from: "singer" (their position, following them; players within voice chat's proximity
+# distance of the singer hear them too, as well as everyone in the display's range) or "display" (its centre, like a PA)
+voice_source = "singer"
+
+# How loud singers hear each other (duets) while a song plays, 0.0-1.0; 0 = not at all. Their voices are re-encoded at
+# this volume. Between songs, while paused or with karaoke off they hear each other normally.
+co_singer_volume = 0.15
+
+# Log every karaoke voice stream as it starts (recipient, distance, packet type)
+debug = false
+
 [fullscreen]
 # Default visual sub-mode when /display fullscreen start omits one: "STANDARD" or "IMMERSIVE"
 default_mode = "STANDARD"

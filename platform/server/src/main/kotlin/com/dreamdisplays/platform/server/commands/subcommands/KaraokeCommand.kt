@@ -7,6 +7,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
 import com.dreamdisplays.platform.server.karaoke.KaraokeManager
+import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.karaoke.KaraokeManager.LineResult
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.utils.MessageUtil
@@ -22,7 +23,7 @@ import org.bukkit.entity.Player
 import java.util.*
 
 /**
- * `/display karaoke <display> ...`: `on|off`, `status`, `trim <ms>`, `singer add <player> [lead_ms]`,
+ * `/display karaoke <display> ...`: `on|off`, `status`, `trim <ms>`, `singer add <player> [duet] [lead_ms]` (replaces the singers unless `duet`),
  * `singer remove <player>`, `singer trim <player> <ms>`, and the singer line: `join <url>`, `leave`, `line`,
  * `line add <player> <url>`, `line remove <player>`, `line clear`. Join, leave and viewing the line need
  * `permissions.karaoke_join`, the rest `permissions.karaoke` (both operator-only by default).
@@ -72,7 +73,7 @@ object KaraokeCommand {
             is KaraokeAction.SingerAdd -> {
                 if (!KaraokeManager.isEnabled(display)) return say(sender, "karaokeIsOff", label)
                 val player = onlinePlayer(action.player) ?: return say(sender, "karaokeNoPlayer", action.player)
-                val lead = KaraokeManager.addSinger(display, player.uniqueId, player.name, action.leadMs)
+                val lead = KaraokeManager.addSinger(display, player.uniqueId, player.name, action.leadMs, duet = action.duet)
                 say(sender, "karaokeSingerAdded", player.name, label, lead.toString())
             }
 
@@ -173,6 +174,7 @@ object KaraokeCommand {
                 singer.trimMs.toString(),
                 if (singer.itemId != null) MessageUtil.messageFor(sender, "karaokeStatusFromLine") else "",
                 voice,
+                TimelineManager.lastSentLeadMs(display.id, singer.playerId)?.toString() ?: "-",
             )
             val late = maxOf(short, stats?.lateListeners ?: 0)
             if (late > 0) say(sender, "karaokeStatusLate", late.toString(), (stats?.worstLateMs ?: 0L).toString())

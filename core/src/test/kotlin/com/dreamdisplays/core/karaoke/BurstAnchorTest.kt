@@ -92,6 +92,21 @@ class BurstAnchorTest {
     }
 
     @Test
+    fun manyShortBurstsKeepTheirEstimatesWhileTheyAreHeldBack() {
+        // Voice activation: a short burst per word, 300 ms apart, all held back for 1.5 s before they are sent
+        val anchor = BurstAnchor()
+        val ids = (0 until 6).map { i ->
+            val start = i * 300 * ms
+            val seq = 10L * i
+            anchor.onFrame(start, seq)
+            anchor.onFrame(start + frame, seq + 1)
+            anchor.onFrame(start + 2 * frame, seq + 2, stop = true)
+        }
+        assertEquals(6, ids.distinct().size)
+        ids.forEachIndexed { i, id -> assertEquals(i * 300 * ms, anchor.estimate(id, 10L * i, lock = true)) }
+    }
+
+    @Test
     fun anUnknownBurstHasNoEstimate() {
         assertNull(BurstAnchor().estimate(42, 0, lock = false))
     }

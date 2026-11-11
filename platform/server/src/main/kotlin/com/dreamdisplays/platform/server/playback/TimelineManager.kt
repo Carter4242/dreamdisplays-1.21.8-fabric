@@ -6,6 +6,7 @@ import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.karaoke.KaraokeTiming
+import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -56,6 +57,22 @@ object TimelineManager {
      * they are also waited for at that shifted position. Empty for nearly every display, which keeps the broadcast.
      */
     var playerLeadsMs: (displayId: UUID) -> Map<UUID, Long> = { emptyMap() }
+
+    /** The lead in the last timeline each player got on its own: player -> (display, lead ms). */
+    private val sentLeads = ConcurrentHashMap<UUID, Pair<UUID, Long>>()
+
+    /** The lead (ms) in the last timeline of [displayId] sent to [playerId] alone, or null when none was. */
+    fun lastSentLeadMs(displayId: UUID, playerId: UUID): Long? = sentLeads[playerId]?.takeIf { it.first == displayId }?.second
+
+    /**
+     * [sync] of [displayId] as [playerId] gets it: moved by their lead (0 for everyone but karaoke singers). Every
+     * timeline sent to one player goes through here.
+     */
+    fun shiftedFor(displayId: UUID, playerId: UUID, sync: DisplaySync): DisplaySync {
+        val lead = playerLeadsMs(displayId)[playerId] ?: 0L
+        sentLeads[playerId] = displayId to lead
+        return KaraokeTiming.withLead(sync, lead)
+    }
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
@@ -267,7 +284,7 @@ object TimelineManager {
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */
     fun sendCurrent(display: DisplayData, playerId: UUID) {
         val timeline = ensureTimeline(display) ?: return
-        transport.sendTo(playerId, syncPacket(display, timeline, transport.nowMs(), playerLeadsMs(display.id)[playerId]))
+        transport.sendTo(playerId, shiftedFor(display.id, playerId, syncPacket(display, timeline, transport.nowMs())))
     }
 
     /** Re-initializes the clock after a base-mode change and broadcasts the result. */
@@ -433,11 +450,10 @@ object TimelineManager {
     }
 
     /**
-     * The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`), moved
-     * [leadMs] ahead for a player who gets it early (a karaoke singer, see [playerLeadsMs]).
+     * The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`); per-player
+     * sends move it by their lead through [shiftedFor].
      */
-    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long, leadMs: Long? = null) =
-        timeline.toSync(display.id, display.mode, now).let { if (leadMs == null) it else KaraokeTiming.withLead(it, leadMs) }
+    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now)
 
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()
@@ -448,14 +464,14 @@ object TimelineManager {
             transport.broadcast(display, sync)
         } else {
             for (playerId in transport.nearbyPlayerIds(display)) {
-                transport.sendTo(playerId, leads[playerId]?.let { syncPacket(display, timeline, now, it) } ?: sync)
+                transport.sendTo(playerId, shiftedFor(display.id, playerId, sync))
             }
         }
         val extra = extraReceivers(display.id)
         if (extra.isEmpty()) return
         val nearby = transport.nearbyPlayerIds(display).toSet()
         for (playerId in extra) {
-            if (playerId !in nearby) transport.sendTo(playerId, leads[playerId]?.let { syncPacket(display, timeline, now, it) } ?: sync)
+            if (playerId !in nearby) transport.sendTo(playerId, if (leads.isEmpty()) sync else shiftedFor(display.id, playerId, sync))
         }
     }
 }
