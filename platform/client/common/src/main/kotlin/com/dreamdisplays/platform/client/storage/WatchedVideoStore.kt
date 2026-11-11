@@ -17,6 +17,7 @@ object WatchedVideoStore {
     private val idsSerializer = ListSerializer(String.serializer())
     private val watched = LinkedHashSet<String>()
     private val lock = Any()
+    private val writeLock = Any()
 
     /** Loads the watched-ID list from disk into memory, replacing any current state. */
     fun load() {
@@ -42,7 +43,7 @@ object WatchedVideoStore {
      */
     fun markWatched(videoId: String) {
         if (videoId.isBlank()) return
-        val snapshot = synchronized(lock) {
+        synchronized(lock) {
             watched.remove(videoId)
             watched.add(videoId)
             while (watched.size > MAX_ENTRIES) {
@@ -51,8 +52,9 @@ object WatchedVideoStore {
                 oldest.next()
                 oldest.remove()
             }
-            watched.toList()
         }
-        save(snapshot)
+        // Called from several player-init threads at once: one writer at a time (they share one temp file), each
+        // writing the newest list, so a slower call can't put an older list back
+        synchronized(writeLock) { save(synchronized(lock) { watched.toList() }) }
     }
 }
