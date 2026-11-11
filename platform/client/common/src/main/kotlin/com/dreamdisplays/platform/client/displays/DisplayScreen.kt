@@ -1079,7 +1079,13 @@ class DisplayScreen(
                 .takeIf { state == WatchPartySessionState.COUNTDOWN && it > 0 },
         )
 
-        if (packet.url.isNotEmpty() && packet.url != videoUrl) loadVideo(packet.url, packet.lang)
+        if (packet.url.isNotEmpty() && packet.url != videoUrl) {
+            // The party's video replaces a screen share: its picture goes at once, as on every other URL change
+            if (ScreenShareViewerRules.clearOnUrlChange(videoUrl, packet.url)) {
+                dropPrivatePicture("watch party video", closeSurfaces = false, nextVideo = true)
+            }
+            loadVideo(packet.url, packet.lang)
+        }
 
         when (state) {
             WatchPartySessionState.PLAYING, WatchPartySessionState.PAUSED ->
