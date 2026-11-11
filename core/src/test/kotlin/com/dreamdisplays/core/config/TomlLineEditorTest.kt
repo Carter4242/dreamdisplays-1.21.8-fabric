@@ -113,6 +113,8 @@ class TomlLineEditorTest {
         assertEquals("96.0", TomlLineEditor.encode(96.0))
         assertEquals("0.25", TomlLineEditor.encode(0.25))
         assertEquals("\"syn\\\"ced\"", TomlLineEditor.encode("syn\"ced"))
-        assertFailsWith<IllegalArgumentException> { TomlLineEditor.encode(listOf(1)) }
+        assertEquals("[\"newpipe\", \"yt-dlp\"]", TomlLineEditor.encode(listOf("newpipe", "yt-dlp")))
+        assertEquals("[]", TomlLineEditor.encode(emptyList<String>()))
+        assertFailsWith<IllegalArgumentException> { TomlLineEditor.encode(mapOf(1 to 2)) }
     }
 }

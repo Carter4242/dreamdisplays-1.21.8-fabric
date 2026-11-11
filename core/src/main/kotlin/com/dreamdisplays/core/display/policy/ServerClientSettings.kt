@@ -49,6 +49,35 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
 
     fun unshadedDisplays(own: Boolean): Boolean = client?.unshadedDisplays ?: own
 
+    /** The video decode path the server allows ([DisplayPolicy.VideoDecoder.AUTO] = the client's own choice). */
+    val videoDecoder: DisplayPolicy.VideoDecoder get() = client?.videoDecoder ?: DisplayPolicy.VideoDecoder.AUTO
+
+    /** False when the server turned GPU YUV drawing off. */
+    val gpuYuv: Boolean get() = client?.gpuYuv != false
+
+    /** False when the server wants plain (never persistently mapped) texture uploads. */
+    val persistentUploads: Boolean get() = client?.textureUpload != DisplayPolicy.TextureUpload.BASIC
+
+    /** The audio backend name (`auto` / `javasound` / `openal`): the server's when it sets one, else [own]. */
+    fun audioBackend(own: String): String = client?.audioBackend?.name?.lowercase() ?: own
+
+    /** Resolver names the server turned off (lower case), empty when none. */
+    val disabledResolvers: Set<String>
+        get() = client?.disabledResolvers.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+            .take(MAX_DISABLED_RESOLVERS).toSet()
+
+    /** Where FFmpeg comes from ([DisplayPolicy.ToolSource.AUTO] = the client's own order). */
+    val ffmpegSource: DisplayPolicy.ToolSource get() = client?.ffmpegSource ?: DisplayPolicy.ToolSource.AUTO
+
+    /** Where yt-dlp comes from ([DisplayPolicy.ToolSource.AUTO] = the client's own order). */
+    val ytDlpSource: DisplayPolicy.ToolSource get() = client?.ytDlpSource ?: DisplayPolicy.ToolSource.AUTO
+
+    /** False when the server turned queue preloading off. */
+    val queuePreload: Boolean get() = client?.queuePreload != false
+
+    /** False when the server turned automatic holding of the nearest paused displays off. */
+    val autoWarm: Boolean get() = client?.autoWarm != false
+
     /** Display distance in chunks (0 = follow render distance): the display's, else the server's, else [own]. */
     fun displayDistanceChunks(own: Int, policy: DisplayPolicy? = null): Int =
         (policy?.client?.displayDistanceChunks ?: client?.displayDistanceChunks)?.coerceIn(0, MAX_DISTANCE_CHUNKS) ?: own
@@ -83,6 +112,7 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
     companion object {
         const val MAX_ACTIVE = 16
         const val MAX_DISTANCE_CHUNKS = 32
+        private const val MAX_DISABLED_RESOLVERS = 32
         const val DEFAULT_SYNC_LOG_MS = 0L
         const val VERBOSE_SYNC_LOG_MS = 10_000L
         const val ULTRA_SYNC_LOG_MS = 1_000L

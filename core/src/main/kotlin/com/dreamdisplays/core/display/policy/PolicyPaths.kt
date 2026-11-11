@@ -33,6 +33,20 @@ object PolicyPaths {
             override fun parse(raw: String): Any? = raw.lowercase(Locale.ROOT).takeIf { it in values }
         }
 
+        /** A comma-separated list of lower-case names (`none` = empty list); [description] is shown as the hint. */
+        class Names(val description: String) : Kind() {
+            override fun parse(raw: String): Any? {
+                val trimmed = raw.trim().lowercase(Locale.ROOT)
+                if (trimmed == "none") return emptyList<String>()
+                val names = trimmed.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                return names.takeIf { it.isNotEmpty() && it.size <= 32 && it.all { n -> NAME.matches(n) } }
+            }
+
+            private companion object {
+                val NAME = Regex("[a-z0-9_.-]{1,32}")
+            }
+        }
+
         /** Free text matching [pattern]; [description] is shown as the hint. */
         class Text(val pattern: Regex, val description: String) : Kind() {
             override fun parse(raw: String): Any? = raw.takeIf { pattern.matches(it) }
@@ -51,6 +65,7 @@ object PolicyPaths {
                 is Kind.Whole -> "${kind.min}..${kind.max}"
                 is Kind.Decimal -> "${fmt(kind.min)}..${fmt(kind.max)}"
                 is Kind.Choice -> kind.values.joinToString("|")
+                is Kind.Names -> kind.description
                 is Kind.Text -> kind.description
             }
     }
@@ -61,6 +76,8 @@ object PolicyPaths {
         Path("sync.max_rate_pct", "sync.maxRatePct", Kind.Decimal(0.0, 5.0)) { it.sync?.maxRatePct },
         Path("sync.seek_threshold_ms", "sync.seekThresholdMs", Kind.Whole(200, 60_000)) { it.sync?.seekThresholdMs },
         Path("sync.seek_cooldown_ms", "sync.seekCooldownMs", Kind.Whole(1_000, 600_000)) { it.sync?.seekCooldownMs },
+        Path("sync.corrective_seeks", "sync.correctiveSeeks", Kind.Bool) { it.sync?.correctiveSeeks },
+        Path("sync.cheap_seeks", "sync.cheapSeeks", Kind.Bool) { it.sync?.cheapSeeks },
         Path("audio.radius_blocks", "audio.radiusBlocks", Kind.Decimal(0.0, 4_096.0)) { it.audio?.radiusBlocks },
         Path("audio.full_volume_blocks", "audio.fullVolumeBlocks", Kind.Decimal(0.0, 4_096.0)) {
             it.audio?.fullVolumeBlocks
@@ -90,6 +107,28 @@ object PolicyPaths {
             it.client?.audioOutputProfile?.name?.lowercase(Locale.ROOT)
         },
         Path("client.audio_normalization", "client.audioNormalization", Kind.Bool) { it.client?.audioNormalization },
+        Path("client.video_decoder", "client.videoDecoder", Kind.Choice(listOf("auto", "process", "jvm"))) {
+            it.client?.videoDecoder?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.gpu_yuv", "client.gpuYuv", Kind.Bool) { it.client?.gpuYuv },
+        Path("client.texture_upload", "client.textureUpload", Kind.Choice(listOf("auto", "basic"))) {
+            it.client?.textureUpload?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.audio_backend", "client.audioBackend", Kind.Choice(listOf("auto", "javasound", "openal"))) {
+            it.client?.audioBackend?.name?.lowercase(Locale.ROOT)
+        },
+        Path(
+            "client.disabled_resolvers", "client.disabledResolvers",
+            Kind.Names("comma-separated: direct,newpipe,yt-dlp,twitch,kick,vimeo,bilibili | none"),
+        ) { it.client?.disabledResolvers },
+        Path("client.ffmpeg_source", "client.ffmpegSource", Kind.Choice(listOf("auto", "bundled", "system"))) {
+            it.client?.ffmpegSource?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.yt_dlp_source", "client.ytDlpSource", Kind.Choice(listOf("auto", "bundled", "system"))) {
+            it.client?.ytDlpSource?.name?.lowercase(Locale.ROOT)
+        },
+        Path("client.queue_preload", "client.queuePreload", Kind.Bool) { it.client?.queuePreload },
+        Path("client.auto_warm", "client.autoWarm", Kind.Bool) { it.client?.autoWarm },
         Path("debug.sync_log_interval_seconds", "debug.syncLogIntervalSeconds", Kind.Whole(0, 3_600)) {
             it.debug?.syncLogIntervalSeconds
         },

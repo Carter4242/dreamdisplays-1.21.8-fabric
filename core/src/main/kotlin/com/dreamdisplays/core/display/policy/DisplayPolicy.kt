@@ -49,6 +49,16 @@ data class DisplayPolicy(
         val seekThresholdMs: Int? = null,
         /** Minimum time between two corrective seeks, in ms. */
         val seekCooldownMs: Int? = null,
+        /**
+         * False: the client never seeks on its own to close drift while playing (no corrective, landing or post-start
+         * seeks); drift is closed by rate correction only. Seeks the server or a player asks for still happen.
+         */
+        val correctiveSeeks: Boolean? = null,
+        /**
+         * False: streams whose seeks land within a frame or two get no shortcuts (a lower seek threshold, a shorter
+         * cooldown, a seek right after a start); [seekThresholdMs] and [seekCooldownMs] apply as for any stream.
+         */
+        val cheapSeeks: Boolean? = null,
     ) {
         fun mergedOver(base: Sync?): Sync = Sync(
             enabled = enabled ?: base?.enabled,
@@ -56,6 +66,8 @@ data class DisplayPolicy(
             maxRatePct = maxRatePct ?: base?.maxRatePct,
             seekThresholdMs = seekThresholdMs ?: base?.seekThresholdMs,
             seekCooldownMs = seekCooldownMs ?: base?.seekCooldownMs,
+            correctiveSeeks = correctiveSeeks ?: base?.correctiveSeeks,
+            cheapSeeks = cheapSeeks ?: base?.cheapSeeks,
         )
     }
 
@@ -142,6 +154,30 @@ data class DisplayPolicy(
         val audioOutputProfile: OutputProfile? = null,
         /** Loudness normalization of display audio (quiet videos raised, loud ones lowered). */
         val audioNormalization: Boolean? = null,
+        /** Which video decode path the client may use ([VideoDecoder]); applies to displays (re)loaded after it. */
+        val videoDecoder: VideoDecoder? = null,
+        /** False: no GPU YUV (planar) drawing; decoded frames are converted to RGBA first. */
+        val gpuYuv: Boolean? = null,
+        /** How decoded frames are uploaded to the GPU ([TextureUpload]). */
+        val textureUpload: TextureUpload? = null,
+        /** Display audio output backend ([AudioBackend]); the player's `dreamdisplays.audioBackend` JVM flag still wins. */
+        val audioBackend: AudioBackend? = null,
+        /**
+         * Media resolvers the client must not use, by name: `direct`, `newpipe`, `yt-dlp`, or a platform (`twitch`,
+         * `kick`, `vimeo`, `bilibili`). A link no remaining resolver can open is still tried with all of them.
+         */
+        val disabledResolvers: List<String>? = null,
+        /** Where the client takes its FFmpeg executable from ([ToolSource]); applies to processes started after it. */
+        val ffmpegSource: ToolSource? = null,
+        /** Where the client takes yt-dlp from ([ToolSource]); applies to resolves started after it. */
+        val ytDlpSource: ToolSource? = null,
+        /** False: the next queue entry is not opened ahead of time (it loads when it starts). */
+        val queuePreload: Boolean? = null,
+        /**
+         * False: paused displays are held ready only when a preparation or the queue asks for it, not the nearest ones
+         * on their own (start holds then do not wait for this client on them).
+         */
+        val autoWarm: Boolean? = null,
     ) {
         fun mergedOver(base: Client?): Client = Client(
             enabled = enabled ?: base?.enabled,
@@ -152,7 +188,74 @@ data class DisplayPolicy(
             displayDistanceChunks = displayDistanceChunks ?: base?.displayDistanceChunks,
             audioOutputProfile = audioOutputProfile ?: base?.audioOutputProfile,
             audioNormalization = audioNormalization ?: base?.audioNormalization,
+            videoDecoder = videoDecoder ?: base?.videoDecoder,
+            gpuYuv = gpuYuv ?: base?.gpuYuv,
+            textureUpload = textureUpload ?: base?.textureUpload,
+            audioBackend = audioBackend ?: base?.audioBackend,
+            disabledResolvers = disabledResolvers ?: base?.disabledResolvers,
+            ffmpegSource = ffmpegSource ?: base?.ffmpegSource,
+            ytDlpSource = ytDlpSource ?: base?.ytDlpSource,
+            queuePreload = queuePreload ?: base?.queuePreload,
+            autoWarm = autoWarm ?: base?.autoWarm,
         )
+    }
+
+    /** Video decode path. Unknown values (from a newer server) read as unset. */
+    @Serializable
+    enum class VideoDecoder {
+        /** The client's choice: in-process decoding when it can, else FFmpeg into its native frame pipe. */
+        @SerialName("auto")
+        AUTO,
+
+        /** No in-process decoding: always an FFmpeg process, into the native frame pipe when it is available. */
+        @SerialName("process")
+        PROCESS,
+
+        /** No native library at all: an FFmpeg process into the plain Java frame pipe (RGBA, slowest, most compatible). */
+        @SerialName("jvm")
+        JVM,
+    }
+
+    /** GPU upload of decoded frames. */
+    @Serializable
+    enum class TextureUpload {
+        /** The client's choice (persistently mapped buffers where the driver offers them). */
+        @SerialName("auto")
+        AUTO,
+
+        /** Plain buffer uploads, never persistently mapped ones. */
+        @SerialName("basic")
+        BASIC,
+    }
+
+    /** Display audio output backend. */
+    @Serializable
+    enum class AudioBackend {
+        /** Java Sound, and OpenAL when Java Sound cannot play. */
+        @SerialName("auto")
+        AUTO,
+
+        @SerialName("javasound")
+        JAVASOUND,
+
+        @SerialName("openal")
+        OPENAL,
+    }
+
+    /** Where a helper executable (FFmpeg, yt-dlp) comes from; the other source is still used when the chosen one has none. */
+    @Serializable
+    enum class ToolSource {
+        /** The client's own order. */
+        @SerialName("auto")
+        AUTO,
+
+        /** The copy the mod downloads and keeps up to date first. */
+        @SerialName("bundled")
+        BUNDLED,
+
+        /** One installed on the system (PATH and the usual install folders) first. */
+        @SerialName("system")
+        SYSTEM,
     }
 
     @Serializable
@@ -272,6 +375,9 @@ data class DisplayPolicy(
         val GLOBAL_ONLY: Set<String> = setOf(
             "client.maxActiveDisplays", "client.hardwareDecoding", "client.unshadedDisplays",
             "client.audioOutputProfile", "client.audioNormalization",
+            "client.videoDecoder", "client.gpuYuv", "client.textureUpload", "client.audioBackend",
+            "client.disabledResolvers", "client.ffmpegSource", "client.ytDlpSource", "client.queuePreload",
+            "client.autoWarm",
             "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds", "debug.logLevel",
         )
 
@@ -343,6 +449,9 @@ data class DisplayPolicy(
                 is Boolean -> JsonPrimitive(value)
                 is Number -> JsonPrimitive(value)
                 is String -> JsonPrimitive(value)
+                is List<*> -> kotlinx.serialization.json.JsonArray(
+                    value.map { (it as? String)?.let(::JsonPrimitive) ?: return null },
+                )
                 else -> return null
             }
             if (element == JsonNull) section.remove(field) else section[field] = element

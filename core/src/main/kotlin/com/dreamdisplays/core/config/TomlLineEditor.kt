@@ -64,6 +64,7 @@ object TomlLineEditor {
         is Double -> if (value == Math.floor(value) && kotlin.math.abs(value) < 1e15) "${value.toLong()}.0" else value.toString()
         is Float -> encode(value.toDouble())
         is String -> "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        is List<*> -> value.joinToString(", ", "[", "]") { encode(it ?: throw IllegalArgumentException("null in $value")) }
         else -> throw IllegalArgumentException("Unsupported TOML value: $value")
     }
 

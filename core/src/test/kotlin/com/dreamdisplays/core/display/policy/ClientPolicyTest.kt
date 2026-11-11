@@ -78,6 +78,12 @@ class ClientPolicyTest {
     fun `server-wide-only set matches real fields`() {
         for (field in DisplayPolicy.GLOBAL_ONLY) {
             val value: Any = when {
+                field.endsWith("videoDecoder") -> "jvm"
+                field.endsWith("textureUpload") -> "basic"
+                field.endsWith("audioBackend") -> "openal"
+                field.endsWith("Source") -> "system"
+                field.endsWith("disabledResolvers") -> listOf("newpipe")
+                field.endsWith("gpuYuv") || field.endsWith("queuePreload") || field.endsWith("autoWarm") -> false
                 field.endsWith("Acoustics") -> "off"
                 field.endsWith("OutputProfile") -> "speakers"
                 field.endsWith("logLevel") -> "ultra"
@@ -92,7 +98,9 @@ class ClientPolicyTest {
             setOf(
                 "client.max_active_displays", "client.hardware_decoding", "client.audio_output_profile",
                 "client.audio_normalization", "client.unshaded_displays", "debug.sync_log_interval_seconds", "debug.verbose", "debug.log_level",
-                "debug.report_interval_seconds",
+                "debug.report_interval_seconds", "client.video_decoder", "client.gpu_yuv", "client.texture_upload",
+                "client.audio_backend", "client.disabled_resolvers", "client.ffmpeg_source", "client.yt_dlp_source",
+                "client.queue_preload", "client.auto_warm",
             ),
             serverWide,
         )

@@ -10,13 +10,17 @@ data class SyncSettings(
     val maxRatePct: Double = 1.0,
     val seekThresholdMs: Int = 1_500,
     val seekCooldownMs: Int = 8_000,
+    /** See [DisplayPolicy.Sync.correctiveSeeks]. */
+    val correctiveSeeks: Boolean = true,
+    /** See [DisplayPolicy.Sync.cheapSeeks]. */
+    val cheapSeeks: Boolean = true,
 ) {
     /** Largest rate offset as a fraction (0.01 for 1 %). */
     val maxRateFraction: Double get() = maxRatePct / 100.0
 
     /** These settings as a policy section. */
     fun toSection(): DisplayPolicy.Sync =
-        DisplayPolicy.Sync(enabled, deadBandMs, maxRatePct, seekThresholdMs, seekCooldownMs)
+        DisplayPolicy.Sync(enabled, deadBandMs, maxRatePct, seekThresholdMs, seekCooldownMs, correctiveSeeks, cheapSeeks)
 
     companion object {
         val DEFAULT = SyncSettings()
@@ -34,6 +38,8 @@ data class SyncSettings(
                 maxRatePct = maxRate,
                 seekThresholdMs = seekThreshold,
                 seekCooldownMs = (sync.seekCooldownMs ?: DEFAULT.seekCooldownMs).coerceIn(1_000, 600_000),
+                correctiveSeeks = sync.correctiveSeeks ?: DEFAULT.correctiveSeeks,
+                cheapSeeks = sync.cheapSeeks ?: DEFAULT.cheapSeeks,
             )
         }
     }

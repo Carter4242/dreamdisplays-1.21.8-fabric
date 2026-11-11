@@ -71,6 +71,8 @@ auto_pause_when_empty_seconds = 0
 # max_rate_pct = 1.0        # largest speed change used to close drift (1.0 = 0.99x to 1.01x)
 # seek_threshold_ms = 1500  # drift above this is fixed by seeking instead
 # seek_cooldown_ms = 8000   # minimum time between corrective seeks
+# corrective_seeks = true   # false = clients never seek on their own while playing; drift is closed by speed only
+# cheap_seeks = true        # false = no faster seeking for streams that seek within a frame (threshold/cooldown above apply)
 
 [policy.audio]
 # How far display sound carries (per display: /display policy <id> audio.<key> <value>)
@@ -97,6 +99,17 @@ auto_pause_when_empty_seconds = 0
 # display_distance_chunks = 0  # how far displays stay loaded; 0 = render / simulation distance (per display too)
 # audio_output_profile = "headphones"  # 3D audio rendering: "headphones" (binaural) or "speakers" (server-wide only)
 # audio_normalization = true  # false = no loudness levelling between videos (server-wide only)
+# Rescue switches for one bad client path (server-wide only). Turning one on reloads the displays players have loaded.
+# video_decoder = "auto"    # "process" = no in-process decoding; "jvm" = no native library (FFmpeg into Java, slowest)
+# gpu_yuv = true            # false = frames converted to RGBA before upload instead of drawn from YUV planes
+# texture_upload = "auto"   # "basic" = plain uploads, no persistently mapped buffers
+# audio_backend = "auto"    # "javasound" or "openal" forces display audio onto one backend
+# disabled_resolvers = []   # e.g. ["newpipe"]: never use these to open links (direct, newpipe, yt-dlp, twitch, kick,
+#                           # vimeo, bilibili); a link nothing else opens still tries all of them
+# ffmpeg_source = "auto"    # "system" = an installed FFmpeg first; "bundled" = the downloaded one first
+# yt_dlp_source = "auto"    # "system" = an installed yt-dlp first; "bundled" = the downloaded one first
+# queue_preload = true      # false = the next queue entry is not loaded ahead of time
+# auto_warm = true          # false = paused displays are not kept ready to play on their own (starts don't wait for them)
 
 [policy.debug]
 # Client diagnostics (server-wide only); clients read these without needing an update.

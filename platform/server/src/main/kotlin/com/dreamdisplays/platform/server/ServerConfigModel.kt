@@ -448,6 +448,10 @@ private fun TomlTable?.numberOrNull(key: String): Number? = this?.get(key) as? N
 
 private fun TomlTable?.boolOrNull(key: String): Boolean? = this?.get(key) as? Boolean
 
+/** The enum constant named by the string at [key] (case-insensitive), or null when absent or not one of [entries]. */
+private fun <E : Enum<E>> TomlTable?.choiceOrNull(key: String, entries: List<E>): E? =
+    (this?.get(key) as? String)?.trim()?.uppercase()?.let { name -> entries.firstOrNull { it.name == name } }
+
 /**
  * Reads the `[policy.*]` tables. Absent keys stay null (= client default); a wrongly typed value is
  * ignored the same way rather than failing the whole config.
@@ -459,6 +463,8 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         maxRatePct = t.numberOrNull("policy.sync.max_rate_pct")?.toDouble(),
         seekThresholdMs = t.numberOrNull("policy.sync.seek_threshold_ms")?.toInt(),
         seekCooldownMs = t.numberOrNull("policy.sync.seek_cooldown_ms")?.toInt(),
+        correctiveSeeks = t.boolOrNull("policy.sync.corrective_seeks"),
+        cheapSeeks = t.boolOrNull("policy.sync.cheap_seeks"),
     )
     val audio = DisplayPolicy.Audio(
         radiusBlocks = t.numberOrNull("policy.audio.radius_blocks")?.toDouble(),
@@ -481,6 +487,16 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         audioOutputProfile = (t?.get("policy.client.audio_output_profile") as? String)?.trim()?.uppercase()
             ?.let { name -> DisplayPolicy.OutputProfile.entries.firstOrNull { it.name == name } },
         audioNormalization = t.boolOrNull("policy.client.audio_normalization"),
+        videoDecoder = t.choiceOrNull("policy.client.video_decoder", DisplayPolicy.VideoDecoder.entries),
+        gpuYuv = t.boolOrNull("policy.client.gpu_yuv"),
+        textureUpload = t.choiceOrNull("policy.client.texture_upload", DisplayPolicy.TextureUpload.entries),
+        audioBackend = t.choiceOrNull("policy.client.audio_backend", DisplayPolicy.AudioBackend.entries),
+        disabledResolvers = t?.takeIf { it.contains("policy.client.disabled_resolvers") }
+            ?.let { stringList(it, "policy.client.disabled_resolvers").map(String::lowercase) },
+        ffmpegSource = t.choiceOrNull("policy.client.ffmpeg_source", DisplayPolicy.ToolSource.entries),
+        ytDlpSource = t.choiceOrNull("policy.client.yt_dlp_source", DisplayPolicy.ToolSource.entries),
+        queuePreload = t.boolOrNull("policy.client.queue_preload"),
+        autoWarm = t.boolOrNull("policy.client.auto_warm"),
     )
     val debug = DisplayPolicy.Debug(
         syncLogIntervalSeconds = t.numberOrNull("policy.debug.sync_log_interval_seconds")?.toInt(),
