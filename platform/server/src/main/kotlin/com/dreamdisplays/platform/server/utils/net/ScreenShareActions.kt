@@ -11,6 +11,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
+import com.dreamdisplays.platform.server.managers.StoredVideo
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
@@ -52,6 +53,8 @@ object ScreenShareActions {
         val previousPlayback: SavedPlayback?,
         /** The queue entry the previous video was, if any. */
         val previousEntry: QueueItem?,
+        /** The previous video's stored length (ns), saved in its place while the share runs. */
+        val previousDuration: Long?,
     ) {
         /** When the sharer's last heartbeat (or the start) arrived, epoch ms. */
         @Volatile
@@ -60,6 +63,13 @@ object ScreenShareActions {
 
     /** Running shares by display. */
     private val byDisplay = ConcurrentHashMap<UUID, Share>()
+
+    /**
+     * What [displayId]'s row stores while a share runs there: the video it had before, never the relay URL (every save
+     * of the display, by any path, goes through this). Null when nothing is shared there.
+     */
+    fun storedVideo(displayId: UUID): StoredVideo? =
+        byDisplay[displayId]?.let { StoredVideo(it.previousUrl, it.previousLang, it.previousDuration) }
 
     /** True when [player] may share at all: a relay is configured and they hold the share permission. */
     fun mayShare(player: Player): Boolean =
@@ -90,6 +100,7 @@ object ScreenShareActions {
             displayId, player.uniqueId, streamId, display.url, display.lang,
             SavedPlayback.of(TimelineManager.timelineOf(display.id), System.currentTimeMillis()),
             QueueManager.playingEntry(display),
+            display.duration,
         )
         byDisplay[displayId] = share
         DisplayActions.applyVideo(display, LiveStreamUrls.fromTemplate(live.relay_play_url, streamId), "", player, persist = false)

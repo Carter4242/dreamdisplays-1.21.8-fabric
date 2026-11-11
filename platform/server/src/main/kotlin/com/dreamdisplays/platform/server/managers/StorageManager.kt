@@ -115,6 +115,18 @@ class DisplaysTable(prefix: String = "") : Table("${prefix}displays") {
     override val primaryKey = PrimaryKey(id)
 }
 
+/** What a display's row stores for its video when that differs from what it shows now. */
+data class StoredVideo(val url: String, val lang: String, val duration: Long?)
+
+/**
+ * The video to store for a display instead of the one it shows (a screen share's relay URL must never be saved: a
+ * crash mid-share would bring the display back on a dead stream). Set by the platform; null keeps what it shows.
+ */
+object StoredVideos {
+    @Volatile
+    var override: (displayId: java.util.UUID) -> StoredVideo? = { null }
+}
+
 /**
  * `SQL`-backed display storage adapter. Loads persisted rows into platform-specific [DisplayData]
  * objects and writes updates from managers back to `SQLite` or `MySQL` through `Exposed` / `Hikari`.
@@ -255,19 +267,21 @@ class StorageManager(
     }
 
     private fun upsert(data: DisplayData, worldName: String, p1: Long, p2: Long, facingOrd: Int) {
+        // A share running there: the video it had before, never the relay URL
+        val stored = StoredVideos.override(data.id)
         transaction(db) {
             table.replace {
                 it[id] = data.id.toBytes()
                 it[ownerId] = data.ownerId.toBytes()
-                it[videoCode] = data.url
+                it[videoCode] = stored?.url ?: data.url
                 it[world] = worldName
                 it[pos1] = p1
                 it[pos2] = p2
                 it[size] = packInts(data.width, data.height)
                 it[facing] = facingOrd
                 it[isSync] = data.isSync
-                it[duration] = data.duration
-                it[lang] = data.lang
+                it[duration] = if (stored != null) stored.duration else data.duration
+                it[lang] = stored?.lang ?: data.lang
                 it[isLocked] = data.isLocked
                 it[access] = data.access.wire
                 it[mode] = data.mode.wire
