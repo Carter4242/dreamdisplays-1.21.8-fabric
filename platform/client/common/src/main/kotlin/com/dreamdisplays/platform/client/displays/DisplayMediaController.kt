@@ -17,6 +17,7 @@ import net.minecraft.client.Minecraft
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /**
  * Owns the media / player lifecycle for a single [DisplayScreen]: swapping in a fresh [MediaPlayer] on
@@ -256,19 +257,19 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     private var playingSampledAtNanos = 0L
 
     /**
-     * Reports what this client knows of the video's length: its metadata length, or else the length it measured at
-     * the end of the stream. Sent in every mode (the server keeps a Local display's length for when it is shared
-     * again), and only when the media generation, URL or length differ from the last report; [force]: the server
-     * asked, so it is sent even then.
+     * Reports what this client knows of the video's length: the length it measured at the end of the stream once it
+     * has one (it beats a header that was wrong or rounded), else its metadata length. Sent in every mode (the server
+     * keeps a Local display's length for when it is shared again), and only when the media generation, URL or length
+     * differ from the last report; [force]: the server asked, so it is sent even then.
      */
     internal fun reportDuration(force: Boolean = false) {
         val url = screen.videoUrl.orEmpty()
         if (url.isEmpty()) return
         val metadataMs = screen.mediaPlayerDurationNanos / 1_000_000L // 0 for live streams and unreadable headers
         val observedMs = observedEnd?.takeIf { it.first == url }?.second ?: 0L
-        val ms = if (metadataMs > 0L) metadataMs else observedMs
+        val ms = if (observedMs > 0L) observedMs else metadataMs
         if (ms <= 0L) return
-        sendDuration(url, ms, observedEnd = metadataMs <= 0L, force = force)
+        sendDuration(url, ms, observedEnd = observedMs > 0L, force = force)
     }
 
     private fun sendDuration(url: String, ms: Long, observedEnd: Boolean, force: Boolean) {
@@ -287,15 +288,20 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     }
 
     /**
-     * The stream ended normally. When its header gave no length (or one that is off), report where it actually
-     * ended: the server's clock then ends, loops and moves the queue on at the real end instead of never.
+     * The stream ended normally (on the player's thread, at its end). When its header gave no length, one that is
+     * off, or one rounded to whole seconds, report where it actually ended: the server's clock then ends, loops and
+     * moves the queue on at the real end (instead of never, or up to a second late). Measured from the last running
+     * position plus the time played since, so a game stall over the end does not lose it.
      */
     internal fun onStreamEnded() {
         val url = screen.videoUrl.orEmpty()
         if (url.isEmpty() || playingSampledAtNanos == 0L) return
         val ageMs = (System.nanoTime() - playingSampledAtNanos) / 1_000_000L
         val metadataMs = screen.mediaPlayerDurationNanos / 1_000_000L
-        val ms = observedEndToReport(playingPositionNanos / 1_000_000L, ageMs, metadataMs) ?: return
+        val ms = observedEndToReport(playingPositionNanos / 1_000_000L, ageMs, metadataMs, screen.playbackSpeed) ?: return
+        // Every loop ends again at about the same place: one report is enough
+        val known = observedEnd?.takeIf { it.first == url }?.second
+        if (known != null && kotlin.math.abs(known - ms) <= OBSERVED_END_RESEND_MS) return
         observedEnd = url to ms
         sendDuration(url, ms, observedEnd = true, force = false)
     }
@@ -335,18 +341,29 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
 /** A measured end this far from the header's length (ms) is reported: the header was wrong, not just rounded down. */
 internal const val OBSERVED_END_TOLERANCE_MS = 1_500L
 
-/** A position sampled longer ago than this (ms) before the end of stream says nothing about where it ended. */
+/**
+ * A position sampled longer ago than this (ms) before the end of stream says too little about where it ended to
+ * correct a header length. With no header length at all, any estimate beats none: up to [OBSERVED_END_MAX_GUESS_AGE_MS].
+ */
 internal const val OBSERVED_END_MAX_SAMPLE_AGE_MS = 500L
+internal const val OBSERVED_END_MAX_GUESS_AGE_MS = 15_000L
+
+/** A later end of stream this close to the one reported (ms) is not reported again. */
+internal const val OBSERVED_END_RESEND_MS = 250L
 
 /**
  * The length to report after a normal end of stream, or null for none: the content position last seen with the clock
- * running ([positionMs], sampled [sampleAgeMs] before the end), when the header gave no length ([metadataMs] 0) or one
- * that is off by more than [OBSERVED_END_TOLERANCE_MS] (whole-second header lengths are rounded down by up to a second).
+ * running ([positionMs], sampled [sampleAgeMs] before the end) plus what played since at [rate]. Reported when the
+ * header gave no length ([metadataMs] 0), one rounded to whole seconds (so up to a second short; the server schedules
+ * such lengths a second long to be safe), or one off by more than [OBSERVED_END_TOLERANCE_MS].
  */
-internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs: Long): Long? {
-    if (positionMs <= 0L || sampleAgeMs !in 0..OBSERVED_END_MAX_SAMPLE_AGE_MS) return null
-    if (metadataMs > 0L && kotlin.math.abs(positionMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
-    return positionMs
+internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs: Long, rate: Double = 1.0): Long? {
+    val maxAgeMs = if (metadataMs > 0L) OBSERVED_END_MAX_SAMPLE_AGE_MS else OBSERVED_END_MAX_GUESS_AGE_MS
+    if (positionMs <= 0L || sampleAgeMs !in 0..maxAgeMs) return null
+    val endMs = positionMs + (sampleAgeMs * rate.coerceIn(0.0, 4.0)).roundToLong()
+    val wholeSeconds = metadataMs % 1_000L == 0L
+    if (metadataMs > 0L && !wholeSeconds && kotlin.math.abs(endMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
+    return endMs
 }
 
 /**
