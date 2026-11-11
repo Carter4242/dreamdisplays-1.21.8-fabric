@@ -115,7 +115,7 @@ object MediaProcess {
                 "pad=w=$w:h=$h:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0,setsar=1,format=rgba"
         return baseCommand(
             ffmpeg, url, offsetNanos, HwAccelBackend.NONE, alreadyResolved = true, seekByDecoding = seekByDecoding,
-            decoder = decoder,
+            decoder = decoder, picture = true,
         ).apply {
             addAll(["-an", "-vf", vf])
             addAll(["-r", String.format(Locale.US, "%.6f", outputFps(fps))])
@@ -160,7 +160,7 @@ object MediaProcess {
         // A sped-up session thins frames out first, so the dropped ones are never scaled or converted
         val filters = if (dropToFps) "fps=${String.format(Locale.US, "%.6f", outputFps(fps))},$vf" else vf
         val liveEdge = LiveStreamUrls.isLive(url)
-        return baseCommand(ffmpeg, url, offsetNanos, hwAccel, alreadyResolved, seekByDecoding).apply {
+        return baseCommand(ffmpeg, url, offsetNanos, hwAccel, alreadyResolved, seekByDecoding, picture = true).apply {
             addAll(["-an", "-vf", filters])
             if (liveEdge) {
                 // Every decoded picture goes out the moment it exists: no constant-rate resampling (which holds a
@@ -189,7 +189,7 @@ object MediaProcess {
                 "pad=w=$w:h=$h:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
         val cmd = baseCommand(
             ffmpeg, url, offsetNanos, HwAccelBackend.NONE,
-            alreadyResolved = true, seekByDecoding = seekByDecoding,
+            alreadyResolved = true, seekByDecoding = seekByDecoding, picture = true,
         ).apply {
             addAll(
                 [
@@ -260,9 +260,10 @@ object MediaProcess {
         alreadyResolved: Boolean = false,
         seekByDecoding: Boolean = false,
         decoder: String? = null,
+        picture: Boolean = false,
     ): MutableList<String> {
         val safeUrl = if (alreadyResolved) url else MediaHostGuard.resolveSafeUrl(url)
-        if (LiveStreamUrls.isLive(safeUrl)) return liveInputCommand(ffmpeg, safeUrl, hwAccel, decoder)
+        if (LiveStreamUrls.isLive(safeUrl)) return liveInputCommand(ffmpeg, safeUrl, hwAccel, decoder, picture)
         // This container's demuxer cannot be trusted with a jump, so the best available seek is a
         // playlist that already starts at the target ([HlsSeekPlaylist]).
         val trimmed =
@@ -344,20 +345,24 @@ object MediaProcess {
     private const val LIVE_RW_TIMEOUT_MICROS = "2000000"
 
     /**
-     * Input half for a live relay stream (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`), tuned to sit at the live edge:
-     * no demuxer buffering, a minimal probe, the low-delay decoder (no frame threading, which holds back a frame per
+     * Input half for a live relay stream (`srt://`, `rtmp://`, `rtmps://`, `rtsp://`), tuned to sit at the live edge: a
+     * probe that ends as soon as it can, the low-delay decoder (no frame threading, which holds back a frame per
      * thread), and a short I/O timeout. The URL is expected to carry its SRT latency already ([LiveStreamUrls.playUrl]).
+     *
+     * The [picture] process keeps what the probe read (the stream starts at a keyframe, and the probe is a fraction of
+     * a second, decoded at once); with `nobuffer` it was dropped, and the first picture waited for the next keyframe.
+     * The sound process drops it: sound read during the probe would play late for the rest of the session.
      */
     internal fun liveInputCommand(
-        ffmpeg: String, url: String, hwAccel: HwAccelBackend, decoder: String? = null,
+        ffmpeg: String, url: String, hwAccel: HwAccelBackend, decoder: String? = null, picture: Boolean = false,
     ): MutableList<String> = mutableListOf<String>().apply {
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
         addAll(["-protocol_whitelist", LIVE_PROTOCOLS])
         if (hwAccel.ffmpegName != null) addAll(["-hwaccel", hwAccel.ffmpegName])
         hwAccel.hwOutputFormat?.let { addAll(["-hwaccel_output_format", it]) }
-        addAll(["-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay"])
-        addAll(["-probesize", LIVE_PROBE_SIZE, "-analyzeduration", "0", "-max_delay", "0"])
+        addAll(["-fflags", if (picture) "discardcorrupt" else "nobuffer+discardcorrupt", "-flags", "low_delay"])
+        addAll(["-probesize", LIVE_PROBE_SIZE, "-analyzeduration", LIVE_ANALYZE_MICROS, "-fpsprobesize", "0", "-max_delay", "0"])
         when (LiveStreamUrls.schemeOf(url)) {
             // RTSP opens its own sockets, so the generic I/O timeout does not exist for it ("Option not found")
             "rtsp" -> addAll(["-rtsp_transport", "tcp", "-reorder_queue_size", "0", "-timeout", LIVE_RW_TIMEOUT_MICROS])
@@ -370,12 +375,22 @@ object MediaProcess {
     }
 
     /**
-     * Bytes `FFmpeg` may probe a live input for before it starts decoding. Probing ends as soon as every stream is
-     * known (measured: a video-only RTMP or SRT stream starts exactly as with the 32-byte minimum), but a stream with
-     * sound needs room to see both: with the minimum, whichever process (picture or sound) first met the other
-     * stream's packet found no stream of its own and failed. The default (5 MB) held the first picture over 6 s.
+     * How much of a live input `FFmpeg` probes before it decodes: [LIVE_PROBE_SIZE] bytes or [LIVE_ANALYZE_MICROS] of
+     * stream, whichever comes first, with no frame-rate estimate (`-fpsprobesize 0`; output timing never uses it).
+     *
+     * A stream with sound and picture is fully known at its first keyframe and the probe ends there. A picture-only
+     * one never is over RTMP: FFmpeg's RTMP client always announces sound too, so the probe runs to a limit. With the
+     * old 500 kB and no time limit (`-analyzeduration 0` is FLV's 90 s) that was 4 s at 1 Mbit/s and longer on a still
+     * screen, past the live player's 6 s startup watchdog, which then reconnected and started over.
+     *
+     * The limits must still let a stream with sound see its first keyframe: the relay sends sound at once but
+     * pictures only from the next keyframe (a second apart), so before it come up to a second of sound (~22 kB at
+     * the share's 160 kbit/s AAC). With less, the picture had no stream of its own and failed.
      */
-    internal const val LIVE_PROBE_SIZE = "500000"
+    internal const val LIVE_PROBE_SIZE = "65536"
+
+    /** See [LIVE_PROBE_SIZE]: above the share's keyframe interval (1 s) with room to spare. */
+    internal const val LIVE_ANALYZE_MICROS = "1500000"
 
     private fun MutableList<String>.addHttpOptions(url: String) {
         addAll(headerArgs(url))

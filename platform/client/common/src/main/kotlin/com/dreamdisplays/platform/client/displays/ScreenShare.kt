@@ -769,13 +769,14 @@ object ScreenShare {
     ): Ended? {
         // One instant on both clocks: the wall clock FFmpeg stamps by, System.nanoTime the sound pipe and the
         // server's clock (via the clock sync) run on. The stream's timestamps count from a server-clock epoch, so each
-        // one says when its frame was captured (see ShareTimeline); without the clock sync, from now.
+        // one says when its frame was captured (see ShareTimeline); without the clock sync, from a moment just before
+        // now (ScreenCapture.UNCLOCKED_START_MICROS: a relay holds a stream that starts near 0).
         val wallMicros = ScreenCapture.wallClockMicros()
         val baseNanos = System.nanoTime()
         val baseMicros = ShareClock.offsetNanos?.let { offset ->
             val server = ShareTimeline.serverMicros(baseNanos, offset)
             wallMicros - (server - ShareTimeline.epoch(server))
-        } ?: wallMicros
+        } ?: (wallMicros - ScreenCapture.UNCLOCKED_START_MICROS)
         if (!r.withAudio) r.audio = null
         val input = if (r.withAudio) startAudio(r, baseNanos) else null
         val windowCapture = (target as? ScreenCapture.Window)?.let { ScreenCapture.windowCapture(ffmpeg) }

@@ -135,6 +135,12 @@ class MediaPlayer(
     private val relayReconnectPending = AtomicBoolean(false)
     private var lastRelayWaitLogNanos = 0L
 
+    /** When this player began, and whether its relay stream was on the air since (see [relayReconnectDelayMs]). */
+    private val createdNanos = System.nanoTime()
+
+    @Volatile
+    private var relayEverOnAir = false
+
     private var preparedBootstrap: PreparedMedia? = replayBootstrap?.prepared
 
     private val state: PlayerState get() = if (terminated.get()) PlayerState.Stopped else lifecycle
@@ -294,6 +300,19 @@ class MediaPlayer(
 
         /** Pause between attempts to (re)connect a live relay stream that is off the air. */
         private const val RELAY_RECONNECT_MS = 1_000L
+
+        /**
+         * The pause while a share is starting: viewers get its stream the moment the sharer is told to publish, so
+         * the first attempts find nothing on the air, and each refusal is a single round trip. Without it a viewer saw
+         * the share up to a second after it was there.
+         */
+        private const val RELAY_EARLY_RECONNECT_MS = 300L
+        private const val RELAY_EARLY_WINDOW_NS = 4_000_000_000L
+
+        /** The pause before the next attempt at a relay stream: short while it never was on air in its first seconds. */
+        internal fun relayReconnectDelayMs(everOnAir: Boolean, sinceStartNanos: Long): Long =
+            if (!everOnAir && sinceStartNanos < RELAY_EARLY_WINDOW_NS) RELAY_EARLY_RECONNECT_MS else RELAY_RECONNECT_MS
+
         private const val RELAY_WAIT_LOG_INTERVAL_NS = 60_000_000_000L
 
         /** `FFmpeg` errors that no reconnect fixes: the build or the URL itself cannot work. */
@@ -1156,6 +1175,7 @@ class MediaPlayer(
             lastRelayWaitLogNanos = now
             logger.info("$debugLabel Live stream not delivering (${MediaUtil.truncate(reason)}); reconnecting every $RELAY_RECONNECT_MS ms.")
         }
+        val delayMs = relayReconnectDelayMs(relayEverOnAir, now - createdNanos)
         RETRY_SCHEDULER.schedule({
             safeExecute {
                 relayReconnectPending.set(false)
@@ -1163,7 +1183,7 @@ class MediaPlayer(
                 val ss = streams
                 if (ss != null) startStreams(ss, 0L) else dispatchInitialize()
             }
-        }, RELAY_RECONNECT_MS, TimeUnit.MILLISECONDS)
+        }, delayMs, TimeUnit.MILLISECONDS)
     }
 
     /** True when [stderr] says this relay stream can never open here, so reconnecting would only loop. */
@@ -1176,6 +1196,7 @@ class MediaPlayer(
             waitingForStream = false
             if (relayStream) logger.info("$debugLabel Live stream is on the air.")
         }
+        if (relayStream) relayEverOnAir = true
         retryPolicy.reset()
         if (warmingUp) {
             warmUpHold.onPlayoutStart { at ->

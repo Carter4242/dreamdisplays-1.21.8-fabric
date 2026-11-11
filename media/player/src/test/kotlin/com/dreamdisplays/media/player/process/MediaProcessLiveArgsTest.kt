@@ -12,8 +12,8 @@ class MediaProcessLiveArgsTest {
     private fun List<String>.valueOf(flag: String): String? =
         indexOf(flag).takeIf { it >= 0 && it + 1 < size }?.let { this[it + 1] }
 
-    private fun input(url: String, hw: HwAccelBackend = HwAccelBackend.NONE) =
-        MediaProcess.liveInputCommand("FFMPEG", url, hw)
+    private fun input(url: String, hw: HwAccelBackend = HwAccelBackend.NONE, picture: Boolean = false) =
+        MediaProcess.liveInputCommand("FFMPEG", url, hw, picture = picture)
 
     @Test
     fun `a relay input is tuned for the live edge`() {
@@ -22,13 +22,33 @@ class MediaProcessLiveArgsTest {
         assertEquals("-i", a[a.size - 2])
         assertEquals("nobuffer+discardcorrupt", a.valueOf("-fflags"))
         assertEquals("low_delay", a.valueOf("-flags"))
-        assertEquals("0", a.valueOf("-analyzeduration"))
         assertEquals(MediaProcess.LIVE_PROBE_SIZE, a.valueOf("-probesize"))
+        assertEquals("0", a.valueOf("-fpsprobesize"))
         assertEquals("0", a.valueOf("-max_delay"))
         assertEquals("2000000", a.valueOf("-rw_timeout"))
         val whitelist = a.valueOf("-protocol_whitelist")!!.split(',')
         assertTrue(whitelist.containsAll(["srt", "rtmp", "rtmps", "rtsp", "rtp", "tcp", "udp", "tls"]))
         assertFalse("http" in whitelist || "https" in whitelist || "file" in whitelist, "A relay input never needs http or files.")
+    }
+
+    @Test
+    fun `the probe is bounded by time and size, and only the picture keeps what it read`() {
+        val sound = input("rtmps://h/live/a")
+        val picture = input("rtmps://h/live/a", picture = true)
+        // 0 would mean FFmpeg's default, 90 s for FLV: a picture-only RTMP stream then probed to the byte limit
+        assertTrue(MediaProcess.LIVE_ANALYZE_MICROS.toLong() in 1_100_000L..2_000_000L)
+        assertTrue(MediaProcess.LIVE_PROBE_SIZE.toLong() in 32_768L..131_072L)
+        for (a in [sound, picture]) {
+            assertEquals(MediaProcess.LIVE_ANALYZE_MICROS, a.valueOf("-analyzeduration"))
+            assertEquals(MediaProcess.LIVE_PROBE_SIZE, a.valueOf("-probesize"))
+        }
+        assertEquals("discardcorrupt", picture.valueOf("-fflags"))
+        assertEquals("nobuffer+discardcorrupt", sound.valueOf("-fflags"))
+        val video = MediaProcess.videoArgs(
+            "FFMPEG", "rtmps://h/live/a", 320, 180, 0L, HwAccelBackend.NONE, MediaProcess.VideoTransport.PPM, 30.0,
+            alreadyResolved = true,
+        )
+        assertEquals("discardcorrupt", video.valueOf("-fflags"))
     }
 
     @Test

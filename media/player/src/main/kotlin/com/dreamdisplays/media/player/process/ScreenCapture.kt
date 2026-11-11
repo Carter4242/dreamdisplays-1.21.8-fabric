@@ -135,8 +135,18 @@ object ScreenCapture {
         val cap = if (serverMaxFps > 0) serverMaxFps else 60
         if (!sixtyPossible(cap, source, encoder)) return minOf(30, cap)
         val probe = Settings.forFps(60).limitedTo(0, maxHeight)
+        // The prewarm measured the full size: a smaller picture encodes no slower, so a full size within budget
+        // spares the share start a ~2 s test at the server's height
+        val full = Settings.forFps(60)
+        if (probe.maxHeight <= full.maxHeight && (measuredMsPerFrame(ffmpeg, encoder, full) ?: Double.MAX_VALUE) <= SIXTY_BUDGET_MS) {
+            return 60
+        }
         return if (encodeMsPerFrame(ffmpeg, encoder, probe) <= SIXTY_BUDGET_MS) 60 else 30
     }
+
+    /** [encodeMsPerFrame]'s result when it was already measured, else null (never measures). */
+    internal fun measuredMsPerFrame(ffmpeg: String, encoder: Encoder, settings: Settings): Double? =
+        sixty["$ffmpeg|$encoder|${settings.maxWidth}x${settings.maxHeight}"]
 
     /** 60 fps can be considered at all: allowed by [cap], a source that keeps up, a hardware encoder. */
     internal fun sixtyPossible(cap: Int, source: Source, encoder: Encoder): Boolean =
@@ -821,6 +831,13 @@ object ScreenCapture {
         addAll(["-c:a", "aac", "-aac_coder", "fast", "-b:a", ShareAudio.AAC_BITRATE])
         addAll(["-ar", ShareAudio.AAC_RATE.toString(), "-ac", "2"])
     }
+
+    /**
+     * Where a share's timestamps start without the clock sync (µs). MediaMTX keeps a new RTMP publish off the air until
+     * its timestamps span 2 s (its track analysis, counted from the codec headers, which go out at 0): a stream
+     * starting near 0 reached viewers 2 s late. With the clock sync they are the server's clock, far above that.
+     */
+    const val UNCLOCKED_START_MICROS = 2_500_000L
 
     /** `-force_key_frames`: the first frame, then one a second after the last forced one (any clock origin). */
     internal const val KEYFRAME_EVERY_SECOND = "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,1))"
