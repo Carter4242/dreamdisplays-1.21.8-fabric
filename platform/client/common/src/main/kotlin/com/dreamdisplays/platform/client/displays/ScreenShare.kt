@@ -744,6 +744,9 @@ object ScreenShare {
         return true
     }
 
+    /** `FFmpeg`'s line when an input ends on an error while the others go on (`[in#1/pulse @ ...] Error during demuxing`). */
+    private val SOUND_INPUT_ENDED = Regex("(?i)Error during demuxing")
+
     private val SOUND_INPUT_FAILURE = Regex("""(?i)/wav @|/pulse @|dreamdisplays-share-|@DEFAULT_MONITOR@|pulse""")
 
     private const val EARLY_EXIT_MS = 5_000L
@@ -810,6 +813,11 @@ object ScreenShare {
         val tail = ArrayDeque<String>()
         runCatching {
             proc.inputStream.bufferedReader().forEachLine { line ->
+                // The sound input failed while the picture goes on (PulseAudio restarted, the pipe broke): FFmpeg
+                // ends only that input, so the badge and the sharer are told the sound is gone
+                if (r.audio != null && SOUND_INPUT_ENDED.containsMatchIn(line) && SOUND_INPUT_FAILURE.containsMatchIn(line)) {
+                    soundLost(r, line.take(160))
+                }
                 if (tail.size >= 15) tail.removeFirst()
                 // FFmpeg names the publish URL in its errors; its credentials (and stream id) never reach a log or the chat
                 tail.addLast(scrubUrls(line))
