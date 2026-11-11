@@ -86,6 +86,7 @@ data class SettingsSection(
     // Fullscreen broadcasts
     val fullscreenAllowForced get() = fullscreen.allow_forced
     val fullscreenQualityCap get() = fullscreen.quality_cap
+    val fullscreenPrepareTimeoutMs get() = fullscreen.prepare_timeout_seconds * 1000L
     val fullscreenDefaultMode: FullscreenMode
         get() = runCatching { FullscreenMode.valueOf(fullscreen.default_mode.uppercase()) }
             .getOrDefault(FullscreenMode.STANDARD)
@@ -140,6 +141,7 @@ data class SettingsSection(
         val default_mode: String = "STANDARD",
         val allow_forced: Boolean = true,
         val quality_cap: Int = 1080,
+        val prepare_timeout_seconds: Int = 600,
     )
 }
 
@@ -296,6 +298,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
             allow_forced = t?.getBoolean("fullscreen.allow_forced") ?: true,
             quality_cap = t?.getLong("fullscreen.quality_cap")?.toInt() ?: 1080,
+            prepare_timeout_seconds = t?.getLong("fullscreen.prepare_timeout_seconds")?.toInt()?.coerceIn(10, 86_400) ?: 600,
         ),
     ),
     storage = StorageSection(

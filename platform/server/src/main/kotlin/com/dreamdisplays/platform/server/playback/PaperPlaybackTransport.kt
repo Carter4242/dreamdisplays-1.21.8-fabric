@@ -75,6 +75,13 @@ object PaperPlaybackTransport : PlaybackTransport {
         return dx * dx + dy * dy + dz * dz
     }
 
+    override fun isInDisplayWorld(playerId: UUID, display: DisplayData): Boolean {
+        if (display.virtual) return true
+        val paper = display as? PaperDisplayData ?: return false
+        val player = PaperServer.getInstance().server.getPlayer(playerId) ?: return false
+        return player.world == paper.pos1.world
+    }
+
     override fun sendDisplayInfo(playerId: UUID, display: DisplayData, forced: Boolean) {
         val paper = display as? PaperDisplayData ?: return
         val player = PaperServer.getInstance().server.getPlayer(playerId) ?: return

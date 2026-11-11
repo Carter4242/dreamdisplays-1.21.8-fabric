@@ -40,6 +40,7 @@ object VanillaBootstrap {
         WatchPartyManager.init(VanillaPlaybackTransport)
         TimelineManager.init(VanillaPlaybackTransport)
         FullscreenBroadcastManager.init(VanillaPlaybackTransport)
+        FullscreenBroadcastManager.prepareTimeoutMs = { VanillaServerState.config.settings.fullscreenPrepareTimeoutMs }
         FullscreenBroadcastManager.restore()
         PipPinManager.init(VanillaPlaybackTransport)
         PipPinManager.restore()

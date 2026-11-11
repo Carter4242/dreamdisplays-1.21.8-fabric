@@ -50,6 +50,7 @@ object ClientTickManager {
 
         FullscreenOverlayManager.onClientTick(minecraft)
         FullscreenController.onClientTick()
+        FullscreenPrepareController.onClientTick()
         DisplayRegistry.tickReconfirm()
         if (minecraft.level != null) {
             ProtocolRouter.tickHelloRefresh(DisplayRegistry.getScreens().any { !it.virtual && !it.isDormant })
@@ -63,6 +64,7 @@ object ClientTickManager {
             if (lastLevel == null) {
                 lastLevel = level
                 if (newBackend) {
+                    FullscreenPrepareController.reset()
                     DisplayRegistry.unloadAllForServerSwitch(newBackend = true)
                     hoveredDisplayScreen = null
                 }
@@ -70,6 +72,7 @@ object ClientTickManager {
             }
             if (level !== lastLevel) {
                 lastLevel = level
+                if (newBackend) FullscreenPrepareController.reset()
                 DisplayRegistry.unloadAllForServerSwitch(newBackend)
                 hoveredDisplayScreen = null
                 checkVersionAndSendPacket()
@@ -125,8 +128,9 @@ object ClientTickManager {
             val outOfRange = threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
             // Switched off by the server: everything goes, popouts and virtual displays included
             val serverDisabled = !ServerOverrides.displayEnabled(displayScreen.policy)
+            // A display held for a fullscreen broadcast stays loaded at any distance until the broadcast takes it
             val shouldUnload = serverDisabled || ((outOfRange || !ClientStateManager.displaysEnabled) &&
-                    !displayScreen.isPopoutActive && !displayScreen.virtual)
+                    !displayScreen.isPopoutActive && !displayScreen.virtual && !displayScreen.isPrepared)
 
             // Already parked warm: wake it when back in range, or tear it down once it has been dormant
             // past the pool TTL (freeing its decoder + texture; the snapshot cache then bridges a return).

@@ -55,6 +55,7 @@ object ClientPacketManager {
             }
 
             is FullscreenState -> FullscreenController.handle(packet)
+            is FullscreenPrepare -> FullscreenPrepareController.handle(packet)
             is RemotePlaybackToggle -> DisplayRegistry.screens[packet.id]?.setPaused(packet.paused)
             is DisplayDelete -> handleDelete(packet)
             is ClearCache -> handleClearCache(packet)
@@ -102,5 +103,6 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         FullscreenController.reset()
+        FullscreenPrepareController.reset()
     }
 }

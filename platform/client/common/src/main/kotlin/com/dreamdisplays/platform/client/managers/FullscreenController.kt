@@ -36,6 +36,8 @@ object FullscreenController {
             }
             return
         }
+        // The broadcast a preparation held this display for has started: the session owns it from here
+        FullscreenPrepareController.onFullscreenStarted(state.displayId)
         val screen = DisplayRegistry.screens[state.displayId]
         if (screen == null || !isClientReady()) {
             pending[state.displayId] = Pending(state, System.currentTimeMillis())
@@ -84,8 +86,14 @@ object FullscreenController {
         }
         screen.lastFullscreenState = state
         screen.activateFullscreenMode(FullscreenMode.fromWire(state.mode), state.forced, state.sessionId, state.loop)
+        // No longer prepared and now on screen: lift the preparation's hiding and muting right away, not next tick
+        screen.refreshPrepareState()
         if (state.volume >= 0f) screen.volume = state.volume.coerceIn(0f, 1f)
-        if (state.quality.isNotEmpty()) screen.quality = VideoQuality.parse(state.quality)
+        // Re-applying the same quality is not free: it can drop a paused player's open stream
+        if (state.quality.isNotEmpty()) {
+            val quality = VideoQuality.parse(state.quality)
+            if (screen.quality != quality) screen.quality = quality
+        }
         if (state.minimized) screen.minimizeFullscreenToPip()
         val action = if (state.minimized) FullscreenAckAction.MINIMIZED else FullscreenAckAction.SHOWN
         ProtocolRouter.send(FullscreenAck(state.sessionId, action.wire))

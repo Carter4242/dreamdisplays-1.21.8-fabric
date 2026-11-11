@@ -127,6 +127,9 @@ allow_forced = true
 # Quality cap in pixels of height; clamped down further to the source's own max
 quality_cap = 1080
 
+# How long /display fullscreen prepare keeps clients holding a broadcast ready before letting go (10..86400)
+prepare_timeout_seconds = 600
+
 [reports]
 # Report settings
 # webhook_url is a discord webhook URL for sending reports

@@ -87,6 +87,7 @@ class PaperServer : JavaPlugin() {
         TimelineManager.seekHoldMs = { Companion.config.settings.seekHoldMs }
         TimelineManager.autoPauseWhenEmptyMs = { Companion.config.settings.autoPauseWhenEmptyMs }
         FullscreenBroadcastManager.init(PaperPlaybackTransport)
+        FullscreenBroadcastManager.prepareTimeoutMs = { Companion.config.settings.fullscreenPrepareTimeoutMs }
         FullscreenBroadcastManager.restore()
         PipPinManager.init(PaperPlaybackTransport)
         PipPinManager.restore()

@@ -63,6 +63,8 @@ enum class ServerMessage(val key: String) {
     FULLSCREEN_NO_DISPLAY("fullscreenNoDisplay"),
     FULLSCREEN_NO_TARGETS("fullscreenNoTargets"),
     FULLSCREEN_PLAYER_ONLY("fullscreenPlayerOnly"),
+    FULLSCREEN_PREPARED("fullscreenPrepared"),
+    FULLSCREEN_PREPARE_PROGRESS("fullscreenPrepareProgress"),
     FULLSCREEN_STARTED("fullscreenStarted"),
     FULLSCREEN_STOP_FAILED("fullscreenStopFailed"),
     FULLSCREEN_STOPPED("fullscreenStopped"),
