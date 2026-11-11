@@ -14,6 +14,11 @@ import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
+import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPing
+import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong
+import com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport
+import com.dreamdisplays.core.protocol.common.packets.KaraokeMicMarkers
+import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
 import com.dreamdisplays.core.protocol.common.packets.QueueAction
@@ -84,7 +89,14 @@ enum class PacketType(
 
     // Client error reporting; only sent to servers that advertise ServerFeature.CLIENT_ERROR_REPORTS
     CLIENT_ERROR_REPORT(60, ClientErrorReport::class, PacketDirection.CLIENT_TO_SERVER),
-    CLIENT_ENVIRONMENT(61, ClientEnvironment::class, PacketDirection.CLIENT_TO_SERVER);
+    CLIENT_ENVIRONMENT(61, ClientEnvironment::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Karaoke timing measurements; only exchanged with servers that advertise ServerFeature.KARAOKE
+    KARAOKE_LATENCY_REPORT(70, KaraokeLatencyReport::class, PacketDirection.CLIENT_TO_SERVER),
+    KARAOKE_OFFSET_REPORT(71, KaraokeOffsetReport::class, PacketDirection.CLIENT_TO_SERVER),
+    KARAOKE_CLOCK_PING(72, KaraokeClockPing::class, PacketDirection.SERVER_TO_CLIENT),
+    KARAOKE_CLOCK_PONG(73, KaraokeClockPong::class, PacketDirection.CLIENT_TO_SERVER),
+    KARAOKE_MIC_MARKERS(74, KaraokeMicMarkers::class, PacketDirection.CLIENT_TO_SERVER);
 
     companion object {
         private val byId = entries.associateBy { it.id }

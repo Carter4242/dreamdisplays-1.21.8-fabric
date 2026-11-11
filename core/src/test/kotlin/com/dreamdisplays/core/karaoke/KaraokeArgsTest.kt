@@ -10,9 +10,10 @@ class KaraokeArgsTest {
     private fun parse(line: String) = KaraokeArgs.parse(line.split(' '))
 
     @Test
-    fun toggleAndStatus() {
-        assertEquals(KaraokeAction.Toggle(true), parse("on"))
-        assertEquals(KaraokeAction.Toggle(false), parse("OFF"))
+    fun stopAndStatus() {
+        assertEquals(KaraokeAction.Stop, parse("stop"))
+        assertEquals(KaraokeAction.Stop, parse("OFF"))
+        assertEquals(KaraokeAction.Invalid(KaraokeAction.Reason.USAGE), parse("on"))
         assertEquals(KaraokeAction.Status, parse("status"))
         assertEquals(KaraokeAction.Status, KaraokeArgs.parse(emptyList()))
     }
@@ -61,7 +62,7 @@ class KaraokeArgsTest {
         assertFalse(parse("line").operatorOnly)
         assertTrue(parse("line add Bob https://x.y/z").operatorOnly)
         assertTrue(parse("line clear").operatorOnly)
-        assertTrue(parse("on").operatorOnly)
+        assertTrue(parse("stop").operatorOnly)
         assertTrue(parse("status").operatorOnly)
         assertTrue(parse("singer add Bob").operatorOnly)
     }

@@ -30,7 +30,13 @@ enum class ServerFeature(override val wire: String) : WireEnum {
     QUEUE("queue"),
 
     /** Server takes `ClientErrorReport` / `ClientEnvironment` packets (op-only diagnostics); clients send none otherwise. */
-    CLIENT_ERROR_REPORTS("client_error_reports");
+    CLIENT_ERROR_REPORTS("client_error_reports"),
+
+    /**
+     * Server runs karaoke (Simple Voice Chat installed): takes karaoke latency / offset / mic marker reports and sends
+     * clock pings; clients send none otherwise.
+     */
+    KARAOKE("karaoke");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */

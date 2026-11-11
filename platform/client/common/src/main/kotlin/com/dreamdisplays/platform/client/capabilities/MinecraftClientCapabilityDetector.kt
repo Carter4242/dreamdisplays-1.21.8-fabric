@@ -72,6 +72,7 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
             supportsFullscreenPrepare = true,
             supportsReadiness = true,
             supportsQueue = true,
+            supportsKaraoke = true,
         )
     }
 

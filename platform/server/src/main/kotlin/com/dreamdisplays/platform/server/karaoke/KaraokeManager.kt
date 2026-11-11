@@ -3,6 +3,8 @@ package com.dreamdisplays.platform.server.karaoke
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.karaoke.KaraokeLatency
 import com.dreamdisplays.core.karaoke.KaraokeTiming
+import com.dreamdisplays.core.karaoke.LeadResync
+import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.queue.QueueTiming
@@ -18,6 +20,7 @@ import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.PlatformUtil
+import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import com.dreamdisplays.shared.playback.PlaybackContext
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -33,6 +36,15 @@ import kotlin.math.sqrt
 /**
  * Karaoke on synced / broadcast displays: who sings where, their lead, the singer line tied to the display's queue,
  * and the [KaraokeStage] snapshots the voice side ([KaraokeVoice]) reads.
+ *
+ * There is no on / off: a display is in karaoke exactly while someone sings on it (added by hand, or their line turn
+ * came up). When the last singer stops (removed, left the line, logged out, their song ended) everything is back to
+ * normal: normal voice chat routing and the normal timeline. `stop` ends it at once and clears the line.
+ *
+ * Timing is automatic: clients report what they measured ([KaraokeMeasurements]): the singer's audio output, mic
+ * capture and (clock-synced) capture -> server time, each listener's voice chat buffer and output, and the singer's
+ * own client listens to their singing against the track and reports how far off it is, which slowly moves their
+ * automatic trim. What is not reported falls back to the `[karaoke]` constants and pings.
  *
  * - Singers get the display's timeline [Singer.leadMs] ahead ([TimelineManager.playerLeadsMs]), so they hear the
  *   track and see the lyrics early; their voice is re-timed per listener by the voice side.
@@ -65,9 +77,6 @@ object KaraokeManager {
     data class LineEntry(val playerId: UUID, val name: String, val itemId: String)
 
     private class State {
-        @Volatile
-        var enabled = false
-
         @Volatile
         var trimMs = 0L
         val singers = ConcurrentHashMap<UUID, Singer>()
@@ -112,6 +121,7 @@ object KaraokeManager {
         singerDisplay.clear()
         leads = emptyMap()
         stagesBySinger = emptyMap()
+        KaraokeMeasurements.clear()
     }
 
     private fun loadVoice(): KaraokeVoice? {
@@ -132,7 +142,11 @@ object KaraokeManager {
     /** The stage [singerId] sings on, for the voice side; null when they are not singing. Any thread. */
     fun stageOfSinger(singerId: UUID): KaraokeStage? = stagesBySinger[singerId]
 
-    fun isEnabled(display: DisplayData): Boolean = states[display.id]?.enabled == true
+    /** True while someone sings on [display] (it is in karaoke). */
+    fun isActive(display: DisplayData): Boolean = states[display.id]?.singers?.isNotEmpty() == true
+
+    /** Waiting line entries of [display]. */
+    fun lineSize(display: DisplayData): Int = states[display.id]?.line?.size ?: 0
 
     fun trimOf(display: DisplayData): Long = states[display.id]?.trimMs ?: 0L
 
@@ -142,12 +156,17 @@ object KaraokeManager {
     fun runsOn(display: DisplayData): Boolean =
         !display.virtual && (display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST)
 
-    /** Turns karaoke on or off for [display]; off stops every singer (the line stays, its songs play without them). */
-    fun setEnabled(display: DisplayData, on: Boolean) {
-        val state = states.computeIfAbsent(display.id) { State() }
-        state.enabled = on
-        if (!on) state.singers.keys.toList().forEach { removeSinger(display, it) }
+    /**
+     * Ends karaoke on [display] at once: every singer stops (and gets the normal timeline) and the line is emptied,
+     * its songs dropped from the queue. Returns how many singers and line entries there were.
+     */
+    fun stop(display: DisplayData): Pair<Int, Int> {
+        val state = states[display.id] ?: return 0 to 0
+        val singers = state.singers.keys.toList()
+        singers.forEach { removeSinger(display, it) }
+        val line = clearLine(display)
         refresh()
+        return singers.size to line
     }
 
     /**
@@ -165,6 +184,8 @@ object KaraokeManager {
         val state = states.computeIfAbsent(display.id) { State() }
         if (!duet) state.singers.keys.filter { it != playerId }.forEach { removeSinger(display, it, resend) }
         val previous = state.singers[playerId]
+        // A new singer's offset reports start afresh (the trim they learned this session stays)
+        if (previous == null) KaraokeMeasurements.onSingingStarted(playerId)
         val wanted = leadMs ?: autoLeadMs(display, playerId)
         // Already singing with about this lead: keep it, and spare them a paused resync
         val unchanged = previous != null && abs(wanted - previous.leadMs) < LEAD_DEADBAND_MS
@@ -200,15 +221,56 @@ object KaraokeManager {
         return true
     }
 
-    /** The automatic lead for [playerId] on [display] now (see [KaraokeTiming.autoLeadMs]). */
+    /**
+     * The automatic lead for [playerId] on [display] now: their measured singer side plus the worst measured listener
+     * side in range, room for a negative trim, and the margin (see [KaraokeTiming.autoLeadMs]); `default_lead_ms`
+     * when that is set. Read-only.
+     */
     fun autoLeadMs(display: DisplayData, playerId: UUID): Long {
         val s = settings()
         if (s.defaultLeadMs > 0L) return s.defaultLeadMs
         val singerPing = Bukkit.getPlayer(playerId)?.ping?.toLong() ?: 0L
-        val singers = states[display.id]?.singers?.keys.orEmpty() + playerId
+        val singerSide = KaraokeTiming.singerSideMs(
+            singerPing, KaraokeMeasurements.singerLatency(playerId, System.nanoTime()), s.latency,
+        )
+        val state = states[display.id]
+        val singers = state?.singers?.keys.orEmpty() + playerId
         val worst = (display as? PaperDisplayData)?.let { listenersOf(it, singers) }
-            ?.maxOfOrNull { it.pingMs }?.coerceAtMost(MAX_PING_FOR_LEAD_MS) ?: singerPing
-        return KaraokeTiming.autoLeadMs(singerPing, worst, s.latency, s.leadMarginMs, s.minLeadMs, s.maxLeadMs)
+            ?.maxOfOrNull { KaraokeTiming.listenerSideMs(it.pingMs.coerceAtMost(MAX_PING_FOR_LEAD_MS), it.latency, s.latency) }
+            ?: KaraokeTiming.listenerSideMs(singerPing, null, s.latency)
+        val trim = (state?.trimMs ?: 0L) + (state?.singers?.get(playerId)?.trimMs ?: 0L) +
+                KaraokeMeasurements.autoTrimMs(playerId)
+        return KaraokeTiming.autoLeadMs(singerSide, worst, trim, s.leadMarginMs, s.minLeadMs, s.maxLeadMs)
+    }
+
+    /**
+     * A singer's client reports how late their voice is against the track they heard. Taken only from a current
+     * singer of that display while its song plays; it slowly moves their automatic trim.
+     */
+    fun onOffsetReport(player: Player, report: KaraokeOffsetReport) {
+        val state = states[report.id] ?: return
+        if (!state.singers.containsKey(player.uniqueId)) return
+        val stage = stagesBySinger[player.uniqueId]?.takeIf { it.displayId == report.id && it.songPlaying } ?: return
+        if (stage.singers[player.uniqueId]?.present != true) return
+        val moved = KaraokeMeasurements.onOffset(
+            player.uniqueId, report.offsetMs.toDouble(), report.confidence, PaperPlaybackTransport.nowMs(),
+        )
+        if (settings().debug) {
+            logger.info(
+                "Karaoke on display {}: {} sings {} ms {} (confidence {}); automatic trim {} ms.",
+                report.id, player.name, kotlin.math.abs(report.offsetMs), if (report.offsetMs >= 0) "late" else "early",
+                "%.2f".format(report.confidence), KaraokeMeasurements.autoTrimMs(player.uniqueId),
+            )
+        }
+        if (moved) refresh()
+    }
+
+    /** [playerId] logged out: they stop singing wherever they did, and their measurements are forgotten. */
+    fun onQuit(playerId: UUID) {
+        singerDisplay[playerId]?.let { displayId ->
+            DisplayManager.getDisplayData(displayId)?.let { removeSinger(it, playerId, resend = false) }
+        }
+        KaraokeMeasurements.forget(playerId)
     }
 
     /** The current stage of [display] (listeners, positions), built now; null when nobody sings there. */
@@ -220,13 +282,13 @@ object KaraokeManager {
 
     // ---- The line ----
 
-    enum class LineResult { OK, OFF, ALREADY, NOT_IN_LINE, QUEUE_REFUSED }
+    enum class LineResult { OK, ALREADY, NOT_IN_LINE, QUEUE_REFUSED }
 
     data class JoinOutcome(val result: LineResult, val queueResult: QueueManager.Result? = null, val position: Int = 0)
 
     /** Queues [url] on [display] for [playerId] and puts them in the line for it. [url] must already be validated. */
     fun join(display: DisplayData, playerId: UUID, name: String, url: String): JoinOutcome {
-        val state = states[display.id]?.takeIf { it.enabled } ?: return JoinOutcome(LineResult.OFF)
+        val state = states.computeIfAbsent(display.id) { State() }
         if (state.line.values.any { it.playerId == playerId }) return JoinOutcome(LineResult.ALREADY)
         val result = QueueManager.add(display, adminContext(display), playerId, name, url, "", "", 0L, "", throttled = false)
         if (result != QueueManager.Result.OK) return JoinOutcome(LineResult.QUEUE_REFUSED, result)
@@ -299,7 +361,6 @@ object KaraokeManager {
         val state = states[display.id] ?: return true
         state.singers.values.filter { it.itemId != null }.forEach { removeSinger(display, it.playerId, resend = false) }
         val entry = state.line.remove(item.itemId) ?: return true
-        if (!state.enabled) return true
         val player = Bukkit.getPlayer(entry.playerId)
         if (player == null || !isPresent(display, player)) {
             val skip = settings().skipAbsent
@@ -325,7 +386,10 @@ object KaraokeManager {
 
     // ---- Ticking and stages ----
 
-    /** Every couple of ticks: ends finished line songs, prunes the line, and rebuilds the stages. */
+    /**
+     * Every couple of ticks: ends finished line songs and singers who left, prunes the line, forgets displays nobody
+     * sings or waits on, pings singers' clocks, and rebuilds the stages.
+     */
     fun tick() {
         if (states.isEmpty()) {
             if (stagesBySinger.isNotEmpty()) stagesBySinger = emptyMap()
@@ -340,9 +404,16 @@ object KaraokeManager {
                 continue
             }
             endFinishedSongs(display, state)
+            state.singers.keys.filter { Bukkit.getPlayer(it) == null }.forEach { removeSinger(display, it, resend = false) }
             if (slow) pruneLine(display, state)
+            if (state.singers.isEmpty() && state.line.isEmpty() && state.trimMs == 0L) states.remove(displayId)
         }
         refresh()
+        KaraokeMeasurements.pingSingers(
+            singerDisplay.keys,
+            capable = { V2PlayerTracker.helloOf(it)?.supportsKaraoke == true },
+            send = { id, ping -> Bukkit.getPlayer(id)?.let { PaperV2Networking.send([it], ping) } },
+        )
     }
 
     /**
@@ -373,7 +444,7 @@ object KaraokeManager {
         val newLeads = HashMap<UUID, Map<UUID, Long>>()
         val stages = HashMap<UUID, KaraokeStage>()
         for ((displayId, state) in states) {
-            if (!state.enabled || state.singers.isEmpty()) continue
+            if (state.singers.isEmpty()) continue
             newLeads[displayId] = state.singers.values.associate { it.playerId to it.leadMs }
             val display = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: continue
             val stage = buildStage(display, state) ?: continue
@@ -384,15 +455,20 @@ object KaraokeManager {
     }
 
     private fun buildStage(display: PaperDisplayData, state: State): KaraokeStage? {
-        if (!state.enabled || state.singers.isEmpty()) return null
+        if (state.singers.isEmpty()) return null
         val box = display.box
         val radius = audioRadius(display)
         val s = settings()
+        val nowNanos = System.nanoTime()
         val singers = state.singers.values.associate {
             val player = Bukkit.getPlayer(it.playerId)
             val present = player != null && player.world == display.pos1.world &&
                     distanceToBox(player.location.x, player.location.y, player.location.z, box) <= radius
-            it.playerId to StageSinger(it.leadMs, state.trimMs + it.trimMs, player?.ping?.toLong() ?: 0L, present)
+            val trim = state.trimMs + it.trimMs + KaraokeMeasurements.autoTrimMs(it.playerId)
+            it.playerId to StageSinger(
+                it.leadMs, trim, player?.ping?.toLong() ?: 0L, present,
+                KaraokeMeasurements.singerLatency(it.playerId, nowNanos),
+            )
         }
         val halfDiagonal = sqrt(box.widthX * box.widthX + box.height * box.height + box.widthZ * box.widthZ) / 2.0
         val timeline = TimelineManager.timelineOf(display.id)
@@ -424,7 +500,9 @@ object KaraokeManager {
         return world.players.mapNotNull {
             if (it.uniqueId in singers) return@mapNotNull null
             val inRange = distanceToBox(it.location.x, it.location.y, it.location.z, display.box) <= radius
-            if (inRange || everyone) StageListener(it.uniqueId, it.ping.toLong(), inRange) else null
+            if (inRange || everyone) {
+                StageListener(it.uniqueId, it.ping.toLong(), inRange, KaraokeMeasurements.listenerLatency(it.uniqueId))
+            } else null
         }
     }
 
@@ -440,20 +518,19 @@ object KaraokeManager {
     }
 
     /**
-     * Sends [playerId] the display's timeline after their lead changed. A playing client takes a jump under a second
-     * as drift and closes it slowly, so it first gets the timeline paused at its new position (a new segment it snaps
-     * to), then the playing one.
+     * Sends [playerId] alone the display's timeline after their lead changed ([LeadResync]): one packet, in the
+     * display's own state (a playing display stays playing for them), shifted by their new lead. Never paused first:
+     * that restarts their player and leaves them without sound for seconds. Nobody else's timeline changed.
      */
     private fun resendTimeline(display: DisplayData, playerId: UUID) {
         val transport = PaperPlaybackTransport
-        if (playerId !in transport.nearbyPlayerIds(display)) return
-        val timeline = TimelineManager.timelineOf(display.id) ?: return
+        val timeline = TimelineManager.timelineOf(display.id)
         val now = transport.nowMs()
-        if (!timeline.paused && timeline.serverTimeMs <= now && !TimelineManager.isHolding(display.id)) {
-            val paused = timeline.withPaused(true, now).toSync(display.id, display.mode, now)
-            transport.sendTo(playerId, TimelineManager.shiftedFor(display.id, playerId, paused))
-        }
-        TimelineManager.sendCurrent(display, playerId)
+        val lead = leads[display.id]?.get(playerId) ?: 0L
+        val packets = LeadResync.packetsFor(
+            playerId, transport.nearbyPlayerIds(display), timeline?.toSync(display.id, display.mode, now), lead,
+        )
+        for ((target, sync) in packets) TimelineManager.sendShifted(target, display.id, lead, sync)
     }
 
     private fun adminContext(display: DisplayData): PlaybackContext =

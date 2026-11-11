@@ -7,6 +7,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
 import com.dreamdisplays.platform.server.karaoke.KaraokeManager
+import com.dreamdisplays.platform.server.karaoke.KaraokeMeasurements
 import com.dreamdisplays.platform.server.playback.TimelineManager
 import com.dreamdisplays.platform.server.karaoke.KaraokeManager.LineResult
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -23,10 +24,11 @@ import org.bukkit.entity.Player
 import java.util.*
 
 /**
- * `/display karaoke <display> ...`: `on|off`, `status`, `trim <ms>`, `singer add <player> [duet] [lead_ms]` (replaces the singers unless `duet`),
+ * `/display karaoke <display> ...`: `stop` (alias `off`), `status`, `trim <ms>`, `singer add <player> [duet] [lead_ms]` (replaces the singers unless `duet`),
  * `singer remove <player>`, `singer trim <player> <ms>`, and the singer line: `join <url>`, `leave`, `line`,
  * `line add <player> <url>`, `line remove <player>`, `line clear`. Join, leave and viewing the line need
- * `permissions.karaoke_join`, the rest `permissions.karaoke` (both operator-only by default).
+ * `permissions.karaoke_join`, the rest `permissions.karaoke` (both operator-only by default). There is no `on`: a display
+ * is in karaoke while someone sings on it.
  */
 @PaperOnly
 object KaraokeCommand {
@@ -59,9 +61,9 @@ object KaraokeCommand {
         if (!KaraokeManager.runsOn(display)) return say(sender, "karaokeNotTimeline")
         val label = display.shortLabel
         when (action) {
-            is KaraokeAction.Toggle -> {
-                KaraokeManager.setEnabled(display, action.on)
-                say(sender, if (action.on) "karaokeOn" else "karaokeOff", label)
+            KaraokeAction.Stop -> {
+                val (singers, line) = KaraokeManager.stop(display)
+                say(sender, "karaokeStopped", label, singers.toString(), line.toString())
             }
 
             KaraokeAction.Status -> status(sender, display)
@@ -71,7 +73,6 @@ object KaraokeCommand {
             }
 
             is KaraokeAction.SingerAdd -> {
-                if (!KaraokeManager.isEnabled(display)) return say(sender, "karaokeIsOff", label)
                 val player = onlinePlayer(action.player) ?: return say(sender, "karaokeNoPlayer", action.player)
                 val lead = KaraokeManager.addSinger(display, player.uniqueId, player.name, action.leadMs, duet = action.duet)
                 say(sender, "karaokeSingerAdded", player.name, label, lead.toString())
@@ -135,33 +136,40 @@ object KaraokeCommand {
                 else -> say(sender, "karaokeLineAdded", name, label, outcome.position.toString())
             }
 
-            LineResult.OFF -> say(sender, "karaokeIsOff", label)
             LineResult.ALREADY -> say(sender, "karaokeAlreadyInLine", name, label)
             LineResult.NOT_IN_LINE -> say(sender, "karaokeNotInLine", name, label)
             LineResult.QUEUE_REFUSED -> QueueCommand.report(sender, display, outcome.queueResult ?: return, "queueAdded")
         }
     }
 
+    /** Strictly read-only: reads the singers, the stage and what clients measured; changes nothing. */
     private fun status(sender: CommandSender, display: DisplayData) {
         val label = display.shortLabel
-        val on = KaraokeManager.isEnabled(display)
-        val listeners = KaraokeManager.listenersNear(display)
-        say(
-            sender, "karaokeStatusHeader", label,
-            MessageUtil.messageFor(sender, if (on) "karaokeStateOn" else "karaokeStateOff"),
-            KaraokeManager.trimOf(display).toString(), listeners.size.toString(),
-            KaraokeManager.audioRadius(display).toInt().toString(),
-        )
         val singers = KaraokeManager.singersOf(display)
-        if (singers.isEmpty()) return say(sender, "karaokeStatusNoSingers")
+        val listeners = KaraokeManager.listenersNear(display)
+        val waiting = KaraokeManager.lineSize(display)
+        if (singers.isEmpty()) {
+            say(sender, "karaokeStatusIdle", label, waiting.toString())
+        } else {
+            say(
+                sender, "karaokeStatusHeader", label, singers.size.toString(), waiting.toString(),
+                KaraokeManager.trimOf(display).toString(), listeners.size.toString(),
+                KaraokeManager.audioRadius(display).toInt().toString(),
+            )
+        }
         val stage = KaraokeManager.stageOf(display)
         val latency = KaraokeManager.settings().latency
+        val nowNanos = System.nanoTime()
         for (singer in singers) {
-            val ping = stage?.singers?.get(singer.playerId)?.pingMs ?: Bukkit.getPlayer(singer.playerId)?.ping?.toLong() ?: 0L
-            val trim = stage?.singers?.get(singer.playerId)?.trimMs ?: singer.trimMs
+            val staged = stage?.singers?.get(singer.playerId)
+            val ping = staged?.pingMs ?: Bukkit.getPlayer(singer.playerId)?.ping?.toLong() ?: 0L
+            val measured = KaraokeMeasurements.singerLatency(singer.playerId, nowNanos)
+            val report = KaraokeMeasurements.reportOf(singer.playerId)?.report
+            val auto = KaraokeMeasurements.statusOf(singer.playerId, nowNanos)
+            val trim = staged?.trimMs ?: (KaraokeManager.trimOf(display) + singer.trimMs + auto.autoTrimMs)
             // Listeners whose computed send delay is negative can't be reached in time at all
             val short = listeners.count {
-                KaraokeTiming.emitDelayMs(singer.leadMs, ping, it.pingMs, trim, latency) < 0
+                KaraokeTiming.emitDelayMs(singer.leadMs, ping, measured, it.pingMs, it.latency, trim, latency) < 0
             }
             val stats = KaraokeManager.voice?.stats(singer.playerId)
             val voice = if (stats == null) MessageUtil.messageFor(sender, "karaokeStatusNoVoice")
@@ -169,17 +177,57 @@ object KaraokeCommand {
                 sender, "karaokeStatusVoice", stats.frames.toString(), stats.bursts.toString(),
                 stats.sent.toString(), stats.late.toString(),
             )
-            say(
-                sender, "karaokeStatusSinger", singer.name, singer.leadMs.toString(), ping.toString(),
-                singer.trimMs.toString(),
-                if (singer.itemId != null) MessageUtil.messageFor(sender, "karaokeStatusFromLine") else "",
-                voice,
-                TimelineManager.lastSentLeadMs(display.id, singer.playerId)?.toString() ?: "-",
+            val autoInfo = if (auto.reports == 0 && auto.lastOffsetMs == null) {
+                MessageUtil.messageFor(sender, "karaokeStatusAutoNone")
+            } else MessageUtil.formatIndexed(
+                sender, "karaokeStatusAuto", "%.2f".format(auto.confidence), auto.reports.toString(),
+                auto.lastOffsetMs?.let { signed(Math.round(it)) } ?: "-",
             )
+            say(
+                sender, "karaokeStatusSinger", singer.name,
+                if (singer.itemId != null) MessageUtil.messageFor(sender, "karaokeStatusFromLine") else "",
+                singer.leadMs.toString(), KaraokeManager.autoLeadMs(display, singer.playerId).toString(),
+                TimelineManager.lastSentLeadMs(display.id, singer.playerId)?.toString() ?: "-",
+                signed(KaraokeManager.trimOf(display) + singer.trimMs), signed(auto.autoTrimMs), autoInfo, voice,
+            )
+            val output = measured.outputMs?.let {
+                "$it ms" + if (report?.trackOutputMeasured == true) "" else " " + word(sender, "karaokeStatusEstimated")
+            } ?: "-"
+            val capture = measured.captureMs?.let { "$it ms" } ?: "-"
+            val fallback = if (measured.outputMs != null && measured.captureMs != null) "" else
+                MessageUtil.formatIndexed(sender, "karaokeStatusDefault", latency.singerOutputCaptureMs.toString())
+            val network = measured.uplinkMs?.let {
+                MessageUtil.formatIndexed(
+                    sender, "karaokeStatusClockSynced", it.toString(),
+                    auto.clockRttMs?.let { rtt -> Math.round(rtt / 2).toString() } ?: "?", auto.uplinkSamples.toString(),
+                )
+            } ?: MessageUtil.formatIndexed(sender, "karaokeStatusHalfPing", (ping / 2).toString())
+            say(sender, "karaokeStatusMeasured", output, capture, fallback, network, ping.toString())
             val late = maxOf(short, stats?.lateListeners ?: 0)
             if (late > 0) say(sender, "karaokeStatusLate", late.toString(), (stats?.worstLateMs ?: 0L).toString())
         }
+        if (listeners.isNotEmpty()) {
+            val reported = listeners.mapNotNull { it.latency }
+            say(
+                sender, "karaokeStatusListeners", reported.size.toString(), listeners.size.toString(),
+                summary(reported.mapNotNull { it.voiceBufferMs }), summary(reported.mapNotNull { it.voiceOutputMs }),
+                summary(reported.mapNotNull { it.trackOutputMs }),
+                listeners.maxOf { KaraokeTiming.listenerSideMs(it.pingMs, it.latency, latency) }.toString(),
+            )
+        }
     }
+
+    /** "median ms (min-max)" of [values], or "-". */
+    private fun summary(values: List<Long>): String {
+        if (values.isEmpty()) return "-"
+        val sorted = values.sorted()
+        val median = sorted[sorted.size / 2]
+        return if (sorted.first() == sorted.last()) "$median ms" else "$median ms (${sorted.first()}-${sorted.last()})"
+    }
+
+    private fun signed(ms: Long): String = if (ms > 0) "+$ms" else ms.toString()
+
+    private fun word(sender: CommandSender, key: String): String = MessageUtil.messageFor(sender, key)
 
     private fun line(sender: CommandSender, display: DisplayData) {
         val label = display.shortLabel

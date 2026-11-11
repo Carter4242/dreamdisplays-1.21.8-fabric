@@ -136,22 +136,28 @@ max_items = 50
 max_per_player = 10
 
 [karaoke]
-# Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). Singers get the display's
-# timeline this far ahead, so they hear the track and see the lyrics early; their voice is held back per listener so
-# it lands on the beat for everyone in the display's audio range (policy audio.radius_blocks). While karaoke is on,
-# a singer's voice reaches only players in that range.
+# Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). A display is in karaoke while
+# someone sings on it (/display karaoke ... singer add, or their turn in the line); when the last singer stops it is
+# back to normal. Singers get the display's timeline this far ahead, so they hear the track and see the lyrics early;
+# their voice is held back per listener so it lands on the beat for everyone in the display's audio range (policy
+# audio.radius_blocks). While someone sings, their voice reaches only players in that range.
+#
+# Timing is automatic: clients with this mod report their measured audio output, mic capture and voice chat buffer
+# latencies, the singer's capture -> server time is measured with synced clocks, and the singer's own client listens
+# to their singing against the track and slowly corrects their trim (the mic is analysed only on their client and
+# never sent; only the offset is). /display karaoke ... status shows all of it.
 
-# Lead for a new singer in ms; 0 = automatic: singer ping / 2 + singer_output_capture_ms + the slowest listener's
-# ping / 2 + listener_buffer_output_ms + lead_margin_ms, kept within min_lead_ms..max_lead_ms
+# Lead for a new singer in ms; 0 = automatic: the singer's measured output + capture + network time, plus the slowest
+# listener's network + voice buffer, plus room for a negative trim and lead_margin_ms, kept within min..max_lead_ms
 default_lead_ms = 0
 lead_margin_ms = 40
 min_lead_ms = 260
 max_lead_ms = 1500
 
-# What the alignment can't measure: the singer's audio output + mic capture, and a listener's voice chat jitter
-# buffer + audio output (Simple Voice Chat buffers 5 frames = 100 ms by default). /display karaoke ... trim fixes
-# the rest by ear.
-singer_output_capture_ms = 60
+# Fallbacks for clients that report nothing (older mod versions, no voice chat mod): the singer's audio output + mic
+# capture, and a listener's voice chat jitter buffer + audio output (Simple Voice Chat buffers 5 frames = 100 ms by
+# default). /display karaoke ... trim still shifts everything by ear on top.
+singer_output_capture_ms = 250
 listener_buffer_output_ms = 120
 
 # A queued karaoke song whose singer is offline or away from the display when it comes up: "skip" it, or "play"
@@ -163,7 +169,7 @@ absent_singer = "skip"
 voice_source = "singer"
 
 # How loud singers hear each other (duets) while a song plays, 0.0-1.0; 0 = not at all. Their voices are re-encoded at
-# this volume. Between songs, while paused or with karaoke off they hear each other normally.
+# this volume. Between songs and while paused they hear each other normally.
 co_singer_volume = 0.15
 
 # Log every karaoke voice stream as it starts (recipient, distance, packet type)

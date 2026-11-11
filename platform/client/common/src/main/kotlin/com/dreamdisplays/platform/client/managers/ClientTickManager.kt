@@ -55,6 +55,7 @@ object ClientTickManager {
         if (minecraft.level != null) {
             ProtocolRouter.tickHelloRefresh(DisplayRegistry.getScreens().any { !it.virtual && !it.isDormant })
         }
+        runCatching { com.dreamdisplays.platform.client.karaoke.KaraokeClient.tick() }
 
         val level = minecraft.level
         if (level != null && (minecraft.currentServer != null || minecraft.isLocalServer)) {

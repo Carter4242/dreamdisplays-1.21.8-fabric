@@ -152,6 +152,32 @@ internal class AudioSink(private val debugLabel: String) {
     @Volatile
     private var dspStage: AudioDspStage? = null
 
+    /** Gets every chunk of PCM written to the line while set (karaoke: the singer's own track); see [PlayedPcmTap]. */
+    @Volatile
+    var pcmTap: PlayedPcmTap? = null
+
+    /** The open line's output latency (see [AudioOutputLatency]), or null while no line plays. Any thread. */
+    fun outputLatency(): AudioOutputLatency? {
+        val s = current ?: return null
+        val ln = s.line ?: return null
+        val format = s.output?.format ?: return null
+        return runCatching {
+            val queuedBytes = (ln.bufferSize - ln.available()).coerceAtLeast(0).toLong()
+            val queued = queuedBytes * 1_000_000_000L / format.bytesPerSecond.coerceAtLeast(1)
+            val device = (ln as? LatencyReportingLine)?.deviceLatencyNanos() ?: -1L
+            AudioOutputLatency(queued, device, if (ln is LatencyReportingLine) "openal" else "javasound")
+        }.getOrNull()
+    }
+
+    /** Hands the chunk just written to [pcmTap] with when its first frame leaves the line. */
+    private fun tapWritten(tap: PlayedPcmTap, chunk: ByteArray, n: Int, ln: SourceDataLine, output: PcmLineOutput, outBytes: Int) {
+        runCatching {
+            val firstFrame = output.outFramesWritten - outBytes / output.format.bytesPerFrame
+            val position = ln.longFramePosition
+            tap.onPcm(chunk, n, PcmTapTiming.playAtNanos(System.nanoTime(), firstFrame, position, output.format.sampleRate))
+        }
+    }
+
     /** Installs (or clears) the acoustics DSP stage for this session; resets its state immediately. */
     fun setDspStage(stage: AudioDspStage?) {
         dspStage = stage
@@ -621,6 +647,7 @@ internal class AudioSink(private val debugLabel: String) {
             val outBytes = output.convert(chunk, n, rate)
             if (outBytes > 0) paceLiveWrite(ln, output.output, outBytes, output.format, terminated, stopFlag)
             lastPcmOutNanos = System.nanoTime()
+            pcmTap?.let { if (outBytes > 0) tapWritten(it, chunk, n, ln, output, outBytes) }
         }
     }
 

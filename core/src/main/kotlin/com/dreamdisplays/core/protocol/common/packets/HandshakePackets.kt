@@ -50,6 +50,8 @@ data class ClientHello(
     @ProtoNumber(31) val buildTimeMs: Long = 0,
     /** True when the client shows the "Up next" queue and preloads its next item; older clients never get QueueState. */
     @ProtoNumber(32) val supportsQueue: Boolean = false,
+    /** True when the client answers karaoke clock pings ([KaraokeClockPing]) and reports karaoke latencies. */
+    @ProtoNumber(33) val supportsKaraoke: Boolean = false,
 ) : DreamPacket
 
 /** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */

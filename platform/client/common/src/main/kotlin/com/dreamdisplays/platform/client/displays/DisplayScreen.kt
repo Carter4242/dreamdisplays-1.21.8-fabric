@@ -842,16 +842,29 @@ class DisplayScreen(
         // The next queue entry's start, scheduled at the current video's end: kept for that instant
         if (media.onTimelineWhileSwitching(packet)) return
         serverSpeed = PlaybackSpeed.clamp(packet.rate)
+        com.dreamdisplays.platform.client.karaoke.KaraokeClient.onSync(uuid, packet.karaokeLeadMs)
         // A speed change normally comes as a hold (paused): pause first, so the player is only retimed while it is
         // stopped. A playing packet retimes first, so the resume or seek the follower triggers runs at the new speed.
         if (packet.isPaused) {
-            timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, true, packet.loop, serverSpeed)
+            timelineFollower.apply(
+                packet.currentTimeMs, packet.serverTimeMs, true, packet.loop, serverSpeed, leadMs = packet.karaokeLeadMs,
+            )
             syncPlaybackSpeed()
         } else {
             syncPlaybackSpeed()
-            timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs)
+            timelineFollower.apply(
+                packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs,
+                packet.karaokeLeadMs,
+            )
         }
     }
+
+    /** The display audio's output latency now (karaoke timing), or null while it plays no audio. */
+    internal fun audioOutputLatency(): com.dreamdisplays.media.player.pipeline.AudioOutputLatency? =
+        mediaPlayer?.audioOutputLatency()
+
+    /** The current media player, for the karaoke track tap (it changes with every video). */
+    internal val karaokePlayer: MediaPlayer? get() = mediaPlayer
 
     /** Applies watch-party snapshot: tracks session, loads host video, follows timeline. */
     fun updateWatchParty(packet: WatchPartyState) {

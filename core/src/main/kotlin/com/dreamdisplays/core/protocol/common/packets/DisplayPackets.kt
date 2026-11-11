@@ -69,6 +69,12 @@ data class DisplaySync(
      * viewer can begin on the same frame. Only with [isPaused] false; clients that do not know the field just start now.
      */
     @ProtoNumber(10) val startInMs: Int = 0,
+    /**
+     * Karaoke: this player sings on the display and gets its timeline this many ms ahead (0 = not singing). The client
+     * jumps straight to a changed lead instead of drifting there, and only a singer's client measures its own voice
+     * timing (see `VoiceTrackAligner`).
+     */
+    @ProtoNumber(11) val karaokeLeadMs: Int = 0,
 ) : DreamPacket
 
 /**

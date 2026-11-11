@@ -42,6 +42,12 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     /** The player is a preloaded queue item held ready on its first frame: tolerate a small paused offset. */
     private var warmAdopted = false
 
+    /** Karaoke lead in the last timeline (0 = not singing here). */
+    private var karaokeLeadMs = 0
+
+    /** The karaoke lead changed while playing: jump to the new position at once instead of drifting there. */
+    private var jumpToLead = false
+
     private var appliedRatio = 1.0
     private var lastRatioPushNanos = 0L
     private var lastDriftMs = 0.0
@@ -100,6 +106,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             lastSnapNanos = 0L
             coldAfterSnap = false
             warmAdopted = false
+            jumpToLead = false
             // The new player starts at rate 1; only our bookkeeping needs to follow
             appliedRatio = 1.0
             intervalAction = Action.NONE
@@ -123,10 +130,19 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
      * Takes the server's [targetMs] / [paused] for the current media, wrapping by the locally known duration when
      * [loop] (Broadcast). Pause state is matched right away; position is corrected here and on every [tick].
      */
-    fun apply(targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, rate: Double = 1.0, startInMs: Int = 0) {
+    fun apply(
+        targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, rate: Double = 1.0, startInMs: Int = 0,
+        leadMs: Int = 0,
+    ) {
         // Any newer word from the server replaces a start still waiting for its moment
         scheduledStart?.cancel(false)
         scheduledStart = null
+        synchronized(lock) {
+            // A singer's lead changed (they started or stopped singing): a jump of that size is not drift to close
+            // slowly at a percent of speed, so the next evaluation seeks there in place at once (one seek, no pause)
+            if (leadMs != karaokeLeadMs && !paused && abs(leadMs - karaokeLeadMs) >= LEAD_JUMP_MIN_MS) jumpToLead = true
+            karaokeLeadMs = leadMs
+        }
         if (paused || startInMs <= 0) {
             applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate)
             return
@@ -303,6 +319,15 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             controller.resetMeasurement()
             landingRunningSinceNanos = 0L
             return
+        }
+
+        if (jumpToLead) {
+            jumpToLead = false
+            if (abs(drift) > settings.deadBandMs) {
+                logVerbose("[dd-sync] {} karaoke lead now {}ms: jumping {}ms", shortId(), karaokeLeadMs, signed(drift.toDouble()))
+                seekPlaying(target, durationMs, now)
+                return
+            }
         }
 
         landing?.let { kind ->
@@ -523,6 +548,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
         /** A scheduled start closer than this is played at once instead. */
         private const val MIN_SCHEDULE_MS = 2.0
+
+        /** A karaoke lead change at least this big is jumped at once; smaller ones are closed by rate. */
+        private const val LEAD_JUMP_MIN_MS = 60
 
         internal val START_SCHEDULER: java.util.concurrent.ScheduledExecutorService =
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->

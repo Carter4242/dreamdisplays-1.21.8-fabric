@@ -5,7 +5,8 @@ sealed interface KaraokeAction {
     /** Needs the operator permission (everything but joining, leaving and viewing the line). */
     val operatorOnly: Boolean get() = true
 
-    data class Toggle(val on: Boolean) : KaraokeAction
+    /** Ends karaoke on the display at once: every singer stops and the line is cleared (`stop`, or `off`). */
+    data object Stop : KaraokeAction
     data object Status : KaraokeAction
     data class Trim(val ms: Long) : KaraokeAction
     /** [duet]: sing alongside the current singers; otherwise [player] replaces them. */
@@ -46,8 +47,8 @@ object KaraokeArgs {
         val usage = KaraokeAction.Invalid(KaraokeAction.Reason.USAGE)
         val first = words.firstOrNull()?.lowercase() ?: return KaraokeAction.Status
         return when (first) {
-            "on" -> if (words.size == 1) KaraokeAction.Toggle(true) else usage
-            "off" -> if (words.size == 1) KaraokeAction.Toggle(false) else usage
+            // There is no "on": a display is in karaoke exactly while someone sings there
+            "stop", "off" -> if (words.size == 1) KaraokeAction.Stop else usage
             "status" -> if (words.size == 1) KaraokeAction.Status else usage
             "trim" -> if (words.size == 2) trim(words[1]) { KaraokeAction.Trim(it) } else usage
             "join" -> if (words.size >= 2) KaraokeAction.Join(words.drop(1).joinToString(" ")) else usage

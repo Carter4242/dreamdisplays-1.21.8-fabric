@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.karaoke
 
 import com.dreamdisplays.core.karaoke.KaraokeLatency
+import com.dreamdisplays.core.karaoke.ListenerLatency
+import com.dreamdisplays.core.karaoke.SingerLatency
 import java.util.*
 
 /**
@@ -29,16 +31,28 @@ data class KaraokeStage(
 )
 
 /**
- * A singer's lead, total trim (display + own) and ping, in ms. [present]: online and in the display's audio range;
- * otherwise voice chat routes their voice as usual.
+ * A singer's lead, total trim (display + own + automatic) and ping, in ms, and what their client measured ([latency]).
+ * [present]: online and in the display's audio range; otherwise voice chat routes their voice as usual.
  */
-data class StageSinger(val leadMs: Long, val trimMs: Long, val pingMs: Long, val present: Boolean = true)
+data class StageSinger(
+    val leadMs: Long,
+    val trimMs: Long,
+    val pingMs: Long,
+    val present: Boolean = true,
+    val latency: SingerLatency = SingerLatency(),
+)
 
 /**
- * A player in the display's world who is not singing on it, with their ping in ms. [inRange]: in the display's audio
- * range (with `voice_source = "display"` only those are listed).
+ * A player in the display's world who is not singing on it, with their ping in ms and what their client measured
+ * ([latency], null = nothing). [inRange]: in the display's audio range (with `voice_source = "display"` only those are
+ * listed).
  */
-data class StageListener(val playerId: UUID, val pingMs: Long, val inRange: Boolean = true)
+data class StageListener(
+    val playerId: UUID,
+    val pingMs: Long,
+    val inRange: Boolean = true,
+    val latency: ListenerLatency? = null,
+)
 
 /** Voice statistics of one singer since they started singing, for `/display karaoke ... status`. */
 data class SingerVoiceStats(

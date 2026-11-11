@@ -61,6 +61,7 @@ object ClientPacketManager {
             is ClearCache -> handleClearCache(packet)
             is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)
             is QueueState -> com.dreamdisplays.platform.client.displays.DisplayQueues.apply(packet)
+            is KaraokeClockPing -> com.dreamdisplays.platform.client.karaoke.KaraokeClient.onClockPing(packet)
             else -> logger.debug("Ignoring non-client-bound packet {}.", packet::class.simpleName)
         }
     }
@@ -106,6 +107,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()
         com.dreamdisplays.platform.client.displays.DisplayQueues.reset()
+        com.dreamdisplays.platform.client.karaoke.KaraokeClient.reset()
         FullscreenController.reset()
         FullscreenPrepareController.reset()
         DisplayWarmup.reset()

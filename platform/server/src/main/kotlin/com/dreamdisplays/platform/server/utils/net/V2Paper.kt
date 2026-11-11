@@ -77,6 +77,7 @@ object PaperV2Networking : PluginMessageListener {
         if (WorldGuardRegions.isAvailable()) add(ServerFeature.REGION_ACCESS.wire)
         if (PaperServer.config.settings.queue.enabled) add(ServerFeature.QUEUE.wire)
         if (PaperServer.config.settings.clients.error_reports) add(ServerFeature.CLIENT_ERROR_REPORTS.wire)
+        if (com.dreamdisplays.platform.server.karaoke.KaraokeManager.available) add(ServerFeature.KARAOKE.wire)
     }
 
     private fun maxDisplaysFor(hasBypass: Boolean): Int {
@@ -86,6 +87,8 @@ object PaperV2Networking : PluginMessageListener {
 
     override fun onPluginMessageReceived(channel: String, player: Player, message: ByteArray) {
         if (channel != V2_CHANNEL) return
+        // As early as possible: karaoke clock pongs are timed by it
+        val receivedNanos = System.nanoTime()
         val packet = runCatching { PacketRegistry.decode(message, PacketDirection.CLIENT_TO_SERVER) }
             .onFailure { logger.warn("Failed to decode v2 packet from ${player.name}", it) }
             .getOrNull() ?: return
@@ -120,6 +123,19 @@ object PaperV2Networking : PluginMessageListener {
             }
 
             is SetDisplaysEnabled -> PlayerManager.setDisplaysEnabled(player, packet.enabled)
+            is KaraokeLatencyReport -> com.dreamdisplays.platform.server.karaoke.KaraokeMeasurements.onLatencyReport(
+                player.uniqueId, packet, System.currentTimeMillis(),
+            )
+
+            is KaraokeClockPong -> com.dreamdisplays.platform.server.karaoke.KaraokeMeasurements.onPong(
+                player.uniqueId, packet, receivedNanos,
+            )
+
+            is KaraokeMicMarkers -> com.dreamdisplays.platform.server.karaoke.KaraokeMeasurements.onMarkers(
+                player.uniqueId, packet, receivedNanos,
+            )
+
+            is KaraokeOffsetReport -> com.dreamdisplays.platform.server.karaoke.KaraokeManager.onOffsetReport(player, packet)
             is FullscreenAck -> FullscreenBroadcastManager.handleAck(
                 packet.sessionId, player.uniqueId, FullscreenAckAction.fromWire(packet.action),
             )

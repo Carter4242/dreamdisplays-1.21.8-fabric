@@ -3,15 +3,47 @@ package com.dreamdisplays.core.karaoke
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 
 /**
- * Latency constants the karaoke voice alignment cannot measure, in ms (`[karaoke]` in the server config).
+ * Latency fallbacks for what a client did not measure (or for clients too old to report), in ms (`[karaoke]` in the
+ * server config).
  *
  * @property singerOutputCaptureMs the singer's audio output (hearing the track) plus mic capture and encoding.
  * @property listenerBufferOutputMs a listener's voice chat jitter buffer plus audio output (Simple Voice Chat's
  *   client buffers 5 frames = 100 ms by default, plus ~20 ms of output).
  */
 data class KaraokeLatency(
-    val singerOutputCaptureMs: Long = 60L,
+    val singerOutputCaptureMs: Long = 250L,
     val listenerBufferOutputMs: Long = 120L,
+)
+
+/**
+ * What a singer's client measured, in ms; null where it reported nothing (the [KaraokeLatency] / ping fallback
+ * applies).
+ *
+ * @property outputMs the display's audio: from where the player's clock says a moment is to when it leaves the
+ *   speakers (the output device's latency).
+ * @property captureMs the mic: from a sound to Simple Voice Chat handing over the frame that holds it (device input,
+ *   the 20 ms frame, denoiser).
+ * @property uplinkMs from that hand-over to the frame's arrival at the server, measured with clock-synced capture
+ *   markers (the jitter-free low end, like the burst anchor).
+ */
+data class SingerLatency(
+    val outputMs: Long? = null,
+    val captureMs: Long? = null,
+    val uplinkMs: Long? = null,
+)
+
+/**
+ * What a listener's client measured, in ms; null where it reported nothing.
+ *
+ * @property voiceBufferMs Simple Voice Chat's jitter buffer (`output_buffer_size` frames of 20 ms).
+ * @property voiceOutputMs voice chat's audio output device latency.
+ * @property trackOutputMs the display audio's output device latency: the track is heard that much after the
+ *   timeline says, so the voice may come that much later too.
+ */
+data class ListenerLatency(
+    val voiceBufferMs: Long? = null,
+    val voiceOutputMs: Long? = null,
+    val trackOutputMs: Long? = null,
 )
 
 /**
@@ -28,18 +60,48 @@ data class KaraokeLatency(
  *     = A + lead - (s_out + s_cap + s_up) - (l_down_i + l_buf + l_out) + trim
  * ```
  *
- * `s_up` and `l_down_i` are half the singer's / listener's ping; `trim` (display + singer, by ear) absorbs what the
- * constants get wrong. A negative [emitDelayMs] means the lead is too small for that listener: the frame can only be
- * sent on arrival and is heard late by that much.
+ * `s_out + s_cap + s_up` is [singerSideMs]: measured by the singer's client where it can ([SingerLatency]; `s_up` from
+ * clock-synced capture markers), else [KaraokeLatency.singerOutputCaptureMs] plus half the singer's ping.
+ * `l_down_i + l_buf + l_out` is [listenerSideMs]: half the listener's ping plus their reported voice chat buffer and
+ * output, less their display audio's output latency (they hear the track that much late too), else
+ * [KaraokeLatency.listenerBufferOutputMs]. `trim` is the manual trim (display + singer, by ear) plus the singer's
+ * automatic trim ([AutoTrimController]). A negative [emitDelayMs] means the lead is too small for that listener: the
+ * frame can only be sent on arrival and is heard late by that much.
  */
 object KaraokeTiming {
     /** Simple Voice Chat's frame length. */
     const val FRAME_MS = 20L
 
-    /** `E_i - A`: how long after a frame's (jitter-free) arrival it is sent to a listener. */
+    /** An audio output latency nobody reported. */
+    const val DEFAULT_OUTPUT_MS = 20L
+
+    /** `E_i - A`: how long after a frame's (jitter-free) arrival it is sent to a listener (constants and pings only). */
     fun emitDelayMs(leadMs: Long, singerPingMs: Long, listenerPingMs: Long, trimMs: Long, latency: KaraokeLatency): Long =
-        leadMs - (latency.singerOutputCaptureMs + singerPingMs / 2) -
-                (listenerPingMs / 2 + latency.listenerBufferOutputMs) + trimMs
+        emitDelayMs(leadMs, singerPingMs, null, listenerPingMs, null, trimMs, latency)
+
+    /** `E_i - A` with what the singer's and the listener's clients measured (null = fallbacks). */
+    fun emitDelayMs(
+        leadMs: Long, singerPingMs: Long, singer: SingerLatency?, listenerPingMs: Long, listener: ListenerLatency?,
+        trimMs: Long, latency: KaraokeLatency,
+    ): Long = leadMs - singerSideMs(singerPingMs, singer, latency) - listenerSideMs(listenerPingMs, listener, latency) + trimMs
+
+    /** `s_out + s_cap + s_up`: from hearing a moment to its voice frame reaching the server. */
+    fun singerSideMs(singerPingMs: Long, singer: SingerLatency?, latency: KaraokeLatency): Long {
+        val output = singer?.outputMs
+        val capture = singer?.captureMs
+        val outputCapture = if (output != null && capture != null) output + capture else latency.singerOutputCaptureMs
+        return outputCapture + (singer?.uplinkMs ?: (singerPingMs.coerceAtLeast(0) / 2))
+    }
+
+    /** `l_down + l_buf + l_out - l_track`: from sending a voice frame to the listener hearing it, net of their track. */
+    fun listenerSideMs(listenerPingMs: Long, listener: ListenerLatency?, latency: KaraokeLatency): Long {
+        val down = listenerPingMs.coerceAtLeast(0) / 2
+        val buffer = listener?.voiceBufferMs ?: return down + latency.listenerBufferOutputMs
+        // An output not reported counts the same on both sides: voice and track usually share the device
+        val track = listener.trackOutputMs ?: DEFAULT_OUTPUT_MS
+        val voice = listener.voiceOutputMs ?: listener.trackOutputMs ?: DEFAULT_OUTPUT_MS
+        return down + buffer + voice - track
+    }
 
     /**
      * The automatic lead for a singer: just enough for [worstListenerPingMs] (the slowest listener in range, or the
@@ -48,20 +110,36 @@ object KaraokeTiming {
     fun autoLeadMs(
         singerPingMs: Long, worstListenerPingMs: Long, latency: KaraokeLatency,
         marginMs: Long, minMs: Long, maxMs: Long,
+    ): Long = autoLeadMs(
+        singerSideMs(singerPingMs, null, latency), listenerSideMs(worstListenerPingMs, null, latency), 0L,
+        marginMs, minMs, maxMs,
+    )
+
+    /**
+     * The automatic lead from the singer's side ([singerSideMs]) and the worst listener side ([listenerSideMs]) in
+     * range, plus room for a negative [trimMs] (an earlier voice needs more lead) and [marginMs] for network jitter,
+     * kept within [minMs]..[maxMs].
+     */
+    fun autoLeadMs(
+        singerSideMs: Long, worstListenerSideMs: Long, trimMs: Long,
+        marginMs: Long, minMs: Long, maxMs: Long,
     ): Long {
-        val needed = singerPingMs.coerceAtLeast(0) / 2 + latency.singerOutputCaptureMs +
-                worstListenerPingMs.coerceAtLeast(0) / 2 + latency.listenerBufferOutputMs + marginMs
+        val needed = singerSideMs + worstListenerSideMs + (-trimMs).coerceAtLeast(0) + marginMs
         return needed.coerceIn(minMs, maxOf(minMs, maxMs))
     }
 
     /**
      * [sync] as a singer with [leadMs] gets it: the position moved ahead by the lead (see [leadPosition]). Pause state,
      * server time, speed and a scheduled start stay, so a paused display shows the singer the paused frame plus the
-     * lead, and a scheduled start starts them that far ahead at the same moment.
+     * lead, and a scheduled start starts them that far ahead at the same moment. [DisplaySync.karaokeLeadMs] tells the
+     * client it sings here (and lets it jump straight to a changed lead).
      */
     fun withLead(sync: DisplaySync, leadMs: Long): DisplaySync {
         if (leadMs == 0L) return sync
-        return sync.copy(currentTimeMs = leadPosition(sync.currentTimeMs, leadMs, sync.rate, sync.durationMs, sync.loop))
+        return sync.copy(
+            currentTimeMs = leadPosition(sync.currentTimeMs, leadMs, sync.rate, sync.durationMs, sync.loop),
+            karaokeLeadMs = leadMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt(),
+        )
     }
 
     /**

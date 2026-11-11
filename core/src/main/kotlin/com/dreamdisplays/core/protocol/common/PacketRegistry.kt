@@ -16,6 +16,11 @@ import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.core.protocol.common.packets.FullscreenState
+import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPing
+import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong
+import com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport
+import com.dreamdisplays.core.protocol.common.packets.KaraokeMicMarkers
+import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
 import com.dreamdisplays.core.protocol.common.packets.QueueAction
@@ -107,6 +112,11 @@ object PacketRegistry {
         Entry(PacketType.QUEUE_PRELOAD, QueuePreload::class, QueuePreload.serializer()),
         Entry(PacketType.CLIENT_ERROR_REPORT, ClientErrorReport::class, ClientErrorReport.serializer()),
         Entry(PacketType.CLIENT_ENVIRONMENT, ClientEnvironment::class, ClientEnvironment.serializer()),
+        Entry(PacketType.KARAOKE_LATENCY_REPORT, KaraokeLatencyReport::class, KaraokeLatencyReport.serializer()),
+        Entry(PacketType.KARAOKE_OFFSET_REPORT, KaraokeOffsetReport::class, KaraokeOffsetReport.serializer()),
+        Entry(PacketType.KARAOKE_CLOCK_PING, KaraokeClockPing::class, KaraokeClockPing.serializer()),
+        Entry(PacketType.KARAOKE_CLOCK_PONG, KaraokeClockPong::class, KaraokeClockPong.serializer()),
+        Entry(PacketType.KARAOKE_MIC_MARKERS, KaraokeMicMarkers::class, KaraokeMicMarkers.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }

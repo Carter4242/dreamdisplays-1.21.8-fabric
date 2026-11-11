@@ -4,6 +4,8 @@ import org.lwjgl.openal.AL10
 import org.lwjgl.openal.AL11
 import org.lwjgl.openal.ALC10
 import org.lwjgl.openal.EXTThreadLocalContext
+import org.lwjgl.openal.SOFTDeviceClock
+import com.dreamdisplays.media.player.pipeline.LatencyReportingLine
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -22,13 +24,14 @@ import javax.sound.sampled.SourceDataLine
  * per thread (`ALC_EXT_thread_local_context`) around its own calls, so the game's sound context is never touched.
  * Audio is streamed through a queue of OpenAL buffers on one source; the played position (what the audio clock
  * reads) comes from the processed buffers plus the source's sample offset, refreshed by a small monitor thread so
- * readers never call into OpenAL themselves.
+ * readers never call into OpenAL themselves. The same thread reads the device's own output latency
+ * (`ALC_SOFT_device_clock`) for karaoke timing.
  */
 internal class OpenAlSourceLine private constructor(
     private val device: Long,
     private val context: Long,
     private val bufferBytes: Int,
-) : SourceDataLine {
+) : SourceDataLine, LatencyReportingLine {
     private val lock = Any()
     private val source: Int
     private val freeBuffers = ArrayDeque<Int>()
@@ -52,6 +55,12 @@ internal class OpenAlSourceLine private constructor(
 
     private val monitor: Thread
 
+    /** The device's output latency (ns) as last read, -1 when OpenAL can't tell. */
+    @Volatile
+    private var deviceLatency = -1L
+    private var lastLatencyReadNanos = 0L
+    private val deviceClock = runCatching { ALC10.alcIsExtensionPresent(device, "ALC_SOFT_device_clock") }.getOrDefault(false)
+
     init {
         source = withContext { AL10.alGenSources() }
         withContext {
@@ -74,6 +83,7 @@ internal class OpenAlSourceLine private constructor(
     private fun monitorLoop() {
         while (open) {
             runCatching { refresh() }
+            readDeviceLatency()
             try {
                 Thread.sleep(MONITOR_MS)
             } catch (_: InterruptedException) {
@@ -101,6 +111,19 @@ internal class OpenAlSourceLine private constructor(
             }
         }
     }
+
+    private fun readDeviceLatency() {
+        if (!deviceClock) return
+        val now = System.nanoTime()
+        if (now - lastLatencyReadNanos < LATENCY_READ_NANOS) return
+        lastLatencyReadNanos = now
+        val latency = runCatching {
+            synchronized(lock) { if (open) SOFTDeviceClock.alcGetInteger64vSOFT(device, SOFTDeviceClock.ALC_DEVICE_LATENCY_SOFT) else -1L }
+        }.getOrDefault(-1L)
+        deviceLatency = if (latency in 0..MAX_LATENCY_NANOS) latency else -1L
+    }
+
+    override fun deviceLatencyNanos(): Long = deviceLatency
 
     private fun unplayedBytes(): Int = ((writtenFrames - playedFrames).coerceAtLeast(0L) * FRAME_BYTES).toInt()
 
@@ -232,6 +255,8 @@ internal class OpenAlSourceLine private constructor(
         private const val SAMPLE_RATE = 44_100
         private const val FRAME_BYTES = 4
         private const val MONITOR_MS = 5L
+        private const val LATENCY_READ_NANOS = 500_000_000L
+        private const val MAX_LATENCY_NANOS = 1_000_000_000L
         private const val MAX_PIECE_BYTES = SAMPLE_RATE * FRAME_BYTES / 20
         private const val AudioSystemNotSpecified = -1f
 

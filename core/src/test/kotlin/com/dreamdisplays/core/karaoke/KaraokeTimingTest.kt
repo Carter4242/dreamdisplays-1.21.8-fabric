@@ -113,4 +113,75 @@ class KaraokeTimingTest {
         val running = t.copy(paused = false, serverTimeMs = 3_250).toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 4_000)
         assertEquals(running.currentTimeMs + lead, KaraokeTiming.withLead(running, lead).currentTimeMs)
     }
+
+    @Test
+    fun measuredLatenciesReplaceTheConstants() {
+        val singer = SingerLatency(outputMs = 30, captureMs = 40, uplinkMs = 25)
+        val listener = ListenerLatency(voiceBufferMs = 100, voiceOutputMs = 20, trackOutputMs = 30)
+        // 400 - (30 + 40 + 25) - (100/2 + 100 + 20 - 30) = 400 - 95 - 140 = 165
+        assertEquals(165L, KaraokeTiming.emitDelayMs(400, 80, singer, 100, listener, 0, latency))
+        assertEquals(95L, KaraokeTiming.singerSideMs(80, singer, latency))
+        assertEquals(140L, KaraokeTiming.listenerSideMs(100, listener, latency))
+    }
+
+    @Test
+    fun whatIsNotMeasuredFallsBack() {
+        val defaults = KaraokeLatency()
+        assertEquals(250L, defaults.singerOutputCaptureMs)
+        // No capture figure (no voice chat client): the constant, and half the ping without an uplink measurement
+        assertEquals(250L + 40L, KaraokeTiming.singerSideMs(80, SingerLatency(outputMs = 30), defaults))
+        // Only the uplink measured
+        assertEquals(250L + 12L, KaraokeTiming.singerSideMs(80, SingerLatency(uplinkMs = 12), defaults))
+        assertEquals(50L + 120L, KaraokeTiming.listenerSideMs(100, null, defaults))
+        // A buffer but no outputs: the outputs count the same on both sides and cancel
+        assertEquals(50L + 100L, KaraokeTiming.listenerSideMs(100, ListenerLatency(voiceBufferMs = 100), defaults))
+        // Only the track's output known: voice chat is taken to share that device
+        assertEquals(50L + 60L, KaraokeTiming.listenerSideMs(100, ListenerLatency(60, trackOutputMs = 45), defaults))
+        // Old signature = measured one with nothing measured
+        assertEquals(
+            KaraokeTiming.emitDelayMs(500, 60, 100, 10, defaults),
+            KaraokeTiming.emitDelayMs(500, 60, null, 100, null, 10, defaults),
+        )
+    }
+
+    @Test
+    fun aFrameEmittedAtTheMeasuredDelayLandsOnTheBeat() {
+        val r = 500_000L
+        val lead = 380L
+        val singer = SingerLatency(outputMs = 35, captureMs = 50, uplinkMs = 41)
+        val listener = ListenerLatency(voiceBufferMs = 140, voiceOutputMs = 25, trackOutputMs = 45)
+        val listenerPing = 90L
+        val trim = -15L
+        // The singer hears m late by their output, sings it, the frame is handed over and reaches the server; their
+        // voice is 15 ms late on top of the model, which the trim takes back
+        val arrival = r - lead + singer.outputMs!! + singer.captureMs!! + singer.uplinkMs!! + 15
+        val emit = arrival + KaraokeTiming.emitDelayMs(lead, 0, singer, listenerPing, listener, trim, latency)
+        val heardVoice = emit + listenerPing / 2 + listener.voiceBufferMs!! + listener.voiceOutputMs!!
+        val heardTrack = r + listener.trackOutputMs!!
+        assertEquals(heardTrack, heardVoice)
+    }
+
+    @Test
+    fun theAutoLeadCoversTheMeasuredWorstCaseAndANegativeTrim() {
+        // 95 + 140 + 40 margin = 275, plus 60 for a -60 trim
+        assertEquals(275L, KaraokeTiming.autoLeadMs(95, 140, 0, 40, 0, 3_000))
+        assertEquals(335L, KaraokeTiming.autoLeadMs(95, 140, -60, 40, 0, 3_000))
+        assertEquals(275L, KaraokeTiming.autoLeadMs(95, 140, 60, 40, 0, 3_000))
+        assertEquals(260L, KaraokeTiming.autoLeadMs(10, 10, 0, 0, 260, 1_500))
+        // With that lead the worst listener still has the margin
+        val singer = SingerLatency(30, 40, 25)
+        val listener = ListenerLatency(100, 20, 30)
+        val lead = KaraokeTiming.autoLeadMs(
+            KaraokeTiming.singerSideMs(0, singer, latency), KaraokeTiming.listenerSideMs(100, listener, latency), -60, 40, 0, 3_000,
+        )
+        assertEquals(40L, KaraokeTiming.emitDelayMs(lead, 0, singer, 100, listener, -60, latency))
+    }
+
+    @Test
+    fun aSingersTimelineSaysTheyAreSinging() {
+        val timeline = Timeline(positionMs = 10_000, serverTimeMs = 50_000, paused = false, durationMs = 200_000, loop = true)
+        val sync = timeline.toSync(ZERO_UUID, PlaybackMode.SYNCED, nowMs = 51_000)
+        assertEquals(0, sync.karaokeLeadMs)
+        assertEquals(420, KaraokeTiming.withLead(sync, 420).karaokeLeadMs)
+    }
 }

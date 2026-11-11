@@ -77,6 +77,12 @@ object TimelineManager {
         sentLeads[playerId] = displayId to lead
         return KaraokeTiming.withLead(sync, lead)
     }
+
+    /** Sends [sync] of [displayId], already moved by [leadMs], to [playerId] alone (a karaoke lead change). */
+    fun sendShifted(playerId: UUID, displayId: UUID, leadMs: Long, sync: DisplaySync) {
+        sentLeads[playerId] = displayId to leadMs
+        transport.sendTo(playerId, sync)
+    }
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */

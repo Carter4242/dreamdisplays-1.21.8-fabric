@@ -378,8 +378,7 @@ object CommandRegistrar {
             requires { KaraokeCommand.allowed(it.sender) }
             target {
                 executesCommand { ctx -> karaoke(ctx) }
-                literal("on", tip("suggestKaraokeOn")) { requires(op); executesCommand { ctx -> karaoke(ctx, "on") } }
-                literal("off", tip("suggestKaraokeOff")) { requires(op); executesCommand { ctx -> karaoke(ctx, "off") } }
+                literal("stop", tip("suggestKaraokeStop")) { requires(op); executesCommand { ctx -> karaoke(ctx, "stop") } }
                 literal("status", tip("suggestKaraokeStatus")) {
                     requires(op)
                     executesCommand { ctx -> karaoke(ctx, "status") }

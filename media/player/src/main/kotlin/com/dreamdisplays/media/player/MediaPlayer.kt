@@ -615,6 +615,13 @@ class MediaPlayer(
      */
     fun setVolume(volume: Float) = this.volume.setUserVolume(volume)
 
+    /** The display audio's output latency now, or null while no audio line plays (karaoke timing). */
+    fun audioOutputLatency(): com.dreamdisplays.media.player.pipeline.AudioOutputLatency? =
+        sessionManager.audioOutputLatency()
+
+    /** Hands every chunk of display audio written to [tap] (karaoke, on a singer's client only); null removes it. */
+    fun setPcmTap(tap: com.dreamdisplays.media.player.pipeline.PlayedPcmTap?) = sessionManager.setPcmTap(tap)
+
     /** Seeds volume up-front (before audio starts) to avoid loud burst on reappear. */
     fun primeVolume(
         userVolume: Float, distance: Double, maxRadius: Double,

@@ -80,6 +80,7 @@ class PlayerListener : Listener {
         DisplayManager.forgetNearbyPlayer(event.player.uniqueId)
         com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(event.player.uniqueId)
         com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(event.player.uniqueId)
+        com.dreamdisplays.platform.server.karaoke.KaraokeManager.onQuit(event.player.uniqueId)
         Scheduler.untrackPlayer(event.player)
     }
 }

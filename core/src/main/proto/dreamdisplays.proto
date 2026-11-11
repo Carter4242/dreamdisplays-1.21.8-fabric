@@ -76,6 +76,8 @@ message ClientHello {
   optional int64 buildTimeMs = 31;
   // WARNING: a default value decoded when value is missing
   optional bool supportsQueue = 32;
+  // WARNING: a default value decoded when value is missing
+  optional bool supportsKaraoke = 33;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerHello'
@@ -178,6 +180,8 @@ message DisplaySync {
   optional double rate = 9;
   // WARNING: a default value decoded when value is missing
   optional int32 startInMs = 10;
+  // WARNING: a default value decoded when value is missing
+  optional int32 karaokeLeadMs = 11;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RequestSync'
@@ -602,6 +606,66 @@ message ClientEnvironment {
   optional string ytDlpPath = 25;
   // WARNING: a default value decoded when value is missing
   optional string ffmpegPath = 26;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport'
+message KaraokeLatencyReport {
+  // WARNING: a default value decoded when value is missing
+  optional int32 trackOutputMs = 1;
+  // WARNING: a default value decoded when value is missing
+  optional bool trackOutputMeasured = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 trackQueuedMs = 3;
+  // WARNING: a default value decoded when value is missing
+  optional bool voiceChat = 4;
+  // WARNING: a default value decoded when value is missing
+  optional int32 captureMs = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int32 voiceBufferMs = 6;
+  // WARNING: a default value decoded when value is missing
+  optional int32 voiceOutputMs = 7;
+  // WARNING: a default value decoded when value is missing
+  optional bool voiceOutputMeasured = 8;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport'
+message KaraokeOffsetReport {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int32 offsetMs = 2;
+  // WARNING: a default value decoded when value is missing
+  optional double confidence = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int32 windowMs = 4;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeClockPing'
+message KaraokeClockPing {
+  // WARNING: a default value decoded when value is missing
+  optional int32 seq = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int64 serverNanos = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong'
+message KaraokeClockPong {
+  // WARNING: a default value decoded when value is missing
+  optional int32 seq = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int64 serverNanos = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int64 clientReceiveNanos = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int64 clientSendNanos = 4;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.KaraokeMicMarkers'
+message KaraokeMicMarkers {
+  // WARNING: a default value decoded when value is missing
+  repeated int64 seqs = 1;
+  // WARNING: a default value decoded when value is missing
+  repeated int64 captureNanos = 2;
 }
 
 message Uuid {

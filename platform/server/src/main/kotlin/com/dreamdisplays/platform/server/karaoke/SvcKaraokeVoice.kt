@@ -140,6 +140,8 @@ class SvcKaraokeVoice : KaraokeVoice {
         }
 
         val seq = mic.locationalSoundPacketBuilder().position(api.createPosition(0.0, 0.0, 0.0)).build().sequenceNumber
+        // For the singer's capture -> arrival time (matched with their client's capture markers)
+        KaraokeMeasurements.onFrame(singerId, seq, now)
         val burst = voice.onFrame(now, seq, stop)
         if (burst < 0) return
         for (listener in stage.listeners) {
@@ -147,7 +149,9 @@ class SvcKaraokeVoice : KaraokeVoice {
             val near = stage.fromSinger && isNear(connection.player, sender, proximity)
             val route = KaraokeRouting.route(singerId, listener.playerId, singing, listener.inRange, near, stage.fromSinger)
             if (route != KaraokeRoute.ALIGNED) continue
-            val delayMs = KaraokeTiming.emitDelayMs(singer.leadMs, singer.pingMs, listener.pingMs, singer.trimMs, stage.latency)
+            val delayMs = KaraokeTiming.emitDelayMs(
+                singer.leadMs, singer.pingMs, singer.latency, listener.pingMs, listener.latency, singer.trimMs, stage.latency,
+            )
             val shift = voice.shiftFor(burst, listener.playerId, delayMs * 1_000_000L)
             val provisional = voice.estimate(burst, seq, lock = false) ?: return
             if (voice.startStream(listener.playerId) && stage.debug) {

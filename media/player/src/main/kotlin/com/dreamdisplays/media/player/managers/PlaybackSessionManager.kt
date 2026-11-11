@@ -427,6 +427,14 @@ internal class PlaybackSessionManager(
     /** When PCM last reached the output line ([System.nanoTime], 0 before any). */
     val lastPcmOutNanos: Long get() = audio.lastPcmOutNanos
 
+    /** The display audio line's output latency, or null while none plays (see [AudioSink.outputLatency]). */
+    fun audioOutputLatency(): com.dreamdisplays.media.player.pipeline.AudioOutputLatency? = audio.outputLatency()
+
+    /** Taps the PCM this player writes (see [com.dreamdisplays.media.player.pipeline.PlayedPcmTap]); null removes it. */
+    fun setPcmTap(tap: com.dreamdisplays.media.player.pipeline.PlayedPcmTap?) {
+        audio.pcmTap = tap
+    }
+
     /** Audio-side state for a silent-audio report: phase, the audio half's process / thread, feeder, and sink. */
     fun describeAudio(): String {
         val half = audioHalf
