@@ -331,6 +331,10 @@ object ScreenShareActions {
         val now = System.currentTimeMillis()
         val stallCredit = ScreenShareServerRules.stallCreditMs(lastTickMs, now)
         lastTickMs = now
+        // Nothing leased: the lease service's connection is kept open for the next share's start
+        if (byDisplay.isEmpty() && starting.isEmpty() && RelayControl.enabled && possibleSharers().isNotEmpty()) {
+            RelayControl.keepWarm()
+        }
         if (byDisplay.isEmpty()) return
         // Heartbeats queued behind a server stall are not the sharer's silence
         if (stallCredit > 0L) byDisplay.values.forEach { it.lastHeartbeatMs = maxOf(it.lastHeartbeatMs, minOf(now, it.lastHeartbeatMs + stallCredit)) }

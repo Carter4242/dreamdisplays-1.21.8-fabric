@@ -31,6 +31,10 @@ object RelayControl {
     @Volatile
     private var lastPushFailed = false
 
+    /** When a push last went out (or was queued by [keepWarm]). */
+    @Volatile
+    private var lastSentMs = 0L
+
     /** True when a lease service is configured: shares then start only once it knows them. */
     val enabled: Boolean get() = PaperServer.config.settings.live.relayLeased
 
@@ -47,6 +51,21 @@ object RelayControl {
         s.set(leases, onAcked)
         runCatching { w.execute(::pushNow) }.onFailure { onAcked?.invoke(false) }
     }
+
+    /**
+     * Keeps the HTTPS connection to the lease service open while nothing is leased but someone online may share: the
+     * current set (empty) is pushed again every [WARM_EVERY_MS], inside the client's and the service's idle limits
+     * (5 minutes). A share's start waits for its lease, and a cold connection added a TCP and TLS handshake to it
+     * (measured: 0.46 s to the relay, against 0.06 s warm).
+     */
+    fun keepWarm() {
+        if (!enabled || System.currentTimeMillis() - lastSentMs < WARM_EVERY_MS) return
+        lastSentMs = System.currentTimeMillis()
+        val (s, w) = started()
+        runCatching { w.execute { runCatching { s.push() } } }
+    }
+
+    private const val WARM_EVERY_MS = 4L * 60_000L
 
     /**
      * Plugin disable, after every share ended: pushes the (now empty) set once more, so a reload or stop cuts the
@@ -96,6 +115,7 @@ object RelayControl {
     }
 
     private fun post(body: String): Boolean {
+        lastSentMs = System.currentTimeMillis()
         val live = PaperServer.config.settings.live
         var problem: String? = null
         val ok = runCatching {
