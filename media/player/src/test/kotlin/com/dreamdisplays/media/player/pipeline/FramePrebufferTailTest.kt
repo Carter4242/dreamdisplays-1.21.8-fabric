@@ -103,4 +103,15 @@ class FramePrebufferTailTest {
         assertTrue(waitedMs in 400..3_500, "Waited $waitedMs ms.")
         assertEquals(0, presented.get())
     }
+
+    @Test
+    fun `the tail bound covers slow playback`() {
+        val frame30 = 33_333_333L
+        val wallAt01x = 16 * frame30 * 10 // 16 queued frames at 0.1x
+        assertTrue(FramePrebuffer.tailWaitBudgetNanos(16, frame30, 0.1) > wallAt01x)
+        assertEquals(
+            FramePrebuffer.tailWaitBudgetNanos(16, frame30, 1.0), FramePrebuffer.tailWaitBudgetNanos(16, frame30, 4.0),
+            "Fast playback keeps the normal bound.",
+        )
+    }
 }

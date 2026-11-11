@@ -139,7 +139,7 @@ internal class FramePrebuffer(
     fun awaitTailPlayed(held: () -> Boolean = { false }, interrupt: () -> Boolean = { false }): Boolean {
         seekStartGate = null
         primed = true
-        val budgetNs = ((queue.size + 2L) * frameNs * 2L + TAIL_SLACK_NANOS).coerceAtMost(MAX_TAIL_WAIT_NANOS)
+        val budgetNs = tailWaitBudgetNanos(queue.size, frameNs, RatedClock.rateOf(getAudioClock))
         var deadline = System.nanoTime() + budgetNs
         var last = System.nanoTime()
         while (alive() && !flushRequested && consumer?.isAlive != false) {
@@ -414,6 +414,17 @@ internal class FramePrebuffer(
     }
 
     companion object {
+        /**
+         * How long the end-of-file tail of [queued] frames of [frameNs] may take to play out at [rate] (content per
+         * real time) before the end is reported anyway (a frozen clock). Slow playback stretches it: at 0.1x a
+         * normal cushion takes seconds of wall time.
+         */
+        internal fun tailWaitBudgetNanos(queued: Int, frameNs: Long, rate: Double): Long {
+            val atNormal = ((queued + 2L) * frameNs * 2L + TAIL_SLACK_NANOS).coerceAtMost(MAX_TAIL_WAIT_NANOS)
+            val slowdown = rate.takeIf { it.isFinite() && it > 0.0 }?.coerceAtMost(1.0) ?: 1.0
+            return (atNormal / slowdown).toLong()
+        }
+
         private const val POLL_MS = 50L
         private const val SEEK_PREFILL_FRAMES = 2
         private const val SEEK_START_WAIT_NANOS = 1_500_000_000L
