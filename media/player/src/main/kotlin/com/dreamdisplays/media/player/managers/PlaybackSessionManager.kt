@@ -892,6 +892,11 @@ internal class PlaybackSessionManager(
     /** The position playback is actually at, for callers that need to freeze or save it. */
     fun currentPacingNanos(): Long = pacingClockNanos()
 
+    /** Plays the audio (and with it the picture paced to it) at [ratio] x; see [AudioSink.playbackRate]. */
+    fun setPlaybackRate(ratio: Double) {
+        audio.playbackRate = ratio
+    }
+
     private fun exactAvBiasNanos(): Long? {
         val a0 = audioFeeder?.firstPtsNanos ?: return null
         if (a0 < 0) return null

@@ -774,6 +774,20 @@ class DisplayScreen(
     /** True if the media player's playback clock is currently advancing. */
     internal fun isClockRunning(): Boolean = mediaPlayer?.isClockRunning() == true
 
+    /** Position actually heard / shown, for sync drift measurement (see [MediaPlayer.getSyncPositionNanos]). */
+    internal val syncPositionNanos: Long get() = mediaPlayer?.getSyncPositionNanos() ?: 0L
+
+    /** Sets the sync playback rate used to close small drift (1.0 = normal speed). */
+    internal fun setSyncPlaybackRate(ratio: Double) {
+        mediaPlayer?.setSyncPlaybackRate(ratio)
+    }
+
+    /** True when a resume would continue the open session instantly rather than restart the stream. */
+    internal fun resumesWarm(): Boolean = mediaPlayer?.resumesWarm() == true
+
+    /** True while this display follows a server timeline (Synced / Broadcast / watch party). */
+    internal val followsServerTimeline: Boolean get() = requiresServerTimeline()
+
     /** The current media/player generation, used by the sync controller to detect stale video swaps. */
     internal val mediaGeneration: Long get() = media.generationNow
 
@@ -1175,6 +1189,7 @@ class DisplayScreen(
         val maxRadius = if (isPopoutActive) Double.MAX_VALUE else ClientStateManager.config.defaultDistance.toDouble()
         val distance = getDistanceToScreen(pos)
         mediaPlayer?.tick(distance, maxRadius)
+        timelineFollower.tick()
         restoreAudioTrackIfPending()
         restoreSubtitleTrackIfPending()
         publishStartedFlip()

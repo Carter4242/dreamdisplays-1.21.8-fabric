@@ -39,6 +39,12 @@ internal class AudioSink(private val debugLabel: String) {
         private const val CATCHUP_MAX_PASSES = 4
         private const val MAX_RESYNC_NANOS = 5_000_000_000L
 
+        /** Furthest a sync rate request may move playback from real time (5 %). */
+        private const val MAX_RATE_OFFSET = 0.05
+
+        /** Largest rate change per PCM chunk (50 ms), so a new rate is reached smoothly: 1 % takes 1 s. */
+        private const val RATE_STEP_PER_CHUNK = 0.0005
+
         /** Converts a count of stereo 16-bit PCM frames into nanos of content. */
         fun framesToNanos(frames: Long): Long = frames * 1_000_000_000L / SAMPLE_RATE
 
@@ -74,6 +80,14 @@ internal class AudioSink(private val debugLabel: String) {
         @Volatile
         @JvmField
         var pcmFlowing = false
+
+        /** Which content frame each output frame of [line] carries; identity unless the rate was changed. */
+        @JvmField
+        val frameMap = ContentFrameMap()
+
+        /** Output frames written to [line] so far (pump thread only). */
+        @JvmField
+        var outFramesWritten = 0L
     }
 
     /**
@@ -111,7 +125,9 @@ internal class AudioSink(private val debugLabel: String) {
         val s = current ?: return ClockSample.NONE
         val ln = s.line ?: return ClockSample.NONE
         if (!s.pcmFlowing) return ClockSample.NONE
-        return ClockSample(s.contentStartNanos + framesToNanos(ln.longFramePosition), s.epoch, s.originKnown)
+        // Content frames, not output frames: while the sync rate is not 1 the two run apart
+        val contentFrames = s.frameMap.contentAt(ln.longFramePosition)
+        return ClockSample(s.contentStartNanos + framesToNanos(contentFrames), s.epoch, s.originKnown)
     }
 
     @Volatile
@@ -124,17 +140,28 @@ internal class AudioSink(private val debugLabel: String) {
 
     private val pendingResyncNanos = AtomicLong(0)
 
+    /**
+     * Requested playback rate as content frames per output frame (1.01 plays 1 % fast), used to keep synced
+     * playback on the server timeline. Reached gradually; the audio clock keeps reporting content time.
+     */
+    @Volatile
+    var playbackRate: Double = 1.0
+        set(value) {
+            field = if (value.isFinite()) value.coerceIn(1.0 - MAX_RATE_OFFSET, 1.0 + MAX_RATE_OFFSET) else 1.0
+        }
+
     /** Asks pump to drop next nanos of audio to restore lip sync after line stall. */
     fun requestResync(nanos: Long) {
         if (nanos <= 0L) return
         pendingResyncNanos.accumulateAndGet(nanos.coerceAtMost(MAX_RESYNC_NANOS), ::maxOf)
     }
 
+    /** Skips PCM owed by [requestResync]; true when anything was skipped (a discontinuity in the content). */
     private fun applyPendingResync(
         session: LineSession, input: InputStream, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
-    ) {
+    ): Boolean {
         val target = pendingResyncNanos.getAndSet(0L)
-        if (target <= 0L || !owns(session)) return
+        if (target <= 0L || !owns(session)) return false
         val scratch = ByteArray(CHUNK_BYTES)
         var toSkip = target * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
         var skipped = 0L
@@ -144,9 +171,10 @@ internal class AudioSink(private val debugLabel: String) {
             skipped += n
             toSkip -= n
         }
-        if (skipped <= 0L) return
+        if (skipped <= 0L) return false
         session.contentStartNanos += bytesToNanos(skipped)
         logger.debug("$debugLabel [audio] re-synced by skipping ${bytesToNanos(skipped) / 1_000_000} ms of PCM.")
+        return true
     }
 
     private fun beginSession(contentStartNanos: Long, originKnown: Boolean): LineSession {
@@ -260,7 +288,8 @@ internal class AudioSink(private val debugLabel: String) {
                 if (isInterrupted()) return@use
                 val skippedNanos = catchUp?.let { skipCatchUp(input, it, terminated, stopFlag) } ?: 0L
 
-                if (isInterrupted() || !primeSwitchLine(input, newLine, terminated, stopFlag)) return@use
+                val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, newLine, terminated, stopFlag)
+                if (isInterrupted() || primedBytes <= 0) return@use
                 if (isInterrupted() || !shouldPromote()) return@use
 
                 // The flip publishes the new session and its line together, so no clock reader can ever
@@ -271,6 +300,7 @@ internal class AudioSink(private val debugLabel: String) {
                     runCatching { flush() }
                 }
                 val s = beginSession(contentStartNanos + skippedNanos, originKnown)
+                s.outFramesWritten = (primedBytes / BYTES_PER_FRAME).toLong() // Primed at rate 1: identity
                 session = s
                 publishLine(s, newLine)
                 newLine.start()
@@ -308,20 +338,21 @@ internal class AudioSink(private val debugLabel: String) {
         }
     }
 
+    /** Pre-fills [ln] at rate 1; returns the bytes written (0 when nothing could be read). */
     private fun primeSwitchLine(
         input: InputStream, ln: SourceDataLine, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
-    ): Boolean {
+    ): Int {
         val chunk = ByteArray(CHUNK_BYTES)
         val primeTarget = paceTargetBytes.coerceIn(CHUNK_BYTES * 3, LINE_BUFFER_BYTES - CHUNK_BYTES)
         var buffered = 0
         while (buffered < primeTarget && !terminated.get() && !stopFlag.get()) {
             val n = MediaUtil.readFull(input, chunk, CHUNK_BYTES)
-            if (n <= 0) return buffered > 0
+            if (n <= 0) return buffered
             MediaBufferEffects.applyVolumeS16LE(chunk, n, currentVolume)
             writeFully(ln, chunk, n, terminated, stopFlag)
             buffered += n
         }
-        return buffered > 0
+        return buffered
     }
 
     /** Flushes and closes the audio line immediately, retiring the clock. Safe to call from any thread. */
@@ -440,6 +471,9 @@ internal class AudioSink(private val debugLabel: String) {
         terminated: AtomicBoolean, stopFlag: AtomicBoolean,
     ) {
         val chunk = ByteArray(CHUNK_BYTES)
+        val resampler = PcmRateResampler().also { it.reset(session.outFramesWritten) }
+        val resampled = ByteArray(resampler.maxOutputBytes(CHUNK_BYTES))
+        var rate = 1.0
         var firstChunk = true
         var totalBytes = 0L
         // Fresh line for this session: don't let its initially-empty buffer read as an underrun on the
@@ -448,7 +482,7 @@ internal class AudioSink(private val debugLabel: String) {
         paceCleanChunks = 0
         while (!terminated.get() && !stopFlag.get()) {
             if (parkIfRequested(ln, terminated, stopFlag)) break
-            if (!firstChunk) applyPendingResync(session, input, terminated, stopFlag)
+            if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) resampler.discontinuity()
             val n = MediaUtil.readFull(input, chunk, CHUNK_BYTES)
             if (n <= 0) {
                 // A deliberate teardown destroys the process mid-read; that EOF is expected and not
@@ -469,8 +503,22 @@ internal class AudioSink(private val debugLabel: String) {
             }
             val dsp = if (owns(session)) dspStage else null
             dsp?.process(chunk, n, currentVolume) ?: MediaBufferEffects.applyVolumeS16LE(chunk, n, currentVolume)
-            paceLiveWrite(ln, chunk, n, terminated, stopFlag)
+            rate = stepRate(rate, playbackRate)
+            // At rate 1 this is a plain copy; otherwise the chunk is stretched / squeezed by the rate
+            val contentFrom = resampler.contentPosition
+            val outBytes = resampler.process(chunk, n, rate, resampled)
+            val outFrames = outBytes / BYTES_PER_FRAME
+            session.frameMap.record(session.outFramesWritten, outFrames, contentFrom, resampler.contentPosition)
+            session.outFramesWritten += outFrames
+            if (outBytes > 0) paceLiveWrite(ln, resampled, outBytes, terminated, stopFlag)
         }
+    }
+
+    /** Moves [current] one chunk's worth toward [target], landing exactly on it (and on 1.0) when close. */
+    private fun stepRate(current: Double, target: Double): Double {
+        val delta = target - current
+        return if (kotlin.math.abs(delta) <= RATE_STEP_PER_CHUNK) target
+        else current + if (delta > 0) RATE_STEP_PER_CHUNK else -RATE_STEP_PER_CHUNK
     }
 
     private fun parkIfRequested(ln: SourceDataLine, terminated: AtomicBoolean, stopFlag: AtomicBoolean): Boolean {

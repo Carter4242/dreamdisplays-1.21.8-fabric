@@ -323,6 +323,26 @@ class MediaPlayer(
     fun getResumePositionNanos(): Long =
         sessionManager.parkedPositionNanos() ?: sessionManager.activeBridgeEdgeNanos() ?: getCurrentTime()
 
+    /**
+     * Position actually being heard and shown (the audio master clock), for measuring sync drift. Unlike
+     * [getCurrentTime], which follows the wall clock, this includes any drift of the sound card's clock.
+     */
+    fun getSyncPositionNanos(): Long {
+        sessionManager.parkedPositionNanos()?.let { return it }
+        if (!isReady || !sessionManager.isPlaying) return clock.originNanos
+        val heard = sessionManager.currentPacingNanos()
+        return if (heard >= 0L) heard else clock.currentTime()
+    }
+
+    /**
+     * Sets the sync playback rate (content time per real time, e.g. 1.005). Applied to the audio, which the
+     * picture follows; has no effect on a session without sound.
+     */
+    fun setSyncPlaybackRate(ratio: Double) = sessionManager.setPlaybackRate(ratio)
+
+    /** True when paused with the session kept open, so [play] resumes instantly from the frozen position. */
+    fun resumesWarm(): Boolean = isPausedWarm()
+
     /** Stream duration in nanos, or 0 for live streams. */
     fun getDuration(): Long = if (liveStream) 0L else durationHintNanos
 
