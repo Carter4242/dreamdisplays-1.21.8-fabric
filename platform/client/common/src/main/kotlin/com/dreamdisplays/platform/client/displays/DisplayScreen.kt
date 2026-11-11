@@ -262,6 +262,17 @@ class DisplayScreen(
     /** True if the local player may change the display's video here (suggestions / SetVideo). */
     val canSetVideoHere: Boolean get() = PlaybackPermissions.canSetVideo(ctx())
 
+    /**
+     * True when the menu offers to clear this display's video: the server can clear videos, the viewer may set one,
+     * and there is one.
+     */
+    val canClearVideoHere: Boolean get() = ClearVideo.supported && canSetVideoHere && !videoUrl.isNullOrEmpty()
+
+    /** Asks the server to take this display's video off, for everyone (the menu's "Clear"). */
+    fun requestClearVideo() {
+        ClearVideo.request(uuid)
+    }
+
     /** True if the local player may open the popout here — false in Broadcast for everyone. */
     val canPopoutHere: Boolean get() = PlaybackPermissions.canPopout(ctx())
 

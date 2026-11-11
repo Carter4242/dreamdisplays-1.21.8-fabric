@@ -160,5 +160,7 @@
   "dreamdisplays.queue.playlist.unavailable": "Skipped %s unavailable videos (private, deleted or members-only)",
   "dreamdisplays.queue.playlist.failed": "Couldn't load that playlist",
   "dreamdisplays.queue.clear": "Clear Up next",
-  "dreamdisplays.queue.clear.confirm": "Click again to remove every video from Up next"
+  "dreamdisplays.queue.clear.confirm": "Click again to remove every video from Up next",
+  "dreamdisplays.ui.clear_video": "Clear the video (ends it for everyone)",
+  "dreamdisplays.ui.clear_video.confirm": "Click again to clear the video for everyone"
 }

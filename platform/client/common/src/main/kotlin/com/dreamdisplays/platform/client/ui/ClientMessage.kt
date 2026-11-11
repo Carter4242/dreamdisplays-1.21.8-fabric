@@ -105,6 +105,8 @@ enum class ClientMessage(val key: String) {
     SHARE_STOP("dreamdisplays.share.stop"),
     SUGGESTIONS_UNAVAILABLE("dreamdisplays.suggestions.unavailable"),
     UI_BILIBILI("dreamdisplays.ui.bilibili"),
+    UI_CLEAR_VIDEO("dreamdisplays.ui.clear_video"),
+    UI_CLEAR_VIDEO_CONFIRM("dreamdisplays.ui.clear_video.confirm"),
     UI_CUSTOM("dreamdisplays.ui.custom"),
     UI_ERROR("dreamdisplays.ui.error"),
     UI_KICK("dreamdisplays.ui.kick"),

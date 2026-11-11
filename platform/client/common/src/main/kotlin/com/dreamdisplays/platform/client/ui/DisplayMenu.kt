@@ -115,6 +115,10 @@ class DisplayMenu private constructor(
     private var suggestionsRect: UiRect? = null
     private lateinit var queueSection: QueueSection
     private lateinit var skipButton: IconButton
+    private lateinit var clearVideoButton: IconButton
+
+    // Clearing ends the video for everyone: a second click within a few seconds confirms it
+    private val clearVideoGuard = ArmedClick(CLEAR_CONFIRM_MS)
     private lateinit var loopButton: IconButton
     private lateinit var queueAddButton: IconButton
     private lateinit var clearQueueButton: IconButton
@@ -344,6 +348,11 @@ class DisplayMenu private constructor(
         skipButton.visibleWhen = { notErrored() && ds.queueRunsHere && DisplayQueues.items(ds.uuid).isNotEmpty() }
         skipButton.enabledWhen = { ds.canSkipQueueHere }
 
+        clearVideoButton = addUi(IconButton(icon = { IconButton.modIcon("cross") }, sprites = IconButton.RED_SPRITES) {
+            if (clearVideoGuard.press(System.currentTimeMillis())) ds.requestClearVideo()
+        })
+        clearVideoButton.visibleWhen = { notErrored() && ds.canClearVideoHere }
+
         suggestions = addUi(SuggestionsPanel(::onPickSuggested, ds.suggestionsController))
         suggestions.visibleWhen = { !ds.errored && suggestionsRect != null }
         // Locked / Broadcast / Watch party displays only let the owner / admin change the video, so
@@ -387,6 +396,7 @@ class DisplayMenu private constructor(
                 ds, muteButton, volume, popoutButton, audioTrackButton, subtitleButton, pauseButton, progress,
                 dropdown, audioTrackDropdown, subtitleDropdown,
                 skipButton = skipButton,
+                clearVideoButton = clearVideoButton,
                 upNext = { if (ds.queueRunsHere) DisplayQueues.next(ds.uuid)?.let(QueueSection::titleOf) else null },
             )
         // Share screen: picks a monitor (dropdown) when idle, stops at once while this display is the one shared to
@@ -611,6 +621,14 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
+        if (!clearVideoButton.visible) {
+            clearVideoGuard.disarm()
+        } else if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
+            g.drawOutline(
+                UiRect(clearVideoButton.x - 1, clearVideoButton.y - 1, clearVideoButton.width + 2, clearVideoButton.height + 2),
+                UiTheme.ACCENT_UPDATE,
+            )
+        }
         if (shareButton.visible) {
             if (ScreenShare.isSharing(ds.uuid)) {
                 val bottom = shareButton.y + shareButton.height
@@ -711,6 +729,11 @@ class DisplayMenu private constructor(
             b.visible && mouseX >= b.x && mouseX < b.x + b.width && mouseY >= b.y && mouseY < b.y + b.height
         when {
             over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
+            over(clearVideoButton) -> queueTip = if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
+                ClientMessage.UI_CLEAR_VIDEO_CONFIRM.text()
+            } else {
+                ClientMessage.UI_CLEAR_VIDEO.text()
+            }
             over(queueAddButton) -> queueTip = queueBlockedReason()
                 ?: if (YouTubePlaylists.parseLink(suggestions.searchText) != null) ClientMessage.QUEUE_PLAYLIST_ADD.text()
                 else ClientMessage.QUEUE_ADD.text()

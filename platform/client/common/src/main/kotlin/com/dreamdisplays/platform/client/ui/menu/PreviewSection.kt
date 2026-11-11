@@ -60,6 +60,8 @@ class PreviewSection(
     private val subtitleDropdown: SubtitleDropdown,
     /** "Skip to the next queued video", right of pause; laid out only while visible. */
     private val skipButton: IconButton? = null,
+    /** "Clear the video" (for everyone), right of pause and left of skip; laid out only while visible. */
+    private val clearVideoButton: IconButton? = null,
     /** Title of the next queued video, shown as a third overlay line; null hides the line. */
     private val upNext: () -> String? = { null },
 ) {
@@ -91,10 +93,17 @@ class PreviewSection(
         val innerW = panel.w - UiTheme.PANEL_PADDING_X * 2
 
         val controlsRowY = panel.bottom - UiTheme.PANEL_PADDING_Y - btn
-        // The queue's skip button takes the right-most slot; everything else shifts left by its width
-        val skipShown = skipButton?.visible == true
-        skipButton?.place(UiRect(innerX + innerW - btn, controlsRowY, btn, btn))
-        val controlsRight = innerX + innerW - if (skipShown) btn + 4 else 0
+        // The queue's skip button takes the right-most slot, the clear button the one left of it; everything else
+        // shifts left by their widths
+        var controlsRight = innerX + innerW
+        if (skipButton?.visible == true) {
+            skipButton.place(UiRect(controlsRight - btn, controlsRowY, btn, btn))
+            controlsRight -= btn + 4
+        }
+        if (clearVideoButton?.visible == true) {
+            clearVideoButton.place(UiRect(controlsRight - btn, controlsRowY, btn, btn))
+            controlsRight -= btn + 4
+        }
         val previewMaxH = controlsRowY - innerY - 6
 
         drawVideoArea(g, innerX, innerY, innerW, previewMaxH)
