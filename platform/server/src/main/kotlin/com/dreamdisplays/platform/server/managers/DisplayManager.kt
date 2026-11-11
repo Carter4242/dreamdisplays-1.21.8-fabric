@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.managers
 
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
+import com.dreamdisplays.core.command.TargetMatch
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.sync.DisplayFollowers
@@ -88,9 +89,14 @@ object DisplayManager {
         return matches.singleOrNull()
     }
 
-    /** True when another display (not [excludeId]) already carries [name], case-insensitively. */
+    /**
+     * True when another display (not [excludeId]) already carries [name], case-insensitively, or [name] would hide
+     * another display's short id ([TargetMatch.nameShadowsId]).
+     */
     fun isNameTaken(name: String, excludeId: UUID): Boolean =
-        displays.values.any { it.id != excludeId && it.name.equals(name, ignoreCase = true) }
+        displays.values.any {
+            it.id != excludeId && (it.name.equals(name, ignoreCase = true) || TargetMatch.nameShadowsId(name, it.id))
+        }
 
     /** Bulk-registers displays loaded from storage without sending any updates. */
     fun register(list: List<DisplayData>) {

@@ -30,6 +30,15 @@ object TargetMatch {
 
     fun isThis(token: String?): Boolean = token == null || token.equals(THIS, ignoreCase = true)
 
+    /**
+     * True when naming a display [name] would hide display [id]: [match] tries names before id prefixes, so commands
+     * aimed at [id]'s listed short id would reach the named display instead.
+     */
+    fun nameShadowsId(name: String, id: UUID): Boolean {
+        val n = name.trim()
+        return n.length >= MIN_PREFIX && id.toString().startsWith(n, ignoreCase = true)
+    }
+
     fun match(token: String?, displays: Collection<Candidate>): Result {
         if (isThis(token)) return Result.LookedAt
         val t = token!!.trim()
