@@ -322,10 +322,14 @@ class DisplayScreen(
     @Volatile
     var videoContentAspect: Double = 0.0
 
+    /** A fullscreen broadcast's volume / quality for this display, over the viewer's own; never saved. */
+    private val broadcast = BroadcastOverrides()
+
     /** User-set volume (`0.0`..`1.0`); writes apply the effective volume and persist the setting. */
     var volume: Float = savedSettings.volume
         set(value) {
             field = value
+            broadcast.onViewerVolume()
             applyEffectiveVolume()
             ClientSettingsStore.updateSettings(uuid, value, quality, brightness, muted, paused)
             DisplayRegistry.recordScreen(this)
@@ -344,7 +348,8 @@ class DisplayScreen(
     var quality: VideoQuality = VideoQuality.parse(savedSettings.quality)
         set(value) {
             field = value
-            mediaPlayer?.setQuality(effectiveQuality(value), userInitiated = qualityWriteIsViewerAction)
+            if (qualityWriteIsViewerAction) broadcast.onViewerQuality()
+            mediaPlayer?.setQuality(effectiveQuality(broadcast.qualityOver(value)), userInitiated = qualityWriteIsViewerAction)
             ClientSettingsStore.updateSettings(uuid, volume, value, brightness, muted, paused)
             DisplayRegistry.recordScreen(this)
         }
@@ -408,7 +413,7 @@ class DisplayScreen(
         if (match != null) subtitleTrack = match.lang
     }
 
-    private fun effectiveQuality(requested: VideoQuality = quality): VideoQuality {
+    private fun effectiveQuality(requested: VideoQuality = broadcast.qualityOver(quality)): VideoQuality {
         val policyCap = policy.quality?.maxHeight?.takeIf { it > 0 } ?: 0
         val cap = listOf(qualityCap, policyCap).filter { it > 0 }.minOrNull() ?: 0
         val requestedHeight = requested.targetHeight
@@ -1212,7 +1217,7 @@ class DisplayScreen(
 
     /** Applies effective volume (0 if muted/unfocused, else user volume). */
     internal fun applyEffectiveVolume() {
-        setVideoVolume(if (muted || focusMuted || prepareMuted) 0f else volume)
+        setVideoVolume(if (muted || focusMuted || prepareMuted) 0f else listeningVolume)
     }
 
     /** True when paused and parked on a decoded start-up cushion by [holdReadyForBroadcast]: a resume plays at once. */
@@ -1290,9 +1295,33 @@ class DisplayScreen(
         popoutManager.activateFullscreenMode(mp, mode, forced, sessionId) { videoContentAspect }
     }
 
-    /** Closes the fullscreen overlay, keeping other popout surfaces alive. */
+    /** Closes the fullscreen overlay, keeping other popout surfaces alive. The broadcast's volume / quality end with it. */
     fun deactivateFullscreen() {
         popoutManager.deactivateFullscreen(mediaPlayer)
+        clearBroadcastOverrides()
+    }
+
+    /** The volume this display plays at: a fullscreen broadcast's while it shows, else the viewer's own [volume]. */
+    private val listeningVolume: Float get() = broadcast.volumeOver(volume)
+
+    /**
+     * Plays this display at a fullscreen broadcast's [volume] (negative = the viewer's own) and [quality] (empty = the
+     * viewer's own) while the broadcast shows, without touching the viewer's saved settings for it.
+     */
+    internal fun applyBroadcastOverrides(volume: Float, quality: String) {
+        val before = effectiveQuality()
+        val changed = broadcast.apply(volume, quality)
+        if (changed.volume) applyEffectiveVolume()
+        // Re-applying the same quality is not free: it can drop a paused player's open stream
+        if (changed.quality && effectiveQuality() != before) reloadQuality()
+    }
+
+    /** Back to the viewer's own volume and quality (the broadcast ended or its overlay closed). */
+    internal fun clearBroadcastOverrides() {
+        val before = effectiveQuality()
+        val changed = broadcast.clear()
+        if (changed.volume) applyEffectiveVolume()
+        if (changed.quality && effectiveQuality() != before) reloadQuality()
     }
 
     /** Swaps fullscreen to non-interactive PiP (forced-broadcast Esc behavior). */
@@ -1510,7 +1539,7 @@ class DisplayScreen(
     internal fun primeNewPlayerVolume(mp: MediaPlayer) {
         val player = Minecraft.getInstance().player ?: return
         mp.primeVolume(
-            if (muted || focusMuted || prepareMuted) 0f else playVolume(volume), getDistanceToScreen(player.blockPosition()),
+            if (muted || focusMuted || prepareMuted) 0f else playVolume(listeningVolume), getDistanceToScreen(player.blockPosition()),
             audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff(),
         )
     }
@@ -1613,7 +1642,7 @@ class DisplayScreen(
             uuid,
             SourceAcousticState(
                 plane = plane,
-                userVolume = volume,
+                userVolume = listeningVolume,
                 muted = muted || focusMuted || prepareMuted,
                 bypassSpatial = isPopoutActive,
                 acousticsEnabled = acousticsEnabled,
@@ -1631,7 +1660,7 @@ class DisplayScreen(
             return cachedEnvironment
         }
         // Nothing to hear, nothing to trace: the raycasts run on the game thread, once per display
-        if (muted || focusMuted || volume <= 0f) return cachedEnvironment
+        if (muted || focusMuted || listeningVolume <= 0f) return cachedEnvironment
         reverbProbeCountdown--
         if (envProbeCountdown > 0) {
             envProbeCountdown--

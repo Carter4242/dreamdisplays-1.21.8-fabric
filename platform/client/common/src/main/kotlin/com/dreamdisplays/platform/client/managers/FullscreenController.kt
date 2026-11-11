@@ -1,6 +1,5 @@
 package com.dreamdisplays.platform.client.managers
 
-import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.core.protocol.common.packets.FullscreenAck
@@ -93,12 +92,8 @@ object FullscreenController {
         screen.activateFullscreenMode(FullscreenMode.fromWire(state.mode), state.forced, state.sessionId, state.loop)
         // No longer prepared and now on screen: lift the preparation's hiding and muting right away, not next tick
         screen.refreshPrepareState()
-        if (state.volume >= 0f) screen.volume = state.volume.coerceIn(0f, 1f)
-        // Re-applying the same quality is not free: it can drop a paused player's open stream
-        if (state.quality.isNotEmpty()) {
-            val quality = VideoQuality.parse(state.quality)
-            if (screen.quality != quality) screen.quality = quality
-        }
+        // Played over the viewer's own settings for this display, never saved into them
+        screen.applyBroadcastOverrides(state.volume, state.quality)
         if (state.minimized) screen.minimizeFullscreenToPip()
         val action = if (state.minimized) FullscreenAckAction.MINIMIZED else FullscreenAckAction.SHOWN
         ProtocolRouter.send(FullscreenAck(state.sessionId, action.wire))
