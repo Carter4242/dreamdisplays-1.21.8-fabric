@@ -28,8 +28,9 @@ class ScreenShareRelayTemplatesTest {
     }
 
     @Test
-    fun `an rtsp publish url is refused (the client has no rtsp muxer), rtsp playback is fine`() {
-        assertNotNull(problem("rtsp://r:8554/{id}", play))
+    fun `rtsp works both ways (the client publishes through the rtsp muxer), other schemes do not`() {
+        assertNull(problem("rtsp://r:8554/{id}", play))
+        assertNotNull(problem("http://r/{id}", play))
         assertNull(problem(publish, "rtsp://r:8554/{id}"))
     }
 

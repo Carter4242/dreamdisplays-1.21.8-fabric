@@ -99,8 +99,8 @@ object ConfigCommand {
      */
     private val PUBLISH_URL: PolicyPaths.Kind
         get() = PolicyPaths.Kind.Text(
-            Regex("""(?i)(?:srt|rtmps?)://[^\s"]*\{id}[^\s"]*"""),
-            "<srt|rtmp|rtmps URL containing {id}>",
+            Regex("""(?i)(?:srt|rtmps?|rtsp)://[^\s"]*\{id}[^\s"]*"""),
+            "<srt|rtmp|rtmps|rtsp URL containing {id}>",
         )
 
     /** A relay URL template: a live scheme and an `{id}` somewhere (path, `streamid`, ...); any query is kept. */

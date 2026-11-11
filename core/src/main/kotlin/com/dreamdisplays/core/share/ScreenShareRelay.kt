@@ -11,10 +11,9 @@ object ScreenShareRelayTemplates {
     const val KEY = "{key}"
 
     /**
-     * Schemes a sharer's client can publish to. RTSP is a relay scheme viewers can play, but the client's publish
-     * pipeline only has the FLV (RTMP) and MPEG-TS (SRT) muxers, so an RTSP publish URL fails every share.
+     * Schemes a sharer's client can publish to: FLV for RTMP(S), MPEG-TS for SRT, and RTSP's own muxer (over TCP).
      */
-    val PUBLISH_SCHEMES: Set<String> = setOf("srt", "rtmp", "rtmps")
+    val PUBLISH_SCHEMES: Set<String> = setOf("srt", "rtmp", "rtmps", "rtsp")
 
     private const val SAMPLE_ID = "dd0sample"
     private const val SAMPLE_KEY = "k0sample"
@@ -31,7 +30,7 @@ object ScreenShareRelayTemplates {
         if (leased && !publish.contains(KEY)) return "relay_publish_url needs {key} when relay_control_url is set"
         if (!leased && publish.contains(KEY)) return "relay_publish_url has {key} but relay_control_url is not set"
         val publishScheme = LiveStreamUrls.schemeOf(publish)
-        if (publishScheme !in PUBLISH_SCHEMES) return "relay_publish_url must be srt://, rtmp:// or rtmps://"
+        if (publishScheme !in PUBLISH_SCHEMES) return "relay_publish_url must be srt://, rtmp://, rtmps:// or rtsp://"
         if (!LiveStreamUrls.isValid(publishUrl(publish, SAMPLE_ID, SAMPLE_KEY))) return "relay_publish_url is not a valid URL"
         // Viewers keep a stream private (no thumbnail, history, held frame or preload) only for a live relay scheme
         if (!LiveStreamUrls.isLive(play)) return "relay_play_url must be a live relay URL (srt, rtmp, rtmps or rtsp)"
