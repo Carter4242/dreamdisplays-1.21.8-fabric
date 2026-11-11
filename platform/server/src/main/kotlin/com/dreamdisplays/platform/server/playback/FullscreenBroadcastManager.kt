@@ -221,9 +221,11 @@ object FullscreenBroadcastManager {
         if (sessions.containsKey(sessionId)) return null
         if (!virtual && sessionIdForDisplay(display.id) != null) return null
 
-        // Clients holding this display ready play it the moment the session reaches them
-        val preparation = preparations.remove(display.id)
+        // Clients holding this display ready play it the moment the session reaches them. The preparation still counts
+        // its far clients as followers while the start is scheduled, so its lead covers them too.
+        val preparation = preparations[display.id]
         if (preparation != null && !virtual) TimelineManager.playNow(display)
+        preparation?.let { preparations.remove(display.id, it) }
 
         val now = transport.nowMs()
         val session = Session(
