@@ -16,6 +16,8 @@ import java.io.File
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -178,9 +180,24 @@ object ClientErrorReports {
 
     private fun write(line: String) {
         val file = logFile().toPath()
-        writer.execute {
-            val current = log?.takeIf { it.path == file } ?: ClientErrorLog(file).also { log = it }
-            if (!current.append(line)) logger.warn("Could not write to {}.", file)
+        try {
+            writer.execute {
+                val current = log?.takeIf { it.path == file } ?: ClientErrorLog(file).also { log = it }
+                if (!current.append(line)) logger.warn("Could not write to {}.", file)
+            }
+        } catch (_: RejectedExecutionException) {
+            // Shut down (plugin disable): the line is dropped
         }
     }
+
+    /**
+     * Stops the writer thread once the lines already queued are written (plugin disable); a live thread would keep
+     * this plugin instance's classes loaded after a reload.
+     */
+    fun shutdown() {
+        writer.shutdown()
+        if (!writer.awaitTermination(SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS)) writer.shutdownNow()
+    }
+
+    private const val SHUTDOWN_WAIT_SECONDS = 2L
 }
