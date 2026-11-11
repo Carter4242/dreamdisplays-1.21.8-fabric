@@ -379,6 +379,8 @@ class DisplayMenu private constructor(
         clearQueueButton.visibleWhen = { loopButton.visibleWhen() && DisplayQueues.items(ds.uuid).isNotEmpty() }
         clearQueueButton.enabledWhen = { ds.canManageQueueHere }
 
+        // init() runs again on every resize: release the previous section's ambient texture and uploader first
+        if (::preview.isInitialized) preview.close()
         preview =
             PreviewSection(
                 ds, muteButton, volume, popoutButton, audioTrackButton, subtitleButton, pauseButton, progress,
