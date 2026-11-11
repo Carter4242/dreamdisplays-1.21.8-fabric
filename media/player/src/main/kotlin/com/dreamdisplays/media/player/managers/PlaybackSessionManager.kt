@@ -972,12 +972,7 @@ internal class PlaybackSessionManager(
                         "$debugLabel [reappear] live channel presented first frame; handoff at ${ms(liveOffsetNanos)} ms."
                     )
                 },
-                onEos = { stderr, normalEos ->
-                    abortIncoming(
-                        generation,
-                        "eos=$normalEos stderr=${MediaUtil.truncate(stderr)}."
-                    )
-                },
+                onEos = { stderr, normalEos -> handoffEos(channel, generation, stderr, normalEos) },
                 parkFlag = parkFlag
             )
 
@@ -1179,12 +1174,7 @@ internal class PlaybackSessionManager(
                     clock.markFirstFrame()
                     if (MediaPlayer.DEBUG) logger.debug("$debugLabel Incoming video handoff #$generation presented its first frame.")
                 },
-                onEos = { stderr, normalEos ->
-                    abortIncoming(
-                        generation,
-                        "eos=$normalEos stderr=${MediaUtil.truncate(stderr)}."
-                    )
-                },
+                onEos = { stderr, normalEos -> handoffEos(channel, generation, stderr, normalEos) },
                 parkFlag = parkFlag,
                 // No pre-prime preview: the incoming channel's first decoded frame is stale by the
                 // session-open time, and presenting it would promote a rewound picture that then holds
@@ -1238,6 +1228,18 @@ internal class PlaybackSessionManager(
         updateRawFrameSink() // Re-attach popout / preview to the new live channel
         old?.let { discardChannelAsync(it) }
         return true
+    }
+
+    /**
+     * End of a handoff channel (quality switch, replay -> live): while still incoming it only aborts the handoff;
+     * once promoted it is the session's video, so its end (or failure) is the stream's, like [start]'s channel.
+     */
+    private fun handoffEos(channel: VideoChannel, generation: Long, stderr: String, normalEos: Boolean) {
+        if (synchronized(switchLock) { active === channel }) {
+            onStreamEnd(stderr, normalEos)
+            return
+        }
+        abortIncoming(generation, "eos=$normalEos stderr=${MediaUtil.truncate(stderr)}.")
     }
 
     private fun abortIncoming(generation: Long, reason: String) {
