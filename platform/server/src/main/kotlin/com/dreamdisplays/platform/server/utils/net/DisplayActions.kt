@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
+import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
@@ -214,8 +215,9 @@ object DisplayActions {
     }
 
     /** Records the player's reported mod version and runs the mod / plugin update checks. */
-    fun recordVersionAndCheckUpdates(player: Player, versionString: String) {
-        logger.info("${player.name} joined with Dream Displays ${versionString.sanitizedForLog()}.")
+    fun recordVersionAndCheckUpdates(player: Player, versionString: String, buildCommit: String? = null) {
+        val build = ClientBuild.of(buildCommit)?.let { "build $it" } ?: "build unknown, older jar"
+        logger.info("${player.name} joined with Dream Displays ${versionString.sanitizedForLog()} ($build).")
         val version = VersionUtil.parseOrNull(versionString)
         PlayerManager.setVersion(player, version)
 

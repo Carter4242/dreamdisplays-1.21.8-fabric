@@ -127,6 +127,11 @@ allow_forced = true
 # Quality cap in pixels of height; clamped down further to the source's own max
 quality_cap = 1080
 
+[clients]
+# Build id (commit, as in the "joined with Dream Displays" log line) of the current client jar.
+# /display clients marks players on any other build; unset = mark nobody.
+# latest_build = "1a2b3c4d"
+
 [reports]
 # Report settings
 # webhook_url is a discord webhook URL for sending reports

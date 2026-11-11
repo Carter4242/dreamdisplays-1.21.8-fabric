@@ -51,4 +51,11 @@ class BundledConfigEditTest {
             assertEquals(lines(template).size, lines(out).size, "$key should be replaced, not added")
         }
     }
+
+    @Test
+    fun `clients latest_build uncomments its example`() {
+        val out = TomlLineEditor.set(template, "clients", "latest_build", TomlLineEditor.encode("1a2b3c4d"))
+        assertEquals(listOf("latest_build = \"1a2b3c4d\""), tableLines(out, "clients").filter { it.startsWith("latest_build") })
+        assertEquals(lines(template).size, lines(out).size)
+    }
 }
