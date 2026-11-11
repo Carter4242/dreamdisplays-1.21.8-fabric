@@ -4,6 +4,7 @@ import com.dreamdisplays.media.runtime.download.SourceLoader
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.util.DreamCoroutines
 import com.dreamdisplays.util.OsInfo
+import com.dreamdisplays.util.net.DreamHttpClient
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.launch
 import kotlinx.io.IOException
@@ -33,7 +34,9 @@ object YtDlpBinary {
         "C:\\Program Files\\yt-dlp\\yt-dlp.exe",
     )
 
-    private const val DOWNLOAD_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/"
+    private const val RELEASES = "https://github.com/yt-dlp/yt-dlp/releases"
+    private const val DOWNLOAD_BASE = "$RELEASES/latest/download/"
+    private const val SUMS_ASSET = "SHA2-256SUMS"
     private const val ZIPAPP_ASSET = "yt-dlp"
     private const val ZIPAPP_NAME = "yt-dlp.pyz"
 
@@ -362,9 +365,34 @@ object YtDlpBinary {
 
     @Throws(IOException::class)
     private fun downloadAsset(target: Path, asset: String, executable: Boolean) {
-        SourceLoader.download(DOWNLOAD_BASE + asset, target, asset, readTimeoutMs = 120_000)
+        // Checked against the SHA2-256SUMS published with the same release; a mismatch keeps the current copy
+        val base = releaseBase()
+        SourceLoader.downloadVerified(base + asset, base + SUMS_ASSET, target, asset, readTimeoutMs = 120_000)
         if (executable && !OsInfo.isWindows) SourceLoader.makeExecutable(target)
     }
+
+    /**
+     * `.../releases/download/<tag>/` of the newest release, so an asset and its checksum list always come from one
+     * release even when a new one is published in between; `latest/download/` when the tag can't be read.
+     */
+    private fun releaseBase(): String {
+        val location = runCatching {
+            DreamHttpClient.peekRedirectLocation(
+                "$RELEASES/latest",
+                DreamHttpClient.RequestOptions(
+                    headers = DreamHttpClient.headersOf("User-Agent" to "DreamDisplays-bootstrap"),
+                    connectTimeoutMs = 15_000,
+                    readTimeoutMs = 30_000,
+                ),
+            )
+        }.getOrNull()
+        return releaseTag(location)?.let { "$RELEASES/download/$it/" } ?: DOWNLOAD_BASE
+    }
+
+    /** The tag a `releases/latest` redirect [location] names (`.../releases/tag/2026.10.26`), or null. */
+    internal fun releaseTag(location: String?): String? =
+        location?.substringAfter("/releases/tag/", "")?.substringBefore('?')?.trim('/')
+            ?.takeIf { it.matches(Regex("[A-Za-z0-9._-]+")) }
 
     private fun canExecute(path: String): Boolean {
         return runCatching {

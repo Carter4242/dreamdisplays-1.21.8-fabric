@@ -26,9 +26,11 @@ object LavFfmpeg {
         }
         return runCatching {
             logger.info("FFmpeg libraries not found — downloading from BtbN builds...")
-            SourceLoader.downloadAndExtract(resolveLatestAssetUrl(source), dir.toPath(), "FFmpeg libraries") { name ->
-                File(name).name.takeIf { wantedEntry(name, source.libDir) }
-            }
+            val url = resolveLatestAssetUrl(source)
+            // The libraries are loaded into the game's own process: verified against the release's checksum list
+            SourceLoader.downloadAndExtractVerified(
+                url, url.substringBeforeLast('/') + "/checksums.sha256", dir.toPath(), "FFmpeg libraries",
+            ) { name -> File(name).name.takeIf { wantedEntry(name, source.libDir) } }
             hasFfmpeg(dir)
         }.getOrElse { e ->
             logger.warn("Could not provision FFmpeg libraries (${e.javaClass.simpleName}: ${e.message}).")

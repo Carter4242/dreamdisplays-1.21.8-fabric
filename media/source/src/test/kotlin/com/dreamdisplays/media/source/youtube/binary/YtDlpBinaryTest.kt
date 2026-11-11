@@ -1,10 +1,20 @@
 package com.dreamdisplays.media.source.youtube.binary
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class YtDlpBinaryTest {
+    @Test
+    fun releaseTagIsReadFromTheLatestRedirect() {
+        assertEquals("2026.10.26", YtDlpBinary.releaseTag("https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26"))
+        assertNull(YtDlpBinary.releaseTag("https://github.com/yt-dlp/yt-dlp/releases"))
+        assertNull(YtDlpBinary.releaseTag("https://github.com/yt-dlp/yt-dlp/releases/tag/../../evil"))
+        assertNull(YtDlpBinary.releaseTag(null))
+    }
+
     @Test
     fun pythonOlderThan311IsRejected() {
         assertFalse(YtDlpBinary.pythonVersionSupported("Python 3.9.6"))

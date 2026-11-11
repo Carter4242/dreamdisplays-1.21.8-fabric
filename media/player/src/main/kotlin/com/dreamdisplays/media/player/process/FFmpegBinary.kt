@@ -99,8 +99,12 @@ object FFmpegBinary {
             return binary.absolutePath
         }
         return runCatching {
-            SourceLoader.downloadAndExtract(p.url, cacheDir.toPath(), "FFmpeg") { name ->
-                p.binaryName.takeIf { name.endsWith(p.entrySuffix) }
+            val select = { name: String -> p.binaryName.takeIf { name.endsWith(p.entrySuffix) } }
+            if (p.sumsUrl != null) {
+                SourceLoader.downloadAndExtractVerified(p.url, p.sumsUrl, cacheDir.toPath(), "FFmpeg", select)
+            } else {
+                // The macOS builds come from single-maintainer sites that publish no checksum list for the archive
+                SourceLoader.downloadAndExtract(p.url, cacheDir.toPath(), "FFmpeg", select = select)
             }
             if (!binary.isFile || binary.length() == 0L) throw IOException("Extracted binary is missing or empty.")
             SourceLoader.makeExecutable(binary.toPath())
@@ -144,17 +148,21 @@ object FFmpegBinary {
 
     private fun detectPlatform(): Platform? {
         val btbn = { arch: String, ext: String -> "$BTBN_BASE/ffmpeg-n$FFMPEG_VERSION-latest-$arch-gpl-$FFMPEG_VERSION.$ext" }
+        val sums = "$BTBN_BASE/checksums.sha256"
         return when {
-            OsInfo.isWindows -> if (OsInfo.isArm) null else Platform("windows-x64", btbn("win64", "zip"), "ffmpeg.exe", "/bin/ffmpeg.exe")
+            OsInfo.isWindows -> if (OsInfo.isArm) null else Platform("windows-x64", btbn("win64", "zip"), "ffmpeg.exe", "/bin/ffmpeg.exe", sums)
             OsInfo.isMac -> if (OsInfo.isArm) {
                 Platform("macos-aarch64", "https://www.osxexperts.net/ffmpeg9arm.zip", "ffmpeg", "ffmpeg")
             } else {
                 Platform("macos-x64", "https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip", "ffmpeg", "ffmpeg")
             }
-            OsInfo.isArm -> Platform("linux-aarch64", btbn("linuxarm64", "tar.xz"), "ffmpeg", "/bin/ffmpeg")
-            else -> Platform("linux-x64", btbn("linux64", "tar.xz"), "ffmpeg", "/bin/ffmpeg")
+            OsInfo.isArm -> Platform("linux-aarch64", btbn("linuxarm64", "tar.xz"), "ffmpeg", "/bin/ffmpeg", sums)
+            else -> Platform("linux-x64", btbn("linux64", "tar.xz"), "ffmpeg", "/bin/ffmpeg", sums)
         }
     }
 
-    private class Platform(val key: String, val url: String, val binaryName: String, val entrySuffix: String)
+    /** [sumsUrl]: the release's `sha256sum` list the archive is verified against, or null when none is published. */
+    private class Platform(
+        val key: String, val url: String, val binaryName: String, val entrySuffix: String, val sumsUrl: String? = null,
+    )
 }
