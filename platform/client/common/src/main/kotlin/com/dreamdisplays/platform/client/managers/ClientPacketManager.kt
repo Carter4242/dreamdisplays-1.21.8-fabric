@@ -58,6 +58,7 @@ object ClientPacketManager {
             is RemotePlaybackToggle -> DisplayRegistry.screens[packet.id]?.setPaused(packet.paused)
             is DisplayDelete -> handleDelete(packet)
             is ClearCache -> handleClearCache(packet)
+            is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)
             else -> logger.debug("Ignoring non-client-bound packet {}.", packet::class.simpleName)
         }
     }
@@ -98,6 +99,8 @@ object ClientPacketManager {
     fun reset() {
         serverSnapshot = ServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
+        com.dreamdisplays.platform.client.displays.ServerOverrides.reset()
+        com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         FullscreenController.reset()
     }
 }

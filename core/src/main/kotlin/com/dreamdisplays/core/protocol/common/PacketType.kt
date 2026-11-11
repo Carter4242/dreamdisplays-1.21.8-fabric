@@ -17,6 +17,8 @@ import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
+import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
+import com.dreamdisplays.core.protocol.common.packets.ViewerReport
 import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
@@ -55,7 +57,11 @@ enum class PacketType(
     RADIUS_PREVIEW(19, RadiusPreview::class, PacketDirection.SERVER_TO_CLIENT),
     PIP_PIN(20, PipPin::class, PacketDirection.CLIENT_TO_SERVER),
     REPORT_DURATION(21, ReportDuration::class, PacketDirection.CLIENT_TO_SERVER),
-    REMOTE_PLAYBACK_TOGGLE(22, RemotePlaybackToggle::class, PacketDirection.SERVER_TO_CLIENT);
+    REMOTE_PLAYBACK_TOGGLE(22, RemotePlaybackToggle::class, PacketDirection.SERVER_TO_CLIENT),
+
+    // Diagnostics / remote client control; ids start at 40 so packets added elsewhere in the 20s cannot collide
+    SERVER_POLICY(40, ServerPolicy::class, PacketDirection.SERVER_TO_CLIENT),
+    VIEWER_REPORT(41, ViewerReport::class, PacketDirection.CLIENT_TO_SERVER);
 
     companion object {
         private val byId = entries.associateBy { it.id }

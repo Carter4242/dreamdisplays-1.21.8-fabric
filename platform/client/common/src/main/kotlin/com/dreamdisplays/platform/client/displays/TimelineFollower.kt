@@ -40,6 +40,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     private var lastDriftMs = 0.0
     private var intervalAction = Action.NONE
     private var lastLogNanos = 0L
+    private var reportAction = Action.NONE
+    private var reportSeeks = 0
 
     private enum class LeadKind { SEEK, COLD }
 
@@ -256,11 +258,37 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     private fun note(action: Action) {
         if (action.ordinal > intervalAction.ordinal) intervalAction = action
+        if (action.ordinal > reportAction.ordinal) reportAction = action
+        if (action == Action.SEEK || action == Action.SNAP) reportSeeks++
+    }
+
+    /** Sync figures for a viewer report: drift, rate and latency now, plus the strongest action and seeks since the last call. */
+    internal class SyncReport(
+        val active: Boolean, val driftMs: Double, val ratio: Double, val latencyCompMs: Double,
+        val action: Int, val seeks: Int,
+    )
+
+    /** The current [SyncReport]; resets its per-report action and seek count. */
+    fun takeReport(): SyncReport = synchronized(lock) {
+        val active = screen.followsServerTimeline && estimator.hasTimeline && !screen.isLive && screen.videoStarted
+        SyncReport(
+            active = active,
+            driftMs = if (active) controller.filteredMs ?: lastDriftMs else 0.0,
+            ratio = appliedRatio,
+            latencyCompMs = latencyCompMs,
+            action = reportAction.ordinal,
+            seeks = reportSeeks,
+        ).also {
+            reportAction = Action.NONE
+            reportSeeks = 0
+        }
     }
 
     private fun logIfDue(now: Long) {
         if (!estimator.hasTimeline || estimator.paused || screen.isLive || !screen.videoStarted) return
-        if (now - lastLogNanos < LOG_INTERVAL_NANOS) return
+        // The server can change the interval or turn these lines off (0)
+        val intervalNanos = ServerOverrides.settings.syncLogIntervalMs * 1_000_000L
+        if (intervalNanos <= 0L || now - lastLogNanos < intervalNanos) return
         lastLogNanos = now
         val drift = controller.filteredMs ?: lastDriftMs
         logger.info(
@@ -316,7 +344,6 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L
         private const val RATIO_REFRESH_NANOS = 1_000_000_000L
-        private const val LOG_INTERVAL_NANOS = 10_000_000_000L
         private const val MAX_LEAD_MS = 8_000L
         private const val MAX_RTT_MS = 2_000
         private const val LEAD_GAIN = 0.7

@@ -11,6 +11,7 @@ import com.dreamdisplays.media.source.platform.Platforms
 import com.dreamdisplays.media.source.youtube.NewPipeResolver
 import com.dreamdisplays.media.source.youtube.YtDlp
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.render.DisplayYuvRenderTypes
 import com.dreamdisplays.platform.client.render.GpuFrameUploader
@@ -25,7 +26,7 @@ object DreamPlaybackEnvironment : PlaybackEnvironment {
     override val config: PlaybackConfig = object : PlaybackConfig {
         override val defaultDisplayVolume: Double get() = ClientStateManager.config.defaultDisplayVolume
 
-        override val useHwAccel: Boolean get() = ClientStateManager.config.useHwAccel
+        override val useHwAccel: Boolean get() = ServerOverrides.useHwAccel
 
         override val isPremium: Boolean get() = ClientStateManager.isPremium
 

@@ -45,6 +45,7 @@ class StatsCommand : SubCommand {
 
         val total = counts.values.sum()
         MessageUtil.sendColoredMessage(sender, MessageUtil.formatPrintf(sender, ServerMessage.DISPLAY_STATS_TOTAL, total))
+        if (PolicyCommand.allowed(sender)) ViewerStatsCommand.executeAll(sender)
     }
 }
 

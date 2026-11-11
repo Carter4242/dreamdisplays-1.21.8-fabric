@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory
  * [DisplayPolicy.KEY]) merged over the server-wide defaults from the `[policy.*]` config tables. Every
  * `DisplayInfo` carries the effective policy under that same key ([wireCustomData]), so clients never see the
  * raw override and pick up config changes as soon as displays are re-sent (e.g. after `/display reload`).
+ * Fields that only work server-wide (most of `client`, all of `debug`) are left out of `DisplayInfo` and reach
+ * clients through [ClientDiagnostics] instead.
  */
 object DisplayPolicies {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -69,7 +71,7 @@ object DisplayPolicies {
      */
     fun wireCustomData(display: DisplayData): Map<String, ByteArray> {
         val stored = display.customData.toMap()
-        val policy = runCatching { effective(display) }.getOrElse {
+        val policy = runCatching { effective(display).forDisplay() }.getOrElse {
             logger.warn("Display policy for {} could not be built.", display.id, it)
             return stored
         }

@@ -354,6 +354,44 @@ message RemotePlaybackToggle {
   optional bool paused = 2;
 }
 
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ServerPolicy'
+message ServerPolicy {
+  // WARNING: a default value decoded when value is missing
+  optional bytes policy = 1;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ViewerReport'
+message ViewerReport {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int32 state = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool syncing = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int32 driftMs = 4;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 5;
+  // WARNING: a default value decoded when value is missing
+  optional int32 latencyCompMs = 6;
+  // WARNING: a default value decoded when value is missing
+  optional int32 action = 7;
+  // WARNING: a default value decoded when value is missing
+  optional int32 seeks = 8;
+  // WARNING: a default value decoded when value is missing
+  optional int32 stalls = 9;
+  // WARNING: a default value decoded when value is missing
+  optional bool buffering = 10;
+  // WARNING: a default value decoded when value is missing
+  optional int64 positionMs = 11;
+  // WARNING: a default value decoded when value is missing
+  optional int32 qualityHeight = 12;
+  // WARNING: a default value decoded when value is missing
+  optional string errorKind = 13;
+  // WARNING: a default value decoded when value is missing
+  optional string errorMessage = 14;
+}
+
 message Uuid {
   // WARNING: a default value decoded when value is missing
   optional fixed64 msb = 1;

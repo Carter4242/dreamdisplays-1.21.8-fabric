@@ -29,7 +29,7 @@ object DisplayPolicyCache {
 
     /** The player's render distance, further limited by [policy]'s `visibility.maxDistanceBlocks` when set. */
     fun renderDistanceFor(policy: DisplayPolicy?): Int {
-        val own = DisplayScreen.clientRenderDistanceBlocks()
+        val own = DisplayScreen.clientRenderDistanceBlocks(policy)
         val max = policy?.visibility?.maxDistanceBlocks?.takeIf { it > 0 } ?: return own
         return minOf(own, max.toInt().coerceAtLeast(1))
     }

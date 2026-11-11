@@ -25,6 +25,7 @@ import com.dreamdisplays.media.source.youtube.cache.VideoTitleCache
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.popout.PopoutManager
 import com.dreamdisplays.platform.client.render.ScrubPreview
@@ -164,9 +165,11 @@ class DisplayMenu private constructor(
             ) { quality ->
                 ClientStateManager.config.audioAcoustics = quality
                 ClientStateManager.config.save()
-                DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.setGlobalQuality(quality)
+                DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
+                    ?.setGlobalQuality(ServerOverrides.audioAcoustics)
             })
         audio3d.visibleWhen = notErrored
+        audio3d.enabledWhen = { !ServerOverrides.settings.acousticsForced }
 
         sync = addUi(
             ModeSlider(
@@ -223,7 +226,8 @@ class DisplayMenu private constructor(
         val audio3dReset = addUi(IconButton("refresh") {
             ClientStateManager.config.audioAcoustics = AUDIO_3D_DEFAULT
             ClientStateManager.config.save()
-            DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.setGlobalQuality(AUDIO_3D_DEFAULT)
+            DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
+                ?.setGlobalQuality(ServerOverrides.audioAcoustics)
         })
         audio3dReset.enabledWhen = { ClientStateManager.config.audioAcoustics != AUDIO_3D_DEFAULT }
         audio3dReset.visibleWhen = notErrored

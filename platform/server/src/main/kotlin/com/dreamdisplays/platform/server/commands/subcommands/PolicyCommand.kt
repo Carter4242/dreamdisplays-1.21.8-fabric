@@ -32,7 +32,11 @@ object PolicyCommand {
 
             else -> {
                 val path = PolicyPaths.find(key) ?: run {
-                    ServerMessage.POLICY_UNKNOWN_KEY.sendTo(sender, key, PolicyPaths.all.joinToString(", ") { it.name })
+                    ServerMessage.POLICY_UNKNOWN_KEY.sendTo(sender, key, perDisplay.joinToString(", ") { it.name })
+                    return
+                }
+                if (path.serverWideOnly) {
+                    ServerMessage.POLICY_SERVER_WIDE_ONLY.sendTo(sender, path.name, path.name)
                     return
                 }
                 if (value == null) {
@@ -55,7 +59,7 @@ object PolicyCommand {
 
     private fun show(sender: CommandSender, display: DisplayData) {
         ServerMessage.POLICY_HEADER.sendTo(sender, display.shortLabel)
-        PolicyPaths.all.forEach { showOne(sender, display, it, header = false) }
+        perDisplay.forEach { showOne(sender, display, it, header = false) }
     }
 
     private fun showOne(sender: CommandSender, display: DisplayData, path: PolicyPaths.Path, header: Boolean = true) {
@@ -76,7 +80,10 @@ object PolicyCommand {
     }
 
     /** Suggestions for the key slot: every policy key plus `reset`. */
-    fun keySuggestions(): List<String> = PolicyPaths.all.map { it.name } + RESET
+    fun keySuggestions(): List<String> = perDisplay.map { it.name } + RESET
+
+    /** The keys a single display can override. */
+    private val perDisplay: List<PolicyPaths.Path> get() = PolicyPaths.all.filter { !it.serverWideOnly }
 
     /** Suggestions for the value slot of [key]: its choices (or true / false) plus `reset`. */
     fun valueSuggestions(key: String): List<String> {
