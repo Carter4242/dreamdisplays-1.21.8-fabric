@@ -135,8 +135,8 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         val slot = slots[ringIndex]
         ringIndex = (ringIndex + 1) % PBO_COUNT
 
-        // Make sure the GPU is done reading this slot's PBO before we overwrite it
-        waitSlotFence(slot)
+        // Make sure the GPU is done reading this slot's PBO before we overwrite it; still busy: this frame is dropped
+        if (!waitSlotFence(slot)) return
 
         bindBuffer(id = slot.pbo)
         ensureCapacity(slot, size)
@@ -181,7 +181,7 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         val slot = slots[ringIndex]
         ringIndex = (ringIndex + 1) % PBO_COUNT
 
-        waitSlotFence(slot)
+        if (!waitSlotFence(slot)) return
 
         bindBuffer(id = slot.pbo)
         ensureCapacity(slot, total)
@@ -232,16 +232,23 @@ class AsyncTextureUploader(private val stateCache: Boolean) : TextureUploaderSer
         }
     }
 
-    private fun waitSlotFence(slot: Slot) {
+    /**
+     * Waits (bounded) until the GPU has finished reading [slot]'s buffer. False when it still has not: the slot keeps
+     * its fence and must not be written (that would change pixels a pending copy is still reading).
+     */
+    private fun waitSlotFence(slot: Slot): Boolean {
         val fence = slot.fence
-        if (fence == 0L) return
+        if (fence == 0L) return true
         // Cheap non-blocking poll first; only flush + wait if the GPU is actually behind
-        val status = GL32.glClientWaitSync(fence, 0, 0L)
+        var status = GL32.glClientWaitSync(fence, 0, 0L)
         if (status == GL32.GL_TIMEOUT_EXPIRED) {
-            GL32.glClientWaitSync(fence, GL32.GL_SYNC_FLUSH_COMMANDS_BIT, FENCE_TIMEOUT_NS)
+            status = GL32.glClientWaitSync(fence, GL32.GL_SYNC_FLUSH_COMMANDS_BIT, FENCE_TIMEOUT_NS)
         }
+        if (status == GL32.GL_TIMEOUT_EXPIRED) return false
+        // Signalled (or the wait failed, which leaves nothing to wait for): the slot is free
         GL32.glDeleteSync(fence)
         slot.fence = 0L
+        return true
     }
 
     private fun ensureCapacity(slot: Slot, size: Int) {
