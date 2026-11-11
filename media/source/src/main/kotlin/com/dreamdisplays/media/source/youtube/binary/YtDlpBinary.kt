@@ -252,17 +252,30 @@ object YtDlpBinary {
     private val JS_RUNTIMES_SINCE = [2025, 11, 12]
 
     /**
-     * `--js-runtimes` arguments for the runtime [YtDlpJsRuntime] found, when [command] is a `yt-dlp` new enough to take
-     * them (an installed copy can be older); none otherwise. Reads the version once per command.
+     * `--js-runtimes` arguments from [YtDlpJsRuntime] (or its `--no-js-runtimes`), when [command] is a `yt-dlp` new
+     * enough to take them (an installed copy can be older); none otherwise.
      */
     fun jsRuntimeArgs(command: List<String>): List<String> {
         val args = YtDlpJsRuntime.args()
         if (args.isEmpty()) return args
+        return if (commandTakesJsRuntimes(command)) args else []
+    }
+
+    /** Whether [command] took `--js-runtimes` when last asked; a `--version` that failed counts too. */
+    @Volatile
+    private var jsRuntimesTaken: Pair<List<String>, Boolean>? = null
+
+    /**
+     * Whether [command]'s `yt-dlp` takes `--js-runtimes`, read once per command: a `--version` that fails is not run
+     * again (up to 30 s) before every fetch.
+     */
+    private fun commandTakesJsRuntimes(command: List<String>): Boolean {
+        jsRuntimesTaken?.takeIf { it.first == command }?.let { return it.second }
         val version = versionProbe?.takeIf { it.first == command }?.second ?: runCatching {
             val (exit, out) = run(command + "--version", 30)
             if (exit == 0) out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty().take(160) else null
         }.getOrNull()?.also { versionProbe = command to it }
-        return if (takesJsRuntimes(version)) args else []
+        return takesJsRuntimes(version).also { jsRuntimesTaken = command to it }
     }
 
     /** True when `yt-dlp --version` printed [version] (`2026.10.26`) for a release that has `--js-runtimes`. */
