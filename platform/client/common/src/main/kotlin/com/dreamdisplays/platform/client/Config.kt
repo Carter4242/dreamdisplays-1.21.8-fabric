@@ -69,6 +69,15 @@ class Config(private val baseDir: File) {
      */
     var audioBackend: String = "auto"
 
+    /**
+     * The file exists but could not be read at start (another program held it, e.g. an antivirus scan or a sync tool):
+     * the values in memory were defaults then, as saved here. The next save merges instead of overwriting: a setting
+     * changed since keeps its new value, every other one the file's ([ConfigWrites.merge]); without that the defaults
+     * would replace the player's settings, and the servers they switched displays off on.
+     */
+    @Volatile
+    private var unreadDefaults: String? = null
+
     init {
         load()
     }
@@ -80,13 +89,13 @@ class Config(private val baseDir: File) {
         if (!file.exists()) {
             save(); return
         }
-        // Unreadable (locked by another program): keep the current values rather than fail the mod's start
-        val lines = try {
-            file.readLines()
-        } catch (e: IOException) {
-            logger.warn("Could not read ${file.path}: ${e.message}")
+        // Unreadable (locked by another program): a few short retries, then keep the current values rather than fail
+        // the mod's start, and remember them so the next save does not write them over the file
+        val lines = readWithRetries() ?: run {
+            if (unreadDefaults == null) unreadDefaults = render()
             return
         }
+        unreadDefaults = null
         val data = lines
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith('#') }
@@ -128,9 +137,44 @@ class Config(private val baseDir: File) {
         }
     }
 
+    private fun readWithRetries(): List<String>? {
+        repeat(READ_ATTEMPTS) { attempt ->
+            try {
+                return file.readLines()
+            } catch (e: IOException) {
+                if (attempt == READ_ATTEMPTS - 1) {
+                    logger.warn("Could not read ${file.path}: ${e.message}; it is not written until it can be read.")
+                } else {
+                    Thread.sleep(READ_RETRY_MS)
+                }
+            }
+        }
+        return null
+    }
+
     /** Persists the current configuration values to disk. */
     fun save() {
-        val text = buildString {
+        val defaults = unreadDefaults
+        if (defaults != null && file.exists()) {
+            val onDisk = try {
+                file.readLines()
+            } catch (e: IOException) {
+                logger.warn("Not saving ${file.path}: it still cannot be read (${e.message}).")
+                return
+            }
+            write(ConfigWrites.merge(defaults, render(), onDisk))
+            unreadDefaults = null
+            // The file's settings are this session's from now on
+            load()
+            return
+        }
+        unreadDefaults = null
+        write(render())
+    }
+
+    /** The file's text for the current values. */
+    private fun render(): String {
+        return buildString {
             appendLine("mute-on-alt-tab: $muteOnAltTab")
             appendLine("default-render-distance: $defaultDistance")
             appendLine("default-default-display-volume: $defaultDisplayVolume")
@@ -149,6 +193,9 @@ class Config(private val baseDir: File) {
             appendLine("max-active-displays: $maxActiveDisplays")
             appendLine("audio-backend: $audioBackend")
         }
+    }
+
+    private fun write(text: String) {
         // Written beside it and moved over it whole: a crash mid-write must not leave a cut-off file whose missing
         // keys (e.g. the servers that switched displays off) silently fall back to defaults
         try {
@@ -174,6 +221,9 @@ class Config(private val baseDir: File) {
         const val MAX_DISTANCE_CHUNKS = 32
         const val MAX_ACTIVE_DISPLAYS = 16
 
+        private const val READ_ATTEMPTS = 3
+        private const val READ_RETRY_MS = 200L
+
         init {
             System.setProperty("file.encoding", "UTF-8")
         }
@@ -183,4 +233,30 @@ class Config(private val baseDir: File) {
                 "'${replace("'", "''")}'"
             else this
     }
+}
+
+/** Writing `config.yml` after it could not be read at start (see `Config.unreadDefaults`). */
+internal object ConfigWrites {
+    /**
+     * The text to write: each setting of [current] (the file's text for the values in memory) as it is when it changed
+     * since the failed read ([defaults], that text then), else as the file has it ([onDisk], its lines now).
+     */
+    fun merge(defaults: String, current: String, onDisk: List<String>): String {
+        val before = linesByKey(defaults.lines())
+        val disk = linesByKey(onDisk)
+        return buildString {
+            for (line in current.lines()) {
+                if (line.isBlank()) continue
+                val key = keyOf(line)
+                val keep = key == null || line != before[key]
+                appendLine(if (keep) line else disk[key] ?: line)
+            }
+        }
+    }
+
+    private fun keyOf(line: String): String? =
+        line.trim().takeIf { it.isNotEmpty() && !it.startsWith('#') && ':' in it }?.substringBefore(':')?.trim()
+
+    private fun linesByKey(lines: List<String>): Map<String, String> =
+        lines.mapNotNull { line -> keyOf(line)?.let { it to line.trim() } }.toMap()
 }
