@@ -1296,7 +1296,7 @@ class MediaPlayer(
     }
 
     private fun currentHwAccel(): HwAccelBackend =
-        if (env.config.useHwAccel && !hwAccelDisabled) HwAccelBackend.detectDefault() else HwAccelBackend.NONE
+        if (env.config.useHwAccel && !hwAccelDisabled) HwAccelBackend.usable(HwAccelBackend.detectDefault()) else HwAccelBackend.NONE
 
     private fun stopSession() {
         watchdog.stop()
@@ -1309,8 +1309,11 @@ class MediaPlayer(
             && System.nanoTime() - sessionStartNanos < HWACCEL_FAIL_WINDOW_NS
             && HwAccelBackend.looksLikeHwAccelFailure(stderr)
         ) {
-            val backend = currentHwAccel().name.lowercase()
+            val failed = currentHwAccel()
+            val backend = failed.name.lowercase()
+            if (HwAccelBackend.looksLikeNoDevice(stderr)) HwAccelBackend.markNoDevice(failed)
             hwAccelDisabled = true
+            if (relayStream) ShareTiming.mark("view.hwfail", "$debugLabel $backend")
             logger.warn(
                 "$debugLabel Hardware decode failed for this stream. Falling back to software. Stderr: ${
                     MediaUtil.truncate(

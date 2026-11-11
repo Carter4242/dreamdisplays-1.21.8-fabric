@@ -64,5 +64,71 @@ enum class HwAccelBackend(val ffmpegName: String?, val hwOutputFormat: String?, 
             "scale_vt",
             "no such filter",
         ]
+
+        /** Backends whose device could not even be created here (no driver for this GPU): off for the session. */
+        private val noDevice = java.util.concurrent.ConcurrentHashMap.newKeySet<HwAccelBackend>()
+
+        /**
+         * True when [stderr] says `FFmpeg` could not create the decoding device at all (`Device creation failed`, no
+         * VA display, no CUDA driver), as opposed to a device that exists but refused one stream.
+         */
+        fun looksLikeNoDevice(stderr: String): Boolean {
+            val s = stderr.lowercase()
+            return NO_DEVICE_MARKERS.any { s.contains(it) }
+        }
+
+        private val NO_DEVICE_MARKERS = [
+            "device creation failed",
+            "no device available",
+            "no va display",
+            "failed to initialise vaapi",
+            "cannot load libcuda",
+        ]
+
+        /**
+         * Records that [backend]'s device cannot be created on this machine. Every later stream then starts in
+         * software at once: each new player (every screen share is one) used to try the device again, fail after
+         * connecting and probing, and only then start over in software.
+         */
+        fun markNoDevice(backend: HwAccelBackend) {
+            if (backend != NONE) noDevice.add(backend)
+        }
+
+        /** [backend], or [NONE] when its device is known not to work here (see [markNoDevice]). */
+        fun usable(backend: HwAccelBackend): HwAccelBackend = if (backend in noDevice) NONE else backend
+
+        internal fun forgetNoDevice() = noDevice.clear()
+
+        /**
+         * Opens the default backend's device once in [ffmpeg] (no stream involved) and records it as unusable when
+         * that fails for want of a device ([markNoDevice]). Run in the background at startup: otherwise the first
+         * stream of each player found out only after connecting and probing, and started over in software.
+         */
+        fun probeDevice(ffmpeg: String) {
+            val backend = detectDefault()
+            val name = backend.ffmpegName ?: return
+            val output = runCatching {
+                val p = ProcessBuilder(
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-init_hw_device", "$name=hw",
+                    "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1", "-frames:v", "1", "-f", "null", "-",
+                ).redirectErrorStream(true).start()
+                runCatching { p.outputStream.close() }
+                val text = StringBuilder()
+                val reader = Thread { runCatching { p.inputStream.bufferedReader().use { text.append(it.readText()) } } }
+                    .apply { isDaemon = true; start() }
+                if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly()
+                    return
+                }
+                reader.join(1_000)
+                if (p.exitValue() == 0) return
+                text.toString()
+            }.getOrNull() ?: return
+            if (looksLikeNoDevice(output)) {
+                markNoDevice(backend)
+                org.slf4j.LoggerFactory.getLogger(HwAccelBackend::class.java)
+                    .info("Hardware decoding ({}) has no device here; decoding in software: {}", name, output.trim().take(160))
+            }
+        }
     }
 }

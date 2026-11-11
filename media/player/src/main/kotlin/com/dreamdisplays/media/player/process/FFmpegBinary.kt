@@ -138,6 +138,7 @@ object FFmpegBinary {
             runCatching {
                 val path = getPath()
                 if (path != null) {
+                    HwAccelBackend.probeDevice(path)
                     FFmpegCapabilities.hasFilter(path, "scale_vt")
                     FFmpegCapabilities.hasDecoder(path, "libvpx-vp9")
                     FFmpegCapabilities.hasLiveStamps(path)

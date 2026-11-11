@@ -69,7 +69,7 @@ object ClientEnvironmentProbe {
             ffmpegPath = s(ff?.path.orEmpty()),
             ffmpegDecoders = ff?.decoders.orEmpty(),
             ffmpegFilters = ff?.filters.orEmpty(),
-            hwAccel = runCatching { HwAccelBackend.detectDefault().name.lowercase() }.getOrDefault(""),
+            hwAccel = runCatching { HwAccelBackend.usable(HwAccelBackend.detectDefault()).name.lowercase() }.getOrDefault(""),
             nativeLoaded = native,
             nativeUnavailableReason = when {
                 native -> ""
