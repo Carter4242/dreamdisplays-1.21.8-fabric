@@ -137,8 +137,10 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         val receivedNanos = System.nanoTime()
         arm(p, waitMs) {
             if (completePendingSwitch(p, seamless = true)) {
+                // Replayed with what is left of the wait: negative when a stall made this late, so the follower
+                // starts the new video where it has got to by now (0 would mean "no scheduled start")
                 val elapsedMs = (System.nanoTime() - receivedNanos) / 1_000_000.0
-                screen.updateData(packet.copy(startInMs = (packet.startInMs - elapsedMs).roundToInt().coerceAtLeast(1)))
+                screen.updateData(packet.copy(startInMs = replayedStartInMs(packet.startInMs, elapsedMs)))
             }
         }
         return true
@@ -346,6 +348,13 @@ internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs
     if (metadataMs > 0L && kotlin.math.abs(positionMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
     return positionMs
 }
+
+/**
+ * The startInMs a switch packet scheduled [startInMs] ahead is replayed with [elapsedMs] after it arrived: what is left
+ * of the wait, negative once late (never 0, which means no scheduled start at all).
+ */
+internal fun replayedStartInMs(startInMs: Int, elapsedMs: Double): Int =
+    (startInMs - elapsedMs).roundToInt().let { if (it == 0) -1 else it }
 
 /** Ids for a timer that gets re-armed: only the latest arming may act. */
 internal class LatestTimer {

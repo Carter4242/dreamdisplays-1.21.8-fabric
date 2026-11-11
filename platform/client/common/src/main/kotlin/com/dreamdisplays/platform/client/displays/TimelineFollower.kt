@@ -132,6 +132,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     fun reset() {
         scheduledStart?.cancel(false)
         scheduledStart = null
+        // A start already handed to the client thread belongs to the previous video: it must not play this one
+        applyWord.incrementAndGet()
         synchronized(lock) {
             lastServerTimeMs = Long.MIN_VALUE
             pending = null
@@ -193,28 +195,34 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             karaokeLeadMs = leadMs
             this.serverDurationMs = serverDurationMs
         }
-        if (paused || startInMs <= 0) {
+        if (paused || startInMs == 0) {
             applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate)
             return
         }
         // A start scheduled ahead: the packet left the server startInMs before the start and took one-way latency to
-        // get here. Hold paused on the start frame until then, so every viewer begins on it together.
+        // get here. Hold paused on the start frame until then, so every viewer begins on it together. A negative
+        // startInMs (a switch packet replayed late, see DisplayMediaController) started that long ago.
         val owl = oneWayLatencyMs()
-        val waitMs = startInMs - owl
+        val waitMs = startInMs.coerceAtLeast(-MAX_LATE_START_MS) - owl
         if (waitMs < MIN_SCHEDULE_MS) {
             // Too late to wait: play from where the start has got to by now
             applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
             return
         }
         applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
+        val waitNanos = (waitMs * 1_000_000.0).toLong()
+        val dueNanos = System.nanoTime() + waitNanos
         scheduledStart = START_SCHEDULER.schedule({
             // The player is told on the client thread like every other packet: at most a frame later. It keeps the
             // packet's own stamp: a pause or seek the server stamped before the start instant, arriving after this
-            // fired, is newer than this packet and must still apply.
+            // fired, is newer than this packet and must still apply. A game stall that held this back counts as
+            // playing time, so the start lands where the others are now, not where they began.
             Minecraft.getInstance().execute {
-                if (applyWord.get() == word) applyNow(targetMs, serverTimeMs, false, loop, 0.0, rate)
+                if (applyWord.get() == word) {
+                    applyNow(targetMs, serverTimeMs, false, loop, startLatenessMs(dueNanos, System.nanoTime()), rate)
+                }
             }
-        }, (waitMs * 1_000.0).toLong(), java.util.concurrent.TimeUnit.MICROSECONDS)
+        }, waitNanos / 1_000L, java.util.concurrent.TimeUnit.MICROSECONDS)
     }
 
     @Volatile
@@ -673,6 +681,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** A scheduled start closer than this is played at once instead. */
         private const val MIN_SCHEDULE_MS = 2.0
 
+        /** A switch packet replayed later than this after its start is taken as this late (a stall beyond is a resync). */
+        private const val MAX_LATE_START_MS = 10_000
+
         /** A karaoke lead change at least this big is jumped at once; smaller ones are closed by rate. */
         private const val LEAD_JUMP_MIN_MS = 60
 
@@ -757,6 +768,9 @@ internal fun heldEndBoundMs(periodMs: Long, confirmedEndMs: Long): Long =
  */
 internal fun endedRightAfterRestart(restartFromMs: Long, endedAtMs: Long, probeMs: Long): Boolean =
     endedAtMs < 0L || endedAtMs <= restartFromMs + probeMs
+
+/** How late (ms, never negative) a scheduled start due at [dueNanos] runs at [nowNanos]: time the video already played. */
+internal fun startLatenessMs(dueNanos: Long, nowNanos: Long): Double = ((nowNanos - dueNanos) / 1_000_000.0).coerceAtLeast(0.0)
 
 /**
  * Whether a timeline stamped [serverTimeMs] is older than the last one applied ([lastServerTimeMs]) and is dropped. An
