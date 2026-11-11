@@ -22,6 +22,7 @@ import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import com.dreamdisplays.platform.server.utils.VanillaPermissions
 import com.dreamdisplays.platform.server.utils.net.CustomMediaGate
+import com.dreamdisplays.platform.server.utils.net.DisplayActions
 import com.dreamdisplays.platform.server.utils.net.VanillaDisplayActions
 import com.dreamdisplays.platform.server.utils.net.VanillaPacketUtil
 import com.mojang.brigadier.context.CommandContext
@@ -205,8 +206,8 @@ object VanillaVideoCommand {
 
 /**
  * `/display video <display> clear`: takes the video off [display] for everyone, with the same ownership rule as
- * setting one. PLACEHOLDER until the server's own clear-video function lands (branch fix2-server): at the merge,
- * replace the body below the permission check with a call to it.
+ * setting one. The clearing itself is [DisplayActions.clearVideo], the menu's Clear button's path (share ended, karaoke
+ * stopped, clock dropped, followers told).
  */
 @PaperOnly
 fun clearDisplayVideo(player: Player, display: PaperDisplayData) {
@@ -215,11 +216,6 @@ fun clearDisplayVideo(player: Player, display: PaperDisplayData) {
         ServerMessage.DISPLAY_VIDEO_NOT_OWNER.sendTo(player)
         return
     }
-    display.url = ""
-    display.lang = ""
-    runAsync { PaperServer.getInstance().storage.saveDisplay(display) }
-    DisplayManager.broadcastUpdate(display)
-    TimelineManager.onVideoChanged(display)
-    ServerApiHost.current?.urlChanged(display)
+    DisplayActions.clearVideo(display, player)
     MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.video.cleared", display.name ?: display.id.toString().take(8)))
 }
