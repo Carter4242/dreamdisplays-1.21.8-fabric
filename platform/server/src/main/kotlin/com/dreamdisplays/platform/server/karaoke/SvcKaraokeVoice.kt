@@ -8,7 +8,9 @@ import com.dreamdisplays.core.karaoke.KaraokeRouting
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.karaoke.KaraokeVoiceGain
 import com.dreamdisplays.core.karaoke.KaraokeVoiceSend
+import com.dreamdisplays.core.karaoke.VoiceGroup
 import de.maxhenkel.voicechat.api.BukkitVoicechatService
+import de.maxhenkel.voicechat.api.Group
 import de.maxhenkel.voicechat.api.VoicechatApi
 import de.maxhenkel.voicechat.api.VoicechatPlugin
 import de.maxhenkel.voicechat.api.VoicechatServerApi
@@ -38,6 +40,10 @@ import kotlin.math.sqrt
  * otherwise, or beyond voice chat's distance where the listener may not track the singer),
  * at the time that lands it on the beat for them: see [KaraokeTiming] for the math and [BurstAnchor] for how frames
  * are put on a jitter-free grid. Sends are scheduled per listener on [VoiceEmitter].
+ *
+ * Voice chat's privacy holds throughout: a whisper, or a singer in a group that isn't open, is never taken (voice chat
+ * routes it to whom it was meant for); members of a singer's open group get voice chat's own group copy; players in
+ * an isolated group hear no singer outside it ([KaraokeRouting.interceptsMic], [KaraokeRouting.withGroups]).
  */
 @PaperOnly
 class SvcKaraokeVoice : KaraokeVoice {
@@ -47,6 +53,9 @@ class SvcKaraokeVoice : KaraokeVoice {
 
     /** When each singer's last voice frame arrived ([System.nanoTime]): whether they sing now, for co-singer volume. */
     private val lastVoice = ConcurrentHashMap<UUID, Long>()
+
+    /** Singers told that their private voice chat group keeps the audience from hearing them (once per singing). */
+    private val toldPrivate: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     private var service: BukkitVoicechatService? = null
     private val addon = Addon()
 
@@ -92,6 +101,7 @@ class SvcKaraokeVoice : KaraokeVoice {
     override fun forget(singerId: UUID) {
         voices.remove(singerId)?.close()
         lastVoice.remove(singerId)
+        toldPrivate.remove(singerId)
     }
 
     private inner class Addon : VoicechatPlugin {
@@ -136,11 +146,24 @@ class SvcKaraokeVoice : KaraokeVoice {
         if (!singer.present) return
         // Without the API (detached) nothing below can send: voice chat routes them as usual
         val api = api ?: return
+        val senderConnection = event.senderConnection ?: return
+        val senderGroup = senderConnection.group
+        val mic = event.packet
+        // Private (a whisper, a group that isn't open): voice chat keeps it to whom it is meant for
+        if (!KaraokeRouting.interceptsMic(groupTypeOf(senderGroup), mic.isWhispering)) {
+            if (senderGroup != null && !mic.isWhispering) tellPrivate(singerId)
+            return
+        }
         // Nobody hears a singer's raw voice; only the copies below
         event.cancel()
         val now = System.nanoTime()
-        val mic = event.packet
-        val sender = event.senderConnection?.player ?: return
+        val sender = senderConnection.player
+        // Their open group hears them as voice chat would: its copy, anywhere, at once
+        val groupMembers = senderGroup?.let { membersOf(api, it.id, singerId) }.orEmpty()
+        if (groupMembers.isNotEmpty()) {
+            val packet = mic.staticSoundPacketBuilder().build()
+            for (memberId in groupMembers) api.getConnectionOf(memberId)?.let { api.sendStaticSoundPacketTo(it, packet) }
+        }
         val proximity = api.voiceChatDistance
         val singing = stage.singers.keys
         val voice = voices.computeIfAbsent(singerId) { SingerVoice() }
@@ -153,7 +176,11 @@ class SvcKaraokeVoice : KaraokeVoice {
             if (otherId == singerId) continue
             val other = api.getConnectionOf(otherId) ?: continue
             val near = isNear(other.player, sender, proximity)
-            if (KaraokeRouting.route(singerId, otherId, singing, false, near, stage.fromSinger) != KaraokeRoute.NORMAL) continue
+            val route = KaraokeRouting.withGroups(
+                KaraokeRouting.route(singerId, otherId, singing, false, near, stage.fromSinger),
+                otherId in groupMembers, groupTypeOf(other.group),
+            )
+            if (route != KaraokeRoute.NORMAL) continue
             val volume = KaraokeCoSinger.target(stage.songPlaying, lastVoice[otherId], now, stage.coSinger)
             val stream = voice.coSinger(otherId)
             val data = stream.faded(api, mic.opusEncodedData, volume, now, stage.coSinger) ?: continue
@@ -177,7 +204,10 @@ class SvcKaraokeVoice : KaraokeVoice {
         for (listener in stage.listeners) {
             val connection = api.getConnectionOf(listener.playerId) ?: continue
             val near = stage.fromSinger && isNear(connection.player, sender, proximity)
-            val route = KaraokeRouting.route(singerId, listener.playerId, singing, listener.inRange, near, stage.fromSinger)
+            val route = KaraokeRouting.withGroups(
+                KaraokeRouting.route(singerId, listener.playerId, singing, listener.inRange, near, stage.fromSinger),
+                listener.playerId in groupMembers, groupTypeOf(connection.group),
+            )
             if (route != KaraokeRoute.ALIGNED) continue
             val delayMs = KaraokeTiming.emitDelayMs(
                 singer.leadMs, singer.pingMs, singer.latency, listener.pingMs, listener.latency, singer.trimMs, stage.latency,
@@ -196,6 +226,31 @@ class SvcKaraokeVoice : KaraokeVoice {
             }
             emitter.schedule(provisional + shift - LOOKAHEAD_SLACK_NANOS) { nowNanos ->
                 send(voice, burst, seq, shift, singerId, listener.playerId, stage, mic, data, nowNanos)
+            }
+        }
+    }
+
+    private fun groupTypeOf(group: Group?): VoiceGroup = when (group?.type) {
+        null -> VoiceGroup.NONE
+        Group.Type.OPEN -> VoiceGroup.OPEN
+        Group.Type.ISOLATED -> VoiceGroup.ISOLATED
+        else -> VoiceGroup.NORMAL
+    }
+
+    /** Online players in voice chat group [groupId], [except] the singer. */
+    private fun membersOf(api: VoicechatServerApi, groupId: UUID, except: UUID): Set<UUID> =
+        Bukkit.getOnlinePlayers().mapNotNullTo(HashSet()) { player ->
+            player.uniqueId.takeIf { it != except && api.getConnectionOf(it)?.group?.id == groupId }
+        }
+
+    /** Tells [singerId] once per singing that the audience can't hear them while they talk in a private group. */
+    private fun tellPrivate(singerId: UUID) {
+        if (!toldPrivate.add(singerId)) return
+        com.dreamdisplays.platform.server.meta.Scheduler.runSync {
+            Bukkit.getPlayer(singerId)?.let {
+                com.dreamdisplays.platform.server.utils.MessageUtil.sendColoredMessage(
+                    it, com.dreamdisplays.platform.server.utils.MessageUtil.formatIndexed(it, "karaokePrivateGroup"),
+                )
             }
         }
     }

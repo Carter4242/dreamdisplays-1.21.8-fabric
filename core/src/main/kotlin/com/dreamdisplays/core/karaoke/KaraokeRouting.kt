@@ -12,6 +12,24 @@ enum class KaraokeRoute {
 
     /** Not at all. */
     NONE,
+
+    /** Voice chat's own group copy: undelayed, heard anywhere (the receiver is in the singer's group). */
+    GROUP,
+}
+
+/** A player's Simple Voice Chat group, as far as karaoke cares: whom voice chat lets hear whom. */
+enum class VoiceGroup {
+    /** In no group: proximity only. */
+    NONE,
+
+    /** An open group: members hear each other anywhere, and players nearby hear them too. */
+    OPEN,
+
+    /** A normal group: only its members hear them. */
+    NORMAL,
+
+    /** An isolated group: only its members hear them, and they hear nobody else. */
+    ISOLATED,
 }
 
 /**
@@ -36,6 +54,26 @@ object KaraokeRouting {
         inDisplayRange -> KaraokeRoute.ALIGNED
         fromSinger && nearSender -> KaraokeRoute.ALIGNED
         else -> KaraokeRoute.NONE
+    }
+
+    /**
+     * Whether karaoke takes a singer's mic frame out of voice chat to re-time it. Never for a whisper or for a singer in
+     * a group that isn't open: those are private, and voice chat keeps them to whom they were meant for (karaoke would
+     * play them to the whole audience).
+     */
+    fun interceptsMic(singerGroup: VoiceGroup, whispering: Boolean): Boolean =
+        !whispering && (singerGroup == VoiceGroup.NONE || singerGroup == VoiceGroup.OPEN)
+
+    /**
+     * [route] with voice chat's group rules on top, for a mic frame karaoke took ([interceptsMic]): a member of the
+     * singer's group gets the group copy, as voice chat would send it, and nothing else; a player in an isolated group
+     * hears nobody outside it.
+     */
+    fun withGroups(route: KaraokeRoute, sameGroup: Boolean, receiverGroup: VoiceGroup): KaraokeRoute = when {
+        route == KaraokeRoute.NONE && !sameGroup -> KaraokeRoute.NONE
+        sameGroup -> KaraokeRoute.GROUP
+        receiverGroup == VoiceGroup.ISOLATED -> KaraokeRoute.NONE
+        else -> route
     }
 
     /**

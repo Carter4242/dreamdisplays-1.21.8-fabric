@@ -89,6 +89,7 @@
   "karaokeLineHeader": "&7D |&f Karaoke line of {0} ({1} waiting)",
   "karaokeLineNow": "&7 Singing now: &f{0}",
   "karaokeYouAreUp": "&7D |&f You're up! Sing along on {0}",
+  "karaokePrivateGroup": "&7D |&f You're in a private voice chat group: the audience can't hear you sing until you leave it or switch it to open.",
   "scheduleCountdownHours": "in {0}h {1}m",
   "displayVideoWrongTargetBlock": "&7D |&f You must look at a display block to use this command!",
   "displayVideoNotOwner": "&7D |&f You are not the owner of this display!",

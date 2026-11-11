@@ -51,4 +51,29 @@ class KaraokeRoutingTest {
         assertEquals(List(6) { KaraokeRoute.NORMAL }, all(null))
         assertEquals(List(6) { KaraokeRoute.NORMAL }, all(setOf(UUID.randomUUID())))
     }
+
+    @Test
+    fun privateVoiceIsLeftToVoiceChat() {
+        assertEquals(true, KaraokeRouting.interceptsMic(VoiceGroup.NONE, whispering = false))
+        assertEquals(true, KaraokeRouting.interceptsMic(VoiceGroup.OPEN, whispering = false))
+        assertEquals(false, KaraokeRouting.interceptsMic(VoiceGroup.NORMAL, whispering = false))
+        assertEquals(false, KaraokeRouting.interceptsMic(VoiceGroup.ISOLATED, whispering = false))
+        assertEquals(false, KaraokeRouting.interceptsMic(VoiceGroup.NONE, whispering = true))
+        assertEquals(false, KaraokeRouting.interceptsMic(VoiceGroup.OPEN, whispering = true))
+    }
+
+    @Test
+    fun groupMembersGetTheGroupCopyAndIsolatedPlayersNothing() {
+        // In the singer's open group: voice chat's group copy wherever they are, never the aligned one too
+        assertEquals(KaraokeRoute.GROUP, KaraokeRouting.withGroups(KaraokeRoute.ALIGNED, sameGroup = true, VoiceGroup.OPEN))
+        assertEquals(KaraokeRoute.GROUP, KaraokeRouting.withGroups(KaraokeRoute.NONE, sameGroup = true, VoiceGroup.OPEN))
+        assertEquals(KaraokeRoute.GROUP, KaraokeRouting.withGroups(KaraokeRoute.NORMAL, sameGroup = true, VoiceGroup.OPEN))
+        // Someone else's isolated group hears no outsider
+        assertEquals(KaraokeRoute.NONE, KaraokeRouting.withGroups(KaraokeRoute.ALIGNED, sameGroup = false, VoiceGroup.ISOLATED))
+        assertEquals(KaraokeRoute.NONE, KaraokeRouting.withGroups(KaraokeRoute.NORMAL, sameGroup = false, VoiceGroup.ISOLATED))
+        // Other groups hear proximity as usual
+        assertEquals(KaraokeRoute.ALIGNED, KaraokeRouting.withGroups(KaraokeRoute.ALIGNED, sameGroup = false, VoiceGroup.NORMAL))
+        assertEquals(KaraokeRoute.ALIGNED, KaraokeRouting.withGroups(KaraokeRoute.ALIGNED, sameGroup = false, VoiceGroup.OPEN))
+        assertEquals(KaraokeRoute.NONE, KaraokeRouting.withGroups(KaraokeRoute.NONE, sameGroup = false, VoiceGroup.NONE))
+    }
 }
