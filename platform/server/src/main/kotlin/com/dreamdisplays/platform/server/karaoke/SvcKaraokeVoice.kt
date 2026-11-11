@@ -134,9 +134,10 @@ class SvcKaraokeVoice : KaraokeVoice {
         if (event.packet.opusEncodedData.isNotEmpty()) lastVoice[singerId] = System.nanoTime()
         // Away from the display (or offline): voice chat routes them as usual
         if (!singer.present) return
+        // Without the API (detached) nothing below can send: voice chat routes them as usual
+        val api = api ?: return
         // Nobody hears a singer's raw voice; only the copies below
         event.cancel()
-        val api = api ?: return
         val now = System.nanoTime()
         val mic = event.packet
         val sender = event.senderConnection?.player ?: return
@@ -271,6 +272,9 @@ class SvcKaraokeVoice : KaraokeVoice {
         private var decoder: OpusDecoder? = null
         private var encoder: OpusEncoder? = null
 
+        /** Closed for good: a frame still in flight passes through rather than opening codecs nobody closes. */
+        private var closed = false
+
         /** [data] at [volume]; passes through at 1.0, and the empty end-of-burst frame passes and resets the codecs. */
         fun scaled(api: VoicechatServerApi, data: ByteArray, volume: Double): ByteArray =
             ramped(api, data, volume, volume)
@@ -283,7 +287,7 @@ class SvcKaraokeVoice : KaraokeVoice {
                 encoder?.resetState()
                 return data
             }
-            if (KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
+            if (closed || KaraokeVoiceGain.isUnity(from) && KaraokeVoiceGain.isUnity(to)) return data
             val dec = decoder ?: api.createDecoder().also { decoder = it }
             val enc = encoder ?: api.createEncoder().also { encoder = it }
             val pcm = dec.decode(data)
@@ -293,6 +297,7 @@ class SvcKaraokeVoice : KaraokeVoice {
 
         @Synchronized
         fun close() {
+            closed = true
             decoder?.close()
             encoder?.close()
             decoder = null

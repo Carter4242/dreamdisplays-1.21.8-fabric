@@ -209,8 +209,9 @@ object KaraokeManager {
         val state = states[display.id] ?: return false
         state.singers.remove(playerId) ?: return false
         singerDisplay.remove(playerId, display.id)
-        voice?.forget(playerId)
+        // Off the stage first, so no new voice frame of theirs makes fresh codecs after the old ones are closed
         refresh()
+        voice?.forget(playerId)
         if (resend) resendTimeline(display, playerId)
         return true
     }
