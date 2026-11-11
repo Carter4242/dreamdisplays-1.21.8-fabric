@@ -36,7 +36,13 @@ object TargetMatch {
         runCatching { UUID.fromString(t) }.getOrNull()?.let { id ->
             return if (displays.any { it.id == id }) Result.Found(id) else Result.NotFound
         }
-        displays.firstOrNull { it.name.equals(t, ignoreCase = true) }?.let { return Result.Found(it.id) }
+        displays.firstOrNull { it.name.equals(t, ignoreCase = true) }?.let { named ->
+            // A name wins over an id prefix, but never over the short id an unnamed display is listed and completed by
+            // (a display named after it would silently take that display's place)
+            val shadowed = displays.filter { it.id != named.id && it.name == null && it.label.equals(t, ignoreCase = true) }
+            return if (shadowed.isEmpty()) Result.Found(named.id)
+            else Result.Ambiguous((shadowed + named).map { it.label }.sorted())
+        }
         if (t.length < MIN_PREFIX) return Result.NotFound
         val matches = displays.filter { it.id.toString().startsWith(t, ignoreCase = true) }
         return when (matches.size) {

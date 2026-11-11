@@ -13,6 +13,14 @@ class TargetMatchTest {
     private val all = listOf(lobby, a, b)
 
     @Test
+    fun nameThatIsAnotherDisplaysIdPrefixIsAmbiguous() {
+        val impostor = TargetMatch.Candidate(UUID.fromString("70000000-0000-0000-0000-000000000004"), "61f0aaaa")
+        val result = TargetMatch.match("61f0aaaa", listOf(lobby, a, b, impostor))
+        assertTrue(result is TargetMatch.Result.Ambiguous)
+        assertEquals(TargetMatch.Result.Found(lobby.id), TargetMatch.match("lobby", listOf(lobby, a, b, impostor)))
+    }
+
+    @Test
     fun thisAndLeftOffMeanLookedAt() {
         assertEquals(TargetMatch.Result.LookedAt, TargetMatch.match(null, all))
         assertEquals(TargetMatch.Result.LookedAt, TargetMatch.match("THIS", all))
