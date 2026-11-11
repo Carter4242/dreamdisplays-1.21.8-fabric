@@ -186,7 +186,7 @@ class MediaPlayer(
         getBrightness = { brightness },
         onStreamEnd = ::handleStreamEnd,
         onQualitySwitchAborted = { appliedAnyway -> handleQualitySwitchAborted(appliedAnyway) },
-        onAudioFailure = { stderr -> handleAudioFailure(stderr) },
+        onAudioEnd = { stderr, hadPcm, isCurrent -> handleAudioEnd(stderr, hadPcm, isCurrent) },
         onAudioFault = { reason, stderr, isCurrent -> handleAudioFault(reason, stderr, isCurrent) },
         onAudioTrackSwitchSettled = { onControl { audioTrackSwitching = false } },
         renderExecutor = env.renderExecutor,
@@ -1346,6 +1346,41 @@ class MediaPlayer(
             return@onControl
         }
         handleSessionStall("audio ended: ${MediaUtil.truncate(stderr)}.")
+    }
+
+    /**
+     * An audio half's PCM ended with a clean exit. Live media takes the usual audio-failure path. On a VOD, sound that
+     * stops before the picture is either a track shorter than the video or a cut connection: only the sound is reopened
+     * at the playhead, and a reopen that ends cleanly without decoding anything ([hadPcm] false, nothing on stderr)
+     * means the track is over there, so the picture plays on silently. Neither ever restarts the picture, which used to
+     * turn every such end (and every natural end of a file whose length is unknown) into a stall loop.
+     */
+    private fun handleAudioEnd(stderr: String, hadPcm: Boolean, isCurrent: () -> Boolean): Unit = onControl {
+        val live = liveStream || relayStream
+        if (!live && (terminated.get() || !isCurrent())) return@onControl
+        val action = AudioEndPolicy.onEnd(
+            live = live,
+            noAudioStream = MediaProcess.indicatesNoAudioStream(stderr),
+            hadPcm = hadPcm,
+            stderrBlank = stderr.isBlank(),
+            nearEnd = durationHintNanos > 0L && durationHintNanos - clock.currentTime() <= AUDIO_EOS_NEAR_END_GUARD_NS,
+            restartAllowed = { audioFaults.allowRestart(System.nanoTime()) },
+        )
+        when (action) {
+            AudioEndPolicy.Action.FAILURE_PATH -> handleAudioFailure(stderr)
+            AudioEndPolicy.Action.FINISHED -> {
+                sessionManager.markAudioFinished()
+                logger.debug("$debugLabel Audio track has no more sound at ${getCurrentTime() / 1_000_000} ms; the picture plays on.")
+            }
+            AudioEndPolicy.Action.DEFER_TO_VIDEO ->
+                logger.debug("$debugLabel Audio pipe ended near VOD end (pos=${clock.currentTime()}, dur=$durationHintNanos); deferring to video EOS.")
+            AudioEndPolicy.Action.REOPEN_AUDIO -> {
+                val ss = streams ?: return@onControl
+                val at = getCurrentTime()
+                logger.debug("$debugLabel Audio ended before the picture at ${at / 1_000_000} ms; reopening the sound there.")
+                if (!sessionManager.restartAudio(ss, at)) handleAudioFailure(stderr)
+            }
+        }
     }
 
     /**

@@ -51,7 +51,11 @@ internal class PlaybackSessionManager(
 
     private val onQualitySwitchAborted: (appliedAnyway: Boolean) -> Unit = {},
 
-    private val onAudioFailure: (stderr: String) -> Unit = {},
+    /**
+     * An audio half's PCM ended on its own with a clean exit: [hadPcm] says whether it decoded anything at all, and
+     * `isCurrent` whether that half is still the session's (see [onAudioFault]).
+     */
+    private val onAudioEnd: (stderr: String, hadPcm: Boolean, isCurrent: () -> Boolean) -> Unit = { _, _, _ -> },
 
     /**
      * A live audio half broke (an exception in its pump, or FFmpeg exiting non-zero mid-stream). `isCurrent` says
@@ -298,6 +302,8 @@ internal class PlaybackSessionManager(
         tempo: Double = 1.0,
     ): Process? {
         val url = streamSet.currentAudio.url
+        // A fresh half at a (new) position: whether its track still has sound there is for it to find out
+        audioFinished = false
         if (url in SILENT_SOURCES) {
             silentSession = true
             audioFeeder = null
@@ -371,6 +377,22 @@ internal class PlaybackSessionManager(
     /** Fault callback for the audio half stopped by [aStop]. */
     private fun faultFor(aStop: AtomicBoolean): (String, String) -> Unit =
         { reason, stderr -> onAudioFault(reason, stderr) { audioHalf?.stop === aStop && !aStop.get() } }
+
+    /** End-of-PCM callback for the audio half stopped by [aStop]. */
+    private fun endFor(aStop: AtomicBoolean): (String, Boolean) -> Unit =
+        { stderr, hadPcm -> onAudioEnd(stderr, hadPcm) { audioHalf?.stop === aStop && !aStop.get() } }
+
+    /**
+     * The session's audio track has no more sound at this position (it is shorter than the picture): nothing is
+     * expected on the line until the next start, seek or audio restart, so the silent-audio self-heal leaves it be.
+     */
+    @Volatile
+    private var audioFinished = false
+
+    /** Records that the current audio half found its track over (see [audioFinished]). */
+    fun markAudioFinished() {
+        audioFinished = true
+    }
 
     /** Installs (or clears) the acoustics DSP stage after construction; see [MediaPlayer.attachAudioStage]. */
     fun setAudioStage(stage: AudioDspStage?) = audio.setDspStage(stage)
@@ -488,14 +510,14 @@ internal class PlaybackSessionManager(
             else -> "exited(${runCatching { proc.exitValue() }.getOrNull()})"
         }
         return "phase=${phase.get()::class.simpleName} parked=${parkFlag.get()} clockRunning=${clock.isRunning} " +
-                "tempo=$tempo silent=$silentSession incoming=${incoming != null} process=$procState " +
+                "tempo=$tempo silent=$silentSession finished=$audioFinished incoming=${incoming != null} process=$procState " +
                 "thread=${half?.thread?.state} stopFlag=${half?.stop?.get()} feeder=${audioFeeder != null} " +
                 "pipeline=${pipelineLabel()} ${audio.describe()}"
     }
 
     /** True when this session should be putting sound on the line now: active, running, not a silent source. */
     fun audioExpected(): Boolean =
-        phase.get() is Phase.Active && !parkFlag.get() && clock.isRunning && !silentSession &&
+        phase.get() is Phase.Active && !parkFlag.get() && clock.isRunning && !silentSession && !audioFinished &&
                 incoming == null
 
     /** Timestamp of the live channel's last decoded video frame; read by [StreamWatchdog]. */
@@ -585,7 +607,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
+                        startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
                     ),
                     aStop,
                 )
@@ -648,7 +670,7 @@ internal class PlaybackSessionManager(
                         audio.start(
                             it, terminated, aStop,
                             contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                            startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
+                            startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
                         ),
                         aStop,
                     )
@@ -702,7 +724,7 @@ internal class PlaybackSessionManager(
                     audio.start(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
-                        startGate = firstVideoFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
+                        startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
                     ),
                     aStop,
                 )
@@ -773,7 +795,7 @@ internal class PlaybackSessionManager(
         val at = audio.start(
             ap, terminated, aStop,
             contentStartNanos = offsetNanos, originKnown = originKnown,
-            startGate = null, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop),
+            startGate = null, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
             catchUp = if (originKnown) AudioSink.CatchUp(offsetNanos, { clock.currentTime() }, tempo) else null,
             tempo = tempo,
         )
@@ -894,6 +916,7 @@ internal class PlaybackSessionManager(
                 // retire the old half. The promoted line publishes its own content origin, so the
                 // master clock picks the new session up exactly, with no anchoring guess.
                 audioHalf = AudioHalf(ap, Thread.currentThread(), aStop)
+                audioFinished = false
                 oldAudio?.stop?.set(true)
                 discardHalvesAsync(null, oldAudio)
                 logger.debug("$debugLabel Audio track switched seamlessly at ${seekNanos / 1_000_000} ms.")
@@ -911,7 +934,7 @@ internal class PlaybackSessionManager(
                 MediaProcess.gracefulDestroy(ap)
                 onAudioTrackSwitchSettled()
             },
-            onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop),
+            onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
             tempo = line.tempo,
         )
     }
@@ -1025,13 +1048,14 @@ internal class PlaybackSessionManager(
             // previous session's feeder would otherwise linger and be consulted for A / V anchoring.
             audioFeeder = null
             silentSession = ap == null
+            audioFinished = false
             audioHalf = if (ap == null) null else {
                 // Live audio joins at the edge, gated on the first live frame (as in start())
                 val aStop = AtomicBoolean()
                 val at = audio.start(
                     ap, terminated, aStop,
                     contentStartNanos = liveOffsetNanos, originKnown = true,
-                    startGate = firstLiveFrame, onUnexpectedEnd = onAudioFailure, onFault = faultFor(aStop), tempo = tempo,
+                    startGate = firstLiveFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
                 )
                 AudioHalf(ap, at, aStop)
             }

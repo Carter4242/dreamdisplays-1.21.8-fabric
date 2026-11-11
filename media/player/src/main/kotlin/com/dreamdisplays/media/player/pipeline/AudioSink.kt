@@ -339,7 +339,7 @@ internal class AudioSink(private val debugLabel: String) {
         contentStartNanos: Long,
         originKnown: Boolean,
         startGate: CountDownLatch? = null,
-        onUnexpectedEnd: (String) -> Unit = {},
+        onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit = { _, _ -> },
         catchUp: CatchUp? = null,
         tempo: Double = 1.0,
         onFault: ((reason: String, stderr: String) -> Unit)? = null,
@@ -365,7 +365,7 @@ internal class AudioSink(private val debugLabel: String) {
         shouldPromote: () -> Boolean = { true },
         onPromoted: () -> Unit,
         onAborted: () -> Unit = {},
-        onUnexpectedEnd: (String) -> Unit = {},
+        onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit = { _, _ -> },
         tempo: Double = 1.0,
         onFault: ((reason: String, stderr: String) -> Unit)? = null,
     ): Thread {
@@ -395,7 +395,7 @@ internal class AudioSink(private val debugLabel: String) {
     private fun runSwitch(
         proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean, contentStartNanos: Long,
         originKnown: Boolean, catchUp: CatchUp?, shouldPromote: () -> Boolean, onPromoted: () -> Unit,
-        onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit, tempo: Double,
+        onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit, tempo: Double,
         onFault: ((String, String) -> Unit)?,
     ) {
         var newLine: SourceDataLine? = null
@@ -464,29 +464,30 @@ internal class AudioSink(private val debugLabel: String) {
 
         if (!promoted) onAborted()
 
-        if (promoted && !isInterrupted()) reportEnd(proc, failure, pumped, stderrBuf, onUnexpectedEnd, onFault)
+        if (promoted && !isInterrupted()) reportEnd(proc, failure, pumped, session?.pcmFlowing == true, stderrBuf, onUnexpectedEnd, onFault)
     }
 
     /**
      * Reports how a live half ended on its own: a fault (exception, FFmpeg exiting non-zero mid-stream) goes to
      * [onFault] so the half is restarted in place right away, with one rate-limited WARN; a plain end of PCM to
-     * [onUnexpectedEnd] as before.
+     * [onUnexpectedEnd] as before, saying whether this half ever got PCM ([hadPcm]: false when the process ended
+     * cleanly without decoding anything, e.g. opened past the end of its track).
      */
     private fun reportEnd(
-        proc: Process, failure: Throwable?, pumped: Boolean, stderrBuf: StringBuilder,
-        onUnexpectedEnd: (String) -> Unit, onFault: ((String, String) -> Unit)?,
+        proc: Process, failure: Throwable?, pumped: Boolean, hadPcm: Boolean, stderrBuf: StringBuilder,
+        onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit, onFault: ((String, String) -> Unit)?,
     ) {
         val exitCode = if (failure == null && pumped) exitCodeAfterEof(proc) else null
         val stderr = synchronized(stderrBuf) { stderrBuf.toString() }
         when (endKind(failure, pumped, exitCode)) {
             null -> {}
-            EndKind.ENDED -> onUnexpectedEnd(stderr)
+            EndKind.ENDED -> onUnexpectedEnd(stderr, hadPcm)
             EndKind.FAULT -> {
                 val reason = failure?.let { "audio pipeline failed ($it)" }
                     ?: "FFmpeg audio process exited with code $exitCode"
                 if (onFault == null) {
                     if (failure != null) logger.warn("$debugLabel [audio] $reason.", failure)
-                    if (pumped) onUnexpectedEnd(stderr)
+                    if (pumped) onUnexpectedEnd(stderr, hadPcm)
                     return
                 }
                 warnFault("$reason; restarting the audio half in place", failure)
@@ -566,7 +567,7 @@ internal class AudioSink(private val debugLabel: String) {
 
     private fun run(
         session: LineSession, proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
-        startGate: CountDownLatch?, stderrBuf: StringBuilder, onUnexpectedEnd: (String) -> Unit,
+        startGate: CountDownLatch?, stderrBuf: StringBuilder, onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit,
         catchUp: CatchUp? = null, onFault: ((String, String) -> Unit)? = null,
     ) {
         var ln: SourceDataLine? = null
@@ -612,7 +613,7 @@ internal class AudioSink(private val debugLabel: String) {
         }
 
         if (!terminated.get() && !stopFlag.get()) {
-            reportEnd(proc, failure, pumped, stderrBuf, onUnexpectedEnd, onFault)
+            reportEnd(proc, failure, pumped, session.pcmFlowing, stderrBuf, onUnexpectedEnd, onFault)
         }
     }
 
