@@ -55,4 +55,14 @@ class DisplayFollowersTest {
         assertTrue(DisplayFollowers.watched(nearby = listOf(near), fullscreen = emptyList()))
         assertFalse(DisplayFollowers.watched(nearby = emptyList(), fullscreen = emptyList()))
     }
+
+    @Test
+    fun `a far fullscreen audience counts at a start even with nobody in range`() {
+        assertEquals(listOf(fullscreen), DisplayFollowers.audience(nearby = emptyList(), fullscreen = listOf(fullscreen)))
+    }
+
+    @Test
+    fun `the audience is everyone in range and every fullscreen follower once each`() {
+        assertEquals(listOf(near, both, fullscreen), DisplayFollowers.audience(nearby = listOf(near, both), fullscreen = listOf(both, fullscreen)))
+    }
 }

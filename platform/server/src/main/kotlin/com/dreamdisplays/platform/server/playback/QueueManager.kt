@@ -7,6 +7,7 @@ import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.queue.QueueLimits
 import com.dreamdisplays.core.queue.QueueText
 import com.dreamdisplays.core.queue.QueueTiming
+import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -363,7 +364,7 @@ object QueueManager {
             val durationMs = timeline.durationMs.takeIf { it > 0L }
                 ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
             val earlyMs = if (readyFor(display, head).isEmpty()) UNPRELOADED_EARLY_MS else maxOf(
-                ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, transport.nearbyPlayerIds(display)) + TICK_MARGIN_MS,
+                ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, audienceOf(display)) + TICK_MARGIN_MS,
             )
             if (!QueueTiming.advanceDue(timeline, now, earlyMs, armed, durationMs)) continue
             advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs))
@@ -419,13 +420,20 @@ object QueueManager {
         return null
     }
 
-    /** The nearby queue clients that reported [next] READY: they hold it ready at 0 and need not be waited for. */
+    /**
+     * The queue clients watching [display] (in range, or fullscreen from afar) that reported [next] READY: they hold it
+     * ready at 0 and need not be waited for.
+     */
     private fun readyFor(display: DisplayData, next: QueueItem): List<UUID> {
         val roster = rosters[display.id]?.takeIf { it.prepareId == next.itemId } ?: return emptyList()
-        return transport.nearbyPlayerIds(display).filter {
+        return audienceOf(display).filter {
             isCapable(it) && roster.stateOf(it) == FullscreenPrepareState.READY
         }
     }
+
+    /** Everyone a switch of [display] is for: players in range and far fullscreen followers. */
+    private fun audienceOf(display: DisplayData): List<UUID> =
+        DisplayFollowers.audience(transport.nearbyPlayerIds(display), TimelineManager.extraReceivers(display.id))
 
     private fun changed(display: DisplayData) {
         broadcastState(display)

@@ -35,6 +35,14 @@ object DisplayFollowers {
     fun mayReportDuration(playerId: UUID, nearby: Collection<UUID>, fullscreen: Collection<UUID>, pinners: Collection<UUID>): Boolean =
         playerId in nearby || playerId in fullscreen || playerId in pinners
 
+    /**
+     * The players a start of a display waits for and times its lead by: everyone in range and every fullscreen follower,
+     * once each. A queue switch counts their preloads too: with nobody in range (a broadcast's far audience) theirs are
+     * the only ones. Pinners never count.
+     */
+    fun audience(nearby: Collection<UUID>, fullscreen: Collection<UUID>): List<UUID> =
+        (nearby.asSequence() + fullscreen.asSequence()).distinct().toList()
+
     /** Whether a display counts as watched for auto-pause: anyone in range, or a fullscreen follower (pins don't count). */
     fun watched(nearby: Collection<UUID>, fullscreen: Collection<UUID>): Boolean = nearby.isNotEmpty() || fullscreen.isNotEmpty()
 }
