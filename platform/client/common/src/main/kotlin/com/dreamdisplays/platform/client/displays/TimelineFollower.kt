@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.client.displays
 
 import com.dreamdisplays.core.sync.DriftController
+import com.dreamdisplays.core.sync.SeekLeadLearner
 import com.dreamdisplays.core.sync.TimelineEstimator
 import net.minecraft.client.Minecraft
 import org.slf4j.LoggerFactory
@@ -68,6 +69,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     /** The pending landing follows a corrective seek: if it misses again, the controller's cooldown takes over. */
     private var landingIsCorrection = false
+
+    /** Lead (real ms) the pending landing's seek / start was aimed with. */
+    private var landingLeadMs = 0L
 
     /** Longest game stall (ms) around the pending landing: such a landing is re-aimed, never learned from. */
     private var landingStallMs = 0.0
@@ -339,25 +343,28 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 pushRatio(1.0, now)
                 return
             }
-            if (kind != LeadKind.WARM) {
-                // A landing far off (a target gone stale over a game stall) says nothing about the restart cost
-                if (DriftController.learnsFromLanding(filtered, landingStallMs)) learnLead(kind, filtered)
-                else logVerbose("[dd-sync] {} landed {}ms after {} (stall {}ms); not learned",
-                    shortId(), signed(filtered), kind.name.lowercase(), landingStallMs.roundToLong())
-            }
             landing = null
             val wasCorrection = landingIsCorrection
             landingIsCorrection = false
+            // A consistent far-off landing (a reopen seek costing 1.8 s) is the true restart cost and is learned once
+            // confirmed; one around a game stall or tens of seconds off (stale target, other video) never is
+            val newTarget = SeekLeadLearner.isNewTarget(filtered)
+            if (kind != LeadKind.WARM) learnLead(kind, filtered, wasCorrection)
             // Landed off after a start or resume: one seek fixes it in a frame or two where rate correction at 1 %
             // would take a minute. Any landing far off is re-aimed at once from the fresh target, outside the
-            // controller's cooldown and streak. Only once: a correction that misses again is left to the controller.
+            // controller's cooldown and streak, aimed with the cost this landing showed. Only once per episode: the
+            // re-aim's landing is accepted and left to rate correction and the controller's cooldown.
             val startFix = correctAfterLanding && abs(filtered) > POST_START_SEEK_MS && screen.seeksCheaply
-            val farOff = controller.landingNeedsReseek(filtered)
+            val reaim = controller.reaimsLanding(filtered, wasCorrection)
             correctAfterLanding = false
-            if (!wasCorrection && (startFix || farOff)) {
-                if (farOff) controller.noteSeek(now / NANOS_PER_MS)
-                logVerbose("[dd-sync] {} re-aiming landing {}ms off", shortId(), signed(filtered))
-                seekPlaying(target, durationMs, now)
+            if (!wasCorrection && (startFix || reaim)) {
+                if (reaim) controller.noteSeek(now / NANOS_PER_MS)
+                logVerbose("[dd-sync] {} re-aiming landing {}ms off{}", shortId(), signed(filtered),
+                    if (newTarget) " (new target)" else "")
+                val quick = screen.seeksCheaply
+                val aim = if (!newTarget && kind == (if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK))
+                    learnerFor(kind)?.impliedLeadMs(landingLeadMs, filtered) else null
+                seekPlaying(target, durationMs, now, aim)
                 landingIsCorrection = true
                 return
             }
@@ -400,41 +407,47 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         screen.applyServerPaused(false)
     }
 
-    private fun seekPlaying(targetMs: Long, durationMs: Long, now: Long) {
+    private fun seekPlaying(targetMs: Long, durationMs: Long, now: Long, aimLeadMs: Long? = null) {
         // An in-place seek keeps the last frame up and lands within a frame or two; a restart fades back in
         val quick = screen.seeksCheaply
+        val kind = if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK
         // Overshoot by the learned restart cost so the post-restart position lands on the live point
-        val seekMs = clampSeek(targetMs + contentMs(if (quick) quickSeekLeadMs else seekLeadMs, estimator.rate), loop, durationMs)
+        val lead = aimLeadMs ?: leadFor(kind)
+        val seekMs = clampSeek(targetMs + contentMs(lead, estimator.rate), loop, durationMs)
         pushRatio(1.0, now)
         if (!quick) screen.clearRenderedFrameForTimeline()
         screen.seekVideoTo(seekMs * 1_000_000L)
-        expectLanding(if (quick) LeadKind.QUICK_SEEK else LeadKind.SEEK)
+        expectLanding(kind, lead)
         note(Action.SEEK)
     }
 
-    private fun expectLanding(kind: LeadKind) {
+    private fun expectLanding(kind: LeadKind, leadMs: Long = leadFor(kind)) {
         landing = kind
+        landingLeadMs = leadMs
         landingRunningSinceNanos = 0L
         landingIsCorrection = false
         landingStallMs = if (recentlyStalled(System.nanoTime(), STALL_LOOKBACK_NANOS)) lastStallMs else 0.0
         controller.resetMeasurement()
     }
 
-    private fun learnLead(kind: LeadKind, landingDriftMs: Double) {
-        // Landed behind (positive drift) means the restart took longer than the lead allowed for. One slow seek
-        // (a network hiccup) moves the lead by at most MAX_LEAD_STEP_MS, so it cannot throw the next one off.
-        val step = (landingDriftMs * LEAD_GAIN).roundToLong().coerceIn(-MAX_LEAD_STEP_MS, MAX_LEAD_STEP_MS)
-        when (kind) {
-            LeadKind.SEEK -> seekLeadMs = (seekLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
-            LeadKind.QUICK_SEEK -> quickSeekLeadMs = (quickSeekLeadMs + step).coerceIn(0L, MAX_QUICK_LEAD_MS)
-            LeadKind.COLD -> coldLeadMs = (coldLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
-            LeadKind.WARM -> return
-        }
+    private fun learnLead(kind: LeadKind, landingDriftMs: Double, afterReaim: Boolean) {
+        val learner = learnerFor(kind) ?: return
+        val verdict = learner.onLanding(landingLeadMs, landingDriftMs, landingStallMs, isReaim = afterReaim)
         if (ServerOverrides.settings.logLevel >= com.dreamdisplays.core.display.policy.ClientLogLevel.VERBOSE) logger.info(
-            "[dd-sync] {} landed {}ms after {}; leads seek={}ms quick={}ms cold={}ms",
-            shortId(), signed(landingDriftMs), kind.name.lowercase(), seekLeadMs, quickSeekLeadMs, coldLeadMs,
+            "[dd-sync] {} landed {}ms after {} (aimed {}ms, stall {}ms): {}; leads seek={}ms quick={}ms cold={}ms",
+            shortId(), signed(landingDriftMs), kind.name.lowercase(), landingLeadMs, landingStallMs.roundToLong(),
+            verdict.name.lowercase(), seekLeadMs, quickSeekLeadMs, coldLeadMs,
         )
     }
+
+    private fun learnerFor(kind: LeadKind): SeekLeadLearner? = when (kind) {
+        LeadKind.SEEK -> seekLead
+        LeadKind.QUICK_SEEK -> quickSeekLead
+        LeadKind.COLD -> coldLead
+        LeadKind.WARM -> null
+    }
+
+    private fun leadFor(kind: LeadKind): Long = learnerFor(kind)?.leadMs ?: 0L
 
     private fun pushRatio(ratio: Double, now: Long) {
         // Re-sent now and then as well, in case the player was swapped underneath
@@ -596,19 +609,18 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** After a long stall, no seek is decided for this long (queued packets may still move the target). */
         private const val STALL_SETTLE_NANOS = 1_000_000_000L
         private const val MAX_RTT_MS = 2_000
-        private const val LEAD_GAIN = 0.7
-        private const val MAX_LEAD_STEP_MS = 500L
 
         /** Learned restart time of a seek while playing; shared by every display (it is this machine's cost). */
-        @Volatile
-        private var seekLeadMs = 400L
+        private val seekLead = SeekLeadLearner(400L, MAX_LEAD_MS)
 
         /** Learned restart time of a stream start from a cold pause. */
-        @Volatile
-        private var coldLeadMs = 600L
+        private val coldLead = SeekLeadLearner(600L, MAX_LEAD_MS)
 
         /** Learned landing offset of an in-place seek (decoder kept open; a prefill and the sound to line up). */
-        @Volatile
-        private var quickSeekLeadMs = 150L
+        private val quickSeekLead = SeekLeadLearner(150L, MAX_QUICK_LEAD_MS)
+
+        private val seekLeadMs: Long get() = seekLead.leadMs
+        private val coldLeadMs: Long get() = coldLead.leadMs
+        private val quickSeekLeadMs: Long get() = quickSeekLead.leadMs
     }
 }

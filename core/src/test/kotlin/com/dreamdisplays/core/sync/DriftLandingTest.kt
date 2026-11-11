@@ -1,7 +1,9 @@
 package com.dreamdisplays.core.sync
 
 import com.dreamdisplays.core.display.policy.SyncSettings
+import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -19,11 +21,77 @@ class DriftLandingTest {
     }
 
     @Test
-    fun `outlier or stalled landings are not learned`() {
-        assertTrue(DriftController.learnsFromLanding(367.0, 0.0))
-        assertTrue(DriftController.learnsFromLanding(-283.0, 120.0))
-        assertFalse(DriftController.learnsFromLanding(6_372.0, 0.0))
-        assertFalse(DriftController.learnsFromLanding(300.0, 9_000.0))
+    fun `stalled, new-target or lone far-off landings are not learned`() {
+        val l = SeekLeadLearner(400L, 3_000L)
+        assertEquals(SeekLeadLearner.Verdict.LEARNED, l.onLanding(400L, 367.0, 0.0))
+        assertEquals(SeekLeadLearner.Verdict.STALLED, l.onLanding(l.leadMs, 300.0, 9_000.0))
+        assertEquals(SeekLeadLearner.Verdict.NEW_TARGET, l.onLanding(l.leadMs, -23_103.0, 0.0))
+        val before = l.leadMs
+        assertEquals(SeekLeadLearner.Verdict.UNCONFIRMED, l.onLanding(before, 1_400.0, 0.0))
+        assertEquals(before, l.leadMs)
+        // A second landing implying the same cost confirms it
+        assertEquals(SeekLeadLearner.Verdict.LEARNED, l.onLanding(before, 1_300.0, 0.0))
+        assertTrue(abs(l.leadMs - (before + 1_350)) <= 1)
+    }
+
+    @Test
+    fun `consistent 1_8 s reopen seeks converge in at most 2 seeks, then rate correction only`() {
+        val learner = SeekLeadLearner(400L, 3_000L)
+        val c = DriftController(settings)
+        val costMs = 1_800.0
+        var drift = 1_600.0 // behind by more than the seek threshold
+        var seeks = 0
+        var reaims = 0
+        var now = 0.0
+        val dt = 50.0
+        val seekLog = mutableListOf<Double>()
+        fun land(lead: Long, afterReaim: Boolean): Double {
+            val landing = costMs - lead + (seeks % 2) * 40.0 // a little jitter
+            learner.onLanding(lead, landing, 0.0, isReaim = afterReaim)
+            return landing
+        }
+        while (now < 120_000.0) {
+            val d = c.update(drift, now, cheapSeeks = false)
+            if (d.seek) {
+                seeks++; seekLog += now
+                val lead = learner.leadMs
+                drift = land(lead, afterReaim = false)
+                if (c.reaimsLanding(drift, afterReaim = false)) {
+                    c.noteSeek(now)
+                    seeks++; reaims++
+                    drift = land(learner.impliedLeadMs(lead, drift), afterReaim = true)
+                    assertFalse(c.reaimsLanding(drift, afterReaim = true))
+                }
+                c.resetMeasurement()
+            } else {
+                drift -= (d.ratio - 1.0) * dt
+            }
+            now += dt
+        }
+        assertTrue(seeks <= 2, "seeks=$seeks at $seekLog")
+        assertTrue(reaims <= 1)
+        assertTrue(abs(learner.leadMs - costMs) <= 100, "lead=${learner.leadMs}")
+        assertTrue(abs(drift) < 100, "drift=$drift")
+    }
+
+    @Test
+    fun `measured-cheap streams keep the low threshold, expensive ones the normal one`() {
+        assertTrue(DriftController(settings).update(400.0, 0.0, cheapSeeks = true).seek)
+        val expensive = DriftController(settings)
+        assertFalse(expensive.update(400.0, 0.0, cheapSeeks = false).seek)
+        assertFalse(expensive.update(1_400.0, 1_000.0, cheapSeeks = false).seek)
+    }
+
+    @Test
+    fun `re-aim fires at most once per episode`() {
+        val c = DriftController(settings)
+        assertTrue(c.reaimsLanding(1_800.0, afterReaim = false))
+        assertFalse(c.reaimsLanding(1_800.0, afterReaim = true))
+        assertFalse(c.reaimsLanding(-23_103.0, afterReaim = true))
+        // The far-off re-aim landing is accepted and learned
+        val l = SeekLeadLearner(400L, 3_000L)
+        assertEquals(SeekLeadLearner.Verdict.LEARNED, l.onLanding(400L, 1_800.0, 0.0, isReaim = true))
+        assertTrue(l.leadMs > 1_500L)
     }
 
     @Test

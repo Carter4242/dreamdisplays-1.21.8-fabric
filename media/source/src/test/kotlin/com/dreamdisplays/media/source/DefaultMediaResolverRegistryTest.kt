@@ -140,4 +140,14 @@ class DefaultMediaResolverRegistryTest {
         assertEquals("needs sign-in", e.message)
         assertTrue(e.isFatal)
     }
+
+    @Test
+    fun `a geo block from the first resolver is conclusive`() {
+        val registry = DefaultMediaResolverRegistry().apply {
+            register(failing(10, DreamMediaException.GeoBlocked("This video isn't available in your country.")))
+            register(failing(0, IllegalStateException("fallback failed")))
+        }
+        val e = assertFailsWith<DreamMediaException.GeoBlocked> { registry.resolve(source) }
+        assertTrue(e.isFatal)
+    }
 }

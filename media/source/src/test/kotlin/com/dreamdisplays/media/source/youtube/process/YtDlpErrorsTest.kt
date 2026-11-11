@@ -31,6 +31,23 @@ class YtDlpErrorsTest {
     }
 
     @Test
+    fun ytDlpGeoBlockIsFatal() {
+        val e = YtDlpErrors.classify(
+            "ERROR: [youtube] x: The uploader has not made this video AVAILABLE IN YOUR COUNTRY",
+        )
+        assertIs<DreamMediaException.GeoBlocked>(e)
+        assertTrue(e.isFatal)
+    }
+
+    @Test
+    fun newPipeGeoBlockIsFatal() {
+        val e = YtDlpErrors.classify("This video is not available in client's country.")
+        assertIs<DreamMediaException.GeoBlocked>(e)
+        assertTrue(e.isFatal)
+        assertTrue("your country" in e.message!!)
+    }
+
+    @Test
     fun unknownOutputIsNull() {
         assertNull(YtDlpErrors.classify("Exited with code 1: ERROR: something odd"))
         assertNull(YtDlpErrors.classify(null))

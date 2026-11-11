@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.youtube
 
+import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.api.media.source.MediaMetadata
 import com.dreamdisplays.api.media.source.MediaResolverService
@@ -155,7 +156,11 @@ object NewPipeResolver : MediaResolverService {
         if (!initialized.value) return []
         // No overlap here: this is the call [YtDlp.fetchUncached] makes from inside the very race
         // the overlap exists to start.
-        return resolveCached(videoUrl)?.streams ?: []
+        return try {
+            resolveCached(videoUrl)?.streams ?: []
+        } catch (_: DreamMediaException.GeoBlocked) {
+            [] // yt-dlp reports the block itself
+        }
     }
 
     override fun prefetch(source: MediaSource): Boolean {
@@ -169,12 +174,17 @@ object NewPipeResolver : MediaResolverService {
 
     private fun resolveCached(url: String, overlapFallback: Boolean = false): NewPipeResolved? {
         val key = YouTubeUrls.extractVideoId(url) ?: url
-        cache.getIfPresent(key)?.let { return it.value }
+        cache.getIfPresent(key)?.let { it.error?.let { e -> throw e }; return it.value }
         if (overlapFallback && NewPipeLadderTracker.shouldOverlapFallback()) {
             runCatching { YtDlp.prefetchFormats(url) }
         }
-        return cache.get(key) {
-            val resolved = NewPipeStreamExtraction.extract(url)
+        val entry = cache.get(key) {
+            // A geo block is cached like any miss, and rethrown so the registry reports it instead of retrying
+            val resolved = try {
+                NewPipeStreamExtraction.extract(url)
+            } catch (e: DreamMediaException.GeoBlocked) {
+                return@get CacheEntry(value = null, ttlNanos = NEGATIVE_TTL_NANOS, error = e)
+            }
             val laddered = resolved != null && YtStreams.offersQualityLadder(resolved.streams)
             val ttl = when {
                 resolved == null -> NEGATIVE_TTL_NANOS
@@ -184,8 +194,10 @@ object NewPipeResolver : MediaResolverService {
             }
             if (resolved == null || !resolved.isLive) NewPipeLadderTracker.recordLadderOutcome(laddered)
             CacheEntry(value = resolved, ttlNanos = ttl)
-        }.value
+        }
+        entry.error?.let { throw it }
+        return entry.value
     }
 
-    private class CacheEntry(val value: NewPipeResolved?, val ttlNanos: Long)
+    private class CacheEntry(val value: NewPipeResolved?, val ttlNanos: Long, val error: DreamMediaException? = null)
 }

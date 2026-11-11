@@ -8,6 +8,9 @@ import kotlin.math.sign
 /**
  * Decides how to close the gap between local playback and the server timeline while playing.
  *
+ * The low seek threshold for cheap seeks is only for streams whose seeks were measured to land within a frame or two;
+ * see `MediaPlayer.seeksCheaply`.
+ *
  * Drift (positive = behind the server) is smoothed over [FILTER_TAU_MS]. Inside the dead band nothing happens.
  * Beyond it the playback rate is nudged proportionally (closing roughly within [CONVERGE_MS], never more than
  * [SyncSettings.maxRatePct]) until the drift is back under [settleMs], then the rate returns to 1. Past the seek
@@ -94,6 +97,13 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
     fun landingNeedsReseek(landingDriftMs: Double): Boolean =
         abs(landingDriftMs) > minOf(settings.seekThresholdMs.toDouble(), LANDING_RESEEK_MS)
 
+    /**
+     * Whether a landing [landingDriftMs] off is re-aimed at once. At most once per correction episode: the landing of
+     * a re-aim ([afterReaim]) is accepted and left to rate correction and the cooldown, however far off.
+     */
+    fun reaimsLanding(landingDriftMs: Double, afterReaim: Boolean): Boolean =
+        !afterReaim && landingNeedsReseek(landingDriftMs)
+
     /** Cooldown before the next seek may happen, given the recent streak. */
     fun currentCooldownMs(): Double = settings.seekCooldownMs.toDouble() * (1 + seekStreak)
 
@@ -142,15 +152,5 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
 
         /** A landing further off than this (or the seek threshold, if smaller) is re-aimed at once. */
         const val LANDING_RESEEK_MS = 1_000.0
-
-        /** A landing further off than this is an outlier (stale target, stall), not a restart cost to learn. */
-        const val MAX_LEARN_LANDING_MS = 1_000.0
-
-        /** A game stall longer than this around a seek makes its landing meaningless for the lead. */
-        const val MAX_LEARN_STALL_MS = 250.0
-
-        /** Whether a landing [landingDriftMs] off, with a game stall of [stallMs] around it, may teach the restart lead. */
-        fun learnsFromLanding(landingDriftMs: Double, stallMs: Double): Boolean =
-            abs(landingDriftMs) <= MAX_LEARN_LANDING_MS && stallMs <= MAX_LEARN_STALL_MS
     }
 }

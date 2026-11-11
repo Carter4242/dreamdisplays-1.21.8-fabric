@@ -1,8 +1,10 @@
 package com.dreamdisplays.media.source.youtube.newpipe
 
+import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.media.source.youtube.model.Durations
 import com.dreamdisplays.media.source.youtube.model.YtStream
+import com.dreamdisplays.media.source.youtube.process.YtDlpErrors
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.stream.AudioStream
@@ -36,7 +38,10 @@ class NewPipeResolved(
 object NewPipeStreamExtraction {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /** Drives [StreamExtractor] directly: single fetchPage() + reads from live stream. */
+    /**
+     * Drives [StreamExtractor] directly: single fetchPage() + reads from live stream. Null when NewPipe can't resolve
+     * it (yt-dlp gets a turn); a geo block is conclusive and thrown as [DreamMediaException.GeoBlocked].
+     */
     fun extract(url: String): NewPipeResolved? {
         return runCatching {
             val service = NewPipe.getServiceByUrl(url)
@@ -68,9 +73,13 @@ object NewPipeStreamExtraction {
                 isSeekable = seekable,
                 subtitles = mapSubtitles(extractor),
             )
-        }.onFailure { e ->
+        }.getOrElse { e ->
             logger.debug("NewPipeExtractor fetch failed for {}: {}", url, e.message)
-        }.getOrNull()
+            val geo = generateSequence(e) { it.cause }.take(4)
+                .firstNotNullOfOrNull { YtDlpErrors.classify(it.message) as? DreamMediaException.GeoBlocked }
+            if (geo != null) throw geo
+            null
+        }
     }
 
     private fun mapStreams(

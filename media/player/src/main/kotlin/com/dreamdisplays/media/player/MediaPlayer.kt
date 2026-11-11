@@ -444,12 +444,13 @@ class MediaPlayer(
 
     /**
      * True when a seek now lands within a frame or two: the stream decodes in-process (in-place seeks) and the last
-     * in-place seek, if any, was quick.
+     * seek on it, if any, was measured cheap (in place, under [CHEAP_SEEK_MS]). After a reopen or any slow seek, seeks
+     * are expensive and sync uses its normal threshold, rate correction and cooldown.
      */
     fun seeksCheaply(): Boolean {
         if (!isReady || liveStream || !seekable || !sessionManager.seeksInPlace) return false
-        val last = sessionManager.lastInPlaceSeekMs
-        return last < 0L || last <= CHEAP_SEEK_MS
+        val last = sessionManager.lastSeekMs
+        return last < 0L || (sessionManager.lastSeekInPlace && last <= CHEAP_SEEK_MS)
     }
 
     /** True while parked by [warmUpPaused] on its start-up cushion: [play] continues at once. */

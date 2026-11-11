@@ -25,7 +25,8 @@ object YtDlpErrors {
 
             "private video" in t -> DreamMediaException.NotFound("This video is private.")
 
-            "not available in your country" in t || "geo restrict" in t || "geo-restrict" in t ->
+            "available in your country" in t || "not available in client's country" in t ||
+                "geo restrict" in t || "geo-restrict" in t ->
                 DreamMediaException.GeoBlocked("This video isn't available in your country.")
 
             "please sign in" in t || "sign in to" in t || "requires authentication" in t ->
