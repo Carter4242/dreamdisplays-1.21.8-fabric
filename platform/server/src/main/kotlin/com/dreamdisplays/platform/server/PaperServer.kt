@@ -73,6 +73,7 @@ class PaperServer : JavaPlugin() {
 
         WatchPartyManager.init(PaperPlaybackTransport)
         TimelineManager.init(PaperPlaybackTransport)
+        TimelineManager.resyncHoldMs = { Companion.config.settings.resyncHoldMs }
         FullscreenBroadcastManager.init(PaperPlaybackTransport)
         FullscreenBroadcastManager.restore()
         PipPinManager.init(PaperPlaybackTransport)

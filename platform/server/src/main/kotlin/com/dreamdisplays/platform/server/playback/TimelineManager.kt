@@ -28,10 +28,12 @@ object TimelineManager {
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
-    private const val RESYNC_HOLD_MS = 5_000L
     private val RESYNC_PARAM = Regex("""([?&])ddsync=(\d+)""")
 
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
+
+    /** resync hold length; the platform points this at its live config (`display.resync_hold_seconds`). */
+    var resyncHoldMs: () -> Long = { 10_000L }
 
     /** Wires the platform transport and seeds timelines for already-loaded displays. */
     fun init(transport: PlaybackTransport) {
@@ -80,12 +82,12 @@ object TimelineManager {
      * seeks, so viewers drift apart and stay there. Changing a display's URL makes every client drop its player,
      * request the timeline and open the video already positioned at it, so: park the timeline paused at
      * [target], bump a harmless `ddsync` query parameter so clients reload, then (when [holdThenPlay]) release
-     * the hold after [RESYNC_HOLD_MS] through the existing start-hold tick, starting everyone from the same frame.
+     * the hold after [resyncHoldMs] through the existing start-hold tick, starting everyone from the same frame.
      */
     private fun resyncAndHold(display: DisplayData, target: Timeline, now: Long, holdThenPlay: Boolean) {
         val held = target.withPaused(true, now)
         timelines[display.id] = held
-        if (holdThenPlay) startHolds[display.id] = now + RESYNC_HOLD_MS
+        if (holdThenPlay) startHolds[display.id] = now + resyncHoldMs()
         bumpResyncMarker(display)
         broadcast(display, held)
     }
