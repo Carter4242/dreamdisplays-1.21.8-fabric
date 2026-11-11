@@ -172,6 +172,9 @@ internal class ReadAheadSession(
         }
     }
 
+    /** When the last reader left ([System.nanoTime]), or null while a decoder is reading this session. */
+    fun idleSinceNanos(): Long? = lock.withLock { if (readers.isEmpty()) lastReaderGoneNanos else null }
+
     /** Drops the cached data unless a reader is still connected; the token stays valid and re-fills on demand. */
     fun release() = lock.withLock {
         if (readers.isNotEmpty()) return@withLock

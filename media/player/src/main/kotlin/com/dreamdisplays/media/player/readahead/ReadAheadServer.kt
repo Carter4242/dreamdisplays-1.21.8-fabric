@@ -36,14 +36,7 @@ internal class ReadAheadServer(
 
     private data class Key(val displayId: UUID, val originalUrl: String)
 
-    private val byKey = object : LinkedHashMap<Key, ReadAheadSession>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, ReadAheadSession>): Boolean {
-            if (size <= maxSessions) return false
-            eldest.value.close()
-            byToken.remove(eldest.value.token)
-            return true
-        }
-    }
+    private val byKey = LinkedHashMap<Key, ReadAheadSession>()
     private val byToken = HashMap<String, ReadAheadSession>()
 
     @Volatile
@@ -78,10 +71,29 @@ internal class ReadAheadServer(
                 ).also {
                     byKey[key] = it
                     byToken[token] = it
+                    evictExcess(keep = it)
                 }
             }
         }
         return "http://$LOOPBACK_HOST:$port/${session.token}"
+    }
+
+    /**
+     * Closes sessions past [maxSessions]: only ones no decoder is reading, longest idle first (a stopped display's,
+     * whose idle clock [release] winds back, before a paused one's). A session being read is never cut off, however
+     * old: that freezes and reloads a display that is playing. Caller holds the [byKey] lock.
+     */
+    private fun evictExcess(keep: ReadAheadSession) {
+        val excess = byKey.size - maxSessions
+        if (excess <= 0) return
+        val idle = byKey.entries.mapNotNull { (key, session) ->
+            if (session === keep) null else session.idleSinceNanos()?.let { key to it }
+        }
+        for (key in evictionOrder(idle, excess)) {
+            val session = byKey.remove(key) ?: continue
+            session.close()
+            byToken.remove(session.token)
+        }
     }
 
     /** True when [url] names a live session of this server. */
@@ -230,7 +242,11 @@ internal class ReadAheadServer(
         return true
     }
 
-    private companion object {
+    internal companion object {
+        /** The [excess] keys to evict out of [idle] (key, idle since), longest idle first. */
+        internal fun <K> evictionOrder(idle: List<Pair<K, Long>>, excess: Int): List<K> =
+            idle.sortedWith { a, b -> a.second.compareTo(b.second) }.take(excess.coerceAtLeast(0)).map { it.first }
+
         const val LOOPBACK_HOST = "127.0.0.1"
         const val TOKEN_BYTES = 16
         const val BACKLOG = 64

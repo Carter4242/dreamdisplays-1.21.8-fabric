@@ -281,4 +281,42 @@ class ReadAheadServerTest {
         server.release(display)
         assertEquals(0L, server.session(url.substringAfterLast('/'))!!.bufferedBytes)
     }
+
+    @Test
+    fun `eviction takes the longest-idle sessions first`() {
+        assertEquals(listOf("b", "c"), ReadAheadServer.evictionOrder(listOf("a" to 30L, "b" to 10L, "c" to 20L), 2))
+        assertEquals(emptyList(), ReadAheadServer.evictionOrder(listOf("a" to 30L), 0))
+    }
+
+    @Test
+    fun `a session a decoder is reading is never evicted, an idle one is`() {
+        val small = ReadAheadServer(upstream = host, refresher = { null }, config = config, maxSessions = 2)
+        val gate = CountDownLatch(1)
+        try {
+            fun reg(d: UUID) = assertNotNull(
+                small.register(d, ReadAhead.DirectFile("https://host.example/$d.mp4", file.size.toLong(), null, "video/mp4"), "https://cdn.example/$d", 32 * 1_024L),
+            )
+            host.stall = gate
+            // The oldest registration, still playing: its decoder is mid-read
+            val playing = reg(UUID.randomUUID())
+            val token = playing.substringAfterLast('/')
+            val reader = thread { runCatching { request(playing, "bytes=0-99999") } }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+            while (small.session(token)?.idleSinceNanos() != null && System.nanoTime() < deadline) Thread.sleep(5)
+            kotlin.test.assertNull(small.session(token)?.idleSinceNanos(), "The reader never connected.")
+
+            val idle = reg(UUID.randomUUID())
+            Thread.sleep(5)
+            val newest = reg(UUID.randomUUID()) // one over the cap
+            assertNotNull(small.session(token), "The display being played was cut off.")
+            kotlin.test.assertNull(small.session(idle.substringAfterLast('/')), "The idle session should have gone.")
+            assertNotNull(small.session(newest.substringAfterLast('/')))
+            gate.countDown()
+            host.stall = null
+            reader.join(5_000)
+        } finally {
+            gate.countDown()
+            small.close()
+        }
+    }
 }
