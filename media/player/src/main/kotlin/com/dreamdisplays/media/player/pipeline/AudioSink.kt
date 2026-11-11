@@ -42,6 +42,9 @@ internal class AudioSink(private val debugLabel: String) {
         /** How long to wait for FFmpeg to exit after its PCM ended, to read its exit code. */
         private const val EXIT_WAIT_MS = 500L
 
+        /** How often a playing line checks that the game still uses the output device it was opened on. */
+        private const val DEVICE_CHECK_NANOS = 1_000_000_000L
+
         /** At most one audio-fault WARN (with its stack trace) per this interval across all displays. */
         private const val FAULT_WARN_INTERVAL_NANOS = 30_000_000_000L
         private val lastFaultWarnNanos = AtomicLong(0L)
@@ -121,6 +124,13 @@ internal class AudioSink(private val debugLabel: String) {
     internal enum class EndKind { FAULT, ENDED }
 
     /**
+     * The game switched its sound output away from the device this line was opened for; ends the pump as a fault, so
+     * the half is restarted in place and opens on the new device.
+     */
+    internal class OutputDeviceChanged(from: String?, to: String?) :
+        IOException("the game's sound device changed (\"${from ?: "default"}\" -> \"${to ?: "default"}\")")
+
+    /**
      * Sample of audio master clock (atomic read of position, session, and meaning).
      */
     class ClockSample(
@@ -143,6 +153,10 @@ internal class AudioSink(private val debugLabel: String) {
         /** A live relay stream: small chunks, a short line queue, and backlog skipping (see [AudioSink.liveEdge]). */
         @JvmField val liveEdge: Boolean = false,
     ) {
+        /** The game's output device when this session's line was opened (null = system default). */
+        @Volatile
+        @JvmField
+        var device: String? = null
 
         @Volatile
         @JvmField
@@ -408,6 +422,7 @@ internal class AudioSink(private val debugLabel: String) {
         fun isInterrupted() = terminated.get() || stopFlag.get()
         runCatching {
             proc.inputStream.use { input ->
+                val device = AudioOutputHooks.gameDeviceName()
                 val opened = openLine() ?: run {
                     logger.warn("$debugLabel [audio] switch line failed to open.")
                     return@use
@@ -433,6 +448,7 @@ internal class AudioSink(private val debugLabel: String) {
                     }
                     val flipped = beginSession(contentStartNanos + skippedNanos, originKnown, tempo)
                     flipped.output = opened.output
+                    flipped.device = device
                     publishLine(flipped, opened.line)
                     oldLine to flipped
                 }
@@ -495,7 +511,8 @@ internal class AudioSink(private val debugLabel: String) {
                     if (pumped) onUnexpectedEnd(stderr, hadPcm)
                     return
                 }
-                warnFault("$reason; restarting the audio half in place", failure)
+                if (failure is OutputDeviceChanged) logger.info("$debugLabel [audio] ${failure.message}; reopening the line there.")
+                else warnFault("$reason; restarting the audio half in place", failure)
                 onFault(reason, stderr)
             }
         }
@@ -581,12 +598,14 @@ internal class AudioSink(private val debugLabel: String) {
         var failure: Throwable? = null
         runCatching {
             proc.inputStream.use { input ->
+                val device = AudioOutputHooks.gameDeviceName()
                 val opened = openLine() ?: run {
                     logger.warn("$debugLabel [audio] line failed to open.")
                     return@runCatching
                 }
                 ln = opened.line
                 session.output = opened.output
+                session.device = device
                 if (terminated.get() || stopFlag.get()) return@runCatching
                 logger.debug("$debugLabel [audio] line open, waiting for start gate...")
                 if (!awaitStartGate(startGate, terminated, stopFlag)) {
@@ -665,6 +684,7 @@ internal class AudioSink(private val debugLabel: String) {
         var rate = 1.0
         var firstChunk = true
         var totalBytes = 0L
+        var deviceCheckedNanos = System.nanoTime()
         // Fresh line for this session: don't let its initially-empty buffer read as an underrun on the
         // first paced write. The learned target itself persists across sessions.
         paceStreaming = false
@@ -673,6 +693,12 @@ internal class AudioSink(private val debugLabel: String) {
         paceTargetBytes = if (live) LIVE_PACE_START_BYTES else paceTargetBytes.coerceIn(MIN_PACE_BYTES, MAX_PACE_BYTES)
         while (!terminated.get() && !stopFlag.get()) {
             if (parkIfRequested(ln, terminated, stopFlag)) break
+            val now = System.nanoTime()
+            if (now - deviceCheckedNanos >= DEVICE_CHECK_NANOS) {
+                deviceCheckedNanos = now
+                val wanted = AudioOutputHooks.gameDeviceName()
+                if (wanted != session.device) throw OutputDeviceChanged(session.device, wanted)
+            }
             if (!firstChunk && applyPendingResync(session, input, terminated, stopFlag)) output.discontinuity()
             if (live && skipLiveBacklog(input, chunk, terminated, stopFlag) && !firstChunk) output.discontinuity()
             val n = MediaUtil.readFull(input, chunk, chunkBytes)
