@@ -81,6 +81,21 @@ class DriftControllerTest {
     }
 
     @Test
+    fun `cheap seeks take over from the rate a lot earlier`() {
+        // 700 ms behind: rate correction at 1 % would need over a minute
+        val slow = DriftController(settings)
+        assertFalse(slow.update(700.0, 0.0).seek)
+        val cheap = DriftController(settings)
+        assertTrue(cheap.update(700.0, 0.0, cheapSeeks = true).seek)
+        // Below the cheap threshold the rate still does it
+        val small = DriftController(settings)
+        assertFalse(small.update(200.0, 0.0, cheapSeeks = true).seek)
+        // And the cooldown between cheap seeks is short, not the configured 8 s
+        assertFalse(cheap.update(700.0, 3_000.0, cheapSeeks = true).seek)
+        assertTrue(cheap.update(700.0, 4_000.0, cheapSeeks = true).seek)
+    }
+
+    @Test
     fun `rate is capped at the configured maximum`() {
         val c = DriftController(settings)
         assertEquals(1.01, c.update(1_000.0, 0.0).ratio, 1e-12)

@@ -208,6 +208,7 @@ class MediaPlayer(
 
         private const val MAX_FETCH_RETRIES = 3
         private const val WARM_UP_STALE_NANOS = 20_000_000_000L
+        private const val CHEAP_SEEK_MS = 250L
         private const val MAX_AUDIO_RESTARTS = 3
         private const val AUDIO_RESTART_BUDGET_RESET_NS = 120_000_000_000L
         private const val HWACCEL_FAIL_WINDOW_NS = 5_000_000_000L
@@ -403,6 +404,16 @@ class MediaPlayer(
     fun isWarmingUp(): Boolean = warmUpPending || (warmingUp && !warmUpStale())
 
     private fun warmUpStale(): Boolean = System.nanoTime() - warmUpStartedNanos > WARM_UP_STALE_NANOS
+
+    /**
+     * True when a seek now lands within a frame or two: the stream decodes in-process (in-place seeks) and the last
+     * in-place seek, if any, was quick.
+     */
+    fun seeksCheaply(): Boolean {
+        if (!isReady || liveStream || !seekable || !sessionManager.seeksInPlace) return false
+        val last = sessionManager.lastInPlaceSeekMs
+        return last < 0L || last <= CHEAP_SEEK_MS
+    }
 
     /** True while parked by [warmUpPaused] on its start-up cushion: [play] continues at once. */
     fun isHeldReady(): Boolean = heldReady && isPausedWarm()

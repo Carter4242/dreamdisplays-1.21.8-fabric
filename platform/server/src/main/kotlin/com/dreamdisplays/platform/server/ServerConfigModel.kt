@@ -63,6 +63,7 @@ data class SettingsSection(
 
     /** How long a seeked / restarted synced display stays parked while viewers re-buffer (0 = no hold). */
     val seekHoldMs get() = display.seek_hold_seconds * 1000L
+    val startLeadMaxMs get() = display.start_lead_max_ms.toLong()
 
     /** Mode new displays are created in: [PlaybackMode.SYNCED] unless `default_mode = "local"`. */
     val defaultMode: PlaybackMode
@@ -121,6 +122,7 @@ data class SettingsSection(
         val max_displays_per_player: Int = 100,
         val resume_hold_seconds: Int = 1,
         val seek_hold_seconds: Int = 3,
+        val start_lead_max_ms: Int = 150,
         val default_mode: String = "synced",
         val auto_pause_when_empty_seconds: Int = 0,
     )
@@ -284,6 +286,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_displays_per_player = t?.getLong("display.max_displays_per_player")?.toInt() ?: 100,
             resume_hold_seconds = t.numberOrNull("display.resume_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 1,
             seek_hold_seconds = t.numberOrNull("display.seek_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 3,
+            start_lead_max_ms = t.numberOrNull("display.start_lead_max_ms")?.toInt()?.coerceIn(0, 1_000) ?: 150,
             default_mode = (t?.get("display.default_mode") as? String) ?: "synced",
             auto_pause_when_empty_seconds = t.numberOrNull("display.auto_pause_when_empty_seconds")?.toInt()
                 ?.coerceIn(0, 86_400) ?: 0,

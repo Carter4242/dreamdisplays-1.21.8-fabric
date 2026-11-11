@@ -255,6 +255,7 @@
   "suggestSelectorEntities": "Every entity",
   "suggestFullscreenStart": "Start a broadcast",
   "suggestFullscreenPrepare": "Load a broadcast ahead, hidden, so start plays at once",
+  "suggestPrepare": "Load a display on players ahead of an event so it starts at once; alone, list preparations",
   "suggestFullscreenStop": "Stop a broadcast",
   "suggestFullscreenList": "List running broadcasts",
   "suggestFullscreenId": "Broadcast what a display is playing",

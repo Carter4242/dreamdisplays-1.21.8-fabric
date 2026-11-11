@@ -12,9 +12,12 @@ data class Timeline(
     val durationMs: Long = 0,
     val loop: Boolean = false,
 ) {
-    /** Position at server-time [nowMs]: advances when running, wraps by [durationMs] when [loop]. */
+    /**
+     * Position at server-time [nowMs]: advances when running, wraps by [durationMs] when [loop]. A running timeline
+     * anchored after [nowMs] (a start scheduled slightly ahead) has not started yet and stays at [positionMs].
+     */
     fun positionAt(nowMs: Long): Long {
-        if (paused) return positionMs
+        if (paused || nowMs < serverTimeMs) return positionMs
         val raw = positionMs + (nowMs - serverTimeMs)
         if (raw <= 0) return 0
         return if (loop && durationMs > 0) raw % durationMs else raw

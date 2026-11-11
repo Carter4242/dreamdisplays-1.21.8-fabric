@@ -402,7 +402,7 @@ class DisplayScreen(
     @Volatile
     var isHiddenForBroadcast: Boolean = false; private set
 
-    /** Silenced by a preparation: hidden, or opening its paused stream to hold it ready. */
+    /** Silenced while hidden by a preparation, or while opening its paused stream to hold it ready. */
     @Volatile
     private var prepareMuted: Boolean = false
 
@@ -769,7 +769,7 @@ class DisplayScreen(
     /** Applies the authoritative server timeline: matches pause state and corrects drift. */
     fun updateData(packet: DisplaySync) {
         if (watchParty != null) return
-        timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, packet.isPaused, packet.loop)
+        timelineFollower.apply(packet.currentTimeMs, packet.serverTimeMs, packet.isPaused, packet.loop, packet.startInMs)
     }
 
     /** Applies watch-party snapshot: tracks session, loads host video, follows timeline. */
@@ -967,12 +967,16 @@ class DisplayScreen(
     /** True when paused and parked on a decoded start-up cushion by [holdReadyForBroadcast]: a resume plays at once. */
     internal val isHeldReady: Boolean get() = mediaPlayer?.isHeldReady() == true
 
+    /** True when a seek now lands within a frame or two (see [MediaPlayer.seeksCheaply]). */
+    internal val seeksCheaply: Boolean get() = mediaPlayer?.seeksCheaply() == true
+
     /** True while [holdReadyForBroadcast] is opening the paused stream. */
     internal val isWarmingUp: Boolean get() = mediaPlayer?.isWarmingUp() == true
 
     /**
-     * Opens the paused stream at the server's paused position and parks it on its decoded first frame, so the
-     * broadcast's resume plays at once instead of opening the stream then (see [MediaPlayer.warmUpPaused]).
+     * Opens the paused stream at the server's paused position and parks it on its decoded first frame, so the next
+     * resume plays at once instead of opening the stream then (see [MediaPlayer.warmUpPaused]). Driven by
+     * [com.dreamdisplays.platform.client.managers.DisplayWarmup].
      */
     internal fun holdReadyForBroadcast() {
         val mp = mediaPlayer ?: return
@@ -987,7 +991,8 @@ class DisplayScreen(
         lastPrepareDistance = distance
         val prepared = isPrepared
         isHiddenForBroadcast = prepared && !isPopoutActive && (virtual || distance > renderDistance)
-        val silenced = isHiddenForBroadcast || (prepared && !isPopoutActive && isWarmingUp)
+        // Opening a paused stream to hold it ready may release a moment of sound: never let it be heard
+        val silenced = isHiddenForBroadcast || (!isPopoutActive && isWarmingUp)
         if (silenced == prepareMuted) return
         prepareMuted = silenced
         applyEffectiveVolume()

@@ -54,6 +54,7 @@ object TimelineManager {
     fun init(transport: PlaybackTransport) {
         this.transport = transport
         DisplayManager.getDisplays().forEach(::ensureTimeline)
+        ReadinessTracker.addListener(::releaseIfReady)
     }
 
     /**
@@ -97,22 +98,65 @@ object TimelineManager {
     }
 
     /**
-     * Start hold: park the timeline paused at [target] and, when [playAfter], release it after [holdMs] through the
-     * start-hold tick. Clients snap their paused player exactly onto a paused timeline, so during the hold every
-     * viewer lines up on the same frame and the release starts them together. A zero hold plays at once and
-     * leaves any small offsets to the clients' drift correction.
+     * Start hold: park the timeline paused at [target] and, when [playAfter], start it once every viewer holds it ready
+     * there ([startWhenReady]), or after [holdMs] at the latest. Clients snap their paused player exactly onto a
+     * paused timeline and keep it open on that frame, so the start is instant when they were ready already (a paused
+     * display) and as quick as the slowest viewer's buffering otherwise. A zero hold plays at once.
      */
     private fun holdThenRelease(display: DisplayData, target: Timeline, now: Long, playAfter: Boolean, holdMs: Long) {
-        if (playAfter && holdMs <= 0L) {
-            val playing = target.withPaused(false, now)
-            timelines[display.id] = playing
-            broadcast(display, playing)
-            return
-        }
         val held = target.withPaused(true, now)
         timelines[display.id] = held
-        if (playAfter) startHolds[display.id] = now + holdMs
-        broadcast(display, held)
+        if (!playAfter) {
+            broadcast(display, held)
+            return
+        }
+        startWhenReady(display, if (holdMs <= 0L) now else now + holdMs)
+    }
+
+    /**
+     * Starts [display] from where its paused timeline stands as soon as every viewer holds it ready there (instantly if
+     * they already do), and at [deadlineMs] at the latest. The start is scheduled [ReadinessTracker.leadMs] ahead so
+     * all viewers begin on the same frame. The display must be paused (a hold); a playing one is left alone.
+     *
+     * This is the call for anything that wants a display to start on time: a resume, seek or new video here, a
+     * fullscreen start, a queue moving to its next item.
+     */
+    fun startWhenReady(display: DisplayData, deadlineMs: Long) {
+        val current = timelines[display.id] ?: return
+        if (!current.paused) return
+        startHolds[display.id] = deadlineMs
+        val now = transport.nowMs()
+        if (now >= deadlineMs || waitingFor(display, current.positionMs).isEmpty()) {
+            release(display, now)
+        } else {
+            broadcast(display, current)
+        }
+    }
+
+    /** The viewers a start of [display] at [positionMs] still waits for (empty = it can start now). */
+    fun waitingFor(display: DisplayData, positionMs: Long): List<UUID> =
+        ReadinessTracker.waitingFor(display.id, positionMs, viewersOf(display))
+
+    private fun viewersOf(display: DisplayData): Collection<UUID> =
+        transport.nearbyPlayerIds(display) + extraReceivers(display.id)
+
+    /** A client reported on [displayId]: start its hold now if that was the last viewer it waited for. */
+    private fun releaseIfReady(displayId: UUID) {
+        if (!startHolds.containsKey(displayId)) return
+        val display = DisplayManager.getDisplayData(displayId) ?: return
+        val current = timelines[displayId] ?: return
+        if (!current.paused) return
+        if (waitingFor(display, current.positionMs).isEmpty()) release(display, transport.nowMs())
+    }
+
+    /** Ends [display]'s hold: plays from its paused position, anchored [ReadinessTracker.leadMs] ahead of [now]. */
+    private fun release(display: DisplayData, now: Long) {
+        startHolds.remove(display.id)
+        val current = timelines[display.id] ?: return
+        val lead = ReadinessTracker.leadMs(display.id, viewersOf(display))
+        val playing = current.anchoredAt(now).copy(paused = false, serverTimeMs = now + lead)
+        timelines[display.id] = playing
+        broadcast(display, playing)
     }
 
     /**
@@ -139,13 +183,9 @@ object TimelineManager {
     fun playNow(display: DisplayData): Boolean {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
         if (WatchPartyManager.hasSession(display.id)) return false
-        val now = transport.nowMs()
-        val held = startHolds.remove(display.id) != null
         val current = timelines[display.id] ?: return false
-        if (!current.paused && !held) return false
-        val playing = current.withPaused(false, now)
-        timelines[display.id] = playing
-        broadcast(display, playing)
+        if (!current.paused) return false
+        release(display, transport.nowMs())
         return true
     }
 
@@ -193,15 +233,19 @@ object TimelineManager {
         }
     }
 
-    /** Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused for [START_HOLD_MS]. */
+    /**
+     * Resets the clock to 0 when the video changes (`SYNCED` / `BROADCAST` only), held paused until every viewer has the
+     * new video ready, for [START_HOLD_MS] at most.
+     */
     fun onVideoChanged(display: DisplayData) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
         val now = transport.nowMs()
         val fresh = Timeline.start(now, paused = true, loop = true)
         timelines[display.id] = fresh
-        startHolds[display.id] = now + START_HOLD_MS
-        broadcast(display, fresh)
+        // What clients held ready belongs to the old video
+        ReadinessTracker.forgetDisplay(display.id)
+        startWhenReady(display, now + START_HOLD_MS)
     }
 
     /**
@@ -224,6 +268,7 @@ object TimelineManager {
 
     /** Forgets a removed display. */
     fun remove(displayId: UUID) {
+        ReadinessTracker.forgetDisplay(displayId)
         emptySince.remove(displayId)
         timelines.remove(displayId)
         lastBroadcast.remove(displayId)
@@ -283,13 +328,16 @@ object TimelineManager {
     private fun releaseStartHolds(now: Long) {
         for ((displayId, startAt) in startHolds) {
             if (now < startAt) continue
-            startHolds.remove(displayId)
-            if (WatchPartyManager.hasSession(displayId)) continue
-            val timeline = timelines[displayId] ?: continue
-            val display = DisplayManager.getDisplayData(displayId) ?: continue
-            val started = timeline.withPaused(false, now)
-            timelines[displayId] = started
-            broadcast(display, started)
+            if (WatchPartyManager.hasSession(displayId)) {
+                startHolds.remove(displayId)
+                continue
+            }
+            val display = DisplayManager.getDisplayData(displayId)
+            if (display == null || timelines[displayId] == null) {
+                startHolds.remove(displayId)
+                continue
+            }
+            release(display, now)
         }
     }
 

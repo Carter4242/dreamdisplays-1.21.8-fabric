@@ -18,11 +18,14 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * Server can resolve region membership (i.e. `WorldGuard` is installed), so the region access
      * level is a real choice.
      */
-    REGION_ACCESS("region_access");
+    REGION_ACCESS("region_access"),
+
+    /** Server gates start holds on clients' `DisplayReadiness` reports and schedules starts (`DisplaySync.startInMs`). */
+    DISPLAY_READINESS("display_readiness");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
-        val playbackFeatures: List<ServerFeature> = [MODES, WATCH_PARTY, BROADCAST]
+        val playbackFeatures: List<ServerFeature> = [MODES, WATCH_PARTY, BROADCAST, DISPLAY_READINESS]
 
         /** Playback-related feature tokens for string-based wire protocols. */
         val playbackFeatureWires: List<String> = playbackFeatures.toWire()

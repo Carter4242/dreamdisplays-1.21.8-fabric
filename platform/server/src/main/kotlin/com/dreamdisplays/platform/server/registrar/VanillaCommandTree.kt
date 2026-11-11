@@ -264,6 +264,14 @@ object VanillaCommandTree {
                 executes { ctx -> VanillaFullscreenCommand.list(ctx) }
             }
         }
+        // In-world events: the same preparation without a fullscreen broadcast; alone it lists preparations
+        literal("prepare", tip("suggestPrepare")) {
+            requires { permitted(it, { p -> p.fullscreenStart }, VanillaPermissions.Fallback.OP) }
+            executes { ctx -> VanillaFullscreenCommand.list(ctx) }
+            fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                DisplaySuggestions.targets(typed, remote(ctx.source))
+            }
+        }
     }
 
     private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenSource(

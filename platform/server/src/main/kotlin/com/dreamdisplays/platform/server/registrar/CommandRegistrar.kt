@@ -338,6 +338,14 @@ object CommandRegistrar {
                 executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
             }
         }
+        // In-world events: the same preparation without a fullscreen broadcast; alone it lists preparations
+        literal("prepare", tip("suggestPrepare")) {
+            requires { it.sender.hasPermission(PaperServer.config.permissions.fullscreenStart) }
+            executesCommand { ctx -> PaperFullscreenCommand.list(ctx.source.sender) }
+            fullscreenSource(prepareFlags, ::runFullscreenPrepare) { ctx, typed ->
+                DisplaySuggestions.targets(typed, remote(ctx.source))
+            }
+        }
     }
 
     private fun LiteralArgumentBuilder<CommandSourceStack>.fullscreenSource(

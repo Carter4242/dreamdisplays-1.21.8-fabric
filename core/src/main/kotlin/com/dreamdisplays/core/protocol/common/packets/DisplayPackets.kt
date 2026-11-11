@@ -59,6 +59,25 @@ data class DisplaySync(
     @ProtoNumber(6) val serverTimeMs: Long = 0,
     @ProtoNumber(7) val loop: Boolean = false,
     @ProtoNumber(8) val mode: Int = 0,
+    /**
+     * A start scheduled slightly ahead: playback begins at [currentTimeMs] this many ms after [serverTimeMs], so every
+     * viewer can begin on the same frame. Only with [isPaused] false; clients that do not know the field just start now.
+     */
+    @ProtoNumber(9) val startInMs: Int = 0,
+) : DreamPacket
+
+/**
+ * Client -> server: whether this client holds a display ready to play at once (paused on a decoded frame with its
+ * stream and sound open) and at which position. Lets the server end a start hold the moment every viewer is ready.
+ * Sent only to servers advertising `display_readiness`; [state] is a `ReadinessState` wire value.
+ */
+@Serializable
+data class DisplayReadiness(
+    @ProtoNumber(1) val id: @Serializable(UuidSerializer::class) UUID = ZERO_UUID,
+    @ProtoNumber(2) val state: Int = 0,
+    @ProtoNumber(3) val positionMs: Long = 0,
+    /** The client's one-way latency to the server, in ms (half its round trip). */
+    @ProtoNumber(4) val latencyMs: Int = 0,
 ) : DreamPacket
 
 /** Client asks the server for the authoritative playback state of a display. */

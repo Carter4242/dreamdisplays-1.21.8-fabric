@@ -571,7 +571,16 @@ internal class PlaybackSessionManager(
     }
 
     /** One line per seek with how long playback took to resume, for sync tuning (see `[dd-sync]` client logs). */
+    /** How long the last in-place seek took to reach its first frame, in ms; -1 before one has. */
+    @Volatile
+    var lastInPlaceSeekMs: Long = -1L
+        private set
+
+    /** True while the live channel decodes in-process, the precondition for an in-place seek. */
+    val seeksInPlace: Boolean get() = active?.inProcess == true && !parkFlag.get()
+
     private fun logSeekDone(offsetNanos: Long, startedNanos: Long, how: String) {
+        if (how == "in-place") lastInPlaceSeekMs = (System.nanoTime() - startedNanos) / 1_000_000
         logger.info(
             "[dd-sync] {} seek to {} ms took {} ms ({})",
             debugLabel.take(8), offsetNanos / 1_000_000, (System.nanoTime() - startedNanos) / 1_000_000, how,

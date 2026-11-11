@@ -44,10 +44,15 @@ default_volume = 50
 # Max displays one player may own at once. 0 or less means no limit
 max_displays_per_player = 0
 
-# Synced displays: after a resume / a seek or restart, the timeline stays paused this many seconds so every
-# viewer can line up on the same frame before playback starts together (0 to 60, 0 = start at once)
+# Synced displays: after a resume / a seek or restart, the timeline stays paused until every nearby viewer holds the
+# video ready at the new position (instant when it already was, e.g. resuming a paused display), for at most this
+# many seconds, then everyone starts together (0 to 60, 0 = start at once without waiting)
 resume_hold_seconds = 1
 seek_hold_seconds = 3
+
+# Starts are scheduled this far ahead at most (covering the slowest viewer's latency) so everyone begins on the
+# same frame; 0 starts on receipt (0 to 1000 ms)
+start_lead_max_ms = 150
 
 # Playback mode new displays start in: "synced" (everyone sees the same moment) or "local"
 default_mode = "synced"

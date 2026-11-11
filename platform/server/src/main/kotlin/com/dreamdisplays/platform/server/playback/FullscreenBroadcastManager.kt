@@ -203,7 +203,8 @@ object FullscreenBroadcastManager {
             title = title,
             namedTargets = namedTargets,
             radius = radius,
-            timeline = if (virtual) Timeline.start(timelineAnchorMs ?: now, loop = true) else null,
+            // Prepared clients hold the start frame: schedule it a moment ahead so they all begin together
+            timeline = if (virtual) Timeline.start(timelineAnchorMs ?: (now + preparedLead(display, preparation)), loop = true) else null,
         )
         sessions[sessionId] = session
         deliverToAll(session)
@@ -221,6 +222,9 @@ object FullscreenBroadcastManager {
         persist()
         return sessionId
     }
+
+    private fun preparedLead(display: DisplayData, preparation: Preparation?): Long =
+        if (preparation == null) 0L else ReadinessTracker.leadMs(display.id, preparation.roster.delivered)
 
     /** Stops [sessionId], notifying every player it was shown to. Returns false if it doesn't exist. */
     fun stop(sessionId: String): Boolean {

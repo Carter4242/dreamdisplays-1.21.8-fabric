@@ -13,6 +13,7 @@ import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.proxy.ProxyBridge
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
@@ -119,6 +120,7 @@ object PaperV2Networking : PluginMessageListener {
                 packet.sessionId, player.uniqueId, FullscreenAckAction.fromWire(packet.action),
             )
 
+            is DisplayReadiness -> ReadinessTracker.onReport(player.uniqueId, packet)
             is FullscreenPrepareStatus -> FullscreenBroadcastManager.onPrepareStatus(
                 player.uniqueId, packet.prepareId, packet.displayId, FullscreenPrepareState.fromWire(packet.state),
             )
