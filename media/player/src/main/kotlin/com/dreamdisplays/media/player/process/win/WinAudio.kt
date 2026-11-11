@@ -48,9 +48,16 @@ object WinAudio {
     class Capture internal constructor(
         val plan: ShareAudio.Plan, val format: ShareAudio.Format, private val thread: Thread,
         private val stopFlag: java.util.concurrent.atomic.AtomicBoolean,
+        private val endedWhy: java.util.concurrent.atomic.AtomicReference<String?>,
     ) {
         /** Ends the capture; its thread notices within 10 ms. */
         fun stop() = stopFlag.set(true)
+
+        /**
+         * Why the capture ended on its own (its device went away, or the default output changed under a whole-device
+         * capture), or null while it runs or after [stop].
+         */
+        val ended: String? get() = endedWhy.get()
     }
 
     /**
@@ -59,6 +66,7 @@ object WinAudio {
      */
     fun start(plan: ShareAudio.Plan, sink: (Long, ByteArray) -> Unit): Capture {
         val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val ended = java.util.concurrent.atomic.AtomicReference<String?>()
         val ready = CountDownLatch(1)
         var failure: Throwable? = null
         var format = FORMAT
@@ -73,6 +81,8 @@ object WinAudio {
                     ShareAudio.Plan.DeviceLoopback -> activateDefaultRender(WinApi.IID_IAUDIO_CLIENT)
                     else -> throw IllegalArgumentException("not a WASAPI plan: $plan")
                 }
+                // A whole-device capture stays on the device it opened: it watches for the default output to move
+                val device = if (plan == ShareAudio.Plan.DeviceLoopback) runCatching { defaultRenderId() }.getOrNull() else null
                 event = WinApi.kernel32.CreateEventW(null, false, false, null)
                 format = initialize(client, event)
                 val out = PointerByReference()
@@ -80,10 +90,13 @@ object WinAudio {
                 capture = out.value
                 check(call(client, 10), "IAudioClient.Start")
                 ready.countDown()
-                pump(capture!!, format, event, stop, sink)
+                pump(capture!!, format, event, stop, sink, device)
                 call(client, 11)
             } catch (t: Throwable) {
-                if (ready.count > 0L) failure = t else logger.warn("Share audio capture stopped: {}", t.toString())
+                if (ready.count > 0L) failure = t else {
+                    logger.warn("Share audio capture stopped: {}", t.toString())
+                    if (!stop.get()) ended.set(t.message ?: t.toString())
+                }
             } finally {
                 ready.countDown()
                 release(capture)
@@ -102,7 +115,7 @@ object WinAudio {
         }
         failure?.let { throw it }
         if (!thread.isAlive) throw IllegalStateException("audio capture ended at once")
-        return Capture(plan, format, thread, stop)
+        return Capture(plan, format, thread, stop, ended)
     }
 
     /**
@@ -147,9 +160,10 @@ object WinAudio {
 
     private fun pump(
         capture: Pointer, format: ShareAudio.Format, event: Pointer?, stop: java.util.concurrent.atomic.AtomicBoolean,
-        sink: (Long, ByteArray) -> Unit,
+        sink: (Long, ByteArray) -> Unit, device: String?,
     ) {
         val frameBytes = format.bytesPerFrame
+        var deviceCheckNanos = System.nanoTime()
         val size = IntByReference()
         val data = PointerByReference()
         val frames = IntByReference()
@@ -158,6 +172,11 @@ object WinAudio {
         val qpcPos = LongByReference()
         while (!stop.get()) {
             if (event != null) WinApi.kernel32.WaitForSingleObject(event, 10) else Thread.sleep(10)
+            if (device != null && System.nanoTime() - deviceCheckNanos >= DEVICE_CHECK_NANOS) {
+                deviceCheckNanos = System.nanoTime()
+                val now = runCatching { defaultRenderId() }.getOrNull()
+                if (now != null && now != device) throw IllegalStateException("the default output device changed")
+            }
             while (!stop.get()) {
                 check(call(capture, 5, size), "IAudioCaptureClient.GetNextPacketSize")
                 if (size.value == 0) break
@@ -208,6 +227,37 @@ object WinAudio {
             try {
                 check(call(device, 3, iid, WinApi.CLSCTX_ALL, null, out), "IMMDevice.Activate")
                 return out.value
+            } finally {
+                release(device)
+            }
+        } finally {
+            release(enumerator)
+        }
+    }
+
+    /** How often a whole-device capture checks that it still records the default output. */
+    private const val DEVICE_CHECK_NANOS = 2_000_000_000L
+
+    /** The default output device's endpoint id (multimedia role, as [activateDefaultRender]), or null when there is none. */
+    private fun defaultRenderId(): String? {
+        val out = PointerByReference()
+        check(
+            WinApi.ole32.CoCreateInstance(WinApi.CLSID_MM_DEVICE_ENUMERATOR, null, WinApi.CLSCTX_ALL, WinApi.IID_IMM_DEVICE_ENUMERATOR, out),
+            "CoCreateInstance(MMDeviceEnumerator)",
+        )
+        val enumerator = out.value
+        try {
+            if (call(enumerator, 4, 0 /* eRender */, 1 /* eMultimedia */, out) < 0) return null
+            val device = out.value
+            try {
+                // IMMDevice::GetId: a CoTaskMem string
+                if (call(device, 5, out) < 0) return null
+                val id = out.value ?: return null
+                try {
+                    return id.getWideString(0)
+                } finally {
+                    WinApi.ole32.CoTaskMemFree(id)
+                }
             } finally {
                 release(device)
             }

@@ -84,6 +84,10 @@ object ScreenShare {
         @Volatile
         var toldNoSound = false
 
+        /** Sound captures started again after one ended on its own (see [restartAudio]). */
+        @Volatile
+        var audioRestarts = 0
+
         /** The relay could not be reached at once and the same plan already got its one more try. */
         @Volatile
         var relayRetried = false
@@ -362,6 +366,9 @@ object ScreenShare {
             stop(r, reason)
             return
         }
+
+        // Sound capture that ended on its own (its device went away, or the default output moved)
+        r.capture?.let { c -> c.ended?.let { why -> restartAudio(r, c, why) } }
 
         val now = System.currentTimeMillis()
         if (now - r.lastHeartbeatMs >= ScreenShareServerRules.HEARTBEAT_INTERVAL_MS &&
@@ -642,6 +649,48 @@ object ScreenShare {
         }
         return null
     }
+
+    /**
+     * [dead] (a share's sound capture) ended on its own for [why]: it is started again on the device as it is now,
+     * feeding the same pipe, so the stream's sound carries on; when that cannot be done (another sample format, no
+     * device, too many tries), the share goes on without sound, the badge says so and the sharer is told.
+     */
+    private fun restartAudio(r: Running, dead: WinAudio.Capture, why: String) {
+        r.capture = null
+        stopCapture(dead)
+        val pipe = r.pipe
+        if (pipe == null || r.audioRestarts >= MAX_AUDIO_RESTARTS) {
+            soundLost(r, why)
+            return
+        }
+        r.audioRestarts++
+        logger.warn("Share sound capture ended ({}); capturing it again.", why)
+        thread("DreamDisplays-share-audio-restart") {
+            val fresh = runCatching { WinAudio.start(dead.plan) { nanos, data -> r.pipe?.offer(nanos, data) } }
+                .onFailure { logger.warn("Share sound could not be captured again: {}", it.toString()) }
+                .getOrNull()
+            if (fresh != null) {
+                audioCaptures += fresh
+                val kept = synchronized(lock) {
+                    (fresh.format == dead.format && !r.stopped && r.pipe === pipe).also { if (it) r.capture = fresh }
+                }
+                if (kept) return@thread
+                stopCapture(fresh)
+            }
+            // Stopped, or the capture was relaunched with sound of its own meanwhile: nothing was lost
+            if (r.stopped || r.pipe !== pipe) return@thread
+            soundLost(r, why)
+        }
+    }
+
+    private fun soundLost(r: Running, why: String) {
+        if (r.stopped) return
+        logger.warn("Share sound lost for the rest of this run: {}", why)
+        r.audio = null
+        notify(ClientMessage.SHARE_AUDIO_LOST.component().withStyle(ChatFormatting.YELLOW))
+    }
+
+    private const val MAX_AUDIO_RESTARTS = 5
 
     private fun stopCapture(capture: WinAudio.Capture) {
         capture.stop()

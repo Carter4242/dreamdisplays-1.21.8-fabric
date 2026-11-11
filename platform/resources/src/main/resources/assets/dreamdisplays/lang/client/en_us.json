@@ -92,6 +92,7 @@
   "dreamdisplays.share.audio.off": "no sound",
   "dreamdisplays.share.audio.server_off": "This server shares screens without sound.",
   "dreamdisplays.share.audio.server_off.badge": "no sound (server)",
+  "dreamdisplays.share.audio.lost": "Screen share sound stopped: the sound device changed or went away. The picture goes on.",
   "dreamdisplays.share.audio.unavailable": "Screen share is running without sound: the sound you picked could not be captured.",
   "dreamdisplays.ui.subtitles_off": "Off",
   "dreamdisplays.ui.schedule_play": "Starts in %s",
