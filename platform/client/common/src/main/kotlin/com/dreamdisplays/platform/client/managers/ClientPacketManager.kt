@@ -49,6 +49,10 @@ object ClientPacketManager {
                 // A timeline for a video this client was not told about: ask for the display again (and still follow
                 // the timeline meanwhile, so pauses and seeks keep applying)
                 com.dreamdisplays.platform.client.displays.ServerMediaGens.onSync(packet)
+                com.dreamdisplays.platform.client.displays.RecentTimelines.record(
+                    packet,
+                    DisplayRegistry.screens[packet.id]?.videoUrl ?: DisplayRegistry.unloadedScreens[packet.id]?.videoUrl,
+                )
                 DisplayRegistry.screens[packet.id]?.let {
                     it.updateData(packet)
                     DisplayRegistry.recordScreen(it)
@@ -103,6 +107,7 @@ object ClientPacketManager {
 
     private fun handleDelete(packet: DisplayDelete) {
         com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(packet.id)
+        com.dreamdisplays.platform.client.displays.RecentTimelines.forget(packet.id)
         DisplayRegistry.screens[packet.id]?.let { DisplayRegistry.unregisterScreen(it) }
         DisplayRegistry.unloadedScreens.remove(packet.id)
         DisplayLifecycleManager.forgetInfo(packet.id)
@@ -113,6 +118,7 @@ object ClientPacketManager {
     private fun handleClearCache(packet: ClearCache) {
         packet.ids.forEach { uuid ->
             com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(uuid)
+            com.dreamdisplays.platform.client.displays.RecentTimelines.forget(uuid)
             DisplayRegistry.screens[uuid]?.let { DisplayRegistry.unregisterScreen(it) }
             DisplayRegistry.unloadedScreens.remove(uuid)
             DisplayLifecycleManager.forgetInfo(uuid)
@@ -126,6 +132,7 @@ object ClientPacketManager {
         serverSnapshot = ServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.ServerMediaGens.reset()
+        com.dreamdisplays.platform.client.displays.RecentTimelines.reset()
         com.dreamdisplays.platform.client.displays.ReportRequests.reset()
         DisplayLifecycleManager.clearInfo()
         com.dreamdisplays.platform.client.displays.ServerOverrides.reset()

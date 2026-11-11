@@ -285,6 +285,14 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                     pending = null
                     return@waitForMFInit
                 }
+                // A fresh player that opened its stream before any timeline was known (back in range with a cached
+                // resolve) runs from its own start, far from the others: move it there now, its stale picture
+                // cleared, rather than show its opening and then wait for the landing to be judged
+                if (initialTimeline && !packet.paused && screen.videoStarted && joinCorrection(System.nanoTime())) {
+                    screen.markInitialTimelineReady()
+                    pending = null
+                    return@waitForMFInit
+                }
                 // While playing, a not-running clock means the stream is (re)starting; its position is
                 // meaningless, so let the tick loop measure once it runs.
                 if (!packet.paused && !screen.isClockRunning() && !initialTimeline) return@waitForMFInit
@@ -526,6 +534,26 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         heldRestartEndedAtMs = -1L
     }
 
+    /**
+     * The first timeline of a player whose stream already opened somewhere else (see [joinIsFarOff]): seeks it to the
+     * live position with its picture cleared and has that landing fixed once. False when it is close enough to leave
+     * to the landing / drift correction.
+     */
+    private fun joinCorrection(now: Long): Boolean {
+        // A server that turned corrective seeks off gets none here either
+        if (!estimator.hasTimeline || estimator.paused || !screen.syncSettings.correctiveSeeks) return false
+        val periodMs = loopPeriodMs()
+        val target = wrapTimeline(estimator.targetMs(now / NANOS_PER_MS).roundToLong(), loop, periodMs)
+        val localMs = screen.syncPositionNanos / 1_000_000L
+        val driftMs = estimator.toRealMs(signedDrift(target - localMs, loop, periodMs).toDouble())
+        if (!joinIsFarOff(driftMs, coldLeadMs)) return false
+        logVerbose("[dd-sync] {} joined {}ms off the timeline: seeking there before showing it", shortId(), signed(driftMs))
+        screen.clearRenderedFrameForTimeline()
+        seekPlaying(target, now)
+        correctAfterLanding = true
+        return true
+    }
+
     /** Server resumed while this player is paused: start it so it lands on the live position. */
     private fun resumeAligned() {
         val cold = coldAfterSnap || !screen.resumesWarm()
@@ -695,7 +723,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private const val MIN_SCHEDULE_MS = 2.0
 
         /** A switch packet replayed later than this after its start is taken as this late (a stall beyond is a resync). */
-        private const val MAX_LATE_START_MS = 10_000
+        private const val MAX_LATE_START_MS = 20_000
 
         /** A karaoke lead change at least this big is jumped at once; smaller ones are closed by rate. */
         private const val LEAD_JUMP_MIN_MS = 60
@@ -792,6 +820,14 @@ internal fun heldForLead(driftMs: Long, toleranceMs: Long, leadMs: Long, rate: D
 
 /** How late (ms, never negative) a scheduled start due at [dueNanos] runs at [nowNanos]: time the video already played. */
 internal fun startLatenessMs(dueNanos: Long, nowNanos: Long): Double = ((nowNanos - dueNanos) / 1_000_000.0).coerceAtLeast(0.0)
+
+/**
+ * Whether a player's first timeline finds its stream [driftMs] (real ms) off the live position, further than a cold
+ * start primed there lands (about [coldLeadMs] either way, plus a second): it opened before any timeline was known.
+ */
+internal fun joinIsFarOff(driftMs: Double, coldLeadMs: Long): Boolean = abs(driftMs) > coldLeadMs + JOIN_SLACK_MS
+
+private const val JOIN_SLACK_MS = 1_000L
 
 /**
  * Whether a timeline stamped [serverTimeMs] is older than the last one applied ([lastServerTimeMs]) and is dropped. An

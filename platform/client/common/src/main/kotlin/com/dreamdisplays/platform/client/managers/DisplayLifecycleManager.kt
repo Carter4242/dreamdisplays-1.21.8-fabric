@@ -273,6 +273,13 @@ object DisplayLifecycleManager {
 
         if (data.videoUrl.isNotEmpty()) {
             displayScreen.loadVideo(data.videoUrl, data.lang)
+            // Back in range: open the stream where the shared clock is, from the timeline the server kept sending,
+            // not at the video's beginning while the one it asks for is on its way
+            if (displayScreen.followsServerTimeline) {
+                com.dreamdisplays.platform.client.displays.RecentTimelines.replayable(
+                    data.uuid, data.videoUrl, com.dreamdisplays.platform.client.displays.ServerMediaGens.of(data.uuid),
+                )?.let { displayScreen.updateData(it) }
+            }
         }
     }
 
