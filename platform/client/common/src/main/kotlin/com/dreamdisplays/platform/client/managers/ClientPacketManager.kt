@@ -62,6 +62,7 @@ object ClientPacketManager {
             is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)
             is QueueState -> com.dreamdisplays.platform.client.displays.DisplayQueues.apply(packet)
             is KaraokeClockPing -> com.dreamdisplays.platform.client.karaoke.KaraokeClient.onClockPing(packet)
+            is ScreenShareState -> com.dreamdisplays.platform.client.displays.ScreenShare.onState(packet)
             else -> logger.debug("Ignoring non-client-bound packet {}.", packet::class.simpleName)
         }
     }
@@ -75,6 +76,7 @@ object ClientPacketManager {
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()
             ?.onServerCapabilities(packet)
         Initializer.sendPacket(SetDisplaysEnabled(ClientStateManager.displaysEnabled))
+        com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
     }
 
     private fun applyDisplaysEnabled(enabled: Boolean) {

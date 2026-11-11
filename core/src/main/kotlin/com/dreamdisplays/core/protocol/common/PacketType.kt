@@ -28,6 +28,8 @@ import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
+import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
+import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
@@ -96,7 +98,12 @@ enum class PacketType(
     KARAOKE_OFFSET_REPORT(71, KaraokeOffsetReport::class, PacketDirection.CLIENT_TO_SERVER),
     KARAOKE_CLOCK_PING(72, KaraokeClockPing::class, PacketDirection.SERVER_TO_CLIENT),
     KARAOKE_CLOCK_PONG(73, KaraokeClockPong::class, PacketDirection.CLIENT_TO_SERVER),
-    KARAOKE_MIC_MARKERS(74, KaraokeMicMarkers::class, PacketDirection.CLIENT_TO_SERVER);
+    KARAOKE_MIC_MARKERS(74, KaraokeMicMarkers::class, PacketDirection.CLIENT_TO_SERVER),
+
+    // Built-in screen sharing to a live relay; only exchanged with servers that advertise ServerFeature.SCREEN_SHARE.
+    // Ids start at 80 so packets added elsewhere in the 60s/70s cannot collide.
+    SCREEN_SHARE_REQUEST(80, ScreenShareRequest::class, PacketDirection.CLIENT_TO_SERVER),
+    SCREEN_SHARE_STATE(81, ScreenShareState::class, PacketDirection.SERVER_TO_CLIENT);
 
     companion object {
         private val byId = entries.associateBy { it.id }

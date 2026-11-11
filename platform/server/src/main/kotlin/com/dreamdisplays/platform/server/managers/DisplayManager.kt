@@ -292,6 +292,7 @@ object DisplayManager {
         FullscreenBroadcastManager.onDisplayRemoved(displayData.id)
         PipPinManager.onDisplayRemoved(displayData.id)
         QueueManager.onDisplayRemoved(displayData.id)
+        com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onDisplayRemoved(displayData.id)
         displays.remove(displayData.id)
         proximityIndex.forgetDisplay(displayData.id)
         ServerApiHost.current?.removed(displayData)

@@ -74,6 +74,7 @@ class PlayerListener : Listener {
         PlayerManager.removeVersion(event.player)
         V2PlayerTracker.clear(event.player.uniqueId)
         WatchPartyManager.onPlayerQuit(event.player.uniqueId)
+        com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerQuit(event.player.uniqueId)
         FullscreenBroadcastManager.onPlayerQuit(event.player.uniqueId)
         ReadinessTracker.forgetPlayer(event.player.uniqueId)
         SelectionManager.resetSelection(event.player.uniqueId)

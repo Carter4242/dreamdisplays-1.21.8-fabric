@@ -30,6 +30,7 @@ data class SettingsSection(
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
     val queue: QueueConfig = QueueConfig(),
     val karaoke: KaraokeConfig = KaraokeConfig(),
+    val live: LiveConfig = LiveConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
     val policy: DisplayPolicy = DisplayPolicy.EMPTY,
     val clients: ClientsConfig = ClientsConfig(),
@@ -133,6 +134,17 @@ data class SettingsSection(
         val singer_volume: Double = 1.4,
         val debug: Boolean = false,
     )
+
+    /**
+     * `[live]` section: the relay (e.g. MediaMTX) the built-in "Share screen" publishes to. Both URLs are templates
+     * whose `{id}` is replaced by a fresh random stream id per share; sharing is off while either is empty.
+     */
+    data class LiveConfig(
+        val relay_publish_url: String = "",
+        val relay_play_url: String = "",
+    ) {
+        val shareEnabled: Boolean get() = relay_publish_url.contains("{id}") && relay_play_url.contains("{id}")
+    }
 
     /** Reports section. */
     data class ReportsConfig(
@@ -261,6 +273,7 @@ data class PermissionsSection(
     val queue get() = permissions.queue
     val karaoke get() = permissions.karaoke
     val karaokeJoin get() = permissions.karaoke_join
+    val share get() = permissions.share
 
     data class PermissionsConfig(
         val create: String = "dreamdisplays.create",
@@ -294,6 +307,7 @@ data class PermissionsSection(
         val queue: String = "dreamdisplays.queue",
         val karaoke: String = "dreamdisplays.karaoke",
         val karaoke_join: String = "dreamdisplays.karaoke.join",
+        val share: String = "dreamdisplays.share",
     )
 }
 
@@ -381,6 +395,10 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             debug = t.boolOrNull("karaoke.debug") ?: false,
         ),
         policy = parsePolicy(t),
+        live = SettingsSection.LiveConfig(
+            relay_publish_url = (t?.get("live.relay_publish_url") as? String)?.trim() ?: "",
+            relay_play_url = (t?.get("live.relay_play_url") as? String)?.trim() ?: "",
+        ),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",
             allow_forced = t?.getBoolean("fullscreen.allow_forced") ?: true,
@@ -439,6 +457,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             queue = t?.getString("permissions.queue") ?: "dreamdisplays.queue",
             karaoke = t?.getString("permissions.karaoke") ?: "dreamdisplays.karaoke",
             karaoke_join = t?.getString("permissions.karaoke_join") ?: "dreamdisplays.karaoke.join",
+            share = t?.getString("permissions.share") ?: "dreamdisplays.share",
         )
     ),
     proxy = ProxySection(

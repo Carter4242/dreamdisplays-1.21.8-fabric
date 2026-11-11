@@ -108,6 +108,16 @@ object LiveStreamUrls {
         return "$base?${params.joinToString("&")}"
     }
 
+    /**
+     * The URL a publisher should push to for [url]: [playUrl]'s latency handling, plus SRT's `pkt_size=1316` (seven
+     * MPEG-TS packets, the size SRT relays expect) when absent.
+     */
+    fun publishUrl(url: String, latencyMs: Int? = null): String {
+        val play = playUrl(url, latencyMs)
+        if (schemeOf(play) != "srt" || play.contains("pkt_size=", ignoreCase = true)) return play
+        return "$play&pkt_size=1316"
+    }
+
     /** A URL SRT latency in microseconds: a value up to [MAX_SRT_LATENCY_MS] is read as ms; clamped to the bounds. */
     internal fun latencyMicros(raw: Long): Long {
         val micros = if (raw <= MAX_SRT_LATENCY_MS) raw * 1_000L else raw

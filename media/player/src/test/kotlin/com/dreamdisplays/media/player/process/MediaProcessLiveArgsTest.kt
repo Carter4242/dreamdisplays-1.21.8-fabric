@@ -47,6 +47,9 @@ class MediaProcessLiveArgsTest {
     fun `rtsp runs over tcp and rtmp asks for a live feed`() {
         val rtsp = input("rtsp://h:8554/a")
         assertEquals("tcp", rtsp.valueOf("-rtsp_transport"))
+        assertEquals("2000000", rtsp.valueOf("-timeout"))
+        assertFalse("-rw_timeout" in rtsp, "The RTSP demuxer rejects the generic I/O timeout.")
+        assertEquals("2000000", input("rtmp://h/live/a").valueOf("-rw_timeout"))
         assertEquals("0", rtsp.valueOf("-reorder_queue_size"))
         val rtmp = input("rtmps://h/live/a")
         assertEquals("live", rtmp.valueOf("-rtmp_live"))

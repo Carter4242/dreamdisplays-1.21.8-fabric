@@ -13,6 +13,7 @@ import com.dreamdisplays.util.DreamCoroutines
 object ClientShutdownManager {
     /** Stops the application, saves and unloads screens, shuts down coroutines, and interrupts the focuser. */
     fun stop() {
+        com.dreamdisplays.platform.client.displays.ScreenShare.onServerLeft()
         DreamServices.registry.getOrNull<ClientApplication>()?.stop()
         DisplayRegistry.saveAllScreens()
         ClientStartupManager.stop()

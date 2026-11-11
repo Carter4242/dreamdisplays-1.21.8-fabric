@@ -126,6 +126,19 @@ allowed_hosts = []
 # blocked_hosts = ["bad.example"]
 blocked_hosts = []
 
+[live]
+# Built-in "Share screen": a player with the share permission streams a monitor from the display menu to a relay
+# (MediaMTX, https://github.com/bluenviron/mediamtx) and everyone sees it on the display with well under a second of
+# delay. The mod encodes with its own FFmpeg; nobody needs OBS. Video only for now.
+# Both are templates: {id} becomes a fresh random stream id for every share, so nobody can guess where to publish.
+# Leave either empty to turn sharing off. The play URL must point at a public host (clients refuse private addresses).
+# Use RTMP with MediaMTX (open TCP 1935): ~35 ms through the relay. MediaMTX pins SRT at 120 ms per leg (~400 ms
+# end to end), and the macOS FFmpeg builds the mod downloads have no SRT at all.
+# relay_publish_url = "rtmp://relay.example.com:1935/{id}"
+# relay_play_url = "rtmp://relay.example.com:1935/{id}"
+relay_publish_url = ""
+relay_play_url = ""
+
 [queue]
 # "Up next": players queue videos from the display menu and a synced / broadcast display moves on to the next
 # one, for everyone, when the current video ends. Whoever may change a display's video may queue and skip;
@@ -264,6 +277,7 @@ schedule_others = "dreamdisplays.schedule.others"               # Default: opera
 queue = "dreamdisplays.queue"                                   # Default: operator (the /display queue command)
 karaoke = "dreamdisplays.karaoke"                               # Default: operator (/display karaoke, except the line below)
 karaoke_join = "dreamdisplays.karaoke.join"                     # Default: operator (/display karaoke join, leave, line)
+share = "dreamdisplays.share"                                   # Default: operator (Share screen in the display menu)
 delete_others = "dreamdisplays.delete.others"                   # Default: operator
 list = "dreamdisplays.list"                                     # Default: operator
 stats = "dreamdisplays.stats"                                   # Default: operator

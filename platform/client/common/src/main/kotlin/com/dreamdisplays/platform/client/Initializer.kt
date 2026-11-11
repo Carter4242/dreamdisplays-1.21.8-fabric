@@ -95,6 +95,7 @@ object Initializer {
         }
 
         val serverId = ClientStateManager.connectedServerId
+        com.dreamdisplays.platform.client.displays.ScreenShare.onServerLeft()
         DisplayRegistry.saveAllScreens()
         DisplayRegistry.unloadAll()
         ClientStateManager.isPremium = false
@@ -138,6 +139,7 @@ object Initializer {
         graphics.nextStratum()
         //?}
         FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
+        com.dreamdisplays.platform.client.displays.ScreenShare.renderIndicator(mc, graphics)
         // No screen means gameplay owns the cursor: overlays show no hover and take no clicks.
         DreamServices.registry.getOrNull<OverlayManager>()
             ?.renderAll(

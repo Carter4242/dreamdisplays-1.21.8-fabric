@@ -92,3 +92,18 @@ class LiveStreamUrlsTest {
         assertEquals("rtsp://h:8554/a", LiveStreamUrls.playUrl("rtsp://h:8554/a"))
     }
 }
+
+class LiveStreamPublishUrlTest {
+    @Test
+    fun `an srt publish url gets latency, live transport and the relay packet size`() {
+        assertEquals(
+            "srt://h:8890?streamid=publish:a&latency=60000&transtype=live&pkt_size=1316",
+            LiveStreamUrls.publishUrl("srt://h:8890?streamid=publish:a", 60),
+        )
+        assertEquals(
+            "srt://h:8890?pkt_size=1000&latency=80000&transtype=live",
+            LiveStreamUrls.publishUrl("srt://h:8890?pkt_size=1000"),
+        )
+        assertEquals("rtmp://h/live/a", LiveStreamUrls.publishUrl("rtmp://h/live/a", 60))
+    }
+}

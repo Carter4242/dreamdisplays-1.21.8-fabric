@@ -102,15 +102,25 @@ object DisplayActions {
             return
         }
 
+        // A video set by hand ends any screen share on this display (the share no longer owns it)
+        ScreenShareActions.onVideoSetByHand(displayId)
+        applyVideo(displayData, url, sanitizedLang, player)
+    }
+
+    /**
+     * Points [displayData] at [url] / [lang] and tells everyone: broadcast, timeline reset, queue, addons. [persist]
+     * false keeps the stored URL as it was (a screen share's relay URL must never outlive the share in storage).
+     */
+    internal fun applyVideo(displayData: PaperDisplayData, url: String, lang: String, actor: Player?, persist: Boolean = true) {
         val previousUrl = displayData.url
         displayData.url = url
-        displayData.lang = sanitizedLang
-        ClientErrorReports.logCommand(
-            player, displayId, "video", null,
+        displayData.lang = lang
+        if (actor != null) ClientErrorReports.logCommand(
+            actor, displayData.id, "video", null,
             mapOf("mode" to displayData.mode.name.lowercase(), "url" to url, "previousUrl" to previousUrl),
         )
 
-        runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
+        if (persist) runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onVideoChanged(displayData)
         QueueManager.onVideoSetByHand(displayData)

@@ -56,6 +56,9 @@ object FFmpegBinary {
         )
     }
 
+    /** The binary [getPath] already resolved, or null; never downloads or probes (safe on the render thread). */
+    fun getPathIfResolved(): String? = cachedPath
+
     /** Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call. */
     fun getPath(): String? {
         cachedPath?.let { return it }

@@ -1,0 +1,135 @@
+package com.dreamdisplays.platform.client.ui.menu
+
+import com.dreamdisplays.platform.client.utils.buttonClickSound
+import com.dreamdisplays.platform.client.ui.GuiGraphicsCompat
+import com.dreamdisplays.platform.client.ui.drawText
+import com.dreamdisplays.platform.client.ui.kit.*
+//? if >=1.21.11 {
+import com.mojang.blaze3d.platform.cursor.CursorTypes
+//?}
+import net.minecraft.client.Minecraft
+import net.minecraft.client.resources.sounds.SimpleSoundInstance
+import net.minecraft.sounds.SoundEvents
+
+/**
+ * The "Share screen" popup that opens above the share button: one item per monitor. Its items are read when it opens,
+ * so a monitor plugged in since the menu opened shows up.
+ */
+class ShareDropdown(
+    private val listItems: () -> List<Pair<String, () -> Unit>>,
+) : PopupLayer {
+    override var visible: Boolean = false
+
+    private var items: List<Pair<String, () -> Unit>> = []
+
+    private var rect = UiRect(0, 0, WIDTH, ITEM_H * items.size)
+    private var animProgress = 0f
+    private var lastFrameNanos = 0L
+
+    /** Toggles dropdown visibility, re-reading the items when it opens. */
+    fun toggle() {
+        if (!visible) items = listItems()
+        visible = !visible && items.isNotEmpty()
+    }
+
+    /** Hides the dropdown. */
+    override fun hide() {
+        visible = false
+    }
+
+    /**
+     * Draws the dropdown anchored above ([anchorCenterX], [anchorY]), horizontally centered on that
+     * point (the button's own center) rather than growing out from one of its edges — easing in / out
+     * of [visible].
+     */
+    fun draw(g: GuiGraphicsCompat, anchorCenterX: Int, anchorY: Int, mouseX: Int, mouseY: Int) {
+        val now = System.nanoTime()
+        val dt = if (lastFrameNanos == 0L) 0.016f else ((now - lastFrameNanos) / 1e9f).coerceIn(0f, 0.1f)
+        lastFrameNanos = now
+
+        val target = if (visible) 1f else 0f
+        animProgress += (target - animProgress) * minOf(1f, dt * 12f)
+        if (animProgress < 0.01f) {
+            animProgress = 0f
+            return
+        }
+
+        if (items.isEmpty()) return
+        val height = ITEM_H * items.size
+        rect = UiRect(anchorCenterX - WIDTH / 2, anchorY - height - 2, WIDTH, height)
+
+        val scale = 0.85f + 0.15f * animProgress
+        val matrices = g.pose()
+        //? if >=1.21.6 {
+        matrices.pushMatrix()
+        matrices.translate(rect.centerX.toFloat(), rect.centerY.toFloat())
+        matrices.scale(scale, scale)
+        matrices.translate(-rect.centerX.toFloat(), -rect.centerY.toFloat())
+        //?} else
+        /*matrices.pushPose()
+        matrices.translate(rect.centerX.toDouble(), rect.centerY.toDouble(), 0.0)
+        matrices.scale(scale, scale, 1f)
+        matrices.translate(-rect.centerX.toDouble(), -rect.centerY.toDouble(), 0.0)*/
+
+        g.drawPanelSprite(rect, DROPDOWN_SPRITE, animProgress)
+
+        val hovered = if (visible && rect.contains(mouseX, mouseY)) (mouseY - rect.y) / ITEM_H else -1
+
+        val font = Minecraft.getInstance().font
+        val fy = rect.y + (ITEM_H - font.lineHeight) / 2
+        items.forEachIndexed { i, (label, _) ->
+            val itemY = rect.y + ITEM_H * i
+            if (i == hovered) {
+                g.fill(
+                    rect.x + 1,
+                    itemY,
+                    rect.x + WIDTH - 1,
+                    itemY + ITEM_H,
+                    scaleAlpha(UiTheme.HOVER_FILL, animProgress)
+                )
+                g.drawOutline(
+                    UiRect(rect.x + 1, itemY, WIDTH - 2, ITEM_H),
+                    scaleAlpha(UiTheme.CARD_BORDER_HOVER, animProgress)
+                )
+            }
+            val color = scaleAlpha(if (i == hovered) UiTheme.TEXT_PRIMARY else UiTheme.TEXT_DIM, animProgress)
+            g.drawText(font, label, rect.x + 6, fy + ITEM_H * i, color, false)
+        }
+
+        //? if >=1.21.11 {
+        if (visible && hovered >= 0 && animProgress > 0.5f) g.requestCursor(CursorTypes.POINTING_HAND)
+        //?}
+        //? if >=1.21.6 <1.21.11 {
+        if (visible && hovered >= 0 && animProgress > 0.5f) LegacyCursor.POINTING_HAND.request()
+        //?}
+
+        //? if >=1.21.6 {
+        matrices.popMatrix()
+        //?} else
+        /*matrices.popPose()*/
+    }
+
+    override fun contains(mx: Int, my: Int): Boolean =
+        mx in rect.x..rect.right && my in rect.y..rect.bottom
+
+    /**
+     * Handles a left click while visible: picks an item if the click is inside, always hides.
+     * Returns true if an item was picked (the click is consumed).
+     */
+    override fun handleClick(mx: Int, my: Int): Boolean {
+        if (!visible) return false
+        val inside = contains(mx, my)
+        visible = false
+        if (!inside || items.isEmpty()) return false
+        val index = ((my - rect.y) / ITEM_H).coerceIn(0, items.size - 1)
+        val s = SimpleSoundInstance.forUI(buttonClickSound(), 1.0f)
+        Minecraft.getInstance().soundManager.play(s)
+        items[index].second()
+        return true
+    }
+
+    companion object {
+        private const val WIDTH = 150
+        private const val ITEM_H = 18
+    }
+}

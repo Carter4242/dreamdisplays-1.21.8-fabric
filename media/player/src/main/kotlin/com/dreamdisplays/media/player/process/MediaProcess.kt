@@ -356,21 +356,22 @@ object MediaProcess {
         hwAccel.hwOutputFormat?.let { addAll(["-hwaccel_output_format", it]) }
         addAll(["-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay"])
         addAll(["-probesize", LIVE_PROBE_SIZE, "-analyzeduration", "0", "-max_delay", "0"])
-        addAll(["-rw_timeout", LIVE_RW_TIMEOUT_MICROS])
         when (LiveStreamUrls.schemeOf(url)) {
+            // RTSP opens its own sockets, so the generic I/O timeout does not exist for it ("Option not found")
             "rtsp" -> addAll(["-rtsp_transport", "tcp", "-reorder_queue_size", "0", "-timeout", LIVE_RW_TIMEOUT_MICROS])
             // The client buffer RTMP announces to the server (3 s by default)
-            "rtmp", "rtmps" -> addAll(["-rtmp_live", "live", "-rtmp_buffer", "100"])
+            "rtmp", "rtmps" -> addAll(["-rw_timeout", LIVE_RW_TIMEOUT_MICROS, "-rtmp_live", "live", "-rtmp_buffer", "100"])
+            else -> addAll(["-rw_timeout", LIVE_RW_TIMEOUT_MICROS])
         }
         if (decoder != null) addAll(["-c:v", decoder])
         addAll(["-i", url])
     }
 
     /**
-     * Bytes `FFmpeg` probes a live input for before it starts decoding. Stream parameters arrive with the first
-     * keyframe anyway, so anything larger only delays the first picture.
+     * Bytes `FFmpeg` probes a live input for before it starts decoding (its minimum). Stream parameters arrive with the
+     * first keyframe anyway; with the default probe the first picture of an RTMP or SRT stream took over 6 s.
      */
-    internal const val LIVE_PROBE_SIZE = "32768"
+    internal const val LIVE_PROBE_SIZE = "32"
 
     private fun MutableList<String>.addHttpOptions(url: String) {
         addAll(headerArgs(url))

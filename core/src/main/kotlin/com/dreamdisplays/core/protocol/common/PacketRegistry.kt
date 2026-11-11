@@ -30,6 +30,8 @@ import com.dreamdisplays.core.protocol.common.packets.RadiusPreview
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.core.protocol.common.packets.ReportDisplay
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
+import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
+import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
@@ -117,6 +119,8 @@ object PacketRegistry {
         Entry(PacketType.KARAOKE_CLOCK_PING, KaraokeClockPing::class, KaraokeClockPing.serializer()),
         Entry(PacketType.KARAOKE_CLOCK_PONG, KaraokeClockPong::class, KaraokeClockPong.serializer()),
         Entry(PacketType.KARAOKE_MIC_MARKERS, KaraokeMicMarkers::class, KaraokeMicMarkers.serializer()),
+        Entry(PacketType.SCREEN_SHARE_REQUEST, ScreenShareRequest::class, ScreenShareRequest.serializer()),
+        Entry(PacketType.SCREEN_SHARE_STATE, ScreenShareState::class, ScreenShareState.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }

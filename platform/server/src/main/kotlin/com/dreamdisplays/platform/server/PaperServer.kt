@@ -147,6 +147,7 @@ class PaperServer : JavaPlugin() {
         if (!::storage.isInitialized) return
         disableStep("stop addons") { PaperServerApi.stop() }
         disableStep("stop karaoke") { KaraokeManager.shutdown() }
+        disableStep("end screen shares") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.stopAll() }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }

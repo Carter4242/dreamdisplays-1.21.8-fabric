@@ -25,6 +25,8 @@ import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.displays.DisplayQueues
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.displays.ScreenShare
+import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.util.DreamCoroutines
@@ -81,6 +83,10 @@ class DisplayMenu private constructor(
                 .setAudioTrack(DisplayId(displayScreen.uuid), it.url)
         },
     )
+    private val shareDropdown = ShareDropdown {
+        ScreenShare.monitors().map { m -> ScreenCapture.label(m) to { ScreenShare.start(displayScreen.uuid, m) } }
+    }
+    private lateinit var shareButton: IconButton
     private val subtitleDropdown = SubtitleDropdown(
         getTracks = { displayScreen.subtitleTrackList },
         currentLang = { displayScreen.currentSubtitleLang.takeIf { displayScreen.subtitlesEnabled } },
@@ -380,12 +386,28 @@ class DisplayMenu private constructor(
                 skipButton = skipButton,
                 upNext = { if (ds.queueRunsHere) DisplayQueues.next(ds.uuid)?.let(QueueSection::titleOf) else null },
             )
+        // Share screen: picks a monitor (dropdown) when idle, stops at once while this display is the one shared to
+        shareButton = addUi(IconButton("share") {
+            if (ScreenShare.isSharing(ds.uuid)) {
+                ScreenShare.stop()
+                shareDropdown.hide()
+            } else {
+                shareDropdown.toggle()
+            }
+        })
+        shareButton.visibleWhen = { ScreenShare.available && !ds.errored }
+        shareButton.enabledWhen = { ScreenShare.isSharing(ds.uuid) || ds.canSetVideoHere }
         settings = SettingsSection(
             rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, accessReset),
-            ownerActions = [reportButton, deleteButton],
+            ownerActions = [reportButton, deleteButton, shareButton],
             buttonTooltips = [
                 deleteButton to { buttonTooltip(ClientMessage.BUTTON_DELETE.key) },
                 reportButton to { buttonTooltip(ClientMessage.BUTTON_REPORT.key) },
+                shareButton to {
+                    buttonTooltip(
+                        if (ScreenShare.isSharing(ds.uuid)) ClientMessage.SHARE_STOP.key else ClientMessage.SHARE_BUTTON.key,
+                    )
+                },
             ],
         )
         errorPanel = ErrorPanel(retryButton, deleteButton, reportButton) { ds.mediaError }
@@ -580,6 +602,13 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
+        if (shareButton.visible) {
+            if (ScreenShare.isSharing(ds.uuid)) {
+                val bottom = shareButton.y + shareButton.height
+                g.fill(shareButton.x + 2, bottom + 1, shareButton.x + shareButton.width - 2, bottom + 3, 0xFFFF5050.toInt())
+            }
+            shareDropdown.draw(g, shareButton.x + shareButton.width / 2, shareButton.y, mouseX, mouseY)
+        }
         if (suggestionsArea != null && tabs) {
             drawPanelTabs(g, suggestionsArea, mouseX, mouseY)
             drawSuggestionQueueButton(g, mouseX, mouseY)
@@ -898,6 +927,7 @@ class DisplayMenu private constructor(
         return audioTrackDropdown.handleScroll(mx, my, scrollY) ||
                 subtitleDropdown.handleScroll(mx, my, scrollY) ||
                 dropdown.claimScroll(mx, my) ||
+                shareDropdown.claimScroll(mx, my) ||
                 audioTrackDropdown.claimScroll(mx, my) ||
                 subtitleDropdown.claimScroll(mx, my) ||
                 (::suggestions.isInitialized && suggestions.claimPopupScroll(mx, my)) ||
@@ -910,6 +940,7 @@ class DisplayMenu private constructor(
         val x = mx.toDouble()
         val y = my.toDouble()
         return dropdown.claimClick(mx, my, button, onToggle = popoutButton.isMouseOver(x, y)) ||
+                shareDropdown.claimClick(mx, my, button, onToggle = shareButton.isMouseOver(x, y)) ||
                 audioTrackDropdown.claimClick(mx, my, button, onToggle = audioTrackButton.isMouseOver(x, y)) ||
                 subtitleDropdown.claimClick(mx, my, button, onToggle = subtitleButton.isMouseOver(x, y)) ||
                 suggestions.claimPopupClick(mx, my, button)

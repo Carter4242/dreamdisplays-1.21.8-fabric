@@ -668,6 +668,26 @@ message KaraokeMicMarkers {
   repeated int64 captureNanos = 2;
 }
 
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest'
+message ScreenShareRequest {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional bool start = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ScreenShareState'
+message ScreenShareState {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional bool active = 2;
+  // WARNING: a default value decoded when value is missing
+  optional string publishUrl = 3;
+  // WARNING: a default value decoded when value is missing
+  optional string error = 4;
+}
+
 message Uuid {
   // WARNING: a default value decoded when value is missing
   optional fixed64 msb = 1;

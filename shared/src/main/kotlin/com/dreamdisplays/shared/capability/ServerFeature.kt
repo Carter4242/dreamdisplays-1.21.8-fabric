@@ -36,7 +36,13 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * Server runs karaoke (Simple Voice Chat installed): takes karaoke latency / offset / mic marker reports and sends
      * clock pings; clients send none otherwise.
      */
-    KARAOKE("karaoke");
+    KARAOKE("karaoke"),
+
+    /**
+     * This player may share their screen to a display (`ScreenShareRequest` / `ScreenShareState`): the server has a
+     * relay configured and the player holds the share permission. Sent per player.
+     */
+    SCREEN_SHARE("screen_share");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
