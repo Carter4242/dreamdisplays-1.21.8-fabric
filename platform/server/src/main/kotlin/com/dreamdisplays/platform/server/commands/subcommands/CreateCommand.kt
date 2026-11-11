@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.platform.server.api.ServerApiHost
 import com.dreamdisplays.platform.client.utils.literalText
+import com.dreamdisplays.shared.geometry.ConformingLimits
 import com.dreamdisplays.shared.geometry.SurfaceCensus
 import com.dreamdisplays.shared.geometry.SurfaceRole
 import com.dreamdisplays.api.playback.model.DisplayAccess
@@ -329,7 +330,8 @@ private fun validateRegion(
     onWrongStructure: (() -> Unit)? = null,
 ): Boolean? {
     if (census.conforming) {
-        if (depth !in 1..maxOf(maxWidth, maxHeight)) {
+        // Clients refuse to show a larger one (its mesh is read from the world on their render thread)
+        if (depth !in 1..maxOf(maxWidth, maxHeight) || !ConformingLimits.fits(width, height, depth)) {
             sendError("structureTooLarge", arrayOf(maxWidth, maxHeight))
             return null
         }

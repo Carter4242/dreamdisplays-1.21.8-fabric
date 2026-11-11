@@ -7,6 +7,7 @@ import com.dreamdisplays.core.services.keys.MediaServices
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.shared.geometry.ConformingLimits
 import com.dreamdisplays.shared.storage.DisplayData
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.services.DisplayStorage
@@ -45,7 +46,7 @@ object DisplayLifecycleManager {
             logger.warn("Ignoring display ${packet.id}: unknown facing ${packet.facing}.")
             return
         }
-        if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
+        if (!isValidDisplaySize(packet.width, packet.height, packet.depth, packet.conforming)) {
             logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
             return
         }
@@ -259,7 +260,7 @@ object DisplayLifecycleManager {
     /*level.dimension().location().toString()*/
 
     private fun restoreScreen(data: DisplayData) {
-        if (!isValidDisplaySize(data.width, data.height, data.depth)) {
+        if (!isValidDisplaySize(data.width, data.height, data.depth, data.conforming)) {
             logger.warn("Skipping cached display ${data.uuid}: invalid size ${data.width}x${data.height}x${data.depth}.")
             DisplayStorage.removeDisplay(data.uuid)
             return
@@ -309,8 +310,10 @@ object DisplayLifecycleManager {
                 playerPos.x, playerPos.y, playerPos.z, x, y, z, width, height, facing, depth.coerceAtLeast(1),
             )
 
-    private fun isValidDisplaySize(width: Int, height: Int, depth: Int = 1): Boolean =
-        width in 1..MAX_DISPLAY_BLOCKS && height in 1..MAX_DISPLAY_BLOCKS && depth in 1..MAX_DISPLAY_BLOCKS
+    /** Each side within [MAX_DISPLAY_BLOCKS]; a wrapped display's volume also within [ConformingLimits]. */
+    private fun isValidDisplaySize(width: Int, height: Int, depth: Int = 1, conforming: Boolean = false): Boolean =
+        width in 1..MAX_DISPLAY_BLOCKS && height in 1..MAX_DISPLAY_BLOCKS && depth in 1..MAX_DISPLAY_BLOCKS &&
+                (!conforming || ConformingLimits.fits(width, height, depth))
 }
 
 /** The display's dimension: [serverWorld] when the server named one, else [playerDimension] (older servers). */
