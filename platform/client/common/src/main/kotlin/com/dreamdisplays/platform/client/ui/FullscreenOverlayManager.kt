@@ -88,7 +88,8 @@ object FullscreenOverlayManager {
     fun onClientTick(mc: Minecraft) {
         val screen = MinecraftScreenUtil.currentScreen(mc)
         val overlay = active
-        if (overlay != null && !screenWasOpen && screen is PauseScreen) {
+        // A pause screen opened while the window is unfocused is vanilla's pause-on-lost-focus (alt-tab), not Esc
+        if (overlay != null && !screenWasOpen && screen is PauseScreen && mc.isWindowActive) {
             MinecraftScreenUtil.setScreen(mc, null)
             if (overlay.forced) {
                 overlay.displayScreen.minimizeFullscreenToPip()
