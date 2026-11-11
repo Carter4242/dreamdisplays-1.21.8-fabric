@@ -43,7 +43,7 @@ class ScreenCaptureLiveTest {
         for ((i, screen) in screens.withIndex()) {
             for (software in listOf(false, true)) {
                 val c0 = System.nanoTime()
-                val choice = ScreenCapture.choose(ffmpeg, screen, softwareOnly = software)
+                val choice = assertNotNull(ScreenCapture.choose(ffmpeg, screen, softwareOnly = software))
                 val chooseMs = (System.nanoTime() - c0) / 1_000_000
                 choice.attempts.forEach { println("    test ${it.plan} @ ${it.adapter}: ${if (it.ok) "ok" else "FAIL ${it.error.lines().lastOrNull()}"} (${it.elapsedMs} ms)") }
                 val tag = "s${i + 1}_${if (software) "x264" else "auto"}"

@@ -64,6 +64,9 @@ internal object WinApi {
         fun SetWindowPos(hwnd: Pointer, after: Pointer?, x: Int, y: Int, cx: Int, cy: Int, flags: Int): Boolean
         fun IsWindow(hwnd: Pointer): Boolean
         fun FindWindowExW(parent: Pointer?, after: Pointer?, className: WString?, title: WString?): Pointer?
+        fun MonitorFromRect(rect: Memory, flags: Int): Pointer?
+        fun GetMonitorInfoW(monitor: Pointer, info: Memory): Boolean
+        fun EnumDisplayDevicesW(device: WString?, index: Int, info: Memory, flags: Int): Boolean
     }
 
     interface Dwmapi : StdCallLibrary {

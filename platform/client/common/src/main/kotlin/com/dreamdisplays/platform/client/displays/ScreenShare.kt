@@ -11,11 +11,13 @@ import com.dreamdisplays.core.share.ScreenShareServerRules
 import com.dreamdisplays.media.player.process.CaptureLifetime
 import com.dreamdisplays.core.share.ShareTimeline
 import com.dreamdisplays.media.player.process.FFmpegBinary
+import com.dreamdisplays.media.player.process.MacDisplays
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
 import com.dreamdisplays.media.player.process.ShareAudio
 import com.dreamdisplays.media.player.process.win.AudioPipe
 import com.dreamdisplays.media.player.process.win.WinAudio
+import com.dreamdisplays.media.player.process.win.WinScreens
 import com.dreamdisplays.media.player.process.win.WinWindows
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
@@ -207,6 +209,14 @@ object ScreenShare {
                 return screens
             }
         }
+        return glfwMonitors()
+    }
+
+    /**
+     * The monitors GLFW sees (primary first), each with what names its screen ([ScreenCapture.Monitor.key]): on
+     * macOS its CGDirectDisplayID, on Linux its output's name. Render thread only.
+     */
+    private fun glfwMonitors(): List<ScreenCapture.Monitor> {
         val handles = GLFW.glfwGetMonitors() ?: return []
         return (0 until handles.limit()).mapNotNull { i ->
             val h = handles.get(i)
@@ -214,8 +224,28 @@ object ScreenShare {
             val x = IntArray(1)
             val y = IntArray(1)
             GLFW.glfwGetMonitorPos(h, x, y)
-            ScreenCapture.Monitor(i, GLFW.glfwGetMonitorName(h).orEmpty(), x[0], y[0], mode.width(), mode.height())
+            val name = GLFW.glfwGetMonitorName(h).orEmpty()
+            val key = when {
+                OsInfo.isMac -> runCatching {
+                    ScreenCapture.MAC_KEY + Integer.toUnsignedString(org.lwjgl.glfw.GLFWNativeCocoa.glfwGetCocoaMonitor(h))
+                }.getOrDefault("")
+                OsInfo.isWindows -> ""
+                else -> "x11:$name"
+            }
+            ScreenCapture.Monitor(i, name, x[0], y[0], mode.width(), mode.height(), key = key)
         }
+    }
+
+    /**
+     * Linux: the monitors as GLFW saw them on the last tick while a share was asked for or running, so the share's
+     * own threads can find its screen (GLFW answers on the render thread only); null before.
+     */
+    @Volatile
+    private var glfwScreens: List<ScreenCapture.Monitor>? = null
+
+    private fun refreshGlfwScreens() {
+        if (ScreenCapture.sourceForThisOs() != ScreenCapture.Source.X11GRAB) return
+        glfwScreens = runCatching { glfwMonitors() }.getOrNull()
     }
 
     private val preparing = java.util.concurrent.atomic.AtomicBoolean()
@@ -246,7 +276,7 @@ object ScreenShare {
                     try {
                         screens.forEach { screen ->
                             runCatching {
-                                val plan = ScreenCapture.choose(ffmpeg, screen).plan
+                                val plan = ScreenCapture.choose(ffmpeg, screen)?.plan ?: return@runCatching
                                 // The 60 fps encode test too (~2 s once per encoder), so the first share starts at once
                                 ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, ScreenCapture.Settings().maxHeight, 0)
                             }
@@ -265,6 +295,7 @@ object ScreenShare {
     /** Asks the server to let this client share [target] with [audio] to [displayId]; capture starts once it agrees. */
     fun start(displayId: UUID, target: ScreenCapture.Target, audio: ShareAudio.Choice) {
         if (!available) return
+        refreshGlfwScreens()
         val nonce = newNonce()
         pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl, nonce)
         Initializer.sendPacket(ScreenShareRequest(displayId, start = true, nonce = nonce))
@@ -356,6 +387,7 @@ object ScreenShare {
 
     private fun tickChecks(mc: Minecraft) {
         val r = running
+        if (r != null || pending.isNotEmpty()) refreshGlfwScreens()
         // Under the lock a capture is started, registered and made current under: a process started meanwhile is
         // never taken for an orphan
         synchronized(lock) {
@@ -420,22 +452,27 @@ object ScreenShare {
     }
 
     private fun shareMonitor(r: Running, ffmpeg: String, monitor: ScreenCapture.Monitor, publishUrl: String) {
+        // Only a screen that can be told apart from the others is ever captured (see ScreenCapture.sameScreen)
+        if (!ScreenCapture.identifiable(monitor)) {
+            fail(r, SCREEN_UNIDENTIFIED)
+            return
+        }
         val choice = ScreenCapture.choose(ffmpeg, monitor, r.softwareOnly)
         if (r.stopped) return
+        if (choice == null) {
+            fail(r, SCREEN_GONE)
+            return
+        }
         r.settings = settingsFor(r, ffmpeg, choice.plan)
         // The plan only came after something failed on this PC: worth knowing, though the player sees nothing
         if (choice.attempts.any { !it.ok } && plannedFallbacksReported.add(ffmpeg + choice.monitor.deviceName + choice.plan)) {
             report(r, choice, choice.plan, "", "planned_fallback", final = false,
                 "screen share needed a fallback: ${choice.plan} after ${choice.attempts.count { !it.ok }} failed test(s)")
         }
-        val started = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = true) ?: return
-        if (r.stopped) return
-        val first = afterLost(r, ffmpeg, choice, publishUrl, afterRelay(r, ffmpeg, choice.monitor, choice.plan, publishUrl, started) ?: return)
-            ?: return
+        val first = runScreen(r, ffmpeg, choice, publishUrl, announce = true) ?: return
         // Died at once because of the sound input: the same plan again, without sound
         if (retryWithoutSound(r, first)) {
-            val again = runShare(r, ffmpeg, choice.monitor, choice.plan, publishUrl, announce = false) ?: return
-            if (r.stopped) return
+            val again = runScreen(r, ffmpeg, choice, publishUrl, announce = false) ?: return
             report(r, choice, choice.plan, again.output, "failed", final = true, again.reason)
             fail(r, again.reason)
             return
@@ -450,12 +487,11 @@ object ScreenShare {
         }
         logger.warn("Screen share with {} ended at once ({}); retrying with {}.", choice.plan, first.reason, safe)
         r.settings = settingsFor(r, ffmpeg, safe)
-        val retry = runShare(r, ffmpeg, choice.monitor, safe, publishUrl, announce = false, onSettled = {
+        val retry = runScreen(r, ffmpeg, choice.copy(plan = safe), publishUrl, announce = false, onSettled = {
             ScreenCapture.rememberChoice(ffmpeg, monitor, r.softwareOnly, ScreenCapture.Choice(choice.monitor, safe, choice.attempts))
             report(r, choice, safe, first.output, "fallback_ok", final = false,
                 "screen share ${choice.plan} failed at once (${first.reason}); ${safe} works")
         }) ?: return
-        if (r.stopped) return
         if (retry.ranMs < EARLY_EXIT_MS) {
             report(r, choice, safe, first.output + "\n--- retry with $safe ---\n" + retry.output, "fallback_failed",
                 final = true, retry.reason)
@@ -463,6 +499,163 @@ object ScreenShare {
             report(r, choice, safe, retry.output, "failed", final = true, retry.reason)
         }
         fail(r, retry.reason)
+    }
+
+    /**
+     * Captures [choice]'s screen with its plan until a run ends in a way that says something about the plan; null
+     * when the share was settled meanwhile (stopped, or ended with the player told). Every launch, the first and
+     * every retry, goes to the screen as it is found right then (see [awaitScreen]), never to an index or rectangle
+     * remembered from before. On the way: a relay that could not be reached at once gets one more try (see
+     * [relayRetry]), and a capture that lost its screen (Desktop Duplication "access lost": a UAC prompt, a mode
+     * change, a hot-plug; or a rectangle capture whose screen moved, see [screenWatch]) is started again on that same
+     * screen, every second for up to [LOST_RECOVERY_MS] (viewers see the share's "no picture" until it is back).
+     */
+    private fun runScreen(
+        r: Running, ffmpeg: String, choice: ScreenCapture.Choice, publishUrl: String, announce: Boolean,
+        onSettled: (() -> Unit)? = null,
+    ): Ended? {
+        var current = awaitScreen(r, ffmpeg, choice, System.currentTimeMillis() + START_WAIT_MS, null) ?: return null
+        var ended = runShare(r, ffmpeg, current.monitor, current.plan, publishUrl, announce, onSettled) ?: return null
+        // While set, the last run was a recapture: one that dies at once is tried again until then
+        var recoverUntil = 0L
+        while (!r.stopped) {
+            // A capture killed because its screen moved says nothing about the relay
+            val relay = if (ended.screenChanged) null else ScreenCapture.relayFailure(ended.output)
+            if (relay != null) {
+                if (!relayRetry(r, current.plan, relay, ended)) return null
+                current = awaitScreen(r, ffmpeg, current, System.currentTimeMillis() + START_WAIT_MS, ended) ?: return null
+            } else if (lostScreen(ended) || (recoverUntil != 0L && ended.ranMs < EARLY_EXIT_MS)) {
+                if (recoverUntil == 0L) {
+                    logger.warn("Screen capture lost its screen ({}); capturing it again.", ended.reason)
+                    recoverUntil = System.currentTimeMillis() + LOST_RECOVERY_MS
+                } else if (System.currentTimeMillis() >= recoverUntil) {
+                    report(r, current, current.plan, ended.output, "lost", final = true, "screen share lost its screen: ${ended.reason}")
+                    fail(r, "the screen could not be captured again")
+                    return null
+                }
+                runCatching { Thread.sleep(1_000L) }
+                current = awaitScreen(r, ffmpeg, current, recoverUntil, ended) ?: return null
+            } else {
+                return ended
+            }
+            if (r.stopped) return null
+            ended = runShare(r, ffmpeg, current.monitor, current.plan, publishUrl, announce = false) ?: return null
+            if (ended.ranMs >= EARLY_EXIT_MS) recoverUntil = 0L
+        }
+        return null
+    }
+
+    /** [ended] lost its screen: Desktop Duplication's "access lost" after running, or [screenWatch] saw it move. */
+    private fun lostScreen(ended: Ended): Boolean =
+        ended.screenChanged || (ended.ranMs >= EARLY_EXIT_MS && ScreenCapture.isCaptureLost(ended.output))
+
+    /**
+     * [choice] bound to its screen as it is now, once that screen is positively found (see [locateNow]); waits for
+     * it until [deadline] (a secure desktop refuses Desktop Duplication meanwhile). Null when the share was settled:
+     * stopped, or ended because the screen is gone ([GONE_CHECKS] looks in a row) or could not be found in time.
+     * [last] is the run before, for the report.
+     */
+    private fun awaitScreen(r: Running, ffmpeg: String, choice: ScreenCapture.Choice, deadline: Long, last: Ended?): ScreenCapture.Choice? {
+        var gone = 0
+        while (true) {
+            if (r.stopped) return null
+            when (val found = locateNow(ffmpeg, choice)) {
+                is Found.Ready -> return found.choice
+                Found.Gone -> if (++gone >= GONE_CHECKS) {
+                    logger.warn("The shared screen {} is gone; ending the share.", describe(choice.monitor))
+                    report(r, choice, choice.plan, last?.output.orEmpty(), "lost", final = true, "the shared screen is gone")
+                    fail(r, SCREEN_GONE)
+                    return null
+                }
+                Found.NotNow -> gone = 0
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                report(r, choice, choice.plan, last?.output.orEmpty(), "lost", final = true,
+                    "screen share could not find its screen again" + (last?.let { ": ${it.reason}" } ?: ""))
+                fail(r, if (last == null) SCREEN_UNIDENTIFIED else "the screen could not be captured again")
+                return null
+            }
+            runCatching { Thread.sleep(1_000L) }
+        }
+    }
+
+    /** Where a share's screen is right now (see [locateNow]). */
+    private sealed interface Found {
+        /** Positively found; [choice] reaches it now. */
+        data class Ready(val choice: ScreenCapture.Choice) : Found
+
+        /** The screen list was read and the screen is not on it. */
+        data object Gone : Found
+
+        /** Not now: the list could not be read, the plan's adapter does not reach it, or Desktop Duplication refused it. */
+        data object NotNow : Found
+    }
+
+    /**
+     * [choice]'s screen as the OS lists it right now, bound for its plan: Windows by its screen name and monitors
+     * (Desktop Duplication on an adapter `FFmpeg` might number differently is opened once to confirm it), macOS by
+     * its display id (avfoundation's index for it right now), Linux by its output name (its rectangle right now).
+     */
+    private fun locateNow(ffmpeg: String, choice: ScreenCapture.Choice): Found {
+        val m = choice.monitor
+        return when (choice.plan.source) {
+            ScreenCapture.Source.DDAGRAB, ScreenCapture.Source.GDIGRAB -> when (val l = ScreenCapture.locateOnWindows(m)) {
+                ScreenCapture.Located.Unknown -> Found.NotNow
+                ScreenCapture.Located.Gone -> Found.Gone
+                is ScreenCapture.Located.Here -> {
+                    val bound = ScreenCapture.rebind(choice, l.ways)
+                    when {
+                        // A rectangle copy needs no adapter: any way to the screen gives its rectangle now
+                        choice.plan.source == ScreenCapture.Source.GDIGRAB ->
+                            Found.Ready(bound ?: choice.copy(monitor = l.ways.first()))
+                        bound == null -> Found.NotNow
+                        bound.monitor.byVendor || ScreenCapture.confirm(ffmpeg, bound.monitor) -> Found.Ready(bound)
+                        else -> Found.NotNow
+                    }
+                }
+            }
+
+            ScreenCapture.Source.AVFOUNDATION -> {
+                val ids = MacDisplays.activeIds() ?: return Found.NotNow
+                val index = ScreenCapture.avfoundationIndex(m, ids) ?: return Found.Gone
+                Found.Ready(choice.copy(monitor = m.copy(index = index)))
+            }
+
+            ScreenCapture.Source.X11GRAB -> when (val l = ScreenCapture.locate(m, glfwScreens)) {
+                ScreenCapture.Located.Unknown -> Found.NotNow
+                ScreenCapture.Located.Gone -> Found.Gone
+                is ScreenCapture.Located.Here -> Found.Ready(choice.copy(monitor = l.ways.first()))
+            }
+
+            ScreenCapture.Source.GFXCAPTURE -> Found.NotNow
+        }
+    }
+
+    /**
+     * Whether a run that ended on the relay is tried once more: a refused publish (the relay's per-share key, a share
+     * it already ended) ends the share saying so, and so does one that lost the relay after running; one that could
+     * not reach it at once gets one more try, after a second. The relay says nothing about the plan, so it never
+     * leads to a fallback or a remembered plan.
+     */
+    private fun relayRetry(r: Running, plan: ScreenCapture.Plan, failure: ScreenCapture.RelayFailure, ended: Ended): Boolean {
+        when (failure) {
+            ScreenCapture.RelayFailure.REFUSED -> {
+                logger.warn("The relay refused the screen share: {}", ended.reason)
+                fail(r, "the relay refused the stream")
+                return false
+            }
+            ScreenCapture.RelayFailure.UNREACHABLE -> {
+                if (ended.ranMs >= EARLY_EXIT_MS || r.relayRetried) {
+                    logger.warn("Screen share lost the relay: {}", ended.reason)
+                    fail(r, "lost the connection to the relay")
+                    return false
+                }
+                r.relayRetried = true
+                logger.warn("Screen share could not reach the relay ({}); trying {} once more.", ended.reason, plan)
+                runCatching { Thread.sleep(1_000L) }
+                return !r.stopped
+            }
+        }
     }
 
     /**
@@ -498,69 +691,29 @@ object ScreenShare {
         fail(r, retry.reason)
     }
 
-    /**
-     * [ended] as the run to judge the plan by, once the relay is ruled out; null when that settled the share. The relay
-     * says nothing about this screen's plan, so it never leads to a fallback or a remembered plan: a refused publish
-     * (the relay's per-share key, a share it already ended) ends the share saying so; one that could not reach the
-     * relay at once gets the same plan once more.
-     */
+    /** [ended] as the run to judge a window's plan by, once the relay is ruled out (see [relayRetry]); null when that settled the share. */
     private fun afterRelay(
         r: Running, ffmpeg: String, target: ScreenCapture.Target, plan: ScreenCapture.Plan, publishUrl: String, ended: Ended,
     ): Ended? {
-        when (ScreenCapture.relayFailure(ended.output)) {
-            null -> return ended
-            ScreenCapture.RelayFailure.REFUSED -> {
-                logger.warn("The relay refused the screen share: {}", ended.reason)
-                fail(r, "the relay refused the stream")
-                return null
-            }
-            ScreenCapture.RelayFailure.UNREACHABLE -> {
-                if (ended.ranMs >= EARLY_EXIT_MS || r.relayRetried) {
-                    logger.warn("Screen share lost the relay: {}", ended.reason)
-                    fail(r, "lost the connection to the relay")
-                    return null
-                }
-                r.relayRetried = true
-                logger.warn("Screen share could not reach the relay ({}); trying {} once more.", ended.reason, plan)
-                runCatching { Thread.sleep(1_000L) }
-                if (r.stopped) return null
-                val again = runShare(r, ffmpeg, target, plan, publishUrl, announce = false) ?: return null
-                if (r.stopped) return null
-                return afterRelay(r, ffmpeg, target, plan, publishUrl, again)
-            }
-        }
-    }
-
-    /**
-     * [ended] as the run to judge the plan by, after any loss of the screen was recovered from; null when that settled
-     * the share. A capture that ran fine and then lost its screen (Desktop Duplication "access lost": a UAC prompt, a
-     * mode change, a hot-plug) is started again on the screen as it is now, every second for up to [LOST_RECOVERY_MS]
-     * (the secure desktop refuses it meanwhile); viewers see the share's "no picture" until it is back.
-     */
-    private fun afterLost(r: Running, ffmpeg: String, choice: ScreenCapture.Choice, publishUrl: String, ended: Ended): Ended? {
         var last = ended
-        while (last.ranMs >= EARLY_EXIT_MS && ScreenCapture.isCaptureLost(last.output)) {
-            logger.warn("Screen capture lost its screen ({}); capturing it again.", last.reason)
-            val deadline = System.currentTimeMillis() + LOST_RECOVERY_MS
-            var run: Ended
-            do {
-                runCatching { Thread.sleep(1_000L) }
-                if (r.stopped) return null
-                val now = ScreenCapture.current(choice)
-                run = runShare(r, ffmpeg, now.monitor, now.plan, publishUrl, announce = false) ?: return null
-                if (r.stopped) return null
-            } while (run.ranMs < EARLY_EXIT_MS && System.currentTimeMillis() < deadline)
-            if (run.ranMs < EARLY_EXIT_MS) {
-                report(r, choice, choice.plan, run.output, "lost", final = true, "screen share lost its screen: ${run.reason}")
-                fail(r, "the screen could not be captured again")
-                return null
-            }
-            last = run
+        while (true) {
+            val failure = ScreenCapture.relayFailure(last.output) ?: return last
+            if (!relayRetry(r, plan, failure, last)) return null
+            last = runShare(r, ffmpeg, target, plan, publishUrl, announce = false) ?: return null
+            if (r.stopped) return null
         }
-        return last
     }
 
     private const val LOST_RECOVERY_MS = 60_000L
+
+    /** How long a launch waits for its screen to be found (a secure desktop may be up). */
+    private const val START_WAIT_MS = 10_000L
+
+    /** Looks a second apart that must all miss the screen before the share ends as gone. */
+    private const val GONE_CHECKS = 3
+
+    private const val SCREEN_GONE = "the shared screen was disconnected or replaced"
+    private const val SCREEN_UNIDENTIFIED = "the screen could not be identified (try sharing a window)"
 
     /**
      * What [r] captures at with [plan]: 60 fps where the plan's encoder measured fast enough and the server allows it
@@ -587,7 +740,8 @@ object ScreenShare {
     /** Plans already reported as needing a fallback this session. */
     private val plannedFallbacksReported = Collections.synchronizedSet(HashSet<String>())
 
-    private class Ended(val code: Int, val output: String, val reason: String, val ranMs: Long)
+    /** One run's end; [screenChanged]: [screenWatch] killed it because its target was no longer what was picked. */
+    private class Ended(val code: Int, val output: String, val reason: String, val ranMs: Long, val screenChanged: Boolean = false)
 
     /**
      * Runs one capture of [monitor] with [plan] until it ends or the share stops; null when it never started (the
@@ -636,6 +790,8 @@ object ScreenShare {
         if (announce) notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
         logger.info("Sharing {} with {} at {} fps, up to {}p, sound: {}.", describe(target), plan, r.settings.fps,
             r.settings.maxHeight, r.audio ?: "none")
+        val changed = java.util.concurrent.atomic.AtomicBoolean()
+        screenWatch(target, plan.source)?.let { check -> watch(r, proc, check, changed) }
         if (onSettled != null) thread("DreamDisplays-screen-share-settle") {
             runCatching { Thread.sleep(EARLY_EXIT_MS) }
             if (proc.isAlive && !r.stopped) onSettled()
@@ -654,8 +810,55 @@ object ScreenShare {
         if (r.stopped) return null
         val output = tail.joinToString("\n")
         logger.warn("Screen capture ({}) ended after {} ms (exit {}): {}", plan, ranMs, code, tail.toList().takeLast(6).joinToString(" | ").take(400))
-        return Ended(code, output, tail.lastOrNull()?.take(120) ?: "capture ended (exit $code)", ranMs)
+        if (changed.get()) logger.warn("Screen capture ({}) stopped: {} is no longer where it was captured.", plan, describe(target))
+        return Ended(code, output, tail.lastOrNull()?.take(120) ?: "capture ended (exit $code)", ranMs, changed.get())
     }
+
+    /**
+     * The check that [target], captured with [source], is still what the capture holds (true), is not (false), or
+     * cannot be told (null); none where the capture follows its target itself (Desktop Duplication fails with
+     * "access lost" on any change, Windows Graphics Capture ends with its window). A rectangle capture (GDI, x11grab)
+     * copies fixed desktop coordinates whatever screen is there now; avfoundation's display may go away.
+     */
+    private fun screenWatch(target: ScreenCapture.Target, source: ScreenCapture.Source): (() -> Boolean?)? {
+        val m = target as? ScreenCapture.Monitor ?: return null
+        val check: () -> Boolean? = when (source) {
+            ScreenCapture.Source.GDIGRAB -> {
+                // Compared with the screen at that rectangle as the same API saw it at the start (one coordinate space)
+                val baseline = runCatching { WinScreens.screenAt(m.x, m.y, m.width, m.height) }.getOrNull()
+                fun now(): Boolean = ScreenCapture.rectStillShows(m, baseline, WinScreens.screenAt(m.x, m.y, m.width, m.height))
+                ::now
+            }
+            ScreenCapture.Source.X11GRAB -> fun(): Boolean? = glfwScreens?.let { ScreenCapture.stillAt(m, it) }
+            ScreenCapture.Source.AVFOUNDATION ->
+                fun(): Boolean? = MacDisplays.activeIds()?.let { ScreenCapture.avfoundationIndex(m, it) != null }
+            else -> return null
+        }
+        return check
+    }
+
+    /**
+     * Kills [proc] (and sets [changed]) as soon as [check] says its target is no longer what was picked, or cannot
+     * be told [WATCH_UNKNOWN_LIMIT] times in a row: a moved screen must not stream for longer than a look or two.
+     */
+    private fun watch(r: Running, proc: Process, check: () -> Boolean?, changed: java.util.concurrent.atomic.AtomicBoolean) =
+        thread("DreamDisplays-screen-share-watch") {
+            var unknown = 0
+            while (proc.isAlive && !r.stopped) {
+                val ok = runCatching(check).getOrNull()
+                if (ok == true) {
+                    unknown = 0
+                } else if (ok == false || ++unknown >= WATCH_UNKNOWN_LIMIT) {
+                    changed.set(true)
+                    ScreenCaptureProcesses.kill(proc)
+                    return@thread
+                }
+                runCatching { Thread.sleep(WATCH_INTERVAL_MS) }
+            }
+        }
+
+    private const val WATCH_INTERVAL_MS = 50L
+    private const val WATCH_UNKNOWN_LIMIT = 3
 
     /** Starts capturing [r]'s sound per its plans, best first; null (picture only) when none works. */
     private fun startAudio(r: Running, baseNanos: Long): ShareAudio.Input? {

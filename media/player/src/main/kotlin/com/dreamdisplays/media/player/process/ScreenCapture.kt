@@ -41,13 +41,16 @@ object ScreenCapture {
      * index on graphics adapter [adapter] (-1: the default adapter). [vendorId] is that adapter's PCI vendor (0:
      * unknown); with [byVendor] `FFmpeg` opens the adapter by that vendor rather than by index (immune to a process
      * seeing the adapters in another order). [deviceName] is the Windows screen (`\\.\DISPLAY1`) when known;
-     * [x], [y], [width], [height] are its desktop rectangle unless [rectKnown] is false.
+     * [x], [y], [width], [height] are its desktop rectangle unless [rectKnown] is false. [key] is the physical screen
+     * (see [sameScreen]): on Windows its monitors' device interface names, on macOS `cg:<CGDirectDisplayID>`, on
+     * Linux GLFW's name for the output; empty when unknown.
      */
     data class Monitor(
         val index: Int, val name: String, val x: Int, val y: Int, val width: Int, val height: Int, val adapter: Int = -1,
         val vendorId: Int = 0, val byVendor: Boolean = false, val deviceName: String = "", val rectKnown: Boolean = true,
         /** PCI `vvvv:dddd` of [adapter] and its name, when known. */
         val adapterPciId: String = "", val adapterName: String = "",
+        val key: String = "",
     ) : Target
 
     /** H.264 encoders tried in order; the first that encodes a test picture here wins. */
@@ -228,12 +231,21 @@ object ScreenCapture {
      * Linux that is the OS source with the best encoder. On Windows: Desktop Duplication on the screen's own adapter
      * (or a duplicate of the screen on another adapter) with that GPU's encoder, the other hardware encoders, then
      * x264; then GDI capture. [softwareOnly] (the server asked for it) tries x264 only. Cached per screen; blocks for
-     * a few `FFmpeg` runs the first time, so call off the render thread.
+     * a few `FFmpeg` runs the first time, so call off the render thread. Null when DXGI no longer lists that screen
+     * (Windows): nothing else is ever captured in its place.
      */
-    fun choose(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice {
-        knownChoice(ffmpeg, monitor, softwareOnly)?.let { cached ->
+    fun choose(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice? {
+        val source = sourceForThisOs() ?: Source.DDAGRAB
+        // Nothing to work out per screen there: the screen is the one picked now, found again at each launch
+        if (source != Source.DDAGRAB) return Choice(monitor, Plan(source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg)), [])
+        // A plan cached under this screen name for another monitor (the name went to it since) is not this screen's
+        knownChoice(ffmpeg, monitor, softwareOnly)?.takeIf { it.monitor.key == monitor.key }?.let { cached ->
             // The screen as it is now: monitors sleep, get plugged, rearranged, resized while the game stays open
-            val fresh = freshVariants(cached.monitor) ?: return cached
+            val fresh = when (val l = locateOnWindows(cached.monitor)) {
+                Located.Unknown -> return cached
+                Located.Gone -> []
+                is Located.Here -> l.ways
+            }
             rebind(cached, fresh)?.let { now ->
                 if (now != cached) {
                     logger.info("Screen share plan for {}: {} now at output {} of {}, {},{} {}x{}.", monitor.deviceName,
@@ -246,12 +258,7 @@ object ScreenCapture {
             // Its adapter does not show the screen any more: work the plan out again
             choices.remove(choiceKey(ffmpeg, monitor, softwareOnly))
         }
-        val source = sourceForThisOs() ?: Source.DDAGRAB
-        val choice = if (source != Source.DDAGRAB) {
-            Choice(monitor, Plan(source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg)), [])
-        } else {
-            chooseOnWindows(ffmpeg, monitor, softwareOnly)
-        }
+        val choice = chooseOnWindows(ffmpeg, monitor, softwareOnly) ?: return null
         logger.info(
             "Screen share plan for {}: {} on {} (tried {}).", monitor.deviceName.ifEmpty { monitor.name },
             choice.plan, adapterLabel(choice.monitor), choice.attempts.joinToString { "${it.plan}@${it.adapter}=${if (it.ok) "ok" else "fail"}" },
@@ -266,18 +273,105 @@ object ScreenCapture {
      * when that adapter no longer shows the screen. A screen not known by its Windows name cannot be checked and is
      * kept as it is.
      */
-    internal fun rebind(choice: Choice, fresh: List<Monitor>): Choice? {
+    fun rebind(choice: Choice, fresh: List<Monitor>): Choice? {
         val m = choice.monitor
         if (m.deviceName.isEmpty()) return choice
-        val sameWay = fresh.filter { it.deviceName == m.deviceName && it.byVendor == m.byVendor && it.adapterPciId == m.adapterPciId }
+        val sameWay = fresh.filter { sameScreen(m, it) && it.byVendor == m.byVendor && it.adapterPciId == m.adapterPciId }
         // Adapter indexes follow the primary screen's adapter: the same index first, else that GPU wherever it is now
         val now = sameWay.firstOrNull { it.adapter == m.adapter } ?: sameWay.firstOrNull() ?: return null
         val rebound = now.copy(name = m.name)
         return if (rebound == m) choice else choice.copy(monitor = rebound)
     }
 
-    /** [choice] on its screen as it is now (see [rebind]), without probing anything; [choice] itself when unknown. */
-    fun current(choice: Choice): Choice = freshVariants(choice.monitor)?.let { rebind(choice, it) } ?: choice
+    // ---- Which screen is which ----
+
+    /**
+     * True when [a] and [b] are the same physical screen: the same Windows screen name (when known) showing the same
+     * monitors, or the same macOS display / Linux output. A screen known by neither cannot be told apart from another.
+     */
+    fun sameScreen(a: Monitor, b: Monitor): Boolean =
+        identifiable(a) && a.deviceName == b.deviceName && a.key == b.key
+
+    /** True when [monitor] carries something that names its screen (see [sameScreen]). */
+    fun identifiable(monitor: Monitor): Boolean = monitor.deviceName.isNotEmpty() || monitor.key.isNotEmpty()
+
+    /** A Windows screen's [Monitor.key] from its monitors' device interface names. */
+    fun monitorKey(interfaceNames: List<String>): String = interfaceNames.map { it.lowercase(Locale.ROOT) }.sorted().joinToString("|")
+
+    /** Where the screen a share was picked as is now. */
+    sealed interface Located {
+        /** Found: [ways] reach it now (on Windows one per adapter way, see [dxgiGroups]; elsewhere the one entry). */
+        data class Here(val ways: List<Monitor>) : Located
+
+        /** The screen list was read and that screen is not on it: unplugged, switched off, or another monitor now. */
+        data object Gone : Located
+
+        /** Cannot be told now: the list could not be read, or the screen carries no identity. */
+        data object Unknown : Located
+    }
+
+    /** Finds [picked] in [screens] (every screen as listed now; null when the list could not be read). */
+    fun locate(picked: Monitor, screens: List<Monitor>?): Located {
+        if (!identifiable(picked) || screens == null) return Located.Unknown
+        val ways = screens.filter { sameScreen(picked, it) }.map { it.copy(name = picked.name) }
+        return if (ways.isEmpty()) Located.Gone else Located.Here(ways)
+    }
+
+    /** [monitor]'s screen as DXGI lists it now (Windows; [Located.Unknown] elsewhere or when DXGI cannot be read). */
+    fun locateOnWindows(monitor: Monitor): Located =
+        if (sourceForThisOs() != Source.DDAGRAB || monitor.deviceName.isEmpty()) Located.Unknown
+        else locate(monitor, dxgiGroups()?.flatten())
+
+    /**
+     * [choice] on its screen as it is now (see [rebind]), without probing anything; null when the screen cannot be
+     * positively found where its plan reaches it.
+     */
+    fun current(choice: Choice): Choice? =
+        (locateOnWindows(choice.monitor) as? Located.Here)?.let { rebind(choice, it.ways) }
+
+    /**
+     * macOS: avfoundation's `Capture screen` index of [picked] given the active display list [activeIds] (see
+     * [MacDisplays]); null when that display is not active any more or [picked] names none.
+     */
+    fun avfoundationIndex(picked: Monitor, activeIds: List<Int>): Int? {
+        val id = picked.key.removePrefix(MAC_KEY).takeIf { picked.key.startsWith(MAC_KEY) }?.toLongOrNull() ?: return null
+        return activeIds.indexOfFirst { Integer.toUnsignedLong(it) == id }.takeIf { it >= 0 }
+    }
+
+    /** [Monitor.key] prefix of a macOS display (its CGDirectDisplayID follows, unsigned). */
+    const val MAC_KEY = "cg:"
+
+    /**
+     * True while a rectangle capture of [picked] ([baseline]: the screen that covered its rectangle when the capture
+     * started, from the same source as [now]) still shows that screen: the screen covering it now is the same one,
+     * at the same place and size. Anything else (another screen moved in, the screen moved, resized, went away)
+     * means the fixed rectangle no longer holds what was picked.
+     */
+    fun rectStillShows(picked: Monitor, baseline: Monitor?, now: Monitor?): Boolean =
+        baseline != null && now != null && sameScreen(picked, baseline) && sameScreen(picked, now) &&
+                now.x == baseline.x && now.y == baseline.y && now.width == baseline.width && now.height == baseline.height
+
+    /**
+     * True when the screen [picked] still sits exactly at its rectangle in [screens] (every screen listed now, as
+     * [picked] was): what a fixed-rectangle capture (x11grab) of it needs.
+     */
+    fun stillAt(picked: Monitor, screens: List<Monitor>): Boolean =
+        (locate(picked, screens) as? Located.Here)?.ways?.any {
+            it.x == picked.x && it.y == picked.y && it.width == picked.width && it.height == picked.height
+        } == true
+
+    /**
+     * Opens [monitor] with Desktop Duplication the way its plan does (one frame) and checks `FFmpeg` got the
+     * adapter ([Monitor.adapterPciId]) and a screen of its size: DXGI numbers adapters per process (a GPU preference
+     * set for the game reorders them), so an index the game read can name another GPU in `FFmpeg`. Blocks up to a
+     * few seconds; off the render thread.
+     */
+    fun confirm(ffmpeg: String, monitor: Monitor): Boolean {
+        val r = probeScreen(ffmpeg, monitor) ?: return false
+        val size = r.size ?: return false
+        val pciOk = monitor.adapterPciId.isEmpty() || r.pciId == null || r.pciId == monitor.adapterPciId
+        return pciOk && size.first == monitor.width && size.second == monitor.height
+    }
 
     /**
      * True when `FFmpeg`'s [output] says Desktop Duplication lost the screen after capturing it: a secure desktop
@@ -287,16 +381,13 @@ object ScreenCapture {
 
     private val CAPTURE_LOST = Regex("(?i)AcquireNextFrame failed|887a0026|ACCESS_LOST")
 
-    /** Every way to reach [monitor]'s screen as DXGI lists it now, or null when that cannot be told (no DXGI here). */
-    private fun freshVariants(monitor: Monitor): List<Monitor>? {
-        if (monitor.deviceName.isEmpty() || sourceForThisOs() != Source.DDAGRAB) return null
-        val groups = dxgiGroups() ?: return null
-        return groups.firstOrNull { g -> g.any { it.deviceName == monitor.deviceName } }.orEmpty()
-    }
-
-    private fun chooseOnWindows(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean): Choice {
+    private fun chooseOnWindows(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean): Choice? {
         val attempts = ArrayList<Attempt>()
         val variants = variantsOf(monitor)
+        if (variants.isEmpty()) {
+            logger.info("Screen share: {} is no longer connected.", monitor.deviceName)
+            return null
+        }
         // Desktop Duplication, on each adapter that shows this screen
         for (m in variants) {
             for (encoder in encodersFor(ffmpeg, m, softwareOnly)) {
@@ -766,6 +857,11 @@ object ScreenCapture {
         val snap = runCatching { Dxgi.enumerate() }
             .onFailure { logger.debug("DXGI screen list unavailable: {}", it.toString()) }.getOrNull() ?: return null
         val perVendor = snap.adapters.filterNot { it.software }.groupingBy { it.vendorId }.eachCount()
+        val keys = HashMap<String, String>()
+        fun keyOf(deviceName: String) = keys.getOrPut(deviceName) {
+            runCatching { com.dreamdisplays.media.player.process.win.WinScreens.monitorKey(deviceName) }
+                .onFailure { logger.debug("Monitor ids of {} unavailable: {}", deviceName, it.toString()) }.getOrDefault("")
+        }
         val groups = snap.outputs
             .filter { it.attachedToDesktop && it.width > 0 && it.height > 0 }
             .groupBy { it.deviceName.ifEmpty { "${it.adapter.index}:${it.index}" } }
@@ -774,19 +870,22 @@ object ScreenCapture {
                 val base = Monitor(
                     index = o.index, name = "", x = o.left, y = o.top, width = o.width, height = o.height,
                     adapter = o.adapter.index, vendorId = o.adapter.vendorId, deviceName = o.deviceName,
-                    adapterPciId = o.adapter.pciId, adapterName = o.adapter.description,
+                    adapterPciId = o.adapter.pciId, adapterName = o.adapter.description, key = keyOf(o.deviceName),
                 )
                 if (perVendor[o.adapter.vendorId] == 1) [base.copy(byVendor = true), base] else [base]
             }
         }
     }
 
-    /** Every way to reach [monitor]'s screen, [monitor] itself first. */
-    private fun variantsOf(monitor: Monitor): List<Monitor> {
-        if (monitor.deviceName.isEmpty()) return [monitor]
-        val group = dxgiGroups()?.firstOrNull { g -> g.any { it.deviceName == monitor.deviceName } }.orEmpty()
-        val withName = { m: Monitor -> m.copy(name = monitor.name) }
-        return ([monitor] + group.map(withName)).distinct()
+    /**
+     * Every way to reach [monitor]'s screen as DXGI lists it now; empty when it is not listed (never the picker's own
+     * copy, whose output index and rectangle may be another screen's by now). [monitor] itself only when DXGI cannot
+     * be read (screens found by [probeWindowsScreens]).
+     */
+    private fun variantsOf(monitor: Monitor): List<Monitor> = when (val l = locateOnWindows(monitor)) {
+        is Located.Here -> l.ways
+        Located.Gone -> []
+        Located.Unknown -> [monitor]
     }
 
     /** Names screens by their place on the desktop, left to right (top to bottom for a column of two). */
@@ -850,7 +949,7 @@ object ScreenCapture {
         return named
     }
 
-    private class ScreenProbe(val pciId: String?, val size: Pair<Int, Int>?)
+    internal class ScreenProbe(val pciId: String?, val size: Pair<Int, Int>?)
 
     private val OPENED = Regex("""Opened dxgi output \d+ with dimensions (\d+)x(\d+)""")
 
