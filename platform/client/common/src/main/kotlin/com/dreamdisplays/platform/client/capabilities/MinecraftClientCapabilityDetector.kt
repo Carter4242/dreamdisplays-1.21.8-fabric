@@ -12,6 +12,8 @@ import com.dreamdisplays.platform.client.render.AsyncTextureUploader
 import com.dreamdisplays.platform.client.render.RenderBackendCompat
 import com.dreamdisplays.platform.client.render.ShaderPackCompat
 import com.dreamdisplays.platform.client.ui.VideoPopoutWindow
+import com.dreamdisplays.shared.capability.ClientFeature
+import com.dreamdisplays.shared.protocol.ProtocolVersion
 import java.time.Instant
 import java.time.ZoneId
 
@@ -38,6 +40,7 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
         val lavAvailable = probed && safeBool { NativeMedia.lavAvailable }
         val memory = ClientMemoryProbe.detected
         return ClientHello(
+            protocolVersion = ProtocolVersion.CURRENT,
             supportsPopout = supportsPopout,
             supportsHardwareDecode = hwAccel != HwAccelBackend.NONE,
             supportsHighResolution = maxTextureSize >= 4096,
@@ -73,8 +76,16 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
             supportsReadiness = true,
             supportsQueue = true,
             supportsKaraoke = true,
+            features = FEATURES,
         )
     }
+
+    /** The [ClientFeature]s this client has. */
+    private val FEATURES: List<String> = [
+        ClientFeature.MEDIA_GEN, ClientFeature.CLEAR_VIDEO, ClientFeature.REPORT_REQUEST, ClientFeature.SHARE_HEARTBEAT,
+        ClientFeature.SHARE_NONCE, ClientFeature.SHARE_LIMITS, ClientFeature.READINESS_UNHOLDABLE,
+        ClientFeature.SERVER_GREETING, ClientFeature.POLICY_LEVERS,
+    ].map { it.wire }
 
     private fun safeInt(block: () -> Int): Int = runCatching(block).getOrDefault(0)
 

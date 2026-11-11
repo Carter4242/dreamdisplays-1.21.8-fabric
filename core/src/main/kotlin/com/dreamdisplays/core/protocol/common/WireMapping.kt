@@ -1,9 +1,11 @@
 package com.dreamdisplays.core.protocol.common
 
+import com.dreamdisplays.shared.capability.ClientFeature
 import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.api.playback.model.Timeline
+import com.dreamdisplays.core.protocol.common.packets.ClientHello
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import kotlinx.serialization.Serializable
@@ -12,6 +14,10 @@ import java.util.*
 /** True if this server snapshot advertises [feature]. */
 fun ServerHello.hasFeature(feature: ServerFeature): Boolean =
     feature.wire in allowedFeatures
+
+/** True if this client says it does [feature]; false for every client that predates `ClientHello.features`. */
+fun ClientHello.hasFeature(feature: ClientFeature): Boolean =
+    feature.wire in features
 
 /**
  * Builds the wire [DisplaySync] for [id] in [mode], stamped with the current [nowMs] anchor; [mediaGen] is the

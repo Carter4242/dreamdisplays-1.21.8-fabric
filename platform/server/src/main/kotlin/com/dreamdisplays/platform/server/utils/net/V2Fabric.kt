@@ -7,6 +7,7 @@ import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.protocol.PacketDirection
+import com.dreamdisplays.shared.protocol.ProtocolVersion
 import com.dreamdisplays.core.protocol.common.PacketRegistry
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.client.net.V2Payload
@@ -127,6 +128,7 @@ object FabricV2Networking {
         send(
             [player],
             ServerHello(
+                protocolVersion = ProtocolVersion.CURRENT,
                 isPremium = VanillaDisplayActions.isPremium(player),
                 isAdmin = VanillaDisplayActions.isAdmin(player),
                 isReportingEnabled = VanillaServerState.config.settings.webhookUrl.isNotEmpty(),

@@ -7,6 +7,7 @@ import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.WatchPartyAction
 import com.dreamdisplays.shared.protocol.PacketDirection
+import com.dreamdisplays.shared.protocol.ProtocolVersion
 import com.dreamdisplays.core.protocol.common.PacketRegistry
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.server.PaperServer
@@ -51,6 +52,7 @@ object PaperV2Networking : PluginMessageListener {
 
     /** The capability snapshot for [player], rebuilt from permissions and config. */
     fun buildServerHello(player: Player): ServerHello = ServerHello(
+        protocolVersion = ProtocolVersion.CURRENT,
         isPremium = player.hasPermission(PaperServer.config.permissions.premium),
         isAdmin = player.hasPermission(PaperServer.config.permissions.deleteOthers),
         isReportingEnabled = PaperServer.config.settings.webhookUrl.isNotEmpty(),

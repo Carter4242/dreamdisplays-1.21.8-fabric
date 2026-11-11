@@ -10,10 +10,16 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.protobuf.ProtoNumber
 import java.util.*
 
-/** Client -> server hello; advertises the client's capabilities. */
+/**
+ * Client -> server hello; advertises the client's capabilities.
+ *
+ * [protocolVersion] must be set by the sender ([ProtocolVersion.CURRENT]): its default is [ProtocolVersion.UNKNOWN], so
+ * a hello without it (every client before this rule, which left it at its own default and so never put it on the
+ * wire) reads as "older than any version a server checks for", never as the receiver's own version.
+ */
 @Serializable
 data class ClientHello(
-    @ProtoNumber(1) val protocolVersion: Int = ProtocolVersion.CURRENT,
+    @ProtoNumber(1) val protocolVersion: Int = ProtocolVersion.UNKNOWN,
     @ProtoNumber(2) val modVersion: String = "",
     @ProtoNumber(3) val supportsPopout: Boolean = false,
     @ProtoNumber(4) val supportsHardwareDecode: Boolean = false,
@@ -52,12 +58,21 @@ data class ClientHello(
     @ProtoNumber(32) val supportsQueue: Boolean = false,
     /** True when the client answers karaoke clock pings ([KaraokeClockPing]) and reports karaoke latencies. */
     @ProtoNumber(33) val supportsKaraoke: Boolean = false,
+    /**
+     * What this client does, as `ClientFeature` wire tokens (`media_gen`, `readiness_unholdable`, ...): a server
+     * branches on these, never on [protocolVersion] or [modVersion]. Unknown tokens are ignored; empty from older
+     * clients.
+     */
+    @ProtoNumber(34) val features: List<String> = [],
 ) : DreamPacket
 
-/** Server -> client capability snapshot (premium, admin, reporting); field 5 retired. */
+/**
+ * Server -> client capability snapshot (premium, admin, reporting); field 5 retired. [protocolVersion]: as for
+ * [ClientHello], set by the sender; absent reads as [ProtocolVersion.UNKNOWN].
+ */
 @Serializable
 data class ServerHello(
-    @ProtoNumber(1) val protocolVersion: Int = ProtocolVersion.CURRENT,
+    @ProtoNumber(1) val protocolVersion: Int = ProtocolVersion.UNKNOWN,
     @ProtoNumber(2) val isPremium: Boolean = false,
     @ProtoNumber(3) val isAdmin: Boolean = false,
     @ProtoNumber(4) val isReportingEnabled: Boolean = false,
@@ -65,6 +80,12 @@ data class ServerHello(
     @ProtoNumber(7) val allowedFeatures: List<String> = [],
     @EncodeDefault
     @ProtoNumber(8) val defaultVolume: Float = -1f,
+    /**
+     * True when the server sends this hello unasked (a freshly enabled plugin greeting players who are already
+     * online), not as the answer to a [ClientHello]: the client answers it with its hello, even before it has
+     * negotiated. False from older servers, whose greetings clients tell apart by timing only.
+     */
+    @ProtoNumber(9) val greeting: Boolean = false,
 ) : DreamPacket
 
 /** Server tells the client to evict the listed displays from local caches. */

@@ -17,7 +17,14 @@ enum class ReadinessState {
     READY,
 
     /** Not loaded or not played on this client (out of range, over its display budget, displays off): never waited for. */
-    ABSENT;
+    ABSENT,
+
+    /**
+     * Loaded, but this client will not hold it ready: a live or unseekable stream, a video that failed here, or a paused
+     * display beyond the ones it keeps held. A start does not wait for it (it starts cold, as it would at the deadline).
+     * Servers that predate it read it as [NOT_READY].
+     */
+    UNHOLDABLE;
 
     /** The append-only wire value for this state. */
     val wire: Int get() = ordinal
@@ -58,11 +65,15 @@ class ReadinessRoster(val toleranceMs: Long = DEFAULT_TOLERANCE_MS) {
         return report.state == ReadinessState.READY && abs(report.positionMs - positionMs) <= toleranceMs
     }
 
-    /** Of [players], those a start of [displayId] at [positionMs] still waits for: not ready there, and not absent. */
+    /**
+     * Of [players], those a start of [displayId] at [positionMs] still waits for: not ready there, and neither absent nor
+     * unholdable.
+     */
     fun waitingFor(displayId: UUID, positionMs: Long, players: Collection<UUID>): List<UUID> =
         players.filter { playerId ->
-            val report = reportOf(displayId, playerId)
-            report?.state != ReadinessState.ABSENT && !isReadyAt(displayId, playerId, positionMs)
+            val state = reportOf(displayId, playerId)?.state
+            state != ReadinessState.ABSENT && state != ReadinessState.UNHOLDABLE &&
+                !isReadyAt(displayId, playerId, positionMs)
         }
 
     /**

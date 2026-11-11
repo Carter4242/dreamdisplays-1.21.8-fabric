@@ -44,6 +44,21 @@ class ReadinessRosterTest {
     }
 
     @Test
+    fun `unholdable is never waited for, and old readers take it as not ready`() {
+        val roster = ReadinessRoster()
+        roster.report(display, a, ReadinessState.UNHOLDABLE, 0, 0)
+        roster.report(display, b, ReadinessState.NOT_READY, 0, 0)
+        assertEquals(listOf(b), roster.waitingFor(display, 0, listOf(a, b)))
+        assertFalse(roster.isReadyAt(display, a, 0))
+        assertEquals(3, ReadinessState.UNHOLDABLE.wire)
+        assertEquals(ReadinessState.UNHOLDABLE, ReadinessState.fromWire(3))
+        assertEquals(ReadinessState.NOT_READY, ReadinessState.fromWire(4))
+        // A new video forgets it like any other held state: the client re-reports for the new one
+        roster.forgetHeldStates(display)
+        assertNull(roster.reportOf(display, a))
+    }
+
+    @Test
     fun `reports are per display`() {
         val roster = ReadinessRoster()
         roster.report(display, a, ReadinessState.READY, 0, 0)

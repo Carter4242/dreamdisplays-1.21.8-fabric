@@ -78,6 +78,8 @@ message ClientHello {
   optional bool supportsQueue = 32;
   // WARNING: a default value decoded when value is missing
   optional bool supportsKaraoke = 33;
+  // WARNING: a default value decoded when value is missing
+  repeated string features = 34;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.ServerHello'
@@ -96,6 +98,8 @@ message ServerHello {
   repeated string allowedFeatures = 7;
   // WARNING: a default value decoded when value is missing
   optional float defaultVolume = 8;
+  // WARNING: a default value decoded when value is missing
+  optional bool greeting = 9;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.DisplayInfo'

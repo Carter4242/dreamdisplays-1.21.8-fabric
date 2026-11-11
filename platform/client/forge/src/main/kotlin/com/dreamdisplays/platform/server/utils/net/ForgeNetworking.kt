@@ -21,6 +21,7 @@ import com.dreamdisplays.platform.server.utils.RegionUtil
 import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.protocol.PacketDirection
+import com.dreamdisplays.shared.protocol.ProtocolVersion
 import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.MinecraftServer
@@ -164,6 +165,7 @@ object ForgeV2Networking {
         send(
             [player],
             ServerHello(
+                protocolVersion = ProtocolVersion.CURRENT,
                 isPremium = VanillaDisplayActions.isPremium(player),
                 isAdmin = VanillaDisplayActions.isAdmin(player),
                 isReportingEnabled = VanillaServerState.config.settings.webhookUrl.isNotEmpty(),
