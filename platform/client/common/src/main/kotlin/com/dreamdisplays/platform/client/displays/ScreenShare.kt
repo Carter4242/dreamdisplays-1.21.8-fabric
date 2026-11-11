@@ -131,6 +131,11 @@ object ScreenShare {
                 fail(r, "FFmpeg is not available")
                 return@thread
             }
+            if (!ScreenCapture.publishTargetAllowed(publishUrl)) {
+                logger.warn("Refusing to share to the relay the server named: {}", LiveStreamUrls.redactCredentials(publishUrl).take(120))
+                fail(r, "the server's relay address is not allowed")
+                return@thread
+            }
             val encoder = ScreenCapture.pickEncoder(ffmpeg)
             if (r.stopped) return@thread
             val args = ScreenCapture.args(ffmpeg, source, r.monitor, encoder, publishUrl)

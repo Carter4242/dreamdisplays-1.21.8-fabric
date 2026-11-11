@@ -1,6 +1,7 @@
 package com.dreamdisplays.media.player.process
 
 import com.dreamdisplays.api.media.source.LiveStreamUrls
+import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.OsInfo
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -67,6 +68,14 @@ object ScreenCapture {
      * The first encoder in [candidates] that really encodes on this machine (a build lists `h264_nvenc` whether or not
      * there is an NVIDIA GPU). Blocks for a few short `FFmpeg` runs the first time; call off the render thread.
      */
+    /**
+     * True when the server-supplied [publishUrl] is a relay this client may stream the screen to: a well-formed live
+     * relay URL (`srt` / `rtmp(s)` / `rtsp`) on a public host. Without it `FFmpeg` takes any output: a local file
+     * path, `file:`, `http://` or `tcp://` to a host on the player's LAN. Resolves the host (call off the render thread).
+     */
+    fun publishTargetAllowed(publishUrl: String): Boolean =
+        LiveStreamUrls.isValid(publishUrl) && MediaHostGuard.isAllowed(publishUrl)
+
     fun pickEncoder(ffmpeg: String): Encoder {
         probed?.takeIf { it.first == ffmpeg }?.let { return it.second }
         val chosen = candidates().firstOrNull { it == Encoder.X264 || works(ffmpeg, it) } ?: Encoder.X264
