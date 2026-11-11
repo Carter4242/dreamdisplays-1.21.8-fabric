@@ -805,12 +805,16 @@ class DisplayMenu private constructor(
         val ds = displayScreen
         val room = DisplayQueues.room(ds.uuid, exempt = ds.owner || ds.isAdmin, atMost = MAX_PLAYLIST_BATCH)
         if (room <= 0) return DisplayQueues.notifyLocal(ClientMessage.QUEUE_FULL.component())
+        // A second "+" while the listing loads (it takes seconds) would queue the whole playlist twice
+        val loadingKey = "${ds.uuid}/${link.listId}"
+        if (!playlistsLoading.add(loadingKey)) return
         DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_LOADING.component().withStyle(ChatFormatting.GRAY))
         DreamCoroutines.clientIo.launch {
             val listing = runCatching { YouTubePlaylists.fetch(link, room) }
                 .onFailure { org.slf4j.LoggerFactory.getLogger(DisplayMenu::class.java).warn("Playlist {}: {}", link.listId, it.message) }
                 .getOrNull()
             Minecraft.getInstance().execute {
+                playlistsLoading.remove(loadingKey)
                 if (listing == null || listing.entries.isEmpty()) {
                     DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_FAILED.component().withStyle(ChatFormatting.RED))
                     return@execute
@@ -1067,6 +1071,9 @@ class DisplayMenu private constructor(
 
         /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
         private var queueTabOpen = false
+
+        /** Playlists being listed for a display ("<display>/<list id>"); render thread only. */
+        private val playlistsLoading = mutableSetOf<String>()
         private const val MIN_CONTENT_W = 640
         private const val MIN_CONTENT_H = 410
 
