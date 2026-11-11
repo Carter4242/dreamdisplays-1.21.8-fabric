@@ -26,11 +26,4 @@ object EmptyDisplays {
      * the cleared video on, unsynced.
      */
     fun dropBeforeClear(protocolVersion: Int): Boolean = protocolVersion < CLEAR_PROTOCOL
-
-    /**
-     * True when a client on [protocolVersion] is never described a display showing [url]: an empty one, to a client
-     * older than [CLEAR_PROTOCOL]. Such a client takes an empty URL as a change every time it hears it (it rewrites
-     * its settings file and asks for the display again, once a second), so it is told nothing until a video is set.
-     */
-    fun hiddenFrom(url: String, protocolVersion: Int): Boolean = !hasVideo(url) && dropBeforeClear(protocolVersion)
 }

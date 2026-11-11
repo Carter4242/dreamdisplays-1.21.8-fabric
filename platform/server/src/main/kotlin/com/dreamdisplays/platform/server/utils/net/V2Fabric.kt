@@ -46,6 +46,7 @@ object FabricV2Networking {
             runCatching { ServerPlayNetworking.send(player, V2Payload(bytes)) }
             //?} else
             /*runCatching { ServerPlayNetworking.send(player, V2Payload.TYPE.id(), CompatPayloads.encode(V2Payload(bytes))) }*/
+            EmptyDisplayDescriptions.onSent(player.uuid, packet)
         }
     }
 

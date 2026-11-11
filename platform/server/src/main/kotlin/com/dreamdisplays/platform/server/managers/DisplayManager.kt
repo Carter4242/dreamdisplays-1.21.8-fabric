@@ -35,6 +35,7 @@ import com.dreamdisplays.platform.server.utils.PlatformUtil
 import com.dreamdisplays.platform.server.utils.RegionUtil
 import com.dreamdisplays.platform.server.utils.WorldGuardRegions
 import com.dreamdisplays.platform.server.utils.ReporterUtil
+import com.dreamdisplays.platform.server.utils.net.EmptyDisplayDescriptions
 import com.dreamdisplays.platform.server.utils.net.PacketUtil
 import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
@@ -210,11 +211,9 @@ object DisplayManager {
     /** Sends a `DisplayInfo` packet describing [display] to the given [players]. */
     @PaperOnly
     fun sendUpdate(display: PaperDisplayData, players: List<Player>, forced: Boolean = false) {
-        val receivers = if (EmptyDisplays.hasVideo(display.url)) players
-        else players.filterNot { EmptyDisplays.hiddenFrom(display.url, V2PlayerTracker.helloOf(it.uniqueId)?.protocolVersion ?: 0) }
-        if (receivers.isEmpty()) return
+        if (players.isEmpty()) return
         PacketUtil.sendDisplayInfo(
-            receivers,
+            players,
             display.id, display.ownerId, display.box.min, display.width, display.height,
             display.url, display.lang, display.facing, display.isSync, display.isLocked,
             display.access, display.mode, display.qualityCap, display.rotation,
@@ -228,6 +227,8 @@ object DisplayManager {
             mediaGen = display.mediaGen,
             // Virtual (URL-only broadcast) displays stand nowhere
             world = if (display.virtual) "" else display.pos1.world?.key?.toString().orEmpty(),
+            // An empty display goes to clients before protocol 12 sparingly ([EmptyDisplayDescriptions])
+            sendsTo = { player, info -> EmptyDisplayDescriptions.sendsTo(player.uniqueId, info) },
         )
     }
 

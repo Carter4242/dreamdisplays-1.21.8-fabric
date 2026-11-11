@@ -40,6 +40,7 @@ object NeoForgeV2Networking {
             .getOrNull() ?: return
         players.forEach { player ->
             runCatching { PacketDistributor.sendToPlayer(player, V2Payload(bytes)) }
+            EmptyDisplayDescriptions.onSent(player.uuid, packet)
         }
     }
 

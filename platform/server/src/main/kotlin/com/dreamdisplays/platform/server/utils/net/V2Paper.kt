@@ -47,6 +47,7 @@ object PaperV2Networking : PluginMessageListener {
         players.filterNotNull().forEach { player ->
             runCatching { player.sendPluginMessage(plugin, V2_CHANNEL, bytes) }
                 .onFailure { logger.warn("Failed to send v2 packet to ${player.name}", it) }
+            EmptyDisplayDescriptions.onSent(player.uniqueId, packet)
         }
     }
 

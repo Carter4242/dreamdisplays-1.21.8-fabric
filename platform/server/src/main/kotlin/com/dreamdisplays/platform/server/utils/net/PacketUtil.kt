@@ -81,6 +81,7 @@ object PacketUtil {
         customData: Map<String, ByteArray> = emptyMap(),
         mediaGen: Long = 0L,
         world: String = "",
+        sendsTo: (Player, DisplayInfo) -> Boolean = { _, _ -> true },
     ) {
         val isVertical = facing == BlockFace.UP || facing == BlockFace.DOWN
         val recipients = v2Players(players).filter { canReceive(it.uniqueId, isVertical, conforming) }
@@ -102,10 +103,12 @@ object PacketUtil {
         )
         if (access == DisplayAccess.REGION && isRegionMember != null) {
             recipients.forEach { player ->
-                PaperV2Networking.send([player], info.copy(viewerInRegion = isRegionMember(player)))
+                val described = info.copy(viewerInRegion = isRegionMember(player))
+                if (sendsTo(player, described)) PaperV2Networking.send([player], described)
             }
         } else {
-            PaperV2Networking.send(recipients, info)
+            val receivers = recipients.filter { sendsTo(it, info) }
+            if (receivers.isNotEmpty()) PaperV2Networking.send(receivers, info)
         }
     }
 

@@ -29,5 +29,6 @@ object V2PlayerTracker {
     /** Drops the per-player state on disconnect. */
     fun clear(uuid: UUID) {
         players.remove(uuid)
+        EmptyDisplayDescriptions.forgetPlayer(uuid)
     }
 }

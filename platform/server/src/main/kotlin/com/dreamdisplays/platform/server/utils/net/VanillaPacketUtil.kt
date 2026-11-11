@@ -5,7 +5,6 @@ import com.dreamdisplays.core.protocol.common.packets.ClearCache
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
-import com.dreamdisplays.core.sync.EmptyDisplays
 import com.dreamdisplays.platform.server.datatypes.display.VanillaDisplayData
 import com.dreamdisplays.util.FacingUtil
 import net.minecraft.core.Direction
@@ -23,31 +22,28 @@ object VanillaPacketUtil {
     /** Encodes and broadcasts a [DisplayInfo] packet describing a single display to [players]. */
     fun sendDisplayInfo(players: List<ServerPlayer>, display: VanillaDisplayData, forced: Boolean = false) {
         val isVertical = display.facing == Direction.UP || display.facing == Direction.DOWN
-        // An empty display is never described to a client older than protocol 12 (see EmptyDisplays.hiddenFrom)
-        val recipients = v2Players(players).filter {
-            canReceive(it.uuid, isVertical, display.conforming) &&
-                !EmptyDisplays.hiddenFrom(display.url, V2PlayerTracker.helloOf(it.uuid)?.protocolVersion ?: 0)
-        }
-        VanillaNetworking.adapter.sendV2(
-            recipients,
-            DisplayInfo(
-                id = display.id, ownerId = display.ownerId,
-                x = display.minX, y = display.minY, z = display.minZ,
-                width = display.width, height = display.height, url = display.url,
-                facing = directionToFacingUtil(display.facing).toPacket().toInt(),
-                isSync = display.isSync, lang = display.lang, isLocked = display.isLocked,
-                mode = display.mode.wire, qualityCap = display.qualityCap,
-                rotation = display.rotation.quarterTurns,
-                virtual = display.virtual, forced = forced,
-                scheduledStartEpochMillis = display.scheduledStart?.toEpochMilliseconds() ?: 0,
-                scheduledAction = display.scheduledAction?.wire ?: -1,
-                access = display.access.wire,
-                depth = display.depth, conforming = display.conforming,
-                customData = DisplayPolicies.wireCustomData(display),
-                mediaGen = display.mediaGen,
-                world = if (display.virtual) "" else display.worldKey,
-            ),
+        val info = DisplayInfo(
+            id = display.id, ownerId = display.ownerId,
+            x = display.minX, y = display.minY, z = display.minZ,
+            width = display.width, height = display.height, url = display.url,
+            facing = directionToFacingUtil(display.facing).toPacket().toInt(),
+            isSync = display.isSync, lang = display.lang, isLocked = display.isLocked,
+            mode = display.mode.wire, qualityCap = display.qualityCap,
+            rotation = display.rotation.quarterTurns,
+            virtual = display.virtual, forced = forced,
+            scheduledStartEpochMillis = display.scheduledStart?.toEpochMilliseconds() ?: 0,
+            scheduledAction = display.scheduledAction?.wire ?: -1,
+            access = display.access.wire,
+            depth = display.depth, conforming = display.conforming,
+            customData = DisplayPolicies.wireCustomData(display),
+            mediaGen = display.mediaGen,
+            world = if (display.virtual) "" else display.worldKey,
         )
+        // An empty display goes to clients before protocol 12 sparingly ([EmptyDisplayDescriptions])
+        val recipients = v2Players(players).filter {
+            canReceive(it.uuid, isVertical, display.conforming) && EmptyDisplayDescriptions.sendsTo(it.uuid, info)
+        }
+        if (recipients.isNotEmpty()) VanillaNetworking.adapter.sendV2(recipients, info)
     }
 
     /** Tells [players] to remove the display with [id] from their local registry. */
