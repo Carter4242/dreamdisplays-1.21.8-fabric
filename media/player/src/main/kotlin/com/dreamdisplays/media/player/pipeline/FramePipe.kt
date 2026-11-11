@@ -79,6 +79,12 @@ internal class LastFrameCache {
         buffer = dst
     }
 
+    /** Forgets the cached frame: nothing is replayed until a new one is stored. Safe to call from any thread. */
+    fun clear(): Unit = synchronized(lock) {
+        buffer = null
+        storedAtNanos = 0L
+    }
+
     /** Replays the cached frame into [sink], if one has been stored yet. Safe to call from any thread. */
     fun replay(sink: (ByteBuffer, Int, Int, FramePixelFormat) -> Unit): Unit = synchronized(lock) {
         val buf = buffer ?: return

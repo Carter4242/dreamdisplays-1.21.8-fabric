@@ -75,7 +75,11 @@ internal class VideoFramePipe(
     override fun updateFrame(texture: GpuTextureRef, actualW: Int, actualH: Int): Boolean =
         surface.updateFrame(texture, actualW, actualH, expectedW, expectedH)
 
-    override fun clear() = surface.clear()
+    override fun clear() {
+        surface.clear()
+        // A sink attached later (a popout, PiP) must not get the cleared picture back
+        lastFrame.clear()
+    }
 
     override fun trimForPark() {
         activePrebuffer?.trimForPark()

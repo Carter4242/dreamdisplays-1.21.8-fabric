@@ -125,7 +125,11 @@ internal class NativeVideoFramePipe(
     ): Boolean =
         surface.updateFramePlanar(y, u, v, actualW, actualH, expectedW, expectedH)
 
-    override fun clear() = surface.clear()
+    override fun clear() {
+        surface.clear()
+        // A sink attached later (a popout, PiP) must not get the cleared picture back
+        lastFrame.clear()
+    }
 
     override fun trimForPark() {
         activePrebuffer?.trimForPark()
