@@ -331,10 +331,13 @@ object FullscreenBroadcastManager {
         return true
     }
 
-    /** Forgets a removed display's session without persisting a stop-broadcast (display is already gone). */
+    /**
+     * Ends a removed display's sessions: every viewer is told (a far one is outside the deletion broadcast and would
+     * keep a forced overlay of a display nobody can stop any more).
+     */
     fun onDisplayRemoved(displayId: UUID) {
-        sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach {
-            sessions.remove(it)
+        sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach { id ->
+            sessions.remove(id)?.let(::teardown)
         }
         preparations.remove(displayId)?.let { preparation ->
             // Far prepared clients hold the display outside the deletion broadcast's range
@@ -344,6 +347,16 @@ object FullscreenBroadcastManager {
             }
         }
         persist()
+    }
+
+    /**
+     * Plugin disable: transient sessions are not saved, so the next plugin instance could never end them; their viewers
+     * are told they are over now. Saved sessions carry on after the reload.
+     */
+    fun endTransientSessions() {
+        sessions.values.filter { it.transientSession }.map { it.sessionId }.forEach { id ->
+            sessions.remove(id)?.let(::teardown)
+        }
     }
 
     /** Re-evaluates radius membership and refreshes drifting clients. Called once per second. */

@@ -155,6 +155,7 @@ class PaperServer : JavaPlugin() {
         if (!::storage.isInitialized) return
         disableStep("stop addons") { PaperServerApi.stop() }
         disableStep("stop karaoke") { KaraokeManager.shutdown() }
+        disableStep("end transient fullscreen sessions") { FullscreenBroadcastManager.endTransientSessions() }
         disableStep("end screen shares") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.stopAll() }
         disableStep("save timelines") { TimelineStore.save(TimelineManager.snapshot()) }
         disableStep("end watch parties") { WatchPartyManager.endAllForShutdown() }
