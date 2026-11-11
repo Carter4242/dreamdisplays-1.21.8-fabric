@@ -233,8 +233,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     }
 
     private fun learnLead(kind: LeadKind, landingDriftMs: Double) {
-        // Landed behind (positive drift) means the restart took longer than the lead allowed for
-        val step = (landingDriftMs * LEAD_GAIN).roundToLong()
+        // Landed behind (positive drift) means the restart took longer than the lead allowed for. One slow seek
+        // (a network hiccup) moves the lead by at most MAX_LEAD_STEP_MS, so it cannot throw the next one off.
+        val step = (landingDriftMs * LEAD_GAIN).roundToLong().coerceIn(-MAX_LEAD_STEP_MS, MAX_LEAD_STEP_MS)
         when (kind) {
             LeadKind.SEEK -> seekLeadMs = (seekLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
             LeadKind.COLD -> coldLeadMs = (coldLeadMs + step).coerceIn(0L, MAX_LEAD_MS)
@@ -319,10 +320,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         private const val MAX_LEAD_MS = 8_000L
         private const val MAX_RTT_MS = 2_000
         private const val LEAD_GAIN = 0.7
+        private const val MAX_LEAD_STEP_MS = 500L
 
         /** Learned restart time of a seek while playing; shared by every display (it is this machine's cost). */
         @Volatile
-        private var seekLeadMs = 1_000L
+        private var seekLeadMs = 400L
 
         /** Learned restart time of a stream start from a cold pause. */
         @Volatile

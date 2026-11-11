@@ -33,6 +33,14 @@ internal class NativeVideoFramePipe(
         private const val LAV_PREROLL_MARGIN_NS = 50_000_000L
         private const val LAV_PTS_DISCONTINUITY_NS = 1_000_000_000L
 
+        /**
+         * How long an in-process reader that hit the end of the file stays alive for an in-place seek. The end is
+         * reported right away; a loop restart (or a sync seek) normally follows within milliseconds and can then
+         * reuse the open session instead of reconnecting and rebuffering.
+         */
+        private const val EOF_LINGER_NS = 3_000_000_000L
+        private const val EOF_LINGER_POLL_MS = 5L
+
         // Rolling packet cache, enabled by default: ~60 s of recent stream. Serves in-window seeks
         // network-free (instant backward scrubbing) and lets a returning display replay locally
         // while the live source re-resolves. Capped by bytes, so the window costs no extra memory
@@ -277,6 +285,7 @@ internal class NativeVideoFramePipe(
         var prevRawLavPtsNanos: Long? = null
         var rc = NativeMedia.READ_OK
         var passFirstFrameAfterSeek = true
+        var eofReported = false
 
         val lav = handle == 0L && lavHandle != 0L
         val prerollMarginNs = maxOf(frameNs * 2L, LAV_PREROLL_MARGIN_NS)
@@ -314,6 +323,7 @@ internal class NativeVideoFramePipe(
                 return false
             }
             currentSeekOffsetNanos = seek.offsetNanos
+            eofReported = false
             currentOnFirstFrame = seek.onFirstFrame
             videoPts = seek.offsetNanos
             lavPtsBiasNanos = null
@@ -388,6 +398,17 @@ internal class NativeVideoFramePipe(
                 }
             }
             if (rc != NativeMedia.READ_OK) {
+                if (lav && rc == NativeMedia.READ_EOF && !eofReported && !terminated.get() && !stopFlag.get()) {
+                    // End of file: report it now, but keep the session open for a moment so the loop restart
+                    // (or a sync seek) that usually follows can seek in place instead of reopening the stream.
+                    eofReported = true
+                    onEos(NativeMedia.lavError(lavHandle), true)
+                    if (awaitSeekAfterEof(terminated, stopFlag)) {
+                        spare.clear()
+                        continue
+                    }
+                    break
+                }
                 if (lav && synchronized(lavSeekMonitor) { pendingLavSeek != null || run { readerDone = true; false } }) {
                     spare.clear()
                     continue
@@ -481,7 +502,7 @@ internal class NativeVideoFramePipe(
         }
         if (activePrebuffer === prebuffer) activePrebuffer = null
 
-        if (!terminated.get() && !stopFlag.get()) {
+        if (!terminated.get() && !stopFlag.get() && !eofReported) {
             if (MediaPlayer.DEBUG) metrics.logFinal(rc)
             if (lav) {
                 onEos(NativeMedia.lavError(lavHandle), rc == NativeMedia.READ_EOF)
@@ -490,6 +511,32 @@ internal class NativeVideoFramePipe(
                 val normalEos = rc == NativeMedia.READ_EOF
                         && NativeMedia.videoExitCode(handle, EXIT_WAIT_MILLIS) == 0
                 onEos(stderr, normalEos)
+            }
+        }
+    }
+
+    /**
+     * Waits (up to [EOF_LINGER_NS]) after end of file for an in-place seek. Returns true when one is pending
+     * (the read loop then applies it), false when none came or the session is stopping; in that case the reader
+     * is marked done in the same step, so a later seek request falls back to reopening.
+     */
+    private fun awaitSeekAfterEof(terminated: AtomicBoolean, stopFlag: AtomicBoolean): Boolean {
+        val deadline = System.nanoTime() + EOF_LINGER_NS
+        while (true) {
+            val stopping = terminated.get() || stopFlag.get()
+            synchronized(lavSeekMonitor) {
+                if (!stopping && pendingLavSeek != null) return true
+                if (stopping || System.nanoTime() >= deadline) {
+                    readerDone = true
+                    return false
+                }
+            }
+            try {
+                Thread.sleep(EOF_LINGER_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                synchronized(lavSeekMonitor) { readerDone = true }
+                return false
             }
         }
     }

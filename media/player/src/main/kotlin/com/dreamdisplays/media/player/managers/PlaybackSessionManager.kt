@@ -409,6 +409,7 @@ internal class PlaybackSessionManager(
         val old = active ?: return false
         val ffmpeg = FFmpegBinary.getPath() ?: return false
         val (w, h) = targetDims(streamSet, lastQuality)
+        val seekStartedNanos = System.nanoTime()
 
         if (old.inProcess && old.nativePipe?.expectedW == w && old.nativePipe.expectedH == h) {
             val firstVideoFrame = CountDownLatch(1)
@@ -433,6 +434,7 @@ internal class PlaybackSessionManager(
             val seeked = old.seekInProcess(offsetNanos, soundReady) {
                 clock.markFirstFrame()
                 firstVideoFrame.countDown()
+                logSeekDone(offsetNanos, seekStartedNanos, "in-place")
             }
             if (seeked) {
                 audioHalf = ap?.let {
@@ -480,6 +482,7 @@ internal class PlaybackSessionManager(
                 channel.launch(ffmpeg, streamSet, w, h, offsetNanos, hwAccel, onFirstFrame = {
                     clock.markFirstFrame()
                     firstVideoFrame.countDown()
+                    logSeekDone(offsetNanos, seekStartedNanos, "reopen")
                 }, onEos = onStreamEnd, parkFlag = parkFlag)
             } catch (e: Exception) {
                 aStop.set(true)
@@ -509,6 +512,14 @@ internal class PlaybackSessionManager(
             discardHalvesAsync(null, oldAudio)
             return false
         }
+    }
+
+    /** One line per seek with how long playback took to resume, for sync tuning (see `[dd-sync]` client logs). */
+    private fun logSeekDone(offsetNanos: Long, startedNanos: Long, how: String) {
+        logger.info(
+            "[dd-sync] {} seek to {} ms took {} ms ({})",
+            debugLabel.take(8), offsetNanos / 1_000_000, (System.nanoTime() - startedNanos) / 1_000_000, how,
+        )
     }
 
     /** Replaces audio half of playing session with fresh process on same audio URL, leaving video unchanged. */
