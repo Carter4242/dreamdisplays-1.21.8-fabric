@@ -92,7 +92,8 @@ object SourceLoader {
         throw mismatch!!
     }
 
-    private fun sha256Sums(url: String): Map<String, String> =
+    /** The `sha256sum` list at [url] (file name to lower-case SHA-256). */
+    fun sha256Sums(url: String): Map<String, String> =
         parseSha256Sums(
             DreamHttpClient.readText(
                 url,

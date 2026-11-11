@@ -1,6 +1,7 @@
 package com.dreamdisplays.media.player.process
 
 import com.dreamdisplays.media.player.util.daemon
+import com.dreamdisplays.media.runtime.download.FfmpegBuilds
 import com.dreamdisplays.media.runtime.download.SourceLoader
 import com.dreamdisplays.util.OsInfo
 import org.slf4j.LoggerFactory
@@ -9,16 +10,27 @@ import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 
-/** `FFmpeg` binary downloader. **/
+/**
+ * `FFmpeg` binary downloader. Windows and Linux builds come from FFmpeg-Builds ([FfmpegBuilds]: release branch 9 where
+ * any source still has it, else the nearest other branch); macOS builds from a fixed list of checksummed archives.
+ * A cached build is only used while it actually runs; otherwise a system `FFmpeg` is preferred, then a fresh download.
+ */
 object FFmpegBinary {
     private val logger = LoggerFactory.getLogger(javaClass)
     private const val CACHE_ROOT = "./dreamdisplays/ffmpeg"
-    private const val BTBN_BASE = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
 
-    private const val FFMPEG_VERSION = "9.0"
+    /** The release branch this version was built and tested against, and the oldest one it still runs on. */
+    private const val WANTED_MAJOR = 9
+    private const val OLDEST_MAJOR = 8
+
+    /** How long a failed resolve is not retried (every playback start asks for the binary). */
+    private const val RETRY_AFTER_FAILURE_MS = 10_000L
 
     @Volatile
     private var cachedPath: String? = null
+
+    @Volatile
+    private var failedAtMs = 0L
 
     /** The [preferredSource] [cachedPath] was resolved for: a different preference resolves again. */
     @Volatile
@@ -35,6 +47,11 @@ object FFmpegBinary {
     /** Where [getPath] found the binary: `bundled`, `system`, or `missing`; empty before it ran. */
     @Volatile
     var source: String = ""
+        private set
+
+    /** The bundled build's release branch (`9.0`, `master`), empty when none is in use. */
+    @Volatile
+    var branch: String = ""
         private set
 
     @Volatile
@@ -71,17 +88,37 @@ object FFmpegBinary {
     /** The binary [getPath] already resolved, or null; never downloads or probes (safe on the render thread). */
     fun getPathIfResolved(): String? = cachedPath
 
-    /** Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call (and on a new [preferredSource]). */
+    /**
+     * Returns the path to a usable `FFmpeg` binary, resolving and caching it on the first call (and on a new
+     * [preferredSource]). A bundled binary that has since disappeared (antivirus quarantine, cache wiped while running)
+     * is resolved again.
+     */
     fun getPath(): String? {
         val preference = runCatching(preferredSource).getOrDefault("auto")
-        cachedPath?.takeIf { cachedFor == preference }?.let { return it }
+        current(preference)?.let { return it }
         synchronized(this) {
-            cachedPath?.takeIf { cachedFor == preference }?.let { return it }
-            if (cachedFor != null) logger.info("FFmpeg source preference is now {}; resolving the binary again.", preference)
-            cachedPath = if (preference == "system") probeSystemFfmpeg() ?: resolve() else resolve()
+            current(preference)?.let { return it }
+            if (cachedFor != null && cachedFor != preference) {
+                logger.info("FFmpeg source preference is now {}; resolving the binary again.", preference)
+                failedAtMs = 0L
+            }
+            if (cachedPath == null && failedAtMs != 0L && System.currentTimeMillis() - failedAtMs < RETRY_AFTER_FAILURE_MS) {
+                return null
+            }
+            cachedPath = if (preference == "system") findSystemFfmpeg(quiet = true) ?: resolve() else resolve()
             cachedFor = preference
+            failedAtMs = if (cachedPath == null) System.currentTimeMillis() else 0L
             return cachedPath
         }
+    }
+
+    private fun current(preference: String): String? {
+        if (cachedFor != preference) return null
+        val path = cachedPath ?: return null
+        if (source != "bundled" || File(path).isFile) return path
+        logger.warn("The FFmpeg binary at $path is gone; resolving it again.")
+        cachedPath = null
+        return null
     }
 
     /**
@@ -107,49 +144,91 @@ object FFmpegBinary {
             logger.warn("No bundled binary URL for this OS / arch; trying system FFmpeg.")
             return findSystemFfmpeg()
         }
-        val cacheDir = File("$CACHE_ROOT/${p.key}-$FFMPEG_VERSION")
-        val binary = File(cacheDir, p.binaryName)
-        if (binary.isFile && binary.length() > 0 && binary.canExecute()) {
-            logger.info("Using binary: ${binary.absolutePath}.")
-            source = "bundled"
-            return binary.absolutePath
-        }
-        return runCatching {
-            val select = { name: String -> p.binaryName.takeIf { name.endsWith(p.entrySuffix) } }
-            if (p.sumsUrl != null) {
-                SourceLoader.downloadAndExtractVerified(p.url, p.sumsUrl, cacheDir.toPath(), "FFmpeg", select)
-            } else {
-                // The macOS builds come from single-maintainer sites that publish no checksum list for the archive
-                SourceLoader.downloadAndExtract(p.url, cacheDir.toPath(), "FFmpeg", select = select)
+        val cached = cachedBuilds(p)
+        for (dir in cached) {
+            val binary = File(dir, p.binaryName)
+            if (runs(binary) == Run.FAILED) {
+                logger.warn("Cached FFmpeg ${binary.absolutePath} does not run.")
+                continue
             }
-            if (!binary.isFile || binary.length() == 0L) throw IOException("Extracted binary is missing or empty.")
-            SourceLoader.makeExecutable(binary.toPath())
-            deleteStaleBuilds(p.key)
-            source = "bundled"
-            binary.absolutePath
-        }.getOrElse { e ->
-            logger.error("Download failed, falling back to system ffmpeg", e)
-            findSystemFfmpeg()
+            logger.info("Using binary: ${binary.absolutePath}.")
+            return bundled(binary, dir)
         }
+        // Every cached build fails to run (quarantined, a libc it can't use, a no-exec game folder): a working system
+        // FFmpeg beats downloading the same build again
+        if (cached.isNotEmpty()) findSystemFfmpeg(quiet = true)?.let { return it }
+        return runCatching { provision(p) }.getOrElse { e ->
+            logger.error("Download failed, falling back to system ffmpeg", e)
+            null
+        } ?: findSystemFfmpeg()
+            ?: cached.firstOrNull()?.let { bundled(File(it, p.binaryName), it) } // nothing better: as before
     }
 
-    private fun deleteStaleBuilds(platformKey: String) {
-        val current = "$platformKey-$FFMPEG_VERSION"
+    private fun bundled(binary: File, dir: File): String {
+        source = "bundled"
+        branch = dir.name.substringAfterLast('-')
+        return binary.absolutePath
+    }
+
+    /** Cached build folders of [p] holding its binary, the wanted branch first. */
+    private fun cachedBuilds(p: Platform): List<File> =
+        File(CACHE_ROOT).listFiles().orEmpty()
+            .filter { it.isDirectory && it.name.startsWith("${p.key}-") && File(it, p.binaryName).let { b -> b.isFile && b.length() > 0 } }
+            .sortedWith(compareByDescending<File> { it.name.startsWith("${p.key}-$WANTED_MAJOR.") }.thenByDescending { it.name })
+
+    /** Downloads and unpacks a build for [p]; returns the binary's path. Throws when no source has one that runs. */
+    @Throws(IOException::class)
+    private fun provision(p: Platform): String {
+        val select = { name: String -> p.binaryName.takeIf { name.endsWith(p.entrySuffix) } }
+        var lastError: IOException? = null
+        // A second pass only after a checksum mismatch: the rolling `latest` can swap a file between list and download
+        for (pass in 0..1) {
+            for (candidate in p.candidates()) {
+                val dir = File("$CACHE_ROOT/${p.key}-${candidate.branch}")
+                val binary = File(dir, p.binaryName)
+                try {
+                    SourceLoader.downloadAndExtract(candidate.url, dir.toPath(), "FFmpeg ${candidate.branch}", candidate.sha256, select)
+                    if (!binary.isFile || binary.length() == 0L) throw IOException("Extracted binary is missing or empty.")
+                    SourceLoader.makeExecutable(binary.toPath())
+                    if (runs(binary) == Run.FAILED) throw IOException("Downloaded FFmpeg ${candidate.branch} does not run here.")
+                    deleteStaleBuilds(p.key, dir.name)
+                    logger.info("FFmpeg ${candidate.branch} ready from ${candidate.url}.")
+                    return bundled(binary, dir)
+                } catch (e: IOException) {
+                    logger.warn("FFmpeg from ${candidate.url} failed: ${e.message}")
+                    lastError = e
+                }
+            }
+            if (lastError !is SourceLoader.ChecksumMismatchException) break
+        }
+        throw lastError ?: IOException("No FFmpeg build found for ${p.key}.")
+    }
+
+    private enum class Run { OK, FAILED, SLOW }
+
+    /** Runs `[binary] -version`: [Run.SLOW] when it hasn't answered in time (a first antivirus scan), not a failure. */
+    private fun runs(binary: File): Run = try {
+        val p = ProcessBuilder(binary.absolutePath, "-hide_banner", "-version").redirectErrorStream(true).start()
+        runCatching { p.outputStream.close() }
+        daemon({ runCatching { p.inputStream.transferTo(OutputStream.nullOutputStream()) } }, "FFmpeg-version-drain").start()
+        when {
+            !p.waitFor(15, TimeUnit.SECONDS) -> Run.SLOW.also { p.destroyForcibly() }
+            p.exitValue() == 0 -> Run.OK
+            else -> Run.FAILED
+        }
+    } catch (_: IOException) {
+        Run.FAILED
+    }
+
+    private fun deleteStaleBuilds(platformKey: String, keep: String) {
         File(CACHE_ROOT).listFiles()
-            ?.filter { it.isDirectory && it.name != current && (it.name == platformKey || it.name.startsWith("$platformKey-")) }
+            ?.filter { it.isDirectory && it.name != keep && (it.name == platformKey || it.name.startsWith("$platformKey-")) }
             ?.forEach { stale ->
                 if (stale.deleteRecursively()) logger.info("Removed stale FFmpeg build: ${stale.name}.")
             }
     }
 
-    private fun findSystemFfmpeg(): String? = probeSystemFfmpeg() ?: run {
-        logger.error("FFmpeg not found (no download succeeded, no system binary).")
-        source = "missing"
-        null
-    }
-
-    /** An installed `FFmpeg` that runs, or null. */
-    private fun probeSystemFfmpeg(): String? {
+    private fun findSystemFfmpeg(quiet: Boolean = false): String? {
         val candidates = ["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
         for (candidate in candidates) {
             runCatching {
@@ -159,31 +238,70 @@ object FFmpegBinary {
                 if (p.waitFor(3, TimeUnit.SECONDS) && p.exitValue() == 0) {
                     logger.info("Using system ffmpeg: $candidate...")
                     source = "system"
+                    branch = ""
                     return candidate
                 }
                 p.destroyForcibly()
             }
         }
+        if (quiet) return null
+        logger.error("FFmpeg not found (no download succeeded, no system binary).")
+        source = "missing"
+        branch = ""
         return null
     }
 
-    private fun detectPlatform(): Platform? {
-        val btbn = { arch: String, ext: String -> "$BTBN_BASE/ffmpeg-n$FFMPEG_VERSION-latest-$arch-gpl-$FFMPEG_VERSION.$ext" }
-        val sums = "$BTBN_BASE/checksums.sha256"
-        return when {
-            OsInfo.isWindows -> if (OsInfo.isArm) null else Platform("windows-x64", btbn("win64", "zip"), "ffmpeg.exe", "/bin/ffmpeg.exe", sums)
-            OsInfo.isMac -> if (OsInfo.isArm) {
-                Platform("macos-aarch64", "https://www.osxexperts.net/ffmpeg9arm.zip", "ffmpeg", "ffmpeg")
-            } else {
-                Platform("macos-x64", "https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip", "ffmpeg", "ffmpeg")
-            }
-            OsInfo.isArm -> Platform("linux-aarch64", btbn("linuxarm64", "tar.xz"), "ffmpeg", "/bin/ffmpeg", sums)
-            else -> Platform("linux-x64", btbn("linux64", "tar.xz"), "ffmpeg", "/bin/ffmpeg", sums)
+    private fun detectPlatform(): Platform? = when {
+        OsInfo.isWindows -> if (OsInfo.isArm64) {
+            Platform.builds("windows-aarch64", "winarm64", "zip", "ffmpeg.exe", "/bin/ffmpeg.exe")
+        } else {
+            Platform.builds("windows-x64", "win64", "zip", "ffmpeg.exe", "/bin/ffmpeg.exe")
         }
+        OsInfo.isMac -> if (OsInfo.isArm) Platform.mac("macos-aarch64", MAC_ARM) else Platform.mac("macos-x64", MAC_X64)
+        OsInfo.isArm64 -> Platform.builds("linux-aarch64", "linuxarm64", "tar.xz", "ffmpeg", "/bin/ffmpeg")
+        OsInfo.isArm -> null // 32-bit ARM: no build is published
+        else -> Platform.builds("linux-x64", "linux64", "tar.xz", "ffmpeg", "/bin/ffmpeg")
     }
 
-    /** [sumsUrl]: the release's `sha256sum` list the archive is verified against, or null when none is published. */
+    /** One archive to try: verified against [sha256] (never run unchecked), unpacked into `<platform>-<branch>`. */
+    internal class Candidate(val url: String, val sha256: String, val branch: String)
+
+    /**
+     * macOS archives (no publisher checksum list exists, so each is pinned here; a changed file is refused and the next
+     * one tried). The mirror release can carry `ffmpeg-<platform>.zip` for when these hosts are gone.
+     */
+    private val MAC_ARM = [
+        Candidate("https://www.osxexperts.net/ffmpeg902arm.zip", "4597f0f3a397cc0027bfd03dc4dd9c3066be15943cc788370846b4305d178bcb", "9.0"),
+        Candidate("https://www.osxexperts.net/ffmpeg9arm.zip", "d0c06c5c68ce48af3143b262f7a9118a7c9f67de1e237fcc24ffb14df9c67af9", "9.0"),
+    ]
+    private val MAC_X64 = [
+        Candidate("https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip", "4acc0be580f9b2788029eb7bd4d645ff87968911b0a62aeeb3940d42d54558d5", "9.0"),
+        Candidate("https://www.osxexperts.net/ffmpeg80intel.zip", "2d24d22db78c87f394a5822867acd5c5dc5e762cd261a44bd26923f3a5af3e07", "8.0"),
+    ]
+
     private class Platform(
-        val key: String, val url: String, val binaryName: String, val entrySuffix: String, val sumsUrl: String? = null,
-    )
+        val key: String,
+        val binaryName: String,
+        val entrySuffix: String,
+        val candidates: () -> List<Candidate>,
+    ) {
+        companion object {
+            fun builds(key: String, arch: String, ext: String, binaryName: String, entrySuffix: String) =
+                Platform(key, binaryName, entrySuffix) {
+                    val want = FfmpegBuilds.Want(
+                        arch, ext, FfmpegBuilds.Variant.GPL, WANTED_MAJOR, otherMajors = true, oldestMajor = OLDEST_MAJOR,
+                    )
+                    listOfNotNull(
+                        FfmpegBuilds.locate(FfmpegBuilds.RELEASES, want)?.let { Candidate(it.url, it.sha256, it.build.branch) },
+                    )
+                }
+
+            fun mac(key: String, pinned: List<Candidate>) = Platform(key, "ffmpeg", "ffmpeg") {
+                val name = "ffmpeg-$key.zip"
+                val mirrored = runCatching { SourceLoader.sha256Sums(FfmpegBuilds.MIRROR.sumsUrl)[name] }.getOrNull()
+                    ?.let { Candidate(FfmpegBuilds.MIRROR.url(name), it, "mirror") }
+                pinned + listOfNotNull(mirrored)
+            }
+        }
+    }
 }
