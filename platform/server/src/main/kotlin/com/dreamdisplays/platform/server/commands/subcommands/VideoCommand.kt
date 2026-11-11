@@ -24,6 +24,7 @@ import com.dreamdisplays.platform.server.utils.VanillaPermissions
 import com.dreamdisplays.platform.server.utils.net.CustomMediaGate
 import com.dreamdisplays.platform.server.utils.net.DisplayActions
 import com.dreamdisplays.platform.server.utils.net.VanillaDisplayActions
+import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import com.dreamdisplays.platform.server.utils.net.VanillaPacketUtil
 import com.mojang.brigadier.context.CommandContext
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -225,7 +226,15 @@ object VanillaVideoCommand {
         data.lang = ""
         ServerCoroutines.io.launch { VanillaServerState.storage?.saveDisplay(data) }
         TimelineManager.onVideoCleared(data)
-        VanillaPacketUtil.sendDisplayInfo(DisplayManager.getReceivers(data, ctx.source.server), data)
+        val receivers = DisplayManager.getReceivers(data, ctx.source.server)
+        // Clients older than protocol 12 ignore an empty URL and would play the cleared video on: they drop the display
+        VanillaPacketUtil.sendDelete(
+            receivers.filter {
+                com.dreamdisplays.core.sync.EmptyDisplays.dropBeforeClear(V2PlayerTracker.helloOf(it.uuid)?.protocolVersion ?: 0)
+            },
+            data.id,
+        )
+        VanillaPacketUtil.sendDisplayInfo(receivers, data)
         com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager.endSessionsOf(data.id)
         QueueManager.onVideoSetByHand(data)
         ServerApiHost.current?.urlChanged(data)
