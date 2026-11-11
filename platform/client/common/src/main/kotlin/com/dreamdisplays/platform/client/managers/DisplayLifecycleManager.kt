@@ -40,7 +40,8 @@ object DisplayLifecycleManager {
     fun handleInfoPacket(packet: DisplayInfo) {
         // Known even while displays are off: its timelines must not look like ones for a display never described
         // A display that got a new video: what this client said about the old one is void on the server
-        if (ServerMediaGens.onInfo(packet)) DisplayWarmup.reReport(packet.id)
+        val newMedia = ServerMediaGens.onInfo(packet)
+        if (newMedia) DisplayWarmup.reReport(packet.id)
         if (!ClientStateManager.displaysEnabled) return
         if (!isValidDisplaySize(packet.width, packet.height, packet.depth)) {
             logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
@@ -54,6 +55,7 @@ object DisplayLifecycleManager {
         DisplayRegistry.screens[packet.id]?.let {
             DisplayRegistry.markReconfirmed(packet.id)
             it.updateData(packet)
+            if (newMedia) it.onMediaGenChanged()
             DisplayRegistry.recordScreen(it)
             return
         }

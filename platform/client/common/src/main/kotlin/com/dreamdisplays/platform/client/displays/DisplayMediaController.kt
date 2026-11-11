@@ -3,7 +3,6 @@ package com.dreamdisplays.platform.client.displays
 import com.dreamdisplays.core.services.keys.MediaServices
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.api.media.source.MediaSource
-import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.packets.ReportDuration
 import com.dreamdisplays.core.share.ScreenShareViewerRules
@@ -159,6 +158,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         }
 
         val expected = generation.incrementAndGet()
+        playingSampledAtNanos = 0L
         val oldPlayer = player
         player = null
         videoStarted = false
@@ -221,17 +221,59 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         DisplayRegistry.recordScreen(screen)
     }
 
-    /** Reports the video's length to the server; [force]: the server asked, so it is sent even if sent before. */
-    internal fun reportDuration(@Suppress("UNUSED_PARAMETER") force: Boolean = false) {
-        val mode = screen.effectiveMode
-        if (mode != PlaybackMode.SYNCED && mode != PlaybackMode.BROADCAST) return
-        val durationNanos = screen.mediaPlayerDurationNanos
-        if (durationNanos <= 0L) return // 0 for live streams and any not-yet-resolved case.
-        Initializer.sendPacket(
-            ReportDuration(
-                screen.uuid, durationNanos / 1_000_000L, screen.videoUrl.orEmpty(), ServerMediaGens.of(screen.uuid),
-            ),
-        )
+    /** What was last reported: media generation, URL and length (ms); nothing is sent twice unless asked. */
+    private var lastDurationReport: Triple<Long, String, Long>? = null
+
+    /** Length measured at a normal end of the stream, for the URL it was measured on (0 = none). */
+    private var observedEnd: Pair<String, Long>? = null
+
+    /** Content position last seen while the clock ran (ns), and when (monotonic ns); see [onStreamEnded]. */
+    private var playingPositionNanos = 0L
+    private var playingSampledAtNanos = 0L
+
+    /**
+     * Reports what this client knows of the video's length: its metadata length, or else the length it measured at
+     * the end of the stream. Sent in every mode (the server keeps a Local display's length for when it is shared
+     * again), and only when the media generation, URL or length differ from the last report; [force]: the server
+     * asked, so it is sent even then.
+     */
+    internal fun reportDuration(force: Boolean = false) {
+        val url = screen.videoUrl.orEmpty()
+        if (url.isEmpty()) return
+        val metadataMs = screen.mediaPlayerDurationNanos / 1_000_000L // 0 for live streams and unreadable headers
+        val observedMs = observedEnd?.takeIf { it.first == url }?.second ?: 0L
+        val ms = if (metadataMs > 0L) metadataMs else observedMs
+        if (ms <= 0L) return
+        sendDuration(url, ms, observedEnd = metadataMs <= 0L, force = force)
+    }
+
+    private fun sendDuration(url: String, ms: Long, observedEnd: Boolean, force: Boolean) {
+        val gen = ServerMediaGens.of(screen.uuid)
+        val key = Triple(gen, url, ms)
+        if (!force && key == lastDurationReport) return
+        lastDurationReport = key
+        Initializer.sendPacket(ReportDuration(screen.uuid, ms, url, gen, observedEnd))
+    }
+
+    /** Called every tick: remembers where a running clock is, so a normal end of stream knows where it ended. */
+    internal fun noteProgress() {
+        if (!videoStarted || !screen.isClockRunning()) return
+        playingPositionNanos = screen.syncPositionNanos
+        playingSampledAtNanos = System.nanoTime()
+    }
+
+    /**
+     * The stream ended normally. When its header gave no length (or one that is off), report where it actually
+     * ended: the server's clock then ends, loops and moves the queue on at the real end instead of never.
+     */
+    internal fun onStreamEnded() {
+        val url = screen.videoUrl.orEmpty()
+        if (url.isEmpty() || playingSampledAtNanos == 0L) return
+        val ageMs = (System.nanoTime() - playingSampledAtNanos) / 1_000_000L
+        val metadataMs = screen.mediaPlayerDurationNanos / 1_000_000L
+        val ms = observedEndToReport(playingPositionNanos / 1_000_000L, ageMs, metadataMs) ?: return
+        observedEnd = url to ms
+        sendDuration(url, ms, observedEnd = true, force = false)
     }
 
     private companion object {
@@ -264,4 +306,21 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         player = null
         return current
     }
+}
+
+/** A measured end this far from the header's length (ms) is reported: the header was wrong, not just rounded down. */
+internal const val OBSERVED_END_TOLERANCE_MS = 1_500L
+
+/** A position sampled longer ago than this (ms) before the end of stream says nothing about where it ended. */
+internal const val OBSERVED_END_MAX_SAMPLE_AGE_MS = 500L
+
+/**
+ * The length to report after a normal end of stream, or null for none: the content position last seen with the clock
+ * running ([positionMs], sampled [sampleAgeMs] before the end), when the header gave no length ([metadataMs] 0) or one
+ * that is off by more than [OBSERVED_END_TOLERANCE_MS] (whole-second header lengths are rounded down by up to a second).
+ */
+internal fun observedEndToReport(positionMs: Long, sampleAgeMs: Long, metadataMs: Long): Long? {
+    if (positionMs <= 0L || sampleAgeMs !in 0..OBSERVED_END_MAX_SAMPLE_AGE_MS) return null
+    if (metadataMs > 0L && kotlin.math.abs(positionMs - metadataMs) <= OBSERVED_END_TOLERANCE_MS) return null
+    return positionMs
 }

@@ -483,6 +483,9 @@ class DisplayScreen(
     /** Sends what this client knows of the video's length again (the server asked for it, see [ReportRequests]). */
     internal fun reReportDuration() = media.reportDuration(force = true)
 
+    /** The server described this display with a new media generation: what was reported is tied to the old one. */
+    internal fun onMediaGenChanged() = media.reportDuration()
+
     private val media = DisplayMediaController(this)
     private val watchPartyController = WatchPartyController(this)
     private val frameUploader = DisplayFrameUploader(uuid)
@@ -1279,6 +1282,7 @@ class DisplayScreen(
 
     /** Marks a local VOD as finished without emitting playback commands upstream; also auto-closes a non-looping fullscreen overlay. */
     internal fun onPlaybackEnded(positionNanos: Long) {
+        media.onStreamEnded()
         if (isFullscreenActive && !fullscreenLoop) deactivateFullscreen()
 
         if (effectiveMode != PlaybackMode.LOCAL) return
@@ -1519,6 +1523,7 @@ class DisplayScreen(
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         syncPlaybackSpeed() // Follows mode / watch-party changes
         timelineFollower.tick()
+        media.noteProgress()
         queuePreloader.tick()
         restoreAudioTrackIfPending()
         restoreSubtitleTrackIfPending()

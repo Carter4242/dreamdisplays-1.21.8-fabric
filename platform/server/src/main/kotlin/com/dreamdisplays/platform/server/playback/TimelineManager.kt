@@ -1,6 +1,6 @@
 package com.dreamdisplays.platform.server.playback
 
-import com.dreamdisplays.core.protocol.common.packets.MediaGen
+import com.dreamdisplays.core.queue.DurationReports
 import com.dreamdisplays.core.protocol.common.packets.ReportKind
 import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.api.playback.model.PlaybackAction
@@ -27,8 +27,6 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object TimelineManager {
     private const val PERIODIC_BROADCAST_MS = 5_000L
-    private const val MAX_DURATION_MS = 24L * 60 * 60 * 1_000
-    private const val MIN_DURATION_MS = 2_000L
     private val commandThrottle = ActionThrottle()
     private const val COMMAND_COOLDOWN_MS = 100L
     private lateinit var transport: PlaybackTransport
@@ -61,6 +59,9 @@ object TimelineManager {
     var autoPauseWhenEmptyMs: () -> Long = { 0L }
 
     private val emptySince = ConcurrentHashMap<UUID, Long>()
+
+    /** When each display's video last changed (server ms), to tell an old client's in-flight report from a fresh one. */
+    private val videoChangedAt = ConcurrentHashMap<UUID, Long>()
 
     /**
      * Players outside a display's range who still follow its timeline (fullscreen viewers, clients holding it ready
@@ -371,7 +372,10 @@ object TimelineManager {
         timelines.remove(display.id)
         startHolds.remove(display.id)
         val now = transport.nowMs()
-        val durationMs = durationMsOf(display)
+        // The length viewers reported for the video it holds now (in any mode: it may have changed while Local), not
+        // whatever the display last ran in a shared mode
+        val durationMs = QueueTiming.scheduledDurationMs(durations.mediaMsOf(display.id, display.url))
+        display.duration = durationMs.takeIf { it > 0L }?.let { it * 1_000_000L }
         val timeline = when (display.mode) {
             PlaybackMode.SYNCED, PlaybackMode.BROADCAST ->
                 Timeline(positionMs.coerceAtLeast(0), now, paused = false, durationMs = durationMs, loop = true)
@@ -381,7 +385,14 @@ object TimelineManager {
         if (timeline != null) {
             timelines[display.id] = timeline
             broadcast(display, timeline)
+            // Unknown length: clients loaded the video before it was shared and reported nothing since; ask them
+            if (durationMs == 0L) askNearby(display, ReportKind.DURATION)
         }
+    }
+
+    private fun askNearby(display: DisplayData, kind: Int) {
+        val request = ReportRequest(display.id, kind)
+        transport.nearbyPlayerIds(display).forEach { transport.sendTo(it, request) }
     }
 
     /**
@@ -394,11 +405,13 @@ object TimelineManager {
      * and anyone not ready joins late.
      */
     fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null) {
-        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
-        // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length
+        // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length.
+        // Tracked in Local too, so a switch back to a shared mode starts from this video's length.
         val knownMs = QueueTiming.scheduledDurationMs(durations.onVideoChanged(display.id, display.url))
         display.duration = knownMs.takeIf { it > 0L }?.let { it * 1_000_000L }
         val now = transport.nowMs()
+        videoChangedAt[display.id] = now
+        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         endOfStream.onVideoChanged(display.id, maxOf(now, startAtMs ?: now))
         // The display keeps its speed across videos
         val speed = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
@@ -435,10 +448,10 @@ object TimelineManager {
      * queue's switch) never comes before the media's.
      */
     fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long, url: String = "", mediaGen: Long = 0L) {
-        if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
-        if (durationMs !in MIN_DURATION_MS..MAX_DURATION_MS) return
-        if (url.isNotEmpty() && url != display.url) return
-        if (!MediaGen.matches(mediaGen, display.mediaGen)) return
+        val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
+        if (!shared && display.mode != PlaybackMode.LOCAL) return
+        val sinceChange = videoChangedAt[display.id]?.let { transport.nowMs() - it } ?: Long.MAX_VALUE
+        if (!DurationReports.accepts(durationMs, url, mediaGen, display.url, display.mediaGen, sinceChange)) return
         if (senderId !in transport.nearbyPlayerIds(display)) return
         // Report cooldowns start afresh with each video ([VideoDurations])
         val mediaMs = durations.report(
@@ -446,6 +459,8 @@ object TimelineManager {
         ) ?: return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L
+        // Local: kept for when the display is shared again
+        if (!shared) return
         val current = timelines[display.id] ?: return
         timelines[display.id] = current.copy(durationMs = scheduledMs, loop = true)
         broadcast(display, timelines.getValue(display.id))
@@ -488,6 +503,7 @@ object TimelineManager {
         ReadinessTracker.forgetDisplay(displayId)
         endOfStream.forget(displayId)
         emptySince.remove(displayId)
+        videoChangedAt.remove(displayId)
         timelines.remove(displayId)
         durations.forget(displayId)
         lastBroadcast.remove(displayId)
