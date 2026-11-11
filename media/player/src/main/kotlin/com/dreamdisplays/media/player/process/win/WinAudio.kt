@@ -390,7 +390,7 @@ object WinAudio {
         val apps = LinkedHashMap<Long, ShareAudio.Choice.App>()
         for (pid in pids) {
             val root = programRoot(pid)
-            if (root == selfPid || isAncestor(selfPid, root)) continue
+            if (includesGame(root, selfPid)) continue
             apps.getOrPut(root) { ShareAudio.Choice.App(root, appName(root)) }
         }
         return apps.values.sortedBy { it.name.lowercase() }
@@ -411,13 +411,19 @@ object WinAudio {
         return current.pid()
     }
 
-    private fun isAncestor(pid: Long, ancestor: Long): Boolean {
-        var current = ProcessHandle.of(pid).orElse(null) ?: return false
+    /**
+     * True when capturing app [root] with its process tree would capture this game ([selfPid]) too: it is the game,
+     * or the game runs under it (a launcher, Steam).
+     */
+    fun includesGame(root: Long, selfPid: Long): Boolean = ShareAudio.includesGame(root, selfPid, ancestors(selfPid))
+
+    /** [pid]'s parent, its parent, and so on (at most 32). */
+    private fun ancestors(pid: Long): List<Long> = buildList {
+        var current = ProcessHandle.of(pid).orElse(null) ?: return@buildList
         repeat(32) {
-            current = current.parent().orElse(null) ?: return false
-            if (current.pid() == ancestor) return true
+            current = current.parent().orElse(null) ?: return@buildList
+            add(current.pid())
         }
-        return false
     }
 
     private val names = java.util.concurrent.ConcurrentHashMap<String, String>()

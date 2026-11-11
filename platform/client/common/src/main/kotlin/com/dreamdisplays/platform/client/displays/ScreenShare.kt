@@ -171,11 +171,14 @@ object ScreenShare {
 
     /**
      * The app owning [window], as a "Just this app" choice (its program's topmost process); null for a Store app whose
-     * process could not be found (its frame host plays nothing, so "this app" would be silence).
+     * process could not be found (its frame host plays nothing, so "this app" would be silence), and for an app this
+     * game runs under (its launcher, Steam): its process tree would carry the game's sound and voice chat.
      */
     fun windowApp(window: ScreenCapture.Window): ShareAudio.Choice.App? {
         if (runCatching { WinWindows.isFrameHost(window.pid) }.getOrDefault(false)) return null
-        return ShareAudio.Choice.App(runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid), window.app)
+        val root = runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid)
+        if (runCatching { WinAudio.includesGame(root, selfPid) }.getOrDefault(true)) return null
+        return ShareAudio.Choice.App(root, window.app)
     }
 
     /** True when this server lets this player share, and this OS has a capture source. */

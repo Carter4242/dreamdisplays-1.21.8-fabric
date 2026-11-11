@@ -74,6 +74,13 @@ object ShareAudio {
             }
         }
 
+    /**
+     * True when app [root]'s sound (its whole process tree) includes this game's: [root] is the game ([selfPid]) or
+     * one of its [selfAncestors] (the launcher that started it, Steam). "Just this app" there would stream the game
+     * and the voice chat it plays.
+     */
+    fun includesGame(root: Long, selfPid: Long, selfAncestors: List<Long>): Boolean = root == selfPid || root in selfAncestors
+
     /** The choice selected when the audio step opens: a picked window's own app, else everything but the game. */
     fun defaultChoice(os: Os, processLoopback: Boolean, window: Choice.App? = null): Choice = when {
         os == Os.MAC -> Choice.Off

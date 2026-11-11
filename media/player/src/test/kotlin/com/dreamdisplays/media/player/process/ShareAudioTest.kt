@@ -53,6 +53,14 @@ class ShareAudioTest {
     }
 
     @Test
+    fun `an app the game runs under is never just this app`() {
+        // Prism -> java (the game): Prism's process tree includes the game, its sound and its voice chat
+        assertTrue(ShareAudio.includesGame(root = 50, selfPid = self, selfAncestors = listOf(50, 4)))
+        assertTrue(ShareAudio.includesGame(root = self, selfPid = self, selfAncestors = listOf(50)))
+        assertFalse(ShareAudio.includesGame(root = 100, selfPid = self, selfAncestors = listOf(50, 4)))
+    }
+
+    @Test
     fun `without process loopback only the whole pc or nothing is offered`() {
         assertEquals(
             listOf(Choice.WholePc, Choice.Off),
