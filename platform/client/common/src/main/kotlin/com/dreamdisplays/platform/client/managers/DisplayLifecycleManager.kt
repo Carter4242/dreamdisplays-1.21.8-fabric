@@ -10,6 +10,7 @@ import com.dreamdisplays.shared.storage.DisplayData
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.services.DisplayStorage
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.displays.DisplayPolicyCache
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager.MAX_DISPLAY_BLOCKS
@@ -41,6 +42,10 @@ object DisplayLifecycleManager {
             return
         }
 
+        val policy = DisplayPolicyCache.update(packet.id, acceptedCustomData(packet))
+        // First sight of a display seeds the player's volume for it from the server's audio.startVolume
+        ClientSettingsStore.getSettings(packet.id, DisplayScreen.defaultVolume(policy))
+
         DisplayRegistry.screens[packet.id]?.let {
             DisplayRegistry.markReconfirmed(packet.id)
             it.updateData(packet)
@@ -54,7 +59,7 @@ object DisplayLifecycleManager {
         } else {
             PlaybackMode.fromWire(packet.mode)
         }
-        val renderDistance = DisplayScreen.clientRenderDistanceBlocks()
+        val renderDistance = DisplayPolicyCache.renderDistanceFor(policy)
 
         if (!packet.forced && !packet.virtual) {
             Minecraft.getInstance().player?.let { player ->
@@ -130,9 +135,11 @@ object DisplayLifecycleManager {
 
     fun restoreVisibleUnloadedScreens(playerPos: BlockPos) {
         val dimensionKey = currentDimensionKey()
-        val renderDistance = DisplayScreen.clientRenderDistanceBlocks()
         DisplayRegistry.unloadedScreens.values
-            .filter { sameDimension(it.dimensionKey, dimensionKey) && distanceToData(it, playerPos) <= renderDistance }
+            .filter {
+                sameDimension(it.dimensionKey, dimensionKey) &&
+                        distanceToData(it, playerPos) <= DisplayPolicyCache.renderDistanceFor(DisplayPolicyCache.get(it.uuid))
+            }
             .sortedBy { distanceToData(it, playerPos) }
             .forEach { data ->
                 if (!fitsBudget(distanceToData(data, playerPos), playerPos)) return@forEach

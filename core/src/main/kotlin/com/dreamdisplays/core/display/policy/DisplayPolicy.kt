@@ -56,18 +56,23 @@ data class DisplayPolicy(
         )
     }
 
-    /** How a display's sound carries (defined for server control; applied by the client separately). */
+    /** How a display's sound carries with distance, and the volume range players get. */
     @Serializable
     data class Audio(
+        /** Distance in blocks at which the sound has faded to silence. */
         val radiusBlocks: Double? = null,
+        /** Shape of the fade between [fullVolumeBlocks] and [radiusBlocks]. */
         val falloff: Falloff? = null,
-        /** Volume (0..1) at the edge of the full-volume zone where falloff starts. */
+        /** Volume (0..1) a player starts at the first time they see this display; they can change it after. */
         val startVolume: Double? = null,
-        /** Volume ceiling, 0..1. */
+        /** Highest volume a player can play this display at (0..2, 1 = 100 %). */
         val maxVolume: Double? = null,
+        /** Within this many blocks the sound plays at full volume; fading starts beyond it. */
+        val fullVolumeBlocks: Double? = null,
     ) {
         fun mergedOver(base: Audio?): Audio = Audio(
             radiusBlocks = radiusBlocks ?: base?.radiusBlocks,
+            fullVolumeBlocks = fullVolumeBlocks ?: base?.fullVolumeBlocks,
             falloff = falloff ?: base?.falloff,
             startVolume = startVolume ?: base?.startVolume,
             maxVolume = maxVolume ?: base?.maxVolume,
@@ -83,14 +88,14 @@ data class DisplayPolicy(
         SQUARED,
     }
 
-    /** How far away a display is still shown (defined for server control; applied by the client separately). */
+    /** How far away a display is still loaded and played; the player's own render distance still applies. */
     @Serializable
     data class Visibility(val maxDistanceBlocks: Double? = null) {
         fun mergedOver(base: Visibility?): Visibility =
             Visibility(maxDistanceBlocks = maxDistanceBlocks ?: base?.maxDistanceBlocks)
     }
 
-    /** Stream quality limits (defined for server control; applied by the client separately). */
+    /** Stream quality limits: the highest resolution (video height) clients pick for this display. */
     @Serializable
     data class Quality(val maxHeight: Int? = null) {
         fun mergedOver(base: Quality?): Quality = Quality(maxHeight = maxHeight ?: base?.maxHeight)

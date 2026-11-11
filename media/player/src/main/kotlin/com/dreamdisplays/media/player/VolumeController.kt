@@ -20,14 +20,27 @@ internal class VolumeController(
     }
 
     /**
-     * Recomputes quadratic distance attenuation for [distance] against [maxRadius] and re-applies
-     * the effective volume only when the attenuation changed materially.
+     * Recomputes distance attenuation for [distance] and re-applies the effective volume only when it changed
+     * materially: full volume within [fullVolumeRadius], then fading to silence at [maxRadius], quadratically
+     * when [squared] (the default) or linearly otherwise.
      */
-    fun updateAttenuation(distance: Double, maxRadius: Double) {
-        val attenuation = (1.0 - minOf(1.0, distance / maxRadius)).let { it * it }
+    fun updateAttenuation(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true) {
+        val attenuation = attenuation(distance, maxRadius, fullVolumeRadius, squared)
         if (abs(attenuation - lastAttenuation) > 1e-5) {
             lastAttenuation = attenuation
             applyVolume(userVolume * attenuation)
+        }
+    }
+
+    internal companion object {
+        /** Volume multiplier (0..1) at [distance]; see [updateAttenuation]. */
+        fun attenuation(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true): Double {
+            val full = fullVolumeRadius.coerceAtLeast(0.0)
+            if (distance <= full) return 1.0
+            val span = maxRadius - full
+            if (span <= 0.0) return 0.0
+            val remaining = 1.0 - ((distance - full) / span).coerceIn(0.0, 1.0)
+            return if (squared) remaining * remaining else remaining
         }
     }
 }

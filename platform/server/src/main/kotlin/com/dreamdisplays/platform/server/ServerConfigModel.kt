@@ -354,6 +354,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
     )
     val audio = DisplayPolicy.Audio(
         radiusBlocks = t.numberOrNull("policy.audio.radius_blocks")?.toDouble(),
+        fullVolumeBlocks = t.numberOrNull("policy.audio.full_volume_blocks")?.toDouble(),
         falloff = (t?.get("policy.audio.falloff") as? String)?.trim()?.uppercase()
             ?.let { name -> DisplayPolicy.Falloff.entries.firstOrNull { it.name == name } },
         startVolume = t.numberOrNull("policy.audio.start_volume")?.toDouble(),

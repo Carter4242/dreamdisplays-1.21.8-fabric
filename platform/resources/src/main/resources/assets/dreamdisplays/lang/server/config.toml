@@ -54,6 +54,20 @@ max_displays_per_player = 0
 # seek_threshold_ms = 1500  # drift above this is fixed by seeking instead
 # seek_cooldown_ms = 8000   # minimum time between corrective seeks
 
+[policy.audio]
+# How far display sound carries (per display: /display policy <id> audio.<key> <value>)
+# radius_blocks = 96        # sound fades to silence at this distance
+# full_volume_blocks = 0    # full volume within this distance, fading starts beyond it
+# falloff = "squared"       # "squared" (drops fast near the edge) or "linear"
+# start_volume = 0.5        # volume players start at the first time they see a display (0 to 1)
+# max_volume = 2.0          # highest volume players can set (0 to 2, 1 = 100 %)
+
+[policy.visibility]
+# max_distance_blocks = 96  # displays further away are not loaded or played (players' render distance still applies)
+
+[policy.quality]
+# max_height = 1080         # highest resolution clients stream (e.g. 720, 1080)
+
 [custom_media]
 # Custom videos: links players paste themselves (direct .mp4 / .m3u8 files, file hosts,
 # and any other site the resolver can open)
