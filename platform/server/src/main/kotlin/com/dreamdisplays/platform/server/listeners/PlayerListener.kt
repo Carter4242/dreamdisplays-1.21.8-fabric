@@ -8,6 +8,7 @@ import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.managers.SelectionManager
 import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
+import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.playback.ReadinessTracker
 import com.dreamdisplays.platform.server.playback.WatchPartyManager
 import com.dreamdisplays.platform.server.utils.ServerMessage
@@ -43,6 +44,9 @@ import java.util.*
 class PlayerListener : Listener {
     private var hasValidatedWorld = false
 
+    /** After a world change: the client has switched level and is holding its carried PiPs for their re-announce. */
+    private val PIN_REANNOUNCE_DELAY_TICKS = 40L
+
     /**
      * On the first join after startup, validates all stored displays once. Also schedules a delayed
      * `modRequired` message for vanilla clients when mod detection is enabled.
@@ -69,10 +73,15 @@ class PlayerListener : Listener {
         }
     }
 
-    /** A player who changed world ends any screen share they run (a display lives in one world). */
+    /**
+     * A player who changed world ends any screen share they run (a display lives in one world). Their PiP-pinned
+     * displays are announced again once the client has switched level: it drops carried PiPs nobody re-announces.
+     */
     @EventHandler
     fun onPlayerChangedWorld(event: PlayerChangedWorldEvent) {
         com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerChangedWorld(event.player.uniqueId)
+        val player = event.player
+        Scheduler.runPlayerLater(player, PIN_REANNOUNCE_DELAY_TICKS) { PipPinManager.onPlayerJoin(player.uniqueId) }
     }
 
     /** Drops cached per-player state when a player disconnects. */

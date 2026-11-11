@@ -28,9 +28,10 @@ object PipPinManager {
     private val saveLock = Any()
     private val persistScheduled = AtomicBoolean(false)
 
-    /** Wires the platform transport. */
+    /** Wires the platform transport; pinners get a pinned display's timeline at any distance (never waited for). */
     fun init(transport: PlaybackTransport) {
         this.transport = transport
+        TimelineManager.pinReceivers = ::pinnersOf
     }
 
     /**
@@ -47,14 +48,27 @@ object PipPinManager {
         schedulePersist()
     }
 
-    /** Records that [playerId] unpinned [displayId] from PiP. Rate-limited per player like [pin]. */
+    /**
+     * Records that [playerId] unpinned [displayId] from PiP. Never throttled: a dropped unpin (one right after a pin)
+     * would leave a pin that sends them that display's updates for good, and a removal cannot grow the store.
+     */
     fun unpin(playerId: UUID, displayId: UUID) {
-        if (!throttle.tryAcquire(playerId, PIN_COOLDOWN_MS)) return
-        pins[playerId]?.remove(displayId)
-        schedulePersist()
+        if (pins[playerId]?.remove(displayId) == true) schedulePersist()
     }
 
-    /** Re-sends every pinned display's info to [playerId] on join, bypassing render distance. */
+    /** Online players who have [displayId] pinned: they get its timeline, description and queue at any distance. */
+    fun pinnersOf(displayId: UUID): Collection<UUID> {
+        if (pins.isEmpty()) return emptyList()
+        val pinners = pins.entries.filter { displayId in it.value }.map { it.key }
+        if (pinners.isEmpty()) return pinners
+        val online = transport.onlinePlayerIds().toSet()
+        return pinners.filter { it in online }
+    }
+
+    /**
+     * Re-sends every pinned display's info to [playerId] on join, bypassing render distance; also after a world change,
+     * where the client drops a carried PiP that is not announced again.
+     */
     fun onPlayerJoin(playerId: UUID) {
         val displayIds = pins[playerId] ?: return
         for (displayId in displayIds) {

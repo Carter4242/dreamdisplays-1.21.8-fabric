@@ -107,7 +107,7 @@ class PaperServer : JavaPlugin() {
         QueueManager.init(PaperPlaybackTransport)
         QueueManager.settings = QueueActions::settings
         QueueManager.applyVideo = QueueActions::applyVideo
-        QueueManager.farReceivers = FullscreenBroadcastManager::timelineFollowers
+        QueueManager.farReceivers = { FullscreenBroadcastManager.timelineFollowers(it) + PipPinManager.pinnersOf(it) }
         QueueManager.restore()
         KaraokeManager.settings = KaraokeManager::settingsFromConfig
         DisplayPolicies.trackVolume = {

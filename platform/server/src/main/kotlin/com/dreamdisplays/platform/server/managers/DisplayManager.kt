@@ -244,8 +244,8 @@ object DisplayManager {
         for ((playerId, forced) in targets) com.dreamdisplays.platform.server.playback.PaperPlaybackTransport.sendDisplayInfo(playerId, display, forced)
     }
 
-    /** PiP pinners of [displayId] (none yet). */
-    private fun farPinners(@Suppress("UNUSED_PARAMETER") displayId: UUID): Collection<UUID> = emptyList()
+    /** Online players with [displayId] pinned to PiP. */
+    private fun farPinners(displayId: UUID): Collection<UUID> = PipPinManager.pinnersOf(displayId)
 
     /** Broadcasts a display delete packet through the appropriate `Paper` / `Folia` player scheduler path. */
     @PaperOnly

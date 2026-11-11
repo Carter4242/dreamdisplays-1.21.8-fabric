@@ -13,6 +13,7 @@ import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.core.queue.QueueTiming
+import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.core.sync.TimelineRecords
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -77,6 +78,12 @@ object TimelineManager {
      * for a broadcast); every timeline change reaches them at once, not only through the periodic resend.
      */
     var extraReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
+
+    /**
+     * Players with [displayId] pinned to PiP: they get every timeline change at any distance, but are never waited for
+     * (a pin can outlive the client's PiP, and such a client never reports readiness).
+     */
+    var pinReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
 
     /**
      * Players who get [displayId]'s timeline ahead of everyone, by ms of wall time (karaoke singers and their lead);
@@ -658,10 +665,9 @@ object TimelineManager {
             }
         }
         val extra = extraReceivers(display.id)
-        if (extra.isEmpty()) return
-        val nearby = transport.nearbyPlayerIds(display).toSet()
-        for (playerId in extra) {
-            if (playerId !in nearby) transport.sendTo(playerId, if (leads.isEmpty()) sync else shiftedFor(display.id, playerId, sync))
-        }
+        val pinners = pinReceivers(display.id)
+        if (extra.isEmpty() && pinners.isEmpty()) return
+        val far = DisplayFollowers.farReceivers(transport.nearbyPlayerIds(display), extra, pinners)
+        for (playerId in far) transport.sendTo(playerId, if (leads.isEmpty()) sync else shiftedFor(display.id, playerId, sync))
     }
 }
