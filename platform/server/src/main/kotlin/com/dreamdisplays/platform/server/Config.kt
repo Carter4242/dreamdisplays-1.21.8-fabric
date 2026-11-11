@@ -99,6 +99,7 @@ class Config(private val plugin: PaperServer) {
         storage = parsed.storage
         permissions = parsed.permissions
         proxy = parsed.proxy
+        settings.live.relayProblem?.let { logger.warn("config.toml [live]: {}; screen sharing is off.", it) }
     }
 
     /**

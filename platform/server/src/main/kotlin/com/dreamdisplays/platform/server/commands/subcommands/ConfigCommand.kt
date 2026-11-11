@@ -71,7 +71,7 @@ object ConfigCommand {
         Key("karaoke.co_singer_fade_up_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.karaoke.co_singer_fade_up_ms },
         Key("karaoke.singer_track_volume", PolicyPaths.Kind.Decimal(0.0, 2.0)) { it.karaoke.singer_track_volume },
         Key("karaoke.debug", PolicyPaths.Kind.Bool) { it.karaoke.debug },
-        Key("live.relay_publish_url", RELAY_URL, secret = true) {
+        Key("live.relay_publish_url", PUBLISH_URL, secret = true) {
             it.live.relay_publish_url.ifEmpty { null }?.let(LiveStreamUrls::redactCredentials)
         },
         Key("live.relay_play_url", RELAY_URL) { it.live.relay_play_url.ifEmpty { null } },
@@ -81,6 +81,16 @@ object ConfigCommand {
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
+
+    /**
+     * A publish URL template: a scheme the client can publish to (no RTSP: the client has no RTSP muxer) and an `{id}`.
+     * The full check (a valid URL once filled in, `{key}` when a lease service is set) runs when the config loads.
+     */
+    private val PUBLISH_URL: PolicyPaths.Kind
+        get() = PolicyPaths.Kind.Text(
+            Regex("""(?i)(?:srt|rtmps?)://[^\s"]*\{id}[^\s"]*"""),
+            "<srt|rtmp|rtmps URL containing {id}>",
+        )
 
     /** A relay URL template: a live scheme and an `{id}` somewhere (path, `streamid`, ...); any query is kept. */
     private val RELAY_URL: PolicyPaths.Kind

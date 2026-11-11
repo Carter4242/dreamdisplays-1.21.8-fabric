@@ -4,6 +4,7 @@ import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.core.display.policy.ClientLogLevel
 import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.core.share.ScreenShareRelayTemplates
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.shared.policy.CustomMediaPolicy
@@ -150,7 +151,18 @@ data class SettingsSection(
         /** Picture height cap for shares, 0 = the client's default (1080). */
         val share_max_height: Int = 0,
     ) {
-        val shareEnabled: Boolean get() = relay_publish_url.contains("{id}") && relay_play_url.contains("{id}")
+        /**
+         * Why the relay templates cannot be used (sharing stays off), or null. Checked at load as well as by
+         * `/display config`: a play URL that is not a live relay scheme (e.g. an HLS `https://` link) would make viewers
+         * treat every share as an ordinary public video (thumbnails, history, held last frame, preload).
+         */
+        val relayProblem: String? by lazy {
+            if (!ScreenShareRelayTemplates.isSet(relay_publish_url, relay_play_url)) null
+            else ScreenShareRelayTemplates.problem(relay_publish_url, relay_play_url, leased = false)
+        }
+
+        val shareEnabled: Boolean
+            get() = ScreenShareRelayTemplates.isSet(relay_publish_url, relay_play_url) && relayProblem == null
     }
 
     /** Reports section. */
