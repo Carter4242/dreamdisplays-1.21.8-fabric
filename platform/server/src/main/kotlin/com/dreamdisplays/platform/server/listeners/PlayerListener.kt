@@ -131,7 +131,13 @@ object VanillaPlayerListener {
         WatchPartyManager.onPlayerJoin(player.uuid)
         if (!hasValidatedWorld && DisplayManager.getDisplays().isNotEmpty()) {
             hasValidatedWorld = true
-            VanillaServerScheduler.runLater(server, 40L) { DisplayManager.validateDisplaysAndCleanup(server) }
+            // A config with errors may name the wrong base material: checking against it would delete every display
+            if (VanillaServerState.config.loadedWithErrors) {
+                org.slf4j.LoggerFactory.getLogger(VanillaPlayerListener::class.java)
+                    .warn("Skipping the startup display check: config.toml has errors.")
+            } else {
+                VanillaServerScheduler.runLater(server, 40L) { DisplayManager.validateDisplaysAndCleanup(server) }
+            }
         }
 
         if (!VanillaServerState.config.settings.modDetectionEnabled) return

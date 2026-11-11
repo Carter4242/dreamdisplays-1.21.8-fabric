@@ -3,7 +3,8 @@ package com.dreamdisplays.platform.server
 import net.minecraft.server.level.ServerPlayer
 import org.slf4j.LoggerFactory
 import org.tomlj.Toml
-import org.tomlj.TomlTable
+import org.tomlj.TomlParseResult
+import com.dreamdisplays.core.config.ConfigLoads
 import java.io.File
 import java.nio.file.Files
 
@@ -35,7 +36,7 @@ class VanillaConfig(private val configDir: File) {
     init {
         createDefaultConfig()
         langStore.extractLangFiles()
-        load()
+        load(firstLoad = true)
         langStore.loadMessages(logger)
     }
 
@@ -53,11 +54,26 @@ class VanillaConfig(private val configDir: File) {
         }
     }
 
-    private fun load() {
-        val t: TomlTable? = runCatching { Toml.parse(configFile.toPath()) }
-            .onFailure { logger.error("Failed to parse config.toml.", it) }
+    /** True when the file in effect was read at startup with errors: nothing destructive may run on its values. */
+    @Volatile
+    var loadedWithErrors = false; private set
+
+    private fun load(firstLoad: Boolean) {
+        val result: TomlParseResult? = runCatching { Toml.parse(configFile.toPath()) }
+            .onFailure { logger.error("Failed to read config.toml.", it) }
             .getOrNull()
-        val parsed = parseServerConfig(t)
+        val errors = result?.errors().orEmpty()
+        errors.forEach { logger.error("config.toml: {}", it.toString()) }
+        when (ConfigLoads.decide(hasErrors = result == null || errors.isNotEmpty(), firstLoad = firstLoad)) {
+            ConfigLoads.Action.APPLY -> loadedWithErrors = false
+            ConfigLoads.Action.APPLY_DEGRADED -> {
+                loadedWithErrors = true
+                logger.error("config.toml has errors: the keys they hit run on their defaults until it is fixed and reloaded.")
+            }
+            ConfigLoads.Action.KEEP_PREVIOUS ->
+                throw IllegalStateException("config.toml has ${errors.size.coerceAtLeast(1)} error(s); the previous settings stay")
+        }
+        val parsed = parseServerConfig(result)
         language = parsed.language
         settings = parsed.settings
         storage = parsed.storage
@@ -66,7 +82,7 @@ class VanillaConfig(private val configDir: File) {
     }
 
     fun reload() {
-        load()
+        load(firstLoad = false)
         langStore.extractLangFiles()
         langStore.loadMessages(logger)
     }
