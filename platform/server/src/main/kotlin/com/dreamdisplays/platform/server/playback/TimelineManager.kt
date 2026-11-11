@@ -12,6 +12,7 @@ import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
+import com.dreamdisplays.core.queue.LoopWraps
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.core.sync.ModeChanges
@@ -45,6 +46,9 @@ object TimelineManager {
      * [QueueTiming.END_SAFETY_MS] past the media's, so viewers get it as their stream ends and start on the end instant.
      */
     private const val LOOP_EARLY_MS = 150L
+
+    /** The play-through each display's timeline was in at the last [tickEnds], with that timeline ([LoopWraps]). */
+    private val playThroughs = ConcurrentHashMap<UUID, Pair<Timeline, Long>>()
 
     /** The restart [tickEnds] last scheduled per display, to tell whether it is still the display's timeline. */
     private val loopRestarts = ConcurrentHashMap<UUID, Timeline>()
@@ -498,6 +502,7 @@ object TimelineManager {
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
             val durationMs = knownDurationMs(display, timeline)
+            if (wrappedUnseen(display, timeline, now, durationMs)) continue
             val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, durationMs) ?: continue
             if (WatchPartyManager.hasSession(displayId) || QueueManager.advancesAtEnd(display)) continue
             if (!FullscreenBroadcastManager.loopsAtEnd(displayId)) continue
@@ -511,6 +516,34 @@ object TimelineManager {
             broadcast(display, restarted)
             logger.info("Display {}: reached the end of its video; restarted from 0 for everyone.", displayId)
         }
+    }
+
+    /**
+     * True when [timeline] ran past its end since the last [tickEnds] without being restarted (a main-thread stall longer
+     * than the restart's early window): it wrapped by itself, while clients hold their last frame until they hear a
+     * timeline. It is sent again at once, where it stands, and that end counts as a restart (karaoke line songs end).
+     */
+    private fun wrappedUnseen(display: DisplayData, timeline: Timeline, now: Long, durationMs: Long): Boolean {
+        val current = LoopWraps.playThrough(timeline, now, durationMs)
+        val previous = playThroughs[display.id]?.takeIf { it.first == timeline }?.second
+        if (current == null) {
+            playThroughs.remove(display.id)
+            return false
+        }
+        playThroughs[display.id] = timeline to current
+        if (!LoopWraps.missedWrap(previous, current)) return false
+        // The queue moves on by itself after a missed end (advanceDue counts past ends); a party or a non-looping
+        // fullscreen session runs its own end
+        if (WatchPartyManager.hasSession(display.id) || QueueManager.advancesAtEnd(display)) return false
+        if (!FullscreenBroadcastManager.loopsAtEnd(display.id)) return false
+        endOfStream.onVideoChanged(display.id, now)
+        runCatching { onLoopRestart(display) }
+            .onFailure { logger.warn("Loop restart hook failed for display {}.", display.id, it) }
+        val reanchored = LoopWraps.reanchored(timeline, now)
+        timelines[display.id] = reanchored
+        broadcast(display, reanchored)
+        logger.info("Display {}: its video ended during a server stall; sent where it stands after the wrap.", display.id)
+        return true
     }
 
     /**
@@ -534,6 +567,7 @@ object TimelineManager {
         videoChangedAt.remove(displayId)
         timelines.remove(displayId)
         loopRestarts.remove(displayId)
+        playThroughs.remove(displayId)
         durations.forget(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)
