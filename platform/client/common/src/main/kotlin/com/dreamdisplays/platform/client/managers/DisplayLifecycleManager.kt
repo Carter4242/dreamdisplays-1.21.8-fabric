@@ -42,12 +42,15 @@ object DisplayLifecycleManager {
     fun handleInfoPacket(packet: DisplayInfo) {
         // A description this client can't show is dropped before its media generation is recorded: recorded, a later
         // sync of the same generation would no longer ask for a description, and the display would never appear
+        // Refused again (its timelines keep asking, now and then): warned about once per video
         if (packet.facing !in FacingUtil.entries.indices) {
-            logger.warn("Ignoring display ${packet.id}: unknown facing ${packet.facing}.")
+            if (ServerMediaGens.onRefused(packet)) logger.warn("Ignoring display ${packet.id}: unknown facing ${packet.facing}.")
             return
         }
         if (!isValidDisplaySize(packet.width, packet.height, packet.depth, packet.conforming)) {
-            logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
+            if (ServerMediaGens.onRefused(packet)) {
+                logger.warn("Ignoring display ${packet.id}: invalid size ${packet.width} x ${packet.height} x ${packet.depth}.")
+            }
             return
         }
         // Known even while displays are off: its timelines must not look like ones for a display never described

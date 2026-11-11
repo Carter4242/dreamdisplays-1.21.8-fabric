@@ -69,4 +69,24 @@ class ServerMediaGensTest {
         ServerMediaGens.forget(id)
         assertEquals(0L, ServerMediaGens.onScreen(id))
     }
+
+    @Test
+    fun `a refused description is warned about once per video and asked about rarely`() {
+        val info = DisplayInfo(id, url = "a", mediaGen = 7L)
+        assertTrue(ServerMediaGens.onRefused(info))
+        assertFalse(ServerMediaGens.onRefused(info))
+        assertFalse(ServerMediaGens.knows(id)) // not recorded: a later description that fits is still asked for
+        assertEquals(60_000L, ServerMediaGens.rerequestIntervalMs(refusedGen = 7L, timelineGen = 7L))
+        // Another video on it, or never refused: asked about soon
+        assertEquals(2_000L, ServerMediaGens.rerequestIntervalMs(refusedGen = 7L, timelineGen = 8L))
+        assertEquals(2_000L, ServerMediaGens.rerequestIntervalMs(refusedGen = null, timelineGen = 8L))
+        assertTrue(ServerMediaGens.onRefused(DisplayInfo(id, url = "b", mediaGen = 8L)))
+    }
+
+    @Test
+    fun `a description that is taken clears the refusal`() {
+        ServerMediaGens.onRefused(DisplayInfo(id, url = "a", mediaGen = 7L))
+        ServerMediaGens.onInfo(DisplayInfo(id, url = "a", mediaGen = 7L))
+        assertTrue(ServerMediaGens.onRefused(DisplayInfo(id, url = "a", mediaGen = 7L)))
+    }
 }

@@ -20,11 +20,17 @@ import java.util.concurrent.ConcurrentHashMap
 object ServerMediaGens {
     private const val REREQUEST_MS = 2_000L
 
+    /** A display whose description this client refused (a size or facing it can't show) is asked about this rarely. */
+    private const val REFUSED_REREQUEST_MS = 60_000L
+
     private val gens = ConcurrentHashMap<UUID, Long>()
     private val requestedAt = ConcurrentHashMap<UUID, Long>()
 
     /** The generation each display was described with before its latest change of generation. */
     private val previous = ConcurrentHashMap<UUID, Long>()
+
+    /** Displays whose last description was refused, with that description's generation (see [onRefused]). */
+    private val refused = ConcurrentHashMap<UUID, Long>()
 
     /** Displays still showing the video of an older generation (a pending queue switch), and that generation. */
     private val held = ConcurrentHashMap<UUID, Long>()
@@ -56,11 +62,19 @@ object ServerMediaGens {
 
     /** Records [info]'s generation; true when it differs from the one held before (a known display got a new video). */
     fun onInfo(info: DisplayInfo): Boolean {
+        refused.remove(info.id)
         val before = gens.put(info.id, info.mediaGen)
         val changed = before != null && before != info.mediaGen
         if (changed) previous[info.id] = before!!
         return changed
     }
+
+    /**
+     * [info] was refused (this client can't show it) and is not recorded: its timelines keep asking for a description,
+     * but [REFUSED_REREQUEST_MS] apart rather than [REREQUEST_MS], since the server will describe it the same way again.
+     * True the first time this display's description is refused for its generation (worth a warning; repeats are not).
+     */
+    fun onRefused(info: DisplayInfo): Boolean = refused.put(info.id, info.mediaGen) != info.mediaGen
 
     /**
      * Checks [sync] against the description this client holds and asks for the display again when they disagree.
@@ -70,11 +84,18 @@ object ServerMediaGens {
         val known = gens[sync.id]
         if (!timelineNeedsDescription(sync.mediaGen, known)) return false
         val last = requestedAt[sync.id]
-        if (last != null && nowMs - last < REREQUEST_MS) return false
+        if (last != null && nowMs - last < rerequestIntervalMs(refused[sync.id], sync.mediaGen)) return false
         requestedAt[sync.id] = nowMs
         Initializer.sendPacket(RequestSync(sync.id, known ?: 0L))
         return true
     }
+
+    /**
+     * How long after the last ask a timeline stamped [timelineGen] asks for its display again: rarely when the display's
+     * description for that generation was refused ([refusedGen]), else soon.
+     */
+    internal fun rerequestIntervalMs(refusedGen: Long?, timelineGen: Long): Long =
+        if (refusedGen == timelineGen) REFUSED_REREQUEST_MS else REREQUEST_MS
 
     /** The display was deleted or evicted. */
     fun forget(displayId: UUID) {
@@ -82,6 +103,7 @@ object ServerMediaGens {
         requestedAt.remove(displayId)
         previous.remove(displayId)
         held.remove(displayId)
+        refused.remove(displayId)
     }
 
     /** Disconnect / backend switch. */
@@ -90,6 +112,7 @@ object ServerMediaGens {
         requestedAt.clear()
         previous.clear()
         held.clear()
+        refused.clear()
     }
 }
 
