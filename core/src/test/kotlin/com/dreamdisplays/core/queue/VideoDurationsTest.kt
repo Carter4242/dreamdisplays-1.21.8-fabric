@@ -102,6 +102,22 @@ class VideoDurationsTest {
     }
 
     @Test
+    fun `a viewer who reported a longer header and left no longer holds the video at that length`() {
+        val durations = VideoDurations()
+        val other = UUID.fromString("00000000-0000-0000-0000-00000000bbbb")
+        durations.onVideoChanged(display, video)
+        // Someone's client claims a day (a bogus header, or a modded client); the media is 3:00
+        assertEquals(86_400_000L, durations.report(display, video, other, 86_400_000, 0, 1_000, present = listOf(player, other)))
+        durations.report(display, video, player, 180_000, 0, 1_000, present = listOf(player, other))
+        assertNull(durations.report(display, video, player, 180_030, 0, 181_000, observedEnd = true, present = listOf(player, other)))
+        // While they stay, nothing changes; once they are gone the observed end settles it
+        assertNull(durations.recheck(display, video, 0, listOf(player, other)))
+        assertEquals(180_030L, durations.recheck(display, video, 0, listOf(player)))
+        assertNull(durations.recheck(display, video, 0, listOf(player)))
+        assertNull(durations.recheck(display, "https://youtu.be/other", 0, listOf(player)))
+    }
+
+    @Test
     fun `one early stream end never shortens the video for the others`() {
         val durations = VideoDurations()
         val other = UUID.fromString("00000000-0000-0000-0000-00000000bbbb")

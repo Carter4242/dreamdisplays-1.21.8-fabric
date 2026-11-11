@@ -704,6 +704,7 @@ object TimelineManager {
         releaseStartHolds(now)
         autoPauseEmpty(now)
         carryKnownDurations()
+        recheckObservedEnds()
         for ((displayId, timeline) in timelines) {
             if (now - (lastBroadcast[displayId] ?: 0L) < PERIODIC_BROADCAST_MS) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
@@ -741,6 +742,24 @@ object TimelineManager {
             timelines[displayId] = paused
             broadcast(display, paused)
             logger.info("Paused display {}: nobody has been near it for {} s.", displayId, limit / 1_000)
+        }
+    }
+
+    /**
+     * A viewer whose report kept a display's length up (a longer header, or a bogus one) left: the ends the viewers still
+     * there observed decide it now ([com.dreamdisplays.core.queue.VideoDurations.recheck]).
+     */
+    private fun recheckObservedEnds() {
+        for ((displayId, timeline) in timelines) {
+            val display = DisplayManager.getDisplayData(displayId) ?: continue
+            if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
+            val present = (transport.nearbyPlayerIds(display) + extraReceivers(displayId) + pinReceivers(displayId)).toSet()
+            val mediaMs = durations.recheck(displayId, display.url, QueueManager.playingEntryDurationMs(display), present) ?: continue
+            val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
+            display.duration = scheduledMs * 1_000_000L
+            val updated = timeline.copy(durationMs = scheduledMs, loop = true)
+            timelines[displayId] = updated
+            broadcast(display, updated)
         }
     }
 

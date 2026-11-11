@@ -74,6 +74,24 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
         return applied
     }
 
+    /**
+     * Settles [displayId]'s video [url] again for the players watching now ([present]): someone who reported and left
+     * no longer stands in the way of the observed ends of those still there (see the class comment). Returns the media
+     * ms to apply, or null when nothing changes.
+     */
+    fun recheck(displayId: UUID, url: String, entryMs: Long, present: Collection<UUID>): Long? {
+        var applied: Long? = null
+        current.computeIfPresent(displayId) { _, state ->
+            if (state.url != url || state.observed.isEmpty()) return@computeIfPresent state
+            val mediaMs = QueueTiming.observedMediaMs(state.byPlayer, state.observed, present)?.coerceAtLeast(entryMs)
+            if (mediaMs == null || mediaMs == state.mediaMs) return@computeIfPresent state
+            applied = mediaMs
+            Current(url, state.byPlayer, mediaMs, state.lastReportAtMs, state.observed)
+        }
+        applied?.let { settled[displayId] = url to it }
+        return applied
+    }
+
     /** Forgets every display. */
     fun clear() {
         current.clear()
