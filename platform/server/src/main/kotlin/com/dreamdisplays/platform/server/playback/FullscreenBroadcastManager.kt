@@ -263,8 +263,8 @@ object FullscreenBroadcastManager {
                 onMinimizedChanged?.invoke(session.sessionId, playerId, false)
             }
 
-            FullscreenAckAction.DISMISSED -> if (!session.forced) {
-                session.shownTo.remove(playerId)
+            // Only from a player it is shown to: anyone else's would stop a session nobody is watching yet
+            FullscreenAckAction.DISMISSED -> if (!session.forced && session.shownTo.remove(playerId)) {
                 session.dismissedBy.add(playerId)
                 if (session.shownTo.isEmpty()) stop(sessionId)
             }
