@@ -47,10 +47,13 @@ object NewPipeStreamExtraction {
             val live = streamType == StreamType.LIVE_STREAM ||
                     streamType == StreamType.AUDIO_LIVE_STREAM ||
                     streamType == StreamType.POST_LIVE_STREAM
-            val durationNanos = Durations.secondsToNanos(safe { extractor.length } ?: 0L)
+            val muxed = safe { extractor.videoStreams }.orEmpty()
+            val videoOnly = safe { extractor.videoOnlyStreams }.orEmpty()
+            val audio = safe { extractor.audioStreams }.orEmpty()
+            val durationNanos = preciseDurationNanos(audio + videoOnly + muxed, safe { extractor.length } ?: 0L)
             val seekable = !live && durationNanos > 0L
 
-            val streams = mapStreams(extractor, live, seekable, durationNanos)
+            val streams = mapStreams(muxed, videoOnly, audio, live, seekable, durationNanos)
             if (streams.isEmpty()) return null
 
             NewPipeResolved(
@@ -71,28 +74,43 @@ object NewPipeStreamExtraction {
     }
 
     private fun mapStreams(
-        extractor: StreamExtractor,
+        muxed: List<VideoStream>,
+        videoOnly: List<VideoStream>,
+        audio: List<AudioStream>,
         live: Boolean,
         seekable: Boolean,
         durationNanos: Long,
     ): List<YtStream> {
         val out = ArrayList<YtStream>()
         // Muxed progressive streams (video + audio in one URL)
-        for (s in safe { extractor.videoStreams }.orEmpty()) {
+        for (s in muxed) {
             if (!acceptable(s)) continue
             out.add(videoToYt(s, hasAudio = true, live = live, seekable = seekable, durationNanos = durationNanos))
         }
         // Adaptive video-only streams
-        for (s in safe { extractor.videoOnlyStreams }.orEmpty()) {
+        for (s in videoOnly) {
             if (!acceptable(s)) continue
             out.add(videoToYt(s, hasAudio = false, live = live, seekable = seekable, durationNanos = durationNanos))
         }
         // Adaptive audio-only streams
-        for (s in safe { extractor.audioStreams }.orEmpty()) {
+        for (s in audio) {
             if (!acceptable(s)) continue
             out.add(audioToYt(s, live = live, seekable = seekable, durationNanos = durationNanos))
         }
         return out
+    }
+
+    /**
+     * The media length in ns: the longest stream's millisecond `approxDurationMs` (the audio track often runs past the
+     * video), within a few seconds of [lengthSeconds]; else [lengthSeconds], which YouTube floors to whole seconds.
+     */
+    private fun preciseDurationNanos(streams: List<Stream>, lengthSeconds: Long): Long {
+        if (lengthSeconds <= 0L) return 0L
+        val metadataMs = lengthSeconds * 1_000L
+        val preciseMs = streams.mapNotNull { s -> safe { s.itagItem?.approxDurationMs } }
+            .filter { it in (metadataMs - 1_000L)..(metadataMs + 3_000L) }
+            .maxOrNull() ?: return Durations.secondsToNanos(lengthSeconds)
+        return preciseMs * 1_000_000L
     }
 
     private inline fun <T> safe(block: () -> T): T? = runCatching(block).getOrNull()

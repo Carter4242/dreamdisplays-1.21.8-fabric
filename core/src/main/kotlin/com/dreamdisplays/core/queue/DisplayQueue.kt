@@ -273,6 +273,33 @@ object QueueTiming {
         return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt
     }
 
+    /** Past the media end the timeline waits this long more: switching late holds the last frame, early cuts the video. */
+    const val END_SAFETY_MS = 150L
+
+    /** A later, longer client duration report may exceed the first one by at most this much. */
+    const val MAX_DURATION_RAISE_MS = 3_000L
+
+    /**
+     * Timeline length to schedule the end of a video whose media duration is reported as [durationMs] (0: unknown).
+     * Whole seconds (YouTube metadata, older clients) are floored, so the media may run up to a second longer; add
+     * that, plus [END_SAFETY_MS].
+     */
+    fun scheduledDurationMs(durationMs: Long): Long {
+        if (durationMs <= 0L) return 0L
+        val slack = if (durationMs % 1_000L == 0L) 1_000L else 0L
+        return durationMs + slack + END_SAFETY_MS
+    }
+
+    /**
+     * The media duration to keep when a client reports [reportedMs] while [currentMs] (null: none yet) is known and
+     * [firstMs] was the first report: the largest, at most [MAX_DURATION_RAISE_MS] above the first. Null: keep
+     * [currentMs].
+     */
+    fun mergeReportedMs(currentMs: Long?, firstMs: Long?, reportedMs: Long): Long? {
+        if (currentMs == null || firstMs == null) return reportedMs
+        return reportedMs.takeIf { it > currentMs && it <= firstMs + MAX_DURATION_RAISE_MS }
+    }
+
     /** Content ms before (or after a loop wrap past) the end within which a client's seek back to the start is its own end-of-stream loop. */
     const val END_OF_STREAM_WINDOW_MS = 2_000L
 

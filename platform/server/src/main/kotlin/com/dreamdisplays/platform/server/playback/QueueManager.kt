@@ -304,7 +304,7 @@ object QueueManager {
             val armed = armedAt[displayId] ?: Long.MIN_VALUE
             // No reported duration (e.g. the plugin reloaded and no client re-reported it): use the playing queue entry's
             val durationMs = timeline.durationMs.takeIf { it > 0L }
-                ?: current?.takeIf { it.url == display.url }?.durationMs ?: 0L
+                ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
             val earlyMs = maxOf(
                 ADVANCE_EARLY_MS, ReadinessTracker.leadMs(displayId, transport.nearbyPlayerIds(display)) + TICK_MARGIN_MS,
             )
@@ -325,7 +325,7 @@ object QueueManager {
         if (WatchPartyManager.hasSession(display.id) || TimelineManager.isHolding(display.id)) return
         val timeline = TimelineManager.timelineOf(display.id) ?: return
         val durationMs = timeline.durationMs.takeIf { it > 0L }
-            ?: current?.takeIf { it.url == display.url }?.durationMs ?: 0L
+            ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
         val startAt = QueueTiming.switchAtMs(timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs)
             ?: return
         advance(display, startAt)

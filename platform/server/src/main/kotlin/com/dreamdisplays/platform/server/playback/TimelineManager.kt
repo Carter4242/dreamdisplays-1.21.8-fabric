@@ -9,6 +9,7 @@ import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
+import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -30,6 +31,9 @@ object TimelineManager {
     private const val COMMAND_COOLDOWN_MS = 100L
     private lateinit var transport: PlaybackTransport
     private val timelines = ConcurrentHashMap<UUID, Timeline>()
+
+    /** Raw client-reported media durations of each display's current video: first and largest kept, in ms. */
+    private val durationReports = ConcurrentHashMap<UUID, Pair<Long, Long>>()
     private val lastBroadcast = ConcurrentHashMap<UUID, Long>()
     private val startHolds = ConcurrentHashMap<UUID, Long>()
     private const val START_HOLD_MS = 5_000L
@@ -340,6 +344,7 @@ object TimelineManager {
     fun onVideoChanged(display: DisplayData, readyAtStart: Collection<UUID> = emptyList(), startAtMs: Long? = null) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         display.duration = null // Fresh video
+        durationReports.remove(display.id)
         val now = transport.nowMs()
         endOfStream.onVideoChanged(display.id, maxOf(now, startAtMs ?: now))
         // The display keeps its speed across videos
@@ -371,18 +376,22 @@ object TimelineManager {
     /**
      * Applies a client-reported media duration for [display]'s current video.
      *
-     * First-report-wins: a no-op once [DisplayData.duration] is already set.
+     * The largest report wins, within [QueueTiming.MAX_DURATION_RAISE_MS] of the first; the timeline runs
+     * [QueueTiming.scheduledDurationMs] of it, so its end (and the queue's switch) never comes before the media's.
      */
     fun onDurationReported(display: DisplayData, senderId: UUID, durationMs: Long) {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return
         if (durationMs !in MIN_DURATION_MS..MAX_DURATION_MS) return
-        if ((display.duration ?: 0L) > 0L) return
+        val known = durationReports[display.id]
+        val mediaMs = QueueTiming.mergeReportedMs(known?.second, known?.first, durationMs) ?: return
         if (senderId !in transport.nearbyPlayerIds(display)) return
-        if (!reportDurationThrottle.tryAcquire(display.id, REPORT_DURATION_COOLDOWN_MS)) return
+        if (!reportDurationThrottle.tryAcquire(display.id to senderId, REPORT_DURATION_COOLDOWN_MS)) return
 
-        display.duration = durationMs * 1_000_000L
+        durationReports[display.id] = (known?.first ?: mediaMs) to mediaMs
+        val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
+        display.duration = scheduledMs * 1_000_000L
         val current = timelines[display.id] ?: return
-        timelines[display.id] = current.copy(durationMs = durationMs, loop = true)
+        timelines[display.id] = current.copy(durationMs = scheduledMs, loop = true)
         broadcast(display, timelines.getValue(display.id))
     }
 
@@ -392,6 +401,7 @@ object TimelineManager {
         endOfStream.forget(displayId)
         emptySince.remove(displayId)
         timelines.remove(displayId)
+        durationReports.remove(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)
     }
