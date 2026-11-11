@@ -77,6 +77,40 @@ object DisplayQueues {
         )
     }
 
+    /** Asks the server to queue [items] in order (a resolved playlist); it adds as many as fit. */
+    fun addBatch(displayId: UUID, items: List<QueueItemWire>) {
+        if (items.isEmpty()) return
+        send(QueueAction(displayId, QueueActionType.ADD_BATCH.wire, items = items))
+    }
+
+    /**
+     * How many more entries the local player may add to [displayId] right now: limited by the queue's total cap and,
+     * unless [exempt] (owner / admin), the per-player cap; 0 when full.
+     */
+    fun room(displayId: UUID, exempt: Boolean, atMost: Int): Int {
+        val state = states[displayId] ?: return atMost
+        var room = atMost
+        if (state.maxItems > 0) room = minOf(room, state.maxItems - state.items.size)
+        if (!exempt && state.maxPerPlayer > 0) room = minOf(room, state.maxPerPlayer - ownCount(displayId))
+        return room.coerceAtLeast(0)
+    }
+
+    /** Shows [message] in the local player's chat only (feedback for their own queue action). */
+    fun notifyLocal(message: net.minecraft.network.chat.Component) {
+        val mc = Minecraft.getInstance()
+        mc.execute {
+            //? if >=26.2 {
+            mc.gui.chatListener().handleSystemMessage(message, false)
+            //?}
+            //? if >=26.1 <26.2 {
+            mc.gui.chat.addClientSystemMessage(message)
+            //?}
+            //? if <26.1 {
+            mc.gui.chat.addMessage(message)
+            //?}
+        }
+    }
+
     fun remove(displayId: UUID, itemId: String) = send(QueueAction(displayId, QueueActionType.REMOVE.wire, itemId = itemId))
 
     fun move(displayId: UUID, itemId: String, toIndex: Int) =

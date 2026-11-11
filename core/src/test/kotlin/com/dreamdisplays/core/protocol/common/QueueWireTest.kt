@@ -43,6 +43,14 @@ class QueueWireTest {
         assertEquals(add, PacketRegistry.decode(PacketRegistry.encode(add)))
         val move = QueueAction(id, QueueActionType.MOVE.wire, itemId = "i2", toIndex = 0)
         assertEquals(move, PacketRegistry.decode(PacketRegistry.encode(move)))
+        val batch = QueueAction(id, QueueActionType.ADD_BATCH.wire, items = state.items)
+        assertEquals(batch, PacketRegistry.decode(PacketRegistry.encode(batch)))
+        // A batch of 100 playlist entries stays well under the 32 KiB serverbound payload limit
+        val big = QueueAction(
+            id, QueueActionType.ADD_BATCH.wire,
+            items = List(100) { QueueItemWire(url = "https://www.youtube.com/watch?v=dQw4w9WgXc$it".take(43), title = "x".repeat(100), durationMs = 600_000) },
+        )
+        kotlin.test.assertTrue(PacketRegistry.encode(big).size < 20_000)
         val preload = QueuePreload(id, "i1", FullscreenPrepareState.READY.wire)
         assertEquals(preload, PacketRegistry.decode(PacketRegistry.encode(preload)))
     }

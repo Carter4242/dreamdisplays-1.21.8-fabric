@@ -460,6 +460,8 @@ message QueueAction {
   optional int32 toIndex = 9;
   // WARNING: a default value decoded when value is missing
   optional bool flag = 10;
+  // WARNING: a default value decoded when value is missing
+  repeated QueueItemWire items = 11;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.QueuePreload'

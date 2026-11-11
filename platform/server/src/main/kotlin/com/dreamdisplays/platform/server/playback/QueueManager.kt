@@ -60,6 +60,9 @@ object QueueManager {
     private const val EDIT_COOLDOWN_MS = 150L
     private const val PRELOAD_COOLDOWN_MS = 100L
     private const val MAX_SKIPS_PER_ADVANCE = 5
+
+    /** Most entries one batch (playlist) add looks at. */
+    const val MAX_BATCH = 100
     private const val PERSIST_DEBOUNCE_MS = 2_000L
 
     private lateinit var transport: PlaybackTransport
@@ -113,41 +116,68 @@ object QueueManager {
     /** A copy of [displayId]'s queue, or null when it has none. */
     fun snapshotOf(displayId: UUID): DisplayQueue? = queues[displayId]?.let { synchronized(it) { it.copy() } }
 
+    /** A video to queue, as sent by a client (display text not yet cleaned). */
+    data class NewEntry(val url: String, val lang: String, val title: String, val durationMs: Long, val thumbnailUrl: String)
+
+    /** Outcome of [addAll]: [result] is OK when at least one entry went in; [added] how many did. */
+    data class AddOutcome(val result: Result, val added: Int)
+
     /** Adds a video to [display]'s queue for [actorId]; [url] and [lang] must already be validated by the caller. */
     fun add(
         display: DisplayData, ctx: PlaybackContext, actorId: UUID, actorName: String,
         url: String, lang: String, title: String, durationMs: Long, thumbnailUrl: String,
         throttled: Boolean = true,
-    ): Result {
-        if (!settings().enabled) return Result.DISABLED
-        if (display.virtual || !PlaybackPermissions.queueRuns(ctx.mode)) return Result.NOT_RUNNING
-        if (!PlaybackPermissions.canAddToQueue(ctx)) return Result.NOT_ALLOWED
-        if (url.isBlank() || url.length > QueueText.MAX_URL) return Result.REFUSED
-        if (throttled && !addThrottle.tryAcquire(actorId, ADD_COOLDOWN_MS)) return Result.THROTTLED
+    ): Result = addAll(
+        display, ctx, actorId, actorName, listOf(NewEntry(url, lang, title, durationMs, thumbnailUrl)), throttled,
+    ).result
 
-        val item = QueueItem(
-            itemId = newItemId(),
-            url = url,
-            lang = lang,
-            title = QueueText.cleanTitle(title),
-            durationMs = QueueText.cleanDuration(durationMs),
-            thumbnailUrl = QueueText.cleanThumbnail(thumbnailUrl),
-            addedBy = actorId,
-            addedByName = QueueText.cleanName(actorName),
-            addedAtMs = transport.nowMs(),
-        )
+    /**
+     * Adds [entries] in order (a playlist) until the queue or [actorId]'s share of it is full; URLs must already be
+     * validated by the caller. At most [MAX_BATCH] entries are looked at.
+     */
+    fun addAll(
+        display: DisplayData, ctx: PlaybackContext, actorId: UUID, actorName: String,
+        entries: List<NewEntry>, throttled: Boolean = true,
+    ): AddOutcome {
+        if (!settings().enabled) return AddOutcome(Result.DISABLED, 0)
+        if (display.virtual || !PlaybackPermissions.queueRuns(ctx.mode)) return AddOutcome(Result.NOT_RUNNING, 0)
+        if (!PlaybackPermissions.canAddToQueue(ctx)) return AddOutcome(Result.NOT_ALLOWED, 0)
+        val valid = entries.take(MAX_BATCH).filter { it.url.isNotBlank() && it.url.length <= QueueText.MAX_URL }
+        if (valid.isEmpty()) return AddOutcome(Result.REFUSED, 0)
+        if (throttled && !addThrottle.tryAcquire(actorId, ADD_COOLDOWN_MS)) return AddOutcome(Result.THROTTLED, 0)
+
+        val name = QueueText.cleanName(actorName)
+        val now = transport.nowMs()
         val queue = queues.computeIfAbsent(display.id) { DisplayQueue() }
-        val result = synchronized(queue) { queue.add(item, limits(), exemptFromPlayerLimit = ctx.isOwner || ctx.isAdmin) }
-        when (result) {
-            QueueAddResult.FULL -> return Result.FULL
-            QueueAddResult.PLAYER_LIMIT -> return Result.PLAYER_LIMIT
-            QueueAddResult.DUPLICATE -> return Result.REFUSED
-            QueueAddResult.ADDED -> {}
+        var added = 0
+        var stoppedBy: Result? = null
+        synchronized(queue) {
+            for (entry in valid) {
+                val item = QueueItem(
+                    itemId = newItemId(),
+                    url = entry.url,
+                    lang = entry.lang,
+                    title = QueueText.cleanTitle(entry.title),
+                    durationMs = QueueText.cleanDuration(entry.durationMs),
+                    thumbnailUrl = QueueText.cleanThumbnail(entry.thumbnailUrl),
+                    addedBy = actorId,
+                    addedByName = name,
+                    addedAtMs = now,
+                )
+                when (queue.add(item, limits(), exemptFromPlayerLimit = ctx.isOwner || ctx.isAdmin)) {
+                    QueueAddResult.ADDED -> added++
+                    QueueAddResult.FULL -> stoppedBy = Result.FULL
+                    QueueAddResult.PLAYER_LIMIT -> stoppedBy = Result.PLAYER_LIMIT
+                    QueueAddResult.DUPLICATE -> {}
+                }
+                if (stoppedBy != null) break
+            }
         }
+        if (added == 0) return AddOutcome(stoppedBy ?: Result.REFUSED, 0)
         changed(display)
         // Nothing on the display yet: the first queued video starts right away
         if (display.url.isBlank()) advance(display)
-        return Result.OK
+        return AddOutcome(Result.OK, added)
     }
 
     /** Removes entry [itemId]; the adder, owner or admin may. */

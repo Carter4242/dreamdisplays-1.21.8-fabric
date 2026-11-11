@@ -29,6 +29,8 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.util.DreamCoroutines
+import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
+import com.dreamdisplays.media.source.youtube.YouTubePlaylists
 import kotlinx.coroutines.launch
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
@@ -41,6 +43,7 @@ import com.dreamdisplays.platform.client.ui.kit.UiText
 import com.dreamdisplays.platform.client.ui.kit.UiTheme
 import com.dreamdisplays.platform.client.ui.kit.claimClick
 import com.dreamdisplays.platform.client.ui.kit.claimScroll
+import com.dreamdisplays.platform.client.ui.kit.drawOutline
 import com.dreamdisplays.platform.client.ui.kit.drawPanel
 import com.dreamdisplays.platform.client.ui.menu.*
 import com.dreamdisplays.platform.client.ui.widgets.*
@@ -109,6 +112,8 @@ class DisplayMenu private constructor(
     private lateinit var skipButton: IconButton
     private lateinit var loopButton: IconButton
     private lateinit var queueAddButton: IconButton
+    private lateinit var clearQueueButton: IconButton
+    private var clearArmedUntilMs = 0L
     private var suggestionsTabRect: UiRect? = null
     private var queueTabRect: UiRect? = null
     private var queueTip: String? = null
@@ -358,12 +363,27 @@ class DisplayMenu private constructor(
         queueSection = QueueSection(ds)
         queueAddButton = addUi(IconButton(icon = { IconButton.modIcon("plus") }, margin = 4) { queueFromSearch() })
         queueAddButton.visibleWhen = { suggestions.visible && DisplayQueues.supported && suggestions.available() }
-        queueAddButton.enabledWhen = { ds.canAddToQueueHere && linkOf(suggestions.searchText) != null && queueBlockedReason() == null }
+        queueAddButton.enabledWhen = {
+            ds.canAddToQueueHere && queueBlockedReason() == null &&
+                (linkOf(suggestions.searchText) != null || YouTubePlaylists.parseLink(suggestions.searchText) != null)
+        }
         loopButton = addUi(IconButton("loop") {
             DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
         })
         loopButton.visibleWhen = { showingQueue() && suggestionsRect != null && !ds.errored }
         loopButton.enabledWhen = { ds.canManageQueueHere }
+        // Clearing takes a second click within a few seconds, so a stray click can't wipe everyone's list
+        clearQueueButton = addUi(IconButton(icon = { IconButton.modIcon("delete") }, sprites = IconButton.RED_SPRITES) {
+            val now = System.currentTimeMillis()
+            if (now < clearArmedUntilMs) {
+                clearArmedUntilMs = 0L
+                DisplayQueues.clear(ds.uuid)
+            } else {
+                clearArmedUntilMs = now + CLEAR_CONFIRM_MS
+            }
+        })
+        clearQueueButton.visibleWhen = { loopButton.visibleWhen() && DisplayQueues.items(ds.uuid).isNotEmpty() }
+        clearQueueButton.enabledWhen = { ds.canManageQueueHere }
 
         preview =
             PreviewSection(
@@ -564,6 +584,9 @@ class DisplayMenu private constructor(
             suggestions.place(suggestionsArea)
             queueAddButton.place(suggestions.extraActionRect(0))
             loopButton.place(UiRect(suggestionsArea.right - 10 - LOOP_BUTTON, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON))
+            clearQueueButton.place(
+                UiRect(suggestionsArea.right - 10 - LOOP_BUTTON * 2 - 4, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON),
+            )
             if (showingQueue()) {
                 queueSection.vertical = layout.suggestionsVertical
                 queueSection.render(g, suggestionsArea, mouseX, mouseY)
@@ -581,6 +604,12 @@ class DisplayMenu private constructor(
             if (loopButton.visible && DisplayQueues.of(ds.uuid)?.loop == true) {
                 val bottom = loopButton.y + loopButton.height
                 g.fill(loopButton.x + 2, bottom + 1, loopButton.x + loopButton.width - 2, bottom + 3, UiTheme.ACCENT)
+            }
+            if (clearQueueButton.visible && System.currentTimeMillis() < clearArmedUntilMs) {
+                g.drawOutline(
+                    UiRect(clearQueueButton.x - 1, clearQueueButton.y - 1, clearQueueButton.width + 2, clearQueueButton.height + 2),
+                    UiTheme.ACCENT_UPDATE,
+                )
             }
         }
         buttonTip(mouseX, mouseY)
@@ -654,7 +683,14 @@ class DisplayMenu private constructor(
             b.visible && mouseX >= b.x && mouseX < b.x + b.width && mouseY >= b.y && mouseY < b.y + b.height
         when {
             over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
-            over(queueAddButton) -> queueTip = queueBlockedReason() ?: ClientMessage.QUEUE_ADD.text()
+            over(queueAddButton) -> queueTip = queueBlockedReason()
+                ?: if (YouTubePlaylists.parseLink(suggestions.searchText) != null) ClientMessage.QUEUE_PLAYLIST_ADD.text()
+                else ClientMessage.QUEUE_ADD.text()
+            over(clearQueueButton) -> queueTip = if (System.currentTimeMillis() < clearArmedUntilMs) {
+                ClientMessage.QUEUE_CLEAR_CONFIRM.text()
+            } else {
+                ClientMessage.QUEUE_CLEAR.text()
+            }
             over(loopButton) -> queueTip = if (DisplayQueues.of(displayScreen.uuid)?.loop == true) {
                 ClientMessage.QUEUE_LOOP_ON.text()
             } else {
@@ -709,11 +745,15 @@ class DisplayMenu private constructor(
         )
     }
 
-    /** Queues the link typed in the search box (resolving a YouTube title first), instead of playing it. */
+    /**
+     * Queues the link typed in the search box (resolving a YouTube title first) instead of playing it. A playlist link
+     * queues the playlist: all of it, or for a `watch?v=X&list=Y` link X and everything after it.
+     */
     private fun queueFromSearch() {
         val ds = displayScreen
-        val url = linkOf(suggestions.searchText) ?: return
         val lang = ds.lang ?: ""
+        YouTubePlaylists.parseLink(suggestions.searchText)?.let { return queuePlaylist(it, lang) }
+        val url = linkOf(suggestions.searchText) ?: return
         val videoId = YouTubeUrls.extractVideoId(url)
         if (videoId == null) {
             DisplayQueues.add(ds.uuid, url, lang, CustomMediaUrls.displayName(url), 0L, "")
@@ -724,6 +764,40 @@ class DisplayMenu private constructor(
             Minecraft.getInstance().execute {
                 if (meta != null) DisplayQueues.add(ds.uuid, meta, lang)
                 else DisplayQueues.add(ds.uuid, YouTubeUrls.watchUrl(videoId), lang, "", 0L, "")
+            }
+        }
+    }
+
+    /** Lists [link]'s playlist off-thread and queues as many of its videos as fit, in order, in one batch. */
+    private fun queuePlaylist(link: YouTubePlaylists.Link, lang: String) {
+        val ds = displayScreen
+        val room = DisplayQueues.room(ds.uuid, exempt = ds.owner || ds.isAdmin, atMost = MAX_PLAYLIST_BATCH)
+        if (room <= 0) return DisplayQueues.notifyLocal(ClientMessage.QUEUE_FULL.component())
+        DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_LOADING.component().withStyle(ChatFormatting.GRAY))
+        DreamCoroutines.clientIo.launch {
+            val listing = runCatching { YouTubePlaylists.fetch(link, room) }
+                .onFailure { org.slf4j.LoggerFactory.getLogger(DisplayMenu::class.java).warn("Playlist {}: {}", link.listId, it.message) }
+                .getOrNull()
+            Minecraft.getInstance().execute {
+                if (listing == null || listing.entries.isEmpty()) {
+                    DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_FAILED.component().withStyle(ChatFormatting.RED))
+                    return@execute
+                }
+                DisplayQueues.addBatch(ds.uuid, listing.entries.map { entry ->
+                    QueueItemWire(
+                        url = YouTubeUrls.watchUrl(entry.videoId), lang = lang, title = entry.title.take(100),
+                        durationMs = entry.durationSec * 1_000L,
+                    )
+                })
+                listing.entries.forEach { VideoTitleCache.put(it.videoId, it.title) }
+                val title = listing.title.ifBlank { link.listId }
+                DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_ADDED.component(listing.entries.size, title))
+                if (listing.more) DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_MORE.component().withStyle(ChatFormatting.GRAY))
+                if (listing.unavailable > 0) {
+                    DisplayQueues.notifyLocal(
+                        ClientMessage.QUEUE_PLAYLIST_UNAVAILABLE.component(listing.unavailable).withStyle(ChatFormatting.GRAY),
+                    )
+                }
             }
         }
     }
@@ -948,6 +1022,10 @@ class DisplayMenu private constructor(
         private const val LOOP_BUTTON = 16
         private const val QUEUE_PLUS = 14
         private const val TAB_GAP = 10
+        private const val CLEAR_CONFIRM_MS = 3_000L
+
+        /** Most playlist videos one "+" queues; the server takes at most this many per batch as well. */
+        private const val MAX_PLAYLIST_BATCH = 100
 
         /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
         private var queueTabOpen = false

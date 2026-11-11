@@ -59,6 +59,7 @@ object QueueActions {
             QueueActionType.SKIP -> QueueManager.skip(display, ctx, player.uniqueId)
             QueueActionType.CLEAR -> QueueManager.clear(display, ctx)
             QueueActionType.LOOP -> QueueManager.setLoop(display, ctx, packet.flag)
+            QueueActionType.ADD_BATCH -> addBatch(player, display, packet)
         }
     }
 
@@ -82,6 +83,21 @@ object QueueActions {
             display, context(display, player), player.uniqueId, player.name,
             url, MediaUrlPolicy.sanitizeLang(packet.lang), packet.title, packet.durationMs, packet.thumbnailUrl,
         )
+    }
+
+    private fun addBatch(player: Player, display: PaperDisplayData, packet: QueueAction) {
+        val entries = packet.items.take(QueueManager.MAX_BATCH).mapNotNull { item ->
+            val url = item.url.trim()
+            if (url.isEmpty() || !MediaUrlPolicy.isAllowed(url)) return@mapNotNull null
+            val refused = CustomMediaGate.refusalKey(
+                url,
+                PaperServer.config.settings.customMediaPolicy,
+                player.hasPermission(PaperServer.config.permissions.custom),
+            )
+            if (refused != null) return@mapNotNull null
+            QueueManager.NewEntry(url, MediaUrlPolicy.sanitizeLang(item.lang), item.title, item.durationMs, item.thumbnailUrl)
+        }
+        QueueManager.addAll(display, context(display, player), player.uniqueId, player.name, entries)
     }
 
     /** The permission context for [player] on [display], admins being the `delete_others` holders. */

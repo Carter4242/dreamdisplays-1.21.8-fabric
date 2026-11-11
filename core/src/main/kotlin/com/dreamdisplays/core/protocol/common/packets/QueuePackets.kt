@@ -48,7 +48,8 @@ data class QueueState(
 
 /**
  * Client -> server: a queue edit on display [id]. Which fields matter depends on [action] ([QueueActionType] wire
- * value): ADD uses the media fields, REMOVE / MOVE use [itemId] (MOVE also [toIndex]), LOOP uses [flag].
+ * value): ADD uses the media fields, ADD_BATCH uses [items] (a resolved playlist; their item ids and adders are
+ * ignored), REMOVE / MOVE use [itemId] (MOVE also [toIndex]), LOOP uses [flag].
  */
 @Serializable
 data class QueueAction(
@@ -62,6 +63,7 @@ data class QueueAction(
     @ProtoNumber(8) val thumbnailUrl: String = "",
     @ProtoNumber(9) val toIndex: Int = 0,
     @ProtoNumber(10) val flag: Boolean = false,
+    @ProtoNumber(11) val items: List<QueueItemWire> = [],
 ) : DreamPacket
 
 /**
@@ -83,7 +85,10 @@ enum class QueueActionType(val wire: Int) {
     MOVE(3),
     SKIP(4),
     CLEAR(5),
-    LOOP(6);
+    LOOP(6),
+
+    /** Several videos at once, in order (a playlist). */
+    ADD_BATCH(7);
 
     companion object {
         /** Decodes [wire], or null for a value this build does not know. */
