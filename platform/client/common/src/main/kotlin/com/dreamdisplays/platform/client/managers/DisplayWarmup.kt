@@ -191,7 +191,7 @@ object DisplayWarmup {
         ProtocolRouter.send(
             DisplayReadiness(
                 displayId, state.wire, positionMs, TimelineFollower.oneWayLatencyMs().roundToInt(),
-                com.dreamdisplays.platform.client.displays.ServerMediaGens.of(displayId),
+                com.dreamdisplays.platform.client.displays.ServerMediaGens.onScreen(displayId),
             ),
         )
     }

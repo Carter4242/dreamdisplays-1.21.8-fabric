@@ -1439,7 +1439,7 @@ class DisplayScreen(
     ) {
         when (effectiveMode) {
             PlaybackMode.SYNCED -> Initializer.sendPacket(
-                PlaybackCommand(uuid, action.wire, positionMs, rate, ServerMediaGens.of(uuid)),
+                PlaybackCommand(uuid, action.wire, positionMs, rate, ServerMediaGens.onScreen(uuid)),
             )
             PlaybackMode.WATCH_PARTY -> if (watchParty?.isHost == true) action.toWatchPartyAction()?.let {
                 Initializer.sendPacket(WatchPartyControl(uuid, it.wire, positionMs))
@@ -1552,7 +1552,7 @@ class DisplayScreen(
     fun requestMode(newMode: PlaybackMode) {
         if (!canSetModeHere) return
         if (PlaybackMode.isBaseMode(newMode)) {
-            Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L, ServerMediaGens.of(uuid)))
+            Initializer.sendPacket(SetMode(uuid, newMode.wire, currentTimeNanos / 1_000_000L, ServerMediaGens.onScreen(uuid)))
         }
     }
 

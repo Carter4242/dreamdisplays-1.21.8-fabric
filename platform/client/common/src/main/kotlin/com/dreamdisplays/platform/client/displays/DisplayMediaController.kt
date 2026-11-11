@@ -50,8 +50,10 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
         }
         pendingSwitch?.let {
             if (it.url == videoUrl && it.lang == lang) return // The same switch again
-            cancelPendingSwitch()
         }
+        // Read before a replaced switch lets go of it: the video still on screen
+        val shownGen = ServerMediaGens.beforeLatest(screen.uuid)
+        cancelPendingSwitch()
 
         // A queue entry this client preloaded in the background becomes the player as is: already resolved,
         // buffered and parked warm on its first frame
@@ -66,6 +68,8 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
             pendingSwitch = PendingSwitch(videoUrl, lang, preservePausedState, taken).also {
                 arm(it, SWITCH_FALLBACK_MS.toDouble()) { completePendingSwitch(it, seamless = false) }
             }
+            // A seek or pause until then acts on the video still playing: keep talking about that one
+            ServerMediaGens.hold(screen.uuid, shownGen)
             return
         }
         taken?.adopt()
@@ -148,6 +152,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     private fun completePendingSwitch(p: PendingSwitch, seamless: Boolean): Boolean {
         if (pendingSwitch !== p) return false
         pendingSwitch = null
+        ServerMediaGens.release(screen.uuid)
         p.timer?.cancel(false)
         p.taken.adopt()
         swapIn(p.url, p.lang, p.preservePausedState, p.taken.player, seamless)
@@ -157,6 +162,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     private fun cancelPendingSwitch() {
         val p = pendingSwitch ?: return
         pendingSwitch = null
+        ServerMediaGens.release(screen.uuid)
         p.timer?.cancel(false)
         p.taken.player.stop()
     }
@@ -264,7 +270,7 @@ internal class DisplayMediaController(private val screen: DisplayScreen) {
     }
 
     private fun sendDuration(url: String, ms: Long, observedEnd: Boolean, force: Boolean) {
-        val gen = ServerMediaGens.of(screen.uuid)
+        val gen = ServerMediaGens.onScreen(screen.uuid)
         val key = Triple(gen, url, ms)
         if (!force && key == lastDurationReport) return
         lastDurationReport = key
