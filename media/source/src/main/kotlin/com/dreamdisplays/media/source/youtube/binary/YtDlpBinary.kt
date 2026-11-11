@@ -36,11 +36,27 @@ object YtDlpBinary {
     private const val DOWNLOAD_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/"
     private const val ZIPAPP_ASSET = "yt-dlp"
     private const val ZIPAPP_NAME = "yt-dlp.pyz"
-    private const val MIN_PYTHON_MINOR = 9
 
+    /**
+     * Oldest Python the current `yt-dlp` runs on: its `__init__` raises ImportError on anything older. macOS ships
+     * 3.9 as `/usr/bin/python3`, so a looser gate picks an interpreter on which every call dies at once.
+     */
+    private const val MIN_PYTHON_MINOR = 11
+
+    /** Interpreters tried in order; the first new enough wins (a Homebrew 3.12 beats an older `python3` on PATH). */
     private val PYTHON_CANDIDATES: Array<String> =
         if (OsInfo.isWindows) arrayOf("python", "python3", "py")
-        else arrayOf("python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python")
+        else arrayOf(
+            "python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3",
+            "python3.14", "python3.13", "python3.12", "python3.11", "python",
+        )
+
+    /** Output of a Python that refuses to run this `yt-dlp` (or a zipapp it can't load). */
+    private val INTERPRETER_FAILURE = Regex(
+        "Only Python versions|unsupported version of Python|ImportError|ModuleNotFoundError|SyntaxError|" +
+            "ZipImportError|BadZipFile|can't find '__main__' module|No module named",
+        RegexOption.IGNORE_CASE,
+    )
 
     private const val BINARY_REFRESH_MS: Long = 1L * 24L * 60L * 60L * 1_000L
 
@@ -105,11 +121,64 @@ object YtDlpBinary {
     private fun override(): String? =
         System.getProperty("dreamdisplays.ytdlp")?.ifEmpty { null } ?: System.getenv("DREAMDISPLAYS_YTDLP")?.ifEmpty { null }
 
+    /** True when [command] (from [resolveCommand]) runs the zipapp through Python rather than a standalone binary. */
+    fun isZipapp(command: List<String>): Boolean = command.size == 2 && command[1].endsWith(ZIPAPP_NAME)
+
+    /** True when `yt-dlp` output says its Python can't run it at all, as opposed to a failure on one video. */
+    fun looksLikeInterpreterFailure(output: String?): Boolean =
+        output != null && INTERPRETER_FAILURE.containsMatchIn(output)
+
+    /**
+     * Drops the zipapp fast path [failed] for the rest of the session after it failed with [output], switching to the
+     * standalone binary. Returns true when the current command is now a different one (so a retry can use it).
+     */
+    fun abandonZipapp(failed: List<String>, output: String): Boolean {
+        synchronized(this) {
+            if (resolvedCommand != failed) return resolvedCommand != null
+            logger.warn(
+                "yt-dlp zipapp can't run on {} ({}); using the standalone yt-dlp binary instead.",
+                failed[0], output.lineSequence().lastOrNull { it.isNotBlank() }?.trim()?.take(200),
+            )
+            resolvedCommand = runCatching { [resolve()] }.onFailure { e ->
+                logger.warn("Standalone yt-dlp binary unavailable: ${e.message}.")
+            }.getOrNull() ?: return false
+            return true
+        }
+    }
+
     private fun zipappCommand(): List<String>? {
         val python = usablePython() ?: return null
         val pyz = provisionZipapp() ?: return null
+        // A new enough interpreter can still fail to run it (a newer yt-dlp raising its floor, a broken install)
+        if (!zipappRuns(python, pyz)) return null
         logger.info("yt-dlp fast path active: {} {}.", python, pyz.fileName)
         return [python, pyz.toString()]
+    }
+
+    private fun zipappRuns(python: String, pyz: Path): Boolean {
+        val (exit, output) = runCatching { run([python, pyz.toString(), "--version"], 20) }.getOrElse { e ->
+            null to (e.message ?: e.javaClass.simpleName)
+        }
+        if (exit == 0) return true
+        logger.warn(
+            "yt-dlp zipapp doesn't run on {} (exit {}: {}); using the standalone yt-dlp binary.",
+            python, exit ?: "timeout", output.trim().lineSequence().lastOrNull { it.isNotBlank() }?.take(200),
+        )
+        return false
+    }
+
+    /** Runs [cmd], returning its exit code (null on timeout) and combined output. */
+    private fun run(cmd: List<String>, timeoutSeconds: Long): Pair<Int?, String> {
+        val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+        runCatching { p.outputStream.close() }
+        val sink = StringBuilder()
+        val reader = Processes.collector(p.inputStream, sink, "YtDlp-probe").also { it.start() }
+        if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            Processes.destroyTree(p)
+            return null to sink.toString()
+        }
+        reader.join(2_000)
+        return p.exitValue() to sink.toString()
     }
 
     private fun usablePython(): String? {
@@ -126,22 +195,20 @@ object YtDlpBinary {
 
     private fun pythonVersionOk(exe: String): Boolean {
         return runCatching {
-            val p = ProcessBuilder(exe, "--version").redirectErrorStream(true).start()
-            runCatching { p.outputStream.close() }
-            val sink = StringBuilder()
-            val reader = Processes.collector(p.inputStream, sink, "YtDlp-python-probe").also { it.start() }
-            if (!p.waitFor(10, TimeUnit.SECONDS)) {
-                Processes.destroyTree(p)
-                return false
-            }
-            reader.join(2_000)
-            val out = sink.toString()
-            if (p.exitValue() != 0) return false
-            val m = Regex("""Python (\d+)\.(\d+)""").find(out) ?: return false
-            val major = m.groupValues[1].toInt()
-            val minor = m.groupValues[2].toInt()
-            major > 3 || (major == 3 && minor >= MIN_PYTHON_MINOR)
+            val (exit, out) = run([exe, "--version"], 10)
+            if (exit != 0) return false
+            val ok = pythonVersionSupported(out)
+            if (!ok) logger.debug("Skipping {} for the yt-dlp zipapp: {}", exe, out.trim().take(80))
+            ok
         }.getOrDefault(false)
+    }
+
+    /** True when `python --version` printed [versionOutput] for an interpreter that can run `yt-dlp`. */
+    internal fun pythonVersionSupported(versionOutput: String): Boolean {
+        val m = Regex("""Python (\d+)\.(\d+)""").find(versionOutput) ?: return false
+        val major = m.groupValues[1].toInt()
+        val minor = m.groupValues[2].toInt()
+        return major > 3 || (major == 3 && minor >= MIN_PYTHON_MINOR)
     }
 
     private fun provisionZipapp(): Path? {

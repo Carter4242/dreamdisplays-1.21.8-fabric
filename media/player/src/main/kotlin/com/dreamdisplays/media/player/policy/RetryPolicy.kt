@@ -1,5 +1,7 @@
 package com.dreamdisplays.media.player.policy
 
+import com.dreamdisplays.api.media.model.DreamMediaException
+import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.media.player.util.MediaUtil
 
 /**
@@ -24,8 +26,11 @@ internal class RetryPolicy(private val maxRetries: Int = 3) {
      */
     fun evaluate(stderr: String, normalEos: Boolean, isLive: Boolean): Decision? {
         if (exhausted) return null
-        val is403or404 = "403" in stderr || "Forbidden" in stderr || "404" in stderr || "Not Found" in stderr
-        if (is403or404 || MediaUtil.isTransientError(stderr)) return Decision(invalidateCache = is403or404)
+        val refused = isRefused(stderr)
+        val gone = isNotFound(stderr)
+        if (refused || gone || MediaUtil.isTransientError(stderr)) {
+            return Decision(invalidateCache = refused || gone, refused = refused)
+        }
         if (normalEos && isLive) return Decision(invalidateCache = true)
         return null
     }
@@ -45,5 +50,36 @@ internal class RetryPolicy(private val maxRetries: Int = 3) {
     data class Decision(
         /** If `true`, the `yt-dlp` cache must be purged before re-fetching stream URLs. */
         val invalidateCache: Boolean,
+        /**
+         * If `true`, the host refused the stream URLs (HTTP 403): the resolvers are told, so a repeated refusal
+         * is resolved from a different source rather than the same kind of URL again.
+         */
+        val refused: Boolean = false,
     )
+
+    companion object {
+        private val REFUSED = Regex("""\b403\s+Forbidden\b|(returned|error|status)[ :=]*403\b|\bForbidden\b""")
+        private val NOT_FOUND = Regex("""\b404\s+Not Found\b|(returned|error|status)[ :=]*404\b|\bNot Found\b""")
+
+        /** True when `FFmpeg`'s [stderr] says the host refused the stream (HTTP 403). */
+        fun isRefused(stderr: String): Boolean = REFUSED.containsMatchIn(stderr)
+
+        /** True when `FFmpeg`'s [stderr] says the stream URL no longer exists (HTTP 404). */
+        fun isNotFound(stderr: String): Boolean = NOT_FOUND.containsMatchIn(stderr)
+
+        /**
+         * The error shown once retries are used up. A refused stream (403) or a lost connection is a passing,
+         * non-fatal [DreamMediaException.Network] the display may retry on its own later; anything else is a verdict
+         * on the stream itself.
+         */
+        fun exhaustedError(stderr: String, normalEos: Boolean, source: MediaSource?): DreamMediaException = when {
+            !normalEos && isRefused(stderr) -> DreamMediaException.Network(
+                if (source is MediaSource.YouTube) "YouTube refused the video stream (403). Try again in a minute."
+                else "The video host refused the stream (403). Try again in a minute."
+            )
+
+            !normalEos && LoadFailures.looksTransient(stderr) -> DreamMediaException.Network("Lost the connection to the video.")
+            else -> DreamMediaException.Decode("Unrecoverable stream failure", isFatal = true)
+        }
+    }
 }

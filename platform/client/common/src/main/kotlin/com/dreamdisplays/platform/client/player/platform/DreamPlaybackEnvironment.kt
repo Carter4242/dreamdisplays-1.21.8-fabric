@@ -10,6 +10,7 @@ import com.dreamdisplays.media.source.direct.DirectStreamResolver
 import com.dreamdisplays.media.source.platform.Platforms
 import com.dreamdisplays.media.source.youtube.NewPipeResolver
 import com.dreamdisplays.media.source.youtube.YtDlp
+import com.dreamdisplays.media.source.youtube.YtStreamRefusals
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
@@ -43,11 +44,19 @@ object DreamPlaybackEnvironment : PlaybackEnvironment {
 
     override val uploaderFactory: FrameUploaderFactory = FrameUploaderFactory { GpuFrameUploader() as FrameUploader }
 
-    override val cacheInvalidator: CacheInvalidator = CacheInvalidator { url ->
-        NewPipeResolver.invalidate(url)
-        YtDlp.invalidateCache(url)
-        Platforms.invalidate(url)
-        DirectStreamResolver.invalidate(url)
+    override val cacheInvalidator: CacheInvalidator = object : CacheInvalidator {
+        override fun invalidate(url: String) {
+            NewPipeResolver.invalidate(url)
+            YtDlp.invalidateCache(url)
+            Platforms.invalidate(url)
+            DirectStreamResolver.invalidate(url)
+        }
+
+        override fun streamRefused(url: String) {
+            // Counted before the purge, so the very next resolve already follows the escalated plan
+            YtStreamRefusals.record(url)
+            invalidate(url)
+        }
     }
 
     override fun resolverChain(): MediaResolverRegistry = DreamServices.registry.get(MediaServices.RESOLVER_REGISTRY)
