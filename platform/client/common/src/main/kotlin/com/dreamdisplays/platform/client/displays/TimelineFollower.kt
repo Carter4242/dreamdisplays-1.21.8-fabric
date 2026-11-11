@@ -390,7 +390,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // would take a minute. Any landing far off is re-aimed at once from the fresh target, outside the
             // controller's cooldown and streak, aimed with the cost this landing showed. Only once per episode: the
             // re-aim's landing is accepted and left to rate correction and the controller's cooldown.
-            val startFix = correctAfterLanding && abs(filtered) > POST_START_SEEK_MS && screen.seeksCheaply
+            val startFix = correctAfterLanding && abs(filtered) > POST_START_SEEK_MS &&
+                controller.cheapSeeksAllowed(screen.seeksCheaply)
             val reaim = controller.reaimsLanding(filtered, wasCorrection)
             correctAfterLanding = false
             if (!wasCorrection && (startFix || reaim)) {

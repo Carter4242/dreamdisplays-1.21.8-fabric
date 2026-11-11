@@ -17,6 +17,9 @@ import kotlin.math.sign
  * threshold a seek is requested, at most once per cooldown; seeks that follow each other within
  * [STREAK_RESET_MS] stretch the cooldown (up to x4), and that stretch is forgotten once seeks stop. Drift past
  * [LARGE_DRIFT_MS] ignores the stretch: seconds off are never left to a 1 % rate for minutes.
+ *
+ * The server can take the seeks away ([SyncSettings.correctiveSeeks] false: drift is closed by rate only) or the
+ * cheap-seek shortcuts ([SyncSettings.cheapSeeks] false: the configured threshold and cooldown apply to every stream).
  */
 class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
     /** What to do now: play at [ratio] (content per output time) or [seek] to the target. */
@@ -74,10 +77,15 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
     /** Decides from the current smoothed drift. */
     fun decide(nowMs: Double, cheapSeeks: Boolean = false): Decision {
         val drift = filteredMs ?: return Decision(1.0, false).also { ratio = 1.0 }
-        val threshold = if (cheapSeeks) minOf(settings.seekThresholdMs.toDouble(), CHEAP_SEEK_THRESHOLD_MS)
+        if (!settings.correctiveSeeks) {
+            ratio = rateFor(drift)
+            return Decision(ratio, false)
+        }
+        val cheap = cheapSeeks && settings.cheapSeeks
+        val threshold = if (cheap) minOf(settings.seekThresholdMs.toDouble(), CHEAP_SEEK_THRESHOLD_MS)
         else settings.seekThresholdMs.toDouble()
         val stretched = if (abs(drift) > LARGE_DRIFT_MS) settings.seekCooldownMs.toDouble() else currentCooldownMs()
-        val cooldown = if (cheapSeeks) minOf(stretched, CHEAP_SEEK_COOLDOWN_MS) else stretched
+        val cooldown = if (cheap) minOf(stretched, CHEAP_SEEK_COOLDOWN_MS) else stretched
         if (abs(drift) > threshold && nowMs - lastSeekMs >= cooldown) {
             noteSeek(nowMs)
             resetMeasurement()
@@ -95,7 +103,11 @@ class DriftController(var settings: SyncSettings = SyncSettings.DEFAULT) {
 
     /** Whether a seek / start that landed [landingDriftMs] off gets one corrective seek at once, outside the cooldown. */
     fun landingNeedsReseek(landingDriftMs: Double): Boolean =
-        abs(landingDriftMs) > minOf(settings.seekThresholdMs.toDouble(), LANDING_RESEEK_MS)
+        settings.correctiveSeeks && abs(landingDriftMs) > minOf(settings.seekThresholdMs.toDouble(), LANDING_RESEEK_MS)
+
+    /** Whether a cheap stream ([seeksCheaply]) gets the cheap-seek shortcuts (and seeks at all) under the settings. */
+    fun cheapSeeksAllowed(seeksCheaply: Boolean): Boolean =
+        seeksCheaply && settings.cheapSeeks && settings.correctiveSeeks
 
     /**
      * Whether a landing [landingDriftMs] off is re-aimed at once. At most once per correction episode: the landing of
