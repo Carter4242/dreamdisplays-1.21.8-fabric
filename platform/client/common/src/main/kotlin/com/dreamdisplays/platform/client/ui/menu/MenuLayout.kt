@@ -53,7 +53,7 @@ class MenuLayout private constructor(
 
             val idealSuggestionsH = SuggestionsPanel.STRIP_CHROME_H + SuggestionsPanel.FULL_CARD_VIEWPORT_H
             val minSuggestionsH = SuggestionsPanel.STRIP_CHROME_H + SuggestionsPanel.MIN_CARD_VIEWPORT_H
-            val topRowFloor = 200
+            val topRowFloor = 226 // Six settings rows + owner actions without overlap (see settingsMinH)
             var suggestionsH = idealSuggestionsH
                 .coerceAtMost(max(minSuggestionsH, totalH - topRowFloor - gap))
                 .coerceAtLeast(minSuggestionsH)
