@@ -1,6 +1,5 @@
 package com.dreamdisplays.platform.client.managers
 
-import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepare
 import com.dreamdisplays.core.protocol.common.packets.FullscreenPrepareStatus
 import com.dreamdisplays.platform.client.displays.DisplayPolicyCache
@@ -102,10 +101,10 @@ object FullscreenPrepareController {
     private fun progress(screen: DisplayScreen, entry: Entry): FullscreenPrepareState {
         if (!entry.qualityApplied) {
             entry.qualityApplied = true
-            // Open at the broadcast's quality now, so starting it does not switch streams
-            if (entry.quality.isNotEmpty()) {
-                val quality = VideoQuality.parse(entry.quality)
-                if (screen.quality != quality) screen.quality = quality
+            // Open at the broadcast's quality now, so starting it does not switch streams. Like the broadcast's own,
+            // played over the viewer's quality for this display and never saved into it (not while a broadcast shows)
+            if (entry.quality.isNotEmpty() && screen.lastFullscreenState == null) {
+                screen.applyBroadcastOverrides(-1f, entry.quality)
             }
         }
         if (screen.errored) return FullscreenPrepareState.FAILED
@@ -127,6 +126,10 @@ object FullscreenPrepareController {
         entries.remove(displayId)
         logger.info("Released display {} held for a fullscreen broadcast ({}).", displayId, entry.prepareId)
         val screen = DisplayRegistry.screens[displayId] ?: return
+        // Cancelled before any broadcast showed: back to the viewer's own quality (a broadcast clears its own)
+        if (entry.qualityApplied && entry.quality.isNotEmpty() && screen.lastFullscreenState == null) {
+            screen.clearBroadcastOverrides()
+        }
         // A broadcast-only display nobody started: nothing else will ever show it
         if (screen.virtual && !screen.isPopoutActive) {
             DisplayRegistry.unregisterScreen(screen)
