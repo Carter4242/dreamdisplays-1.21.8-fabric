@@ -319,7 +319,10 @@ object VanillaDisplayActions {
         return if (hasBypass || cap <= 0) -1 else cap
     }
 
-    /** Checks if [player] has operator level 2 permissions, the no-LuckPerms fallback for privileged actions. */
+    /**
+     * Checks if [player] has operator level 2 permissions, the no-LuckPerms fallback for privileged actions. The host of
+     * a single-player or LAN world counts as one even with cheats off: the mod is theirs to use in their own world.
+     */
     fun isOpLevel2(player: ServerPlayer): Boolean {
         val server =
             //? if >=1.21.6 {
@@ -333,11 +336,11 @@ object VanillaDisplayActions {
         player.getLevel().server
         //?}
         */
-        return server.playerList.isOp(
+        val profile =
             //? if >=1.21.11 {
             NameAndId(player.gameProfile)
             //?} else
             /*player.gameProfile*/
-        )
+        return server.playerList.isOp(profile) || server.isSingleplayerOwner(profile)
     }
 }
