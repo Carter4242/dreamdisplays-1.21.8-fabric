@@ -220,7 +220,9 @@ object ScreenCapture {
     private val choices = ConcurrentHashMap<String, Choice>()
 
     private fun choiceKey(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean) =
-        "$ffmpeg|$softwareOnly|" + monitor.deviceName.ifEmpty { "${monitor.adapter}:${monitor.index}@${monitor.x},${monitor.y}" }
+        "$ffmpeg|$softwareOnly|" + monitor.deviceName.ifEmpty {
+            monitor.key.ifEmpty { "${monitor.adapter}:${monitor.index}@${monitor.x},${monitor.y}" }
+        }
 
     /** The plan already chosen for [monitor], or null before [choose] ran for it. */
     fun knownChoice(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice? =
@@ -241,8 +243,12 @@ object ScreenCapture {
      */
     fun choose(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice? {
         val source = sourceForThisOs() ?: Source.DDAGRAB
-        // Nothing to work out per screen there: the screen is the one picked now, found again at each launch
-        if (source != Source.DDAGRAB) return Choice(monitor, Plan(source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg)), [])
+        // Nothing to work out per screen there: the screen is the one picked now, found again at each launch; the plan a
+        // share of it fell back to before (its hardware encoder died at once) is kept, rather than failing first again
+        if (source != Source.DDAGRAB) {
+            val remembered = knownChoice(ffmpeg, monitor, softwareOnly)?.plan?.takeIf { it.source == source }
+            return Choice(monitor, remembered ?: Plan(source, if (softwareOnly) Encoder.X264 else pickEncoder(ffmpeg)), [])
+        }
         // A plan cached under this screen name for another monitor (the name went to it since) is not this screen's
         knownChoice(ffmpeg, monitor, softwareOnly)?.takeIf { it.monitor.key == monitor.key }?.let { cached ->
             // The screen as it is now: monitors sleep, get plugged, rearranged, resized while the game stays open

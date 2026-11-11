@@ -724,7 +724,9 @@ object ScreenShare {
     private const val GONE_CHECKS = 3
 
     private const val SCREEN_GONE = "the shared screen was disconnected or replaced"
-    private const val SCREEN_UNIDENTIFIED = "the screen could not be identified (try sharing a window)"
+    /** Window sharing exists on Windows only: elsewhere the hint would point at nothing. */
+    private val SCREEN_UNIDENTIFIED =
+        "the screen could not be identified" + if (OsInfo.isWindows) " (try sharing a window)" else ""
 
     /**
      * What [r] captures at with [plan]: 60 fps where the plan's encoder measured fast enough and the server allows it
