@@ -88,6 +88,8 @@ internal class VideoFramePipe(
     override fun trimForPark() {
         activePrebuffer?.trimForPark()
         surface.clear()
+        // The kept copy of the picture is frame-sized memory outside the frame budget: not held for a parked display
+        lastFrame.clear()
     }
 
     override fun cleanup() = surface.cleanup()
