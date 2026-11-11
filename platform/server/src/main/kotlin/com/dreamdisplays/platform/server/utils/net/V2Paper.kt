@@ -80,6 +80,15 @@ object PaperV2Networking : PluginMessageListener {
         logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
     }
 
+    /**
+     * Sends every connected client a fresh hello after the config was reloaded: the features it advertises (queue,
+     * error reports, ...) follow the settings, and clients only learn them from a hello.
+     */
+    fun refreshServerHellos() {
+        val players = plugin.server.onlinePlayers.filter { V2PlayerTracker.isV2(it.uniqueId) }
+        players.forEach { send([it], buildServerHello(it)) }
+    }
+
     /** Players greeted by [greetOnlinePlayers]: their client may still hold state the previous plugin instance set. */
     private val regreeted: MutableSet<java.util.UUID> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 

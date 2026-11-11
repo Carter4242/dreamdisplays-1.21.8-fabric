@@ -80,6 +80,8 @@ class PaperServer : JavaPlugin() {
         )
         storage.createSchema()
         DisplayManager.register(storage.loadAllPaperDisplays().onEach(::stripResyncMarker))
+        // Clients learn the server's features only from a hello: a config reload sends them a fresh one
+        Companion.config.afterReload = { PaperV2Networking.refreshServerHellos() }
         // A screen share's relay URL is never stored: every save of a shared display keeps the video it had before
         com.dreamdisplays.platform.server.managers.StoredVideos.override =
             com.dreamdisplays.platform.server.utils.net.ScreenShareActions::storedVideo

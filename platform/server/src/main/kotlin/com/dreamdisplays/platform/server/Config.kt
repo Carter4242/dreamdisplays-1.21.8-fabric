@@ -58,6 +58,9 @@ class Config(private val plugin: PaperServer) {
     @Volatile
     var loadedWithErrors = false; private set
 
+    /** Runs after every successful [reload] (the platform re-sends what clients learned from the old settings). */
+    var afterReload: () -> Unit = {}
+
     /** Initializes the plugin's configuration. */
     init {
         createDefaultConfig()
@@ -106,6 +109,7 @@ class Config(private val plugin: PaperServer) {
         load(firstLoad = false)
         langStore.extractLangFiles()
         langStore.loadMessages(logger)
+        runCatching { afterReload() }.onFailure { logger.warn("Could not apply the reloaded config everywhere.", it) }
     }
 
     /**
