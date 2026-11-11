@@ -10,6 +10,7 @@ import com.dreamdisplays.api.media.player.PlaybackHost
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.managers.PlaybackSessionManager
 import com.dreamdisplays.media.player.managers.StatsReporter
@@ -87,6 +88,10 @@ class MediaPlayer(
 
     @Volatile
     private var primedStartPositionNanos = -1L
+
+    /** Playback speed the viewer asked for (see [setPlaybackSpeed]); live / unseekable media plays at 1 anyway. */
+    @Volatile
+    private var requestedSpeed = PlaybackSpeed.NORMAL
 
     private val events = PlayerEvents(
         onError = { e -> onControl { lifecycle = PlayerState.Error }; reportError(e) },
@@ -278,6 +283,7 @@ class MediaPlayer(
         if (sessionManager.isParked()) {
             sessionManager.resume()
             watchdog.start()
+            applySpeed() // A speed change that arrived while parked
         }
     }
 
@@ -348,6 +354,22 @@ class MediaPlayer(
 
     /** True when paused with the session kept open, so [play] resumes instantly from the frozen position. */
     fun resumesWarm(): Boolean = isPausedWarm()
+
+    /**
+     * Plays at [speed] x (clamped to [PlaybackSpeed.MIN]..[PlaybackSpeed.MAX]) with the pitch kept: the sound is
+     * time-stretched in FFmpeg and the picture follows the audio clock. A playing session restarts in place at the
+     * position being heard; a paused or not-yet-started one simply starts at the new speed. Live streams stay at 1.
+     * Independent of [setSyncPlaybackRate], the small sync correction applied on top.
+     */
+    fun setPlaybackSpeed(speed: Double) {
+        val s = PlaybackSpeed.clamp(speed)
+        if (s == requestedSpeed) return
+        requestedSpeed = s
+        safeExecute(::applySpeed)
+    }
+
+    /** The speed the current session plays at (1 for live media). */
+    fun getPlaybackSpeed(): Double = sessionManager.tempo
 
     /** Stream duration in nanos, or 0 for live streams. */
     fun getDuration(): Long = if (liveStream) 0L else durationHintNanos
@@ -712,6 +734,7 @@ class MediaPlayer(
 
     private fun startStreams(streamSet: ActiveStreams, offsetNanos: Long) {
         if (terminated.get()) return
+        sessionManager.setTempo(effectiveSpeed())
         if (pauseRequested) {
             logger.debug("$debugLabel Start skipped: playback was paused while the media was being prepared.")
             lifecycle = PlayerState.Paused
@@ -1073,6 +1096,33 @@ class MediaPlayer(
 
     private fun isPausedWarm(): Boolean =
         lifecycle == PlayerState.Paused && sessionManager.isParked()
+
+    /** The speed sessions should run at: the requested one, except for media that cannot be retimed. */
+    private fun effectiveSpeed(): Double =
+        if (liveStream || (media != null && !seekable)) PlaybackSpeed.NORMAL else requestedSpeed
+
+    /**
+     * Moves the session to [requestedSpeed]. Audio processes are time-stretched at spawn, so a playing session is
+     * re-seeked in place to the position being heard; anything not playing just records it for its next start.
+     */
+    private fun applySpeed() {
+        if (terminated.get()) return
+        val target = effectiveSpeed()
+        if (target == sessionManager.tempo) return
+        // A warm pause keeps the old-speed processes and their buffered PCM; resume must start fresh instead
+        if (isPausedWarm()) freezePausedWarmSession()
+        // A parked (out of range) session is retimed when it is un-parked
+        if (sessionManager.isParked()) return
+        val playing = isReady && sessionManager.isPlaying
+        val position = if (playing) getSyncPositionNanos() else clock.currentTime()
+        sessionManager.setTempo(target)
+        if (!playing || streams == null) {
+            clock.moveTo(position)
+            return
+        }
+        logger.debug("$debugLabel Speed ${target}x: restarting in place at ${ms(position)} ms.")
+        doSeek(position.coerceAtLeast(0L), fire = false)
+    }
 
     private fun freezePausedWarmSession() {
         val pos = sessionManager.parkedPositionNanos() ?: getCurrentTime()

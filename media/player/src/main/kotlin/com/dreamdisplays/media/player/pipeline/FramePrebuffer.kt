@@ -283,6 +283,7 @@ internal class FramePrebuffer(
                     dropStaleTimeline = false,
                     dropWhenBehind = pacingDropWhenBehind,
                     leadNs = displayLeadNs,
+                    rate = RatedClock.rateOf(getAudioClock),
                 )
                 if (pacingAbortedByPark && !flushRequested && alive()) {
                     pending.set(tf)

@@ -54,4 +54,7 @@ interface PlaybackPort {
 
     /** Re-resolves and reloads the current video for [displayId] after a load failure (local recovery). */
     fun retry(displayId: DisplayId)
+
+    /** Requests playback at [rate] x for [displayId] (see [PlaybackService.setSpeed]). */
+    fun setSpeed(displayId: DisplayId, rate: Double) {}
 }

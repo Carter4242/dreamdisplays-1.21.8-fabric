@@ -164,6 +164,8 @@ message DisplaySync {
   optional bool loop = 7;
   // WARNING: a default value decoded when value is missing
   optional int32 mode = 8;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 9;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RequestSync'
@@ -218,6 +220,8 @@ message PlaybackCommand {
   optional int32 action = 2;
   // WARNING: a default value decoded when value is missing
   optional int64 positionMs = 3;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 4;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.SetMode'

@@ -51,6 +51,7 @@ object CommandRegistrar {
             statsBranch()
             reloadBranch()
             policyBranch()
+            speedBranch()
             configBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
@@ -135,6 +136,23 @@ object CommandRegistrar {
                                 StringArgumentType.getString(ctx, "key"), StringArgumentType.getString(ctx, "value"),
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.speedBranch() {
+        literal("speed", tip("suggestSpeed")) {
+            requires { SpeedCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> SpeedCommand.execute(ctx.source.sender, target(ctx), null) }
+                argument("rate", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        SpeedCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
                     }
                 }
             }

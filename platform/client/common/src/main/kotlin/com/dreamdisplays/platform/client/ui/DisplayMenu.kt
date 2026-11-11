@@ -17,6 +17,7 @@ import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.core.services.keys.PlaybackServices
 import com.dreamdisplays.core.runtime.get
 import com.dreamdisplays.core.services.keys.WatchPartyServices
@@ -84,6 +85,7 @@ class DisplayMenu private constructor(
     private lateinit var volume: ValueSlider
     private lateinit var quality: ValueSlider
     private lateinit var brightness: ValueSlider
+    private lateinit var speed: SpeedField
     private lateinit var audio3d: ModeSlider<AcousticQuality>
     private lateinit var sync: ModeSlider<PlaybackMode>
     private lateinit var access: ModeSlider<DisplayAccess>
@@ -155,6 +157,10 @@ class DisplayMenu private constructor(
         brightness.enabledWhen = { !ds.isSync || ds.canEdit }
         brightness.visibleWhen = notErrored
 
+        speed = addUi(SpeedField(current = { ds.playbackSpeed }) { playback.setSpeed(displayId, it) })
+        speed.enabledWhen = { ds.canChangeSpeedHere }
+        speed.visibleWhen = notErrored
+
         audio3d = addUi(
             ModeSlider(
                 modes = AUDIO_3D_MODES,
@@ -222,6 +228,10 @@ class DisplayMenu private constructor(
         })
         brightnessReset.enabledWhen = { abs(brightness.value - 1.0) > 0.01 }
         brightnessReset.visibleWhen = notErrored
+
+        val speedReset = addUi(IconButton("refresh") { playback.setSpeed(displayId, PlaybackSpeed.NORMAL) })
+        speedReset.enabledWhen = { ds.canChangeSpeedHere && ds.playbackSpeed != PlaybackSpeed.NORMAL }
+        speedReset.visibleWhen = notErrored
 
         val audio3dReset = addUi(IconButton("refresh") {
             ClientStateManager.config.audioAcoustics = AUDIO_3D_DEFAULT
@@ -342,7 +352,7 @@ class DisplayMenu private constructor(
                 dropdown, audioTrackDropdown, subtitleDropdown,
             )
         settings = SettingsSection(
-            rows = settingsRows(qualityReset, brightnessReset, audio3dReset, syncReset, accessReset),
+            rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, syncReset, accessReset),
             ownerActions = [reportButton, deleteButton],
             buttonTooltips = [
                 deleteButton to { buttonTooltip(ClientMessage.BUTTON_DELETE.key) },
@@ -354,7 +364,7 @@ class DisplayMenu private constructor(
 
     private fun settingsRows(
         qualityReset: IconButton,
-        brightnessReset: IconButton, audio3dReset: IconButton, syncReset: IconButton,
+        brightnessReset: IconButton, speedReset: IconButton, audio3dReset: IconButton, syncReset: IconButton,
         accessReset: IconButton,
     ): List<SettingsSection.Row> {
         val ds = displayScreen
@@ -380,6 +390,15 @@ class DisplayMenu private constructor(
                     tooltipBody(ClientMessage.BUTTON_BRIGHTNESS_TOOLTIP_2.key),
                     literalText(""),
                     tooltipValue(ClientMessage.BUTTON_BRIGHTNESS_TOOLTIP_3.key, floor(brightness.value * 100).toInt()),
+                ]
+            },
+            SettingsSection.Row(ClientMessage.BUTTON_SPEED.key, speed, speedReset) {
+                [
+                    tooltipTitle(ClientMessage.BUTTON_SPEED_TOOLTIP_1.key),
+                    tooltipBody(ClientMessage.BUTTON_SPEED_TOOLTIP_2.key),
+                    tooltipBody(ClientMessage.BUTTON_SPEED_TOOLTIP_3.key),
+                    literalText(""),
+                    tooltipValue(ClientMessage.BUTTON_SPEED_TOOLTIP_4.key, PlaybackSpeed.format(ds.playbackSpeed)),
                 ]
             },
             SettingsSection.Row(ClientMessage.BUTTON_AUDIO3D.key, audio3d, audio3dReset) {
@@ -580,6 +599,7 @@ class DisplayMenu private constructor(
         val seekStep = if (coarse) SEEK_STEP_COARSE_NANOS else SEEK_STEP_NANOS
         val volumeStep = if (coarse) VOLUME_STEP_COARSE else VOLUME_STEP
         if (::suggestions.isInitialized && suggestions.isTyping) return false
+        if (::speed.isInitialized && speed.isTyping) return false
         val ds = displayScreen
         if (ds.errored) return false
         val displayId = DisplayId(ds.uuid)
