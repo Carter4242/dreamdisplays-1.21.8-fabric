@@ -402,17 +402,11 @@ internal class NativeVideoFramePipe(
             val readElapsedNs = System.nanoTime() - readStartNs
             if (MediaPlayer.DEBUG) metrics.recordRead(readElapsedNs, rc)
             if (lav && rc == NativeMedia.READ_PREVIEW) {
-                // Post-seek keyframe delivered ahead of the (network-bound) pre-roll: present it
-                // straight to the surface so the picture updates instantly, but never let it
-                // start the clock, compute the PTS bias, or enter the prebuffer — its PTS is
-                // before the seek target and the exact frame follows once the pre-roll completes.
+                // Post-seek keyframe delivered ahead of the (network-bound) pre-roll. Never shown: its picture is up
+                // to a whole keyframe interval before the seek target, so a sync correction would flash back in time
+                // (2.2 s -> 1.0 s -> 3.1 s). The picture from before the seek stays up until the first frame at the
+                // target; this only counts as the reader being alive.
                 lastFrameReceivedNanos.set(System.nanoTime())
-                if (presentPreview && MediaPlayer.captureSamples
-                    && pendingLavSeek == null && parked?.get() != true
-                ) {
-                    spare.limit(frameSize).position(0)
-                    spare = surface.publish(spare, frameSize)
-                }
                 continue
             }
             if (lav && rc != NativeMedia.READ_OK) {
