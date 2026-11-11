@@ -153,7 +153,8 @@ internal class PcmRateResampler {
     }
 
     private fun compact() {
-        val drop = (floor(pos).toInt() - 1).coerceAtLeast(0)
+        // A step over 2 (an output device below ~22 kHz) leaves the read position past the buffered frames
+        val drop = (floor(pos).toInt() - 1).coerceIn(0, workFrames)
         if (drop == 0) return
         System.arraycopy(work, drop * CHANNELS, work, 0, (workFrames - drop) * CHANNELS)
         workFrames -= drop

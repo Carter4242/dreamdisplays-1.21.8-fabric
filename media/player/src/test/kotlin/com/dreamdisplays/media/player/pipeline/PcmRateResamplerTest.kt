@@ -128,6 +128,24 @@ class PcmRateResamplerTest {
         r.process(ByteArray(400), 400, 1.0, out)
         assertEquals(1_100.0, r.contentPosition)
     }
+
+    @Test
+    fun `a low-rate output (step over 2) keeps running and counting content`() {
+        for (outRate in intArrayOf(8_000, 16_000, 11_025)) {
+            val ratio = 44_100.0 / outRate
+            val r = PcmRateResampler()
+            val out = ByteArray(chunkFrames * 4)
+            var fed = 0L
+            var produced = 0L
+            repeat(40) {
+                val input = sine(fed, chunkFrames)
+                produced += r.process(input, input.size, ratio, out) / 4
+                fed += chunkFrames
+            }
+            assertTrue(abs(r.contentPosition - fed) <= ratio + 3, "$outRate Hz: content at ${r.contentPosition} of $fed.")
+            assertTrue(abs(produced - fed / ratio) <= 4, "$outRate Hz: $produced frames out for ${fed / ratio}.")
+        }
+    }
 }
 
 class ContentFrameMapTest {
