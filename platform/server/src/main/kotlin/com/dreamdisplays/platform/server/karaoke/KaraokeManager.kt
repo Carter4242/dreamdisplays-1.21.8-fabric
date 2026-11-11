@@ -525,6 +525,7 @@ object KaraokeManager {
             coSinger = s.coSinger,
             singerVolume = s.singerVolume,
             debug = s.debug,
+            world = display.pos1.world,
         )
     }
 

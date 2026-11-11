@@ -305,8 +305,20 @@ class SvcKaraokeVoice : KaraokeVoice {
         voice.estimate(burst, seq, lock = true)
         val api = api ?: return null
         val connection = api.getConnectionOf(listenerId) ?: return null
+        val singerConnection = api.getConnectionOf(singerId)
+        // Voice chat's group rules as they are now, not as when the frame came in: a listener who has since joined an
+        // isolated group, or the singer's group (which hears them at once), gets no more of it
+        val singerGroup = singerConnection?.group
+        val sameGroup = singerGroup != null && connection.group?.id == singerGroup.id
+        if (KaraokeRouting.withGroups(KaraokeRoute.ALIGNED, sameGroup, groupTypeOf(connection.group)) != KaraokeRoute.ALIGNED) {
+            return null
+        }
         // From the singer: where they are now, so the voice follows them
-        val singer = if (stage.fromSinger) api.getConnectionOf(singerId)?.player else null
+        val singer = if (stage.fromSinger) singerConnection?.player else null
+        // Only into the world it plays in (the singer's, else the display's): a listener who changed worlds since
+        // would hear it at the same coordinates in theirs
+        val world = singer?.serverLevel?.serverLevel ?: stage.world
+        if (world != null && connection.player.serverLevel.serverLevel != world) return null
         val singerPos = singer?.position
         val near = singer != null && isNear(connection.player, singer, api.voiceChatDistance)
         // Entity sound is on the singer's own channel; their raw mic frames are cancelled, so it is the only stream

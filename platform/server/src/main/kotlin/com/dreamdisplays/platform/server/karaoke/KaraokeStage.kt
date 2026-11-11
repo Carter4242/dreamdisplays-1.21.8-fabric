@@ -31,6 +31,8 @@ data class KaraokeStage(
     /** Volume of the singers' voices for listeners (`singer_volume`, 0..3, soft-limited above 1). */
     val singerVolume: Double = 1.0,
     val debug: Boolean = false,
+    /** The display's world (a Bukkit `World`): voice played at the display only reaches players there. */
+    val world: Any? = null,
 )
 
 /**
