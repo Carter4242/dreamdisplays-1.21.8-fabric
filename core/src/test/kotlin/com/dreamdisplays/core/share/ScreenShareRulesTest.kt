@@ -100,6 +100,14 @@ class ScreenShareRulesTest {
     }
 
     @Test
+    fun `the sharer hears none of their own share, other displays and videos play on`() {
+        assertTrue(ScreenShareViewerRules.muteOwnShare(sharingToIt = true, url = share))
+        assertFalse(ScreenShareViewerRules.muteOwnShare(sharingToIt = false, url = share))
+        // Asked, the display still shows its old video until the share reaches it
+        assertFalse(ScreenShareViewerRules.muteOwnShare(sharingToIt = true, url = youtube))
+    }
+
+    @Test
     fun `the share url is remembered from the first private stream the display shows`() {
         assertNull(ScreenShareCaptureRules.shareUrlAfter(seen(url = youtube, shareUrl = null)))
         assertEquals(share, ScreenShareCaptureRules.shareUrlAfter(seen(url = share, shareUrl = null)))

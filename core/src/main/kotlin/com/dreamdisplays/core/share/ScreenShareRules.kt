@@ -53,6 +53,13 @@ object ScreenShareViewerRules {
      */
     fun hidePicture(url: String?, stale: Boolean): Boolean = ScreenSharePrivacy.isPrivateStream(url) && stale
 
+    /**
+     * Whether the sharer's own client plays the display it shares to ([sharingToIt]) silently while it shows [url]: its
+     * sound, captured again by whole-PC loopback, would go round the share as an echo (other players' voice chat
+     * included).
+     */
+    fun muteOwnShare(sharingToIt: Boolean, url: String?): Boolean = sharingToIt && ScreenSharePrivacy.isPrivateStream(url)
+
     /** Whether the switch away from [fromUrl] may keep its last frame up until the next video starts (seamless). */
     fun maySwapSeamlessly(fromUrl: String?): Boolean = !ScreenSharePrivacy.isPrivateStream(fromUrl)
 }

@@ -474,6 +474,15 @@ class DisplayScreen(
 
     private var focusMuted: Boolean = false
 
+    /**
+     * The sharer's own client playing their screen share here: silent, or its sound (captured again by "Whole PC"
+     * loopback) would go round the share as an echo, with every nearby voice chat voice in it.
+     */
+    private var ownShareMuted: Boolean = false
+
+    /** No sound from this display: muted by the user, focus, preparation, or [ownShareMuted]. */
+    private val silenced: Boolean get() = muted || focusMuted || prepareMuted || ownShareMuted
+
     /** True while a fullscreen preparation keeps this display loaded for a broadcast that has not started yet. */
     val isPrepared: Boolean get() = FullscreenPrepareController.isPrepared(uuid)
 
@@ -1254,9 +1263,9 @@ class DisplayScreen(
 
     private fun audioSquaredFalloff(): Boolean = policy.audio?.falloff != DisplayPolicy.Falloff.LINEAR
 
-    /** Applies effective volume (0 if muted/unfocused, else user volume). */
+    /** Applies effective volume (0 if [silenced], else user volume). */
     internal fun applyEffectiveVolume() {
-        setVideoVolume(if (muted || focusMuted || prepareMuted) 0f else listeningVolume)
+        setVideoVolume(if (silenced) 0f else listeningVolume)
     }
 
     /** True when paused and parked on a decoded start-up cushion by [holdReadyForBroadcast]: a resume plays at once. */
@@ -1287,9 +1296,9 @@ class DisplayScreen(
         val prepared = isPrepared
         isHiddenForBroadcast = prepared && !isPopoutActive && (!isInWorldHere || distance > renderDistance)
         // Opening a paused stream to hold it ready may release a moment of sound: never let it be heard
-        val silenced = isHiddenForBroadcast || (!isPopoutActive && isWarmingUp)
-        if (silenced == prepareMuted) return
-        prepareMuted = silenced
+        val hold = isHiddenForBroadcast || (!isPopoutActive && isWarmingUp)
+        if (hold == prepareMuted) return
+        prepareMuted = hold
         applyEffectiveVolume()
     }
 
@@ -1578,7 +1587,7 @@ class DisplayScreen(
     internal fun primeNewPlayerVolume(mp: MediaPlayer) {
         val player = Minecraft.getInstance().player ?: return
         mp.primeVolume(
-            if (muted || focusMuted || prepareMuted) 0f else playVolume(listeningVolume), getDistanceToScreen(player.blockPosition()),
+            if (silenced) 0f else playVolume(listeningVolume), getDistanceToScreen(player.blockPosition()),
             audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff(),
         )
     }
@@ -1641,6 +1650,11 @@ class DisplayScreen(
     /** Called every game tick to update distance-based volume attenuation from [pos]. */
     fun tick(pos: BlockPos) {
         recoverMediaErrorIfDue()
+        val ownShare = ScreenShareViewerRules.muteOwnShare(ScreenShare.isSharing(uuid), videoUrl)
+        if (ownShare != ownShareMuted) {
+            ownShareMuted = ownShare
+            applyEffectiveVolume()
+        }
         val hidden = privatePictureHidden()
         // Once when the picture goes stale, if any copy of it is up (texture drawn, popout, menu preview)
         if (hidden && !privatePictureWasHidden && ScreenSharePrivacy.isPrivateStream(videoUrl) &&
@@ -1684,7 +1698,7 @@ class DisplayScreen(
             SourceAcousticState(
                 plane = plane,
                 userVolume = listeningVolume,
-                muted = muted || focusMuted || prepareMuted,
+                muted = silenced,
                 bypassSpatial = isPopoutActive,
                 acousticsEnabled = acousticsEnabled,
                 environment = probeEnvironment(plane, distance),
