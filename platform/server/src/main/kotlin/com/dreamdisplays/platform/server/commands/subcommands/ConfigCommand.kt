@@ -6,6 +6,7 @@ import com.dreamdisplays.core.display.policy.PolicyPaths
 import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.SettingsSection
+import com.dreamdisplays.platform.server.utils.SecretLogFilter
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -32,8 +33,9 @@ object ConfigCommand {
     private class Key(
         val name: String,
         val kind: PolicyPaths.Kind,
-        /** Holds credentials: shown, echoed and logged only through [LiveStreamUrls.redactCredentials]. */
+        /** Holds credentials: shown, echoed and logged only through [redact]. */
         val secret: Boolean = false,
+        val redact: (String) -> String = LiveStreamUrls::redactCredentials,
         val current: (SettingsSection) -> Any?,
     ) {
         val table: String = name.substringBeforeLast('.')
@@ -79,6 +81,13 @@ object ConfigCommand {
         Key("live.share_max_fps", PolicyPaths.Kind.Whole(0, 60)) { it.live.share_max_fps },
         Key("live.share_max_height", PolicyPaths.Kind.Whole(0, 2160)) { it.live.share_max_height },
         Key("live.share_sound", PolicyPaths.Kind.Bool) { it.live.share_sound },
+        Key("live.relay_control_url", PolicyPaths.Kind.Text(Regex("""(?i)https://[^\s"]+"""), "<https URL of the relay lease service>")) {
+            it.live.relay_control_url.ifEmpty { null }
+        },
+        Key(
+            "live.relay_control_token", PolicyPaths.Kind.Text(Regex("""[^\s"]{16,}"""), "<token, 16+ characters>"),
+            secret = true, redact = { SecretLogFilter.REDACTED },
+        ) { it.live.relay_control_token.ifEmpty { null }?.let { SecretLogFilter.REDACTED } },
     ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
@@ -146,7 +155,7 @@ object ConfigCommand {
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
         }
         PaperServer.config.reload()
-        val shown = if (entry.secret && value is String) LiveStreamUrls.redactCredentials(value) else value
+        val shown = if (entry.secret && value is String) entry.redact(value) else value
         logger.info("config.toml: {} {}", entry.name, if (value == null) "reset" else "= $shown")
         null
     }.getOrElse { e ->

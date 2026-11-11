@@ -13,20 +13,36 @@ import org.slf4j.LoggerFactory
  * Keeps the relay publish credentials out of the server log. The server logs every command a player types
  * ("<name> issued server command: /display config live.relay_publish_url rtmps://...?user=...&pass=..."); this
  * root-logger filter drops any line that mentions `relay_publish_url` with credentials in it and logs it again
- * with them redacted ([LiveStreamUrls.redactCredentials]). Lines that do not mention the key are never touched.
+ * with them redacted ([LiveStreamUrls.redactCredentials]). The same for `relay_control_token` (the relay lease
+ * service's bearer token: the value after the key is replaced). Lines that mention neither key are never touched.
  */
 @PaperOnly
 object SecretLogFilter {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private const val MARKER = "relay_publish_url"
+    private const val TOKEN_MARKER = "relay_control_token"
+    const val REDACTED = "<redacted>"
+
+    /** `relay_control_token <value>` / `relay_control_token = "<value>"`: the value. */
+    private val TOKEN_VALUE = Regex("""(?i)(relay_control_token["']?\s*(?:=\s*)?["']?)(?!<redacted>)[^\s"']+""")
+
+    /** [message] with relay credentials redacted (publish URL query credentials, the lease service token). */
+    fun redact(message: String): String {
+        var out = message
+        if (out.contains(MARKER, ignoreCase = true)) out = LiveStreamUrls.redactCredentials(out)
+        if (out.contains(TOKEN_MARKER, ignoreCase = true)) out = TOKEN_VALUE.replace(out) { "${it.groupValues[1]}$REDACTED" }
+        return out
+    }
 
     private object Redactor : AbstractFilter(Filter.Result.NEUTRAL, Filter.Result.NEUTRAL) {
         override fun filter(event: LogEvent?): Filter.Result {
             if (event == null) return Filter.Result.NEUTRAL
             val message = event.message?.formattedMessage ?: return Filter.Result.NEUTRAL
-            if (!message.contains(MARKER, ignoreCase = true)) return Filter.Result.NEUTRAL
-            val redacted = LiveStreamUrls.redactCredentials(message)
+            if (!message.contains(MARKER, ignoreCase = true) && !message.contains(TOKEN_MARKER, ignoreCase = true)) {
+                return Filter.Result.NEUTRAL
+            }
+            val redacted = redact(message)
             // Already clean (or this is the redacted copy logged below): let it through
             if (redacted == message) return Filter.Result.NEUTRAL
             LogManager.getLogger(event.loggerName).log(event.level, redacted, event.thrown)

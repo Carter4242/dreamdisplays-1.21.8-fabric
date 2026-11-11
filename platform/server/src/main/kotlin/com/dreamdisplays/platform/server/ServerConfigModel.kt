@@ -4,6 +4,7 @@ import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.core.display.policy.ClientLogLevel
 import com.dreamdisplays.core.display.policy.DisplayPolicy
+import com.dreamdisplays.core.share.RelayControlConfig
 import com.dreamdisplays.core.share.ScreenShareRelayTemplates
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.shared.playback.FullscreenMode
@@ -152,7 +153,17 @@ data class SettingsSection(
         val share_max_height: Int = 0,
         /** False: shares carry no sound whatever the sharer picked (sent with every share start). */
         val share_sound: Boolean = true,
+        /**
+         * The relay's lease service (`https://.../v1/shares`), or empty for none. With it every share gets its own
+         * publish key (`{key}` in [relay_publish_url]) and the relay cuts a share's stream as soon as it ends here.
+         */
+        val relay_control_url: String = "",
+        /** Bearer token for [relay_control_url]. */
+        val relay_control_token: String = "",
     ) {
+        /** True when a relay lease service is configured. */
+        val relayLeased: Boolean get() = relay_control_url.isNotBlank()
+
         /**
          * Why the relay templates cannot be used (sharing stays off), or null. Checked at load as well as by
          * `/display config`: a play URL that is not a live relay scheme (e.g. an HLS `https://` link) would make viewers
@@ -160,7 +171,8 @@ data class SettingsSection(
          */
         val relayProblem: String? by lazy {
             if (!ScreenShareRelayTemplates.isSet(relay_publish_url, relay_play_url)) null
-            else ScreenShareRelayTemplates.problem(relay_publish_url, relay_play_url, leased = false)
+            else RelayControlConfig.problem(relay_control_url, relay_control_token)
+                ?: ScreenShareRelayTemplates.problem(relay_publish_url, relay_play_url, leased = relayLeased)
         }
 
         val shareEnabled: Boolean
@@ -387,6 +399,8 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             share_max_fps = t.numberOrNull("live.share_max_fps")?.toInt()?.coerceIn(0, 60) ?: 0,
             share_max_height = t.numberOrNull("live.share_max_height")?.toInt()?.coerceIn(0, 2160) ?: 0,
             share_sound = t.boolOrNull("live.share_sound") ?: true,
+            relay_control_url = (t?.get("live.relay_control_url") as? String)?.trim() ?: "",
+            relay_control_token = (t?.get("live.relay_control_token") as? String)?.trim() ?: "",
         ),
         fullscreen = SettingsSection.FullscreenConfig(
             default_mode = t?.getString("fullscreen.default_mode") ?: "STANDARD",

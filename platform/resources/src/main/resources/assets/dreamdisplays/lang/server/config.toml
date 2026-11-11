@@ -143,6 +143,16 @@ blocked_hosts = []
 # relay_play_url = "rtmps://relay.example.com:443/{id}"
 relay_publish_url = ""
 relay_play_url = ""
+# Optional relay lease service (a small HTTP service next to MediaMTX that MediaMTX asks before every publish and
+# read). With it, every share gets its own publish key: put {key} in relay_publish_url, e.g.
+# "rtmps://relay.example.com:443/{id}?user=dd&pass={key}". The server tells the service which shares run (on every
+# change and every few seconds), the relay only lets a running share publish or be watched, and it cuts a share's
+# stream within a second of the share ending here, even if the sharer's game crashed and its capture runs on. If
+# the service can't be reached, new shares are refused and running ones are cut after 20 s.
+# relay_control_url = "https://relay.example.com/dd-relay/v1/shares"
+# relay_control_token = "CHANGE-ME"
+relay_control_url = ""
+relay_control_token = ""
 # How sharers' clients encode. "auto": each client tests its own GPU encoders per screen and falls back to x264 by
 # itself. "software": x264 only, for everyone (if shares fail on many PCs). Sent with every share start, so changing
 # it needs no client update.
