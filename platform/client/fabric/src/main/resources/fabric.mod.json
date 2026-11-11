@@ -9,9 +9,9 @@
     "arnodoelinger, INotSleep, Kolyakot33, Toffikk"
   ],
   "contact": {
-    "homepage": "https://github.com/arnodoelinger/dreamdisplays",
-    "sources": "https://github.com/arnodoelinger/dreamdisplays",
-    "issues": "https://github.com/arnodoelinger/dreamdisplays/issues"
+    "homepage": "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric",
+    "sources": "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric",
+    "issues": "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric/issues"
   },
   "entrypoints": {
     "client": [
