@@ -5,8 +5,10 @@ package com.dreamdisplays.core.protocol.common
  * track of it (its plugin was reloaded while the player stayed online) picks it back up without a relog.
  *
  * Two triggers:
- * - **Unsolicited server hello.** A `ServerHello` that is not the answer to a hello sent moments ago means the
- *   server is asking who is there (a freshly enabled server greets everyone listening on the channel): answer it.
+ * - **Server greeting.** A `ServerHello` marked `greeting` is the server asking who is there (a freshly enabled
+ *   plugin greets everyone listening on the channel): always answer it, negotiated or not, at most once per
+ *   [greetingGapNanos]. Older servers do not mark greetings: a `ServerHello` on a negotiated connection that is not
+ *   the answer to a hello sent moments ago is taken as one.
  * - **Silence.** The server sends display updates about every second while displays are in range. When the
  *   client has displays loaded but nothing at all has arrived for [silenceNanos], the server has probably
  *   forgotten it: say hello again, backing off (doubling from [silenceNanos]) for at most [maxAttempts] tries.
@@ -18,9 +20,11 @@ class HelloRefresh(
     private val silenceNanos: Long = 15_000_000_000L,
     private val answerWindowNanos: Long = 10_000_000_000L,
     private val maxAttempts: Int = 5,
+    private val greetingGapNanos: Long = 2_000_000_000L,
 ) {
     private var lastPacketNanos = Long.MIN_VALUE
     private var lastHelloNanos = Long.MIN_VALUE
+    private var lastGreetingAnsweredNanos = Long.MIN_VALUE
     private var attempts = 0
 
     /** Number of silence-triggered hellos sent since the server last spoke. */
@@ -32,12 +36,20 @@ class HelloRefresh(
     }
 
     /**
-     * Records a packet from the server. Returns true when it is an unsolicited `ServerHello` on an already
-     * negotiated connection, i.e. the caller should answer with a hello now.
+     * Records a packet from the server. Returns true when the caller should answer with a hello now: a `ServerHello`
+     * marked as a [greeting], or (from servers that do not mark them) an unsolicited one on an already negotiated
+     * connection.
      */
-    fun onPacket(now: Long, isServerHello: Boolean, alreadyNegotiated: Boolean): Boolean {
+    fun onPacket(now: Long, isServerHello: Boolean, alreadyNegotiated: Boolean, greeting: Boolean = false): Boolean {
         lastPacketNanos = now
         attempts = 0
+        if (isServerHello && greeting) {
+            // Bounded, so a server that wrongly greets in reply to every hello costs one hello per gap, not a loop
+            if (lastGreetingAnsweredNanos != Long.MIN_VALUE && now - lastGreetingAnsweredNanos < greetingGapNanos) return false
+            lastGreetingAnsweredNanos = now
+            lastHelloNanos = now
+            return true
+        }
         if (!isServerHello || !alreadyNegotiated) return false
         if (lastHelloNanos != Long.MIN_VALUE && now - lastHelloNanos < answerWindowNanos) return false
         lastHelloNanos = now
@@ -67,6 +79,7 @@ class HelloRefresh(
     fun reset() {
         lastPacketNanos = Long.MIN_VALUE
         lastHelloNanos = Long.MIN_VALUE
+        lastGreetingAnsweredNanos = Long.MIN_VALUE
         attempts = 0
     }
 }

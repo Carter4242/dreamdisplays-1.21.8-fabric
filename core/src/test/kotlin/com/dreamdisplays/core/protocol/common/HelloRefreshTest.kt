@@ -29,6 +29,30 @@ class HelloRefreshTest {
     }
 
     @Test
+    fun `a marked greeting is answered even before negotiation and right after our own hello`() {
+        val r = HelloRefresh()
+        // Joined while the plugin was off: the blind hello went nowhere, then the plugin greets 3 s later
+        r.onHelloSent(0)
+        assertTrue(r.onPacket(3 * s, isServerHello = true, alreadyNegotiated = false, greeting = true))
+        // Its answer to our answer is a plain reply
+        r.onHelloSent(3 * s)
+        assertFalse(r.onPacket(3 * s + s / 10, isServerHello = true, alreadyNegotiated = true))
+        // A reload a few seconds after a hello greets again: answered, though within the reply window
+        r.onHelloSent(10 * s)
+        assertTrue(r.onPacket(13 * s, isServerHello = true, alreadyNegotiated = true, greeting = true))
+    }
+
+    @Test
+    fun `greetings are answered at most once per gap`() {
+        val r = HelloRefresh()
+        assertTrue(r.onPacket(0, isServerHello = true, alreadyNegotiated = true, greeting = true))
+        assertFalse(r.onPacket(s, isServerHello = true, alreadyNegotiated = true, greeting = true))
+        assertTrue(r.onPacket(3 * s, isServerHello = true, alreadyNegotiated = true, greeting = true))
+        // A greeting flag on anything but a server hello means nothing
+        assertFalse(r.onPacket(10 * s, isServerHello = false, alreadyNegotiated = true, greeting = true))
+    }
+
+    @Test
     fun `steady traffic never triggers a hello`() {
         val r = HelloRefresh()
         r.onHelloSent(0)

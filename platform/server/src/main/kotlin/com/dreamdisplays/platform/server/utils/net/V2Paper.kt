@@ -77,7 +77,7 @@ object PaperV2Networking : PluginMessageListener {
         if (waiting.isEmpty()) return
         waiting.forEach { player ->
             regreeted.add(player.uniqueId)
-            send([player], buildServerHello(player))
+            send([player], buildServerHello(player).copy(greeting = true))
         }
         logger.info("Greeted {} online player(s) so their clients re-handshake.", waiting.size)
     }

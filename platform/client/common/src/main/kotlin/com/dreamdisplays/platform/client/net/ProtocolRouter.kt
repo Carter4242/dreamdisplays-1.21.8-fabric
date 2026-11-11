@@ -55,7 +55,9 @@ object ProtocolRouter {
             .getOrNull() ?: return
         val negotiatedBefore = v2Negotiated
         val answer = synchronized(helloRefresh) {
-            helloRefresh.onPacket(System.nanoTime(), packet is ServerHello, negotiatedBefore)
+            helloRefresh.onPacket(
+                System.nanoTime(), packet is ServerHello, negotiatedBefore, greeting = (packet as? ServerHello)?.greeting == true,
+            )
         }
         if (packet is ServerHello && !v2Negotiated) {
             v2Negotiated = true
@@ -65,7 +67,7 @@ object ProtocolRouter {
             logger.error("Failed to handle server packet {}; ignoring it.", packet::class.simpleName, e)
         }
         if (answer) {
-            logger.info("Server greeted this client again (plugin reloaded?); answering with a hello.")
+            logger.info("Server greeted this client (plugin enabled or reloaded?); answering with a hello.")
             sendHello()
         }
     }
