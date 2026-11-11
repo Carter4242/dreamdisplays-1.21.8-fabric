@@ -47,17 +47,24 @@ object Processes {
             start()
         }
 
+    /** Most characters [collector] keeps by default: far above any real `yt-dlp -J` (a few MB), far below a heap. */
+    const val MAX_COLLECTED_CHARS = 16 * 1024 * 1024
+
     /**
      * Creates (without starting) a daemon thread named [name] that reads [input] as UTF-8 text into
-     * [sink]. Call [Thread.start] then [Thread.join] after the process exits.
+     * [sink]. Call [Thread.start] then [Thread.join] after the process exits. Past [maxChars] the rest is
+     * read and dropped (the child never blocks on a full pipe), so output a page controls cannot exhaust the heap.
      */
-    fun collector(input: InputStream, sink: StringBuilder, name: String): Thread =
+    fun collector(input: InputStream, sink: StringBuilder, name: String, maxChars: Int = MAX_COLLECTED_CHARS): Thread =
         Thread({
             runCatching {
                 BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { r ->
                     val buf = CharArray(8192)
                     var n: Int
-                    while (r.read(buf).also { n = it } != -1) sink.appendRange(buf, 0, n)
+                    while (r.read(buf).also { n = it } != -1) {
+                        val room = maxChars - sink.length
+                        if (room > 0) sink.appendRange(buf, 0, minOf(n, room))
+                    }
                 }
             }.onFailure { e -> if (e !is IOException) throw e }
         }, name).apply { isDaemon = true }
