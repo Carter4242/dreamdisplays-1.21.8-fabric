@@ -208,6 +208,12 @@ object VanillaDisplayActions {
         if (!PlaybackMode.isBaseMode(mode)) return
         val displayData = DisplayManager.getDisplayData(displayId) as? VanillaDisplayData ?: return
         if (!PlaybackPermissions.canSetMode(context(displayData, player))) return
+        // Local takes a display off the shared clock for everyone; the menu no longer offers a mode switch, so only
+        // an op's client may still ask for it.
+        if (mode == PlaybackMode.LOCAL && !isOpLevel2(player)) {
+            logger.info("Refused a switch to Local for display ${displayData.id} from ${player.name.string} (not op)")
+            return
+        }
 
         if (!canAccessMode(player, mode)) {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)

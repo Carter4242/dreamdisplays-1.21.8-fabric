@@ -259,6 +259,9 @@ object TimelineManager {
     }
 
     /** The playback speed of [display]'s shared timeline (1 when it has none). */
+    /** Where [display]'s shared clock is now, or null when it has none (Local). */
+    fun positionOf(display: DisplayData): Long? = timelines[display.id]?.positionAt(transport.nowMs())
+
     fun speedOf(display: DisplayData): Double = timelines[display.id]?.rate ?: PlaybackSpeed.NORMAL
 
     /** Sends the current timeline to one player (RequestSync reply / late-join catch-up). */

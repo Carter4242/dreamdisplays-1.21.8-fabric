@@ -16,6 +16,7 @@ import com.dreamdisplays.platform.client.ui.enableScissorPoseAware
 //?}
 import com.dreamdisplays.platform.client.ui.kit.*
 import com.dreamdisplays.platform.client.ui.widgets.IconButton
+import com.dreamdisplays.platform.client.ui.widgets.StripCardMetrics
 import com.dreamdisplays.platform.client.utils.buttonClickSound
 //? if >=1.21.11 {
 import com.mojang.blaze3d.platform.cursor.CursorTypes
@@ -70,7 +71,7 @@ class QueueSection(private val ds: DisplayScreen) {
         actions.clear()
         tooltip = null
         val f = Minecraft.getInstance().font
-        val stripRect = UiRect(panel.x + 10, panel.y + 10 + HEADER_H + 8, panel.w - 20, panel.h - 10 - HEADER_H - 8 - 10)
+        val stripRect = UiRect(panel.x + 10, panel.y + 10 + HEADER_H + 8, panel.w - 20, panel.h - StripCardMetrics.QUEUE_PANEL_CHROME_H)
         strip = stripRect
         val notice = when {
             ds.effectiveMode == PlaybackMode.WATCH_PARTY -> ClientMessage.QUEUE_WATCH_PARTY.text()
@@ -91,8 +92,8 @@ class QueueSection(private val ds: DisplayScreen) {
         if (items.isEmpty() || stripRect.h < 40) return
 
         val viewportMain = if (vertical) stripRect.h else stripRect.w
-        val thumbH = if (vertical) max(THUMB_H, (stripRect.w * 180.0 / 320.0).toInt()) else dynThumbH(stripRect.h)
-        val cardW = if (vertical) stripRect.w else max(80, (thumbH * CARD_W / THUMB_H.toDouble()).toInt())
+        val thumbH = if (vertical) StripCardMetrics.verticalThumbH(stripRect.w) else dynThumbH(stripRect.h)
+        val cardW = if (vertical) stripRect.w else StripCardMetrics.cardW(thumbH)
         val cardH = thumbH + CARD_TEXT_H + 6
         val step = (if (vertical) cardH else cardW) + CARD_GAP
         maxScroll = max(0, items.size * step - CARD_GAP - viewportMain)
@@ -141,7 +142,7 @@ class QueueSection(private val ds: DisplayScreen) {
 
     private fun drawCard(g: GuiGraphicsCompat, f: Font, item: QueueItemWire, index: Int, r: UiRect, thumbH: Int, hover: Boolean) {
         g.fill(r.x, r.y, r.right, r.bottom, if (hover) UiTheme.CARD_BG_HOVER else UiTheme.CARD_BG)
-        val thumbW = if (vertical) r.w else (thumbH.toDouble() * CARD_W / THUMB_H).roundToInt().coerceAtMost(r.w)
+        val thumbW = if (vertical) r.w else StripCardMetrics.thumbW(thumbH, r.w)
         val thumbX = r.x + (r.w - thumbW) / 2
         val thumb = thumbnail(item)
         if (thumb != null) {
@@ -230,7 +231,7 @@ class QueueSection(private val ds: DisplayScreen) {
         }
     }
 
-    private fun dynThumbH(stripH: Int): Int = max(30, min(THUMB_H, stripH - CARD_TEXT_H - 6 - 8))
+    private fun dynThumbH(stripH: Int): Int = StripCardMetrics.thumbH(stripH, StripCardMetrics.QUEUE_NON_THUMB_H)
 
     private fun ease(current: Float, target: Float): Float {
         val now = System.nanoTime()
@@ -257,9 +258,7 @@ class QueueSection(private val ds: DisplayScreen) {
 
     companion object {
         private const val HEADER_H = 14
-        private const val CARD_W = 152
-        private const val THUMB_H = 86
-        private const val CARD_TEXT_H = 32
+        private const val CARD_TEXT_H = StripCardMetrics.CARD_TEXT_H
         private const val CARD_GAP = 6
         private const val MINI = 14
 

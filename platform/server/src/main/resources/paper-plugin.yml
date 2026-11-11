@@ -92,6 +92,8 @@ permissions:
     default: op
   dreamdisplays.speed:
     default: op
+  dreamdisplays.mode:
+    default: op
   dreamdisplays.queue:
     default: op
   dreamdisplays.karaoke:

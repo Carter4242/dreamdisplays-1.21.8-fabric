@@ -55,6 +55,7 @@ object CommandRegistrar {
             reloadBranch()
             policyBranch()
             speedBranch()
+            modeBranch()
             configBranch()
             toggleBranch("on", "suggestOn", OnCommand())
             toggleBranch("off", "suggestOff", OffCommand())
@@ -163,6 +164,23 @@ object CommandRegistrar {
                     })
                     executesCommand { ctx ->
                         SpeedCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "rate"))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun LiteralArgumentBuilder<CommandSourceStack>.modeBranch() {
+        literal("mode", tip("suggestMode")) {
+            requires { ModeCommand.allowed(it.sender) }
+            target {
+                executesCommand { ctx -> ModeCommand.execute(ctx.source.sender, target(ctx), null) }
+                argument("mode", StringArgumentType.word()) {
+                    suggests(suggesting(tips) { _, _, typed ->
+                        ModeCommand.valueSuggestions().map { Suggestion(it) }.startingWith(typed)
+                    })
+                    executesCommand { ctx ->
+                        ModeCommand.execute(ctx.source.sender, target(ctx), StringArgumentType.getString(ctx, "mode"))
                     }
                 }
             }
