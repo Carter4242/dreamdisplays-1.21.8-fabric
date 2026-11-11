@@ -117,6 +117,8 @@ dependencies {
         exclude(group = "com.google.guava", module = "guava")
         exclude(group = "com.google.code.gson", module = "gson")
         exclude(group = "it.unimi.dsi", module = "fastutil")
+        // WorldGuard's own bStats (2.x) would shadow libs.bstats here: this configuration resolves on its own
+        exclude(group = "org.bstats")
     }
     compileOnly(libs.bstats)
     compileOnly("io.papermc.paper:paper-api:${scVersion("paper.api.version")}")

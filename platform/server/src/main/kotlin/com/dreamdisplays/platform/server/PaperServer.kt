@@ -39,6 +39,9 @@ class PaperServer : JavaPlugin() {
     /** Storage manager for persistent data. */
     lateinit var storage: StorageManager
 
+    /** bStats: its timer thread outlives the plugin unless shut down on disable. */
+    private var metrics: Metrics? = null
+
     override fun onLoad() {
         instance = this
         Companion.config = Config(this)
@@ -136,7 +139,7 @@ class PaperServer : JavaPlugin() {
         Scheduler.runSync { runCatching { PaperV2Networking.greetOnlinePlayers() } }
         runRepeatingTasks()
 
-        TelemetryMetrics.register(this, Metrics(this, 26488))
+        metrics = Metrics(this, 26488).also { TelemetryMetrics.register(this, it) }
 
         PaperServerApi.start()
     }
@@ -174,6 +177,7 @@ class PaperServer : JavaPlugin() {
         disableStep("save PiP pins") { PipPinManager.flush() }
         disableStep("stop the client error log") { com.dreamdisplays.platform.server.policy.ClientErrorReports.shutdown() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }
+        disableStep("stop metrics") { metrics?.shutdown(); metrics = null }
         disableStep("close storage") { storage.disconnect() }
         disableStep("remove the log filter") { com.dreamdisplays.platform.server.utils.SecretLogFilter.uninstall() }
     }
