@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.playback
 
+import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.queue.DurationReports
 import com.dreamdisplays.core.protocol.common.packets.ReportKind
 import com.dreamdisplays.core.protocol.common.packets.ReportRequest
@@ -246,7 +247,8 @@ object TimelineManager {
      * all viewers begin on the same frame. The display must be paused (a hold); a playing one is left alone.
      *
      * This is the call for anything that wants a display to start on time: a resume, seek or new video here, a
-     * fullscreen start, a queue moving to its next item.
+     * fullscreen start, a queue moving to its next item. A live relay stream (a screen share) starts at once: no
+     * client holds live media ready, so a hold would only run to its deadline.
      */
     fun startWhenReady(display: DisplayData, deadlineMs: Long) {
         if (!EmptyDisplays.hasVideo(display.url)) return
@@ -254,7 +256,7 @@ object TimelineManager {
         if (!current.paused) return
         startHolds[display.id] = deadlineMs
         val now = transport.nowMs()
-        if (now >= deadlineMs || waitingFor(display, current.positionMs).isEmpty()) {
+        if (now >= deadlineMs || LiveStreamUrls.isLive(display.url) || waitingFor(display, current.positionMs).isEmpty()) {
             release(display, now)
         } else {
             broadcast(display, current)
@@ -272,16 +274,20 @@ object TimelineManager {
         ReadinessTracker.unreported(display.id, viewersOf(display)).forEach { transport.sendTo(it, request) }
     }
 
-    /** The viewers a start of [display] at [positionMs] still waits for (empty = it can start now). */
+    /**
+     * The viewers a start of [display] at [positionMs] still waits for (empty = it can start now). A karaoke singer is
+     * ready at their lead, or held at [positionMs] itself: a singer's preloaded next song is held at its start and jumps
+     * to the lead once it plays.
+     */
     fun waitingFor(display: DisplayData, positionMs: Long): List<UUID> {
         val viewers = viewersOf(display)
         val leads = playerLeadsMs(display.id)
         if (leads.isEmpty()) return ReadinessTracker.waitingFor(display.id, positionMs, viewers)
         val timeline = timelines[display.id]
         return viewers.groupBy { leads[it] ?: 0L }.flatMap { (lead, players) ->
-            val at = if (lead == 0L || timeline == null) positionMs
-            else KaraokeTiming.leadPosition(positionMs, lead, timeline.rate, timeline.durationMs, timeline.loop)
-            ReadinessTracker.waitingFor(display.id, at, players)
+            if (lead == 0L || timeline == null) return@flatMap ReadinessTracker.waitingFor(display.id, positionMs, players)
+            val at = KaraokeTiming.leadPosition(positionMs, lead, timeline.rate, timeline.durationMs, timeline.loop)
+            ReadinessTracker.waitingFor(display.id, at, players).filter { !ReadinessTracker.isReady(display.id, it, positionMs) }
         }
     }
 
@@ -573,6 +579,9 @@ object TimelineManager {
     fun tickEnds() {
         if (timelines.isEmpty()) return
         val now = transport.nowMs()
+        // Holds end here too: within a tenth of a second of their deadline, and as soon as the last viewer they waited
+        // for is gone (quit, walked away) rather than only when someone reports
+        releaseStartHolds(now)
         for ((displayId, timeline) in timelines) {
             if (timeline.paused || startHolds.containsKey(displayId)) continue
             val display = DisplayManager.getDisplayData(displayId) ?: continue
@@ -717,9 +726,10 @@ object TimelineManager {
         }
     }
 
+    /** Ends every start hold that is due: past its deadline, or with nobody left to wait for. */
     private fun releaseStartHolds(now: Long) {
         for ((displayId, startAt) in startHolds) {
-            if (now < startAt) continue
+            if (now < startAt && !nobodyToWaitFor(displayId)) continue
             if (WatchPartyManager.hasSession(displayId)) {
                 startHolds.remove(displayId)
                 continue
@@ -731,6 +741,12 @@ object TimelineManager {
             }
             release(display, now)
         }
+    }
+
+    private fun nobodyToWaitFor(displayId: UUID): Boolean {
+        val display = DisplayManager.getDisplayData(displayId) ?: return false
+        val current = timelines[displayId]?.takeIf { it.paused } ?: return false
+        return waitingFor(display, current.positionMs).isEmpty()
     }
 
     internal fun clampSeek(positionMs: Long, display: DisplayData): Long {
