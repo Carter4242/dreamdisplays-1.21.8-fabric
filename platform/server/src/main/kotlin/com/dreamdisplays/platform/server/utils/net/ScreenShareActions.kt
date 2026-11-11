@@ -282,19 +282,36 @@ object ScreenShareActions {
     fun sharedDisplays(): Set<UUID> = byDisplay.keys + starting.keys
 
     /**
-     * Everyone a share's latency is measured between: each sharer and the players reporting on their display. They
-     * get the karaoke clock pings, which carry their clock offset back, so the share's timestamps and the viewers'
-     * presentation times meet on the server's clock.
+     * Everyone a share's latency is measured between: each sharer and the players reporting on their display, and
+     * every player who may share at all, so a sharer's client knows the server's clock before its first share starts
+     * (its capture reads the offset once, at launch). They get the karaoke clock pings, which carry their clock offset
+     * back, so the share's timestamps and the viewers' presentation times meet on the server's clock.
      */
     fun clockParticipants(viewersOf: (UUID) -> Collection<UUID>): Set<UUID> {
-        if (byDisplay.isEmpty()) return emptySet()
-        val ids = HashSet<UUID>()
+        val ids = HashSet(possibleSharers())
+        starting.values.forEach { ids += it.sharerId }
         for (share in byDisplay.values) {
             ids += share.sharerId
             ids += viewersOf(share.displayId)
         }
         return ids
     }
+
+    @Volatile
+    private var possibleSharers: Pair<Long, Set<UUID>> = 0L to emptySet()
+
+    /** Online players who may share, looked up at most once a second (the caller runs ten times a second). */
+    private fun possibleSharers(): Set<UUID> {
+        val now = System.currentTimeMillis()
+        val (at, ids) = possibleSharers
+        if (now - at < POSSIBLE_SHARERS_REFRESH_MS) return ids
+        val fresh = if (!PaperServer.config.settings.live.shareEnabled) emptySet()
+        else Bukkit.getOnlinePlayers().filter(::mayShare).mapTo(HashSet()) { it.uniqueId }
+        possibleSharers = now to fresh
+        return fresh
+    }
+
+    private const val POSSIBLE_SHARERS_REFRESH_MS = 1_000L
 
     /**
      * Once a second (global tick): ends every share whose display shows something else now, or whose sharer is gone, in
