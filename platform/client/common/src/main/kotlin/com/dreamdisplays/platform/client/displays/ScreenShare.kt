@@ -241,7 +241,13 @@ object ScreenShare {
                 val screens = ScreenCapture.windowsScreens(ffmpeg) ?: ScreenCapture.probeWindowsScreens(ffmpeg)
                 if (preparing.compareAndSet(false, true)) {
                     try {
-                        screens.forEach { runCatching { ScreenCapture.choose(ffmpeg, it) } }
+                        screens.forEach { screen ->
+                            runCatching {
+                                val plan = ScreenCapture.choose(ffmpeg, screen).plan
+                                // The 60 fps encode test too (~2 s once per encoder), so the first share starts at once
+                                ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, ScreenCapture.Settings().maxHeight, 0)
+                            }
+                        }
                     } finally {
                         preparing.set(false)
                     }
