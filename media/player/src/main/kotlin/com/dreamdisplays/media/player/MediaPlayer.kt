@@ -364,6 +364,11 @@ class MediaPlayer(
         if (heldStart != null) return@safeExecute
         val ss = streams ?: return@safeExecute
         noteHitch(FailureStages.RESUME, if (liveStream) "re_resolve" else "cold_restart", "resumed without a warm session")
+        // A relay stream has one fixed URL that never expires: nothing to resolve again, it just connects
+        if (relayStream) {
+            startStreams(ss, 0L)
+            return@safeExecute
+        }
         if (liveStream) {
             logger.debug("$debugLabel Live resume from cold pause; re-resolving playlist URLs.")
             env.cacheInvalidator.invalidate(url)
@@ -1690,6 +1695,8 @@ class MediaPlayer(
 
     private fun changeQuality(desired: VideoQuality, userInitiated: Boolean) {
         val ss = streams ?: return
+        // A relay stream comes in one quality: switching would only reconnect to the same stream
+        if (relayStream) return
         val target = desired.targetHeight ?: return
         if (target == lastQuality || target == lastRequestedQuality) {
             if (DEBUG) logger.debug(
