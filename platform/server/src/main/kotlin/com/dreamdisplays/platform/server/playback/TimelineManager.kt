@@ -409,16 +409,17 @@ object TimelineManager {
             startHolds.remove(display.id)
         }
         val now = transport.nowMs()
-        // The length viewers reported for the video it holds now (in any mode: it may have changed while Local), not
-        // whatever the display last ran in a shared mode
-        val durationMs = QueueTiming.scheduledDurationMs(durations.mediaMsOf(display.id, display.url))
+        // The length viewers reported for the video it holds now (in any mode: it may have changed while Local), else
+        // the one stored for it (nobody reported since a restart or a watch party)
+        val reportedMs = durations.mediaMsOf(display.id, display.url)
+        val durationMs = ModeChanges.durationAfter(reportedMs, durationMsOf(display))
         display.duration = durationMs.takeIf { it > 0L }?.let { it * 1_000_000L }
         val timeline = ModeChanges.timelineAfter(existing, shared, positionMs, now, durationMs)
         if (timeline != null) {
             timelines[display.id] = timeline
             broadcast(display, timeline)
-            // Unknown length: clients loaded the video before it was shared and reported nothing since; ask them
-            if (durationMs == 0L) askNearby(display, ReportKind.DURATION)
+            // No reported length: clients loaded the video before it was shared and reported nothing since; ask them
+            if (reportedMs == 0L) askNearby(display, ReportKind.DURATION)
         }
     }
 
