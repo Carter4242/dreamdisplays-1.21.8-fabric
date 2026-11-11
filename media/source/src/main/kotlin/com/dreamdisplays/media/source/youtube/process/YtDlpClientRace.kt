@@ -112,10 +112,12 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         return result.getOrNull()
     }
 
-    private suspend fun raceParallel(
+    internal suspend fun raceParallel(
         videoUrl: String,
         clients: List<String?>,
-        onProcess: (Process) -> Unit
+        onProcess: (Process) -> Unit,
+        fetch: (videoUrl: String, client: String?, onStarted: (Process) -> Unit) -> List<YtStream> =
+            { url, client, onStarted -> runClientFetch(url, client, onStarted = onStarted) },
     ): List<YtStream>? {
         val processes = CopyOnWriteArrayList<Process>()
         val results = CopyOnWriteArrayList<List<YtStream>>()
@@ -128,7 +130,7 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                 for (client in clients) {
                     launch(ioContext) {
                         runCatching {
-                            val streams = runClientFetch(videoUrl, client) { proc ->
+                            val streams = fetch(videoUrl, client) { proc ->
                                 processes.add(proc)
                                 onProcess(proc)
                                 if (winner.isCompleted) Processes.destroyTree(proc)
@@ -150,7 +152,12 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
                         }
                     }
                 }
-                winner.await()
+                winner.await().also {
+                    // The losers block in Process.waitFor, which cancellation cannot interrupt, and coroutineScope
+                    // waits for every child: without this the winning result sat until the slowest client finished
+                    // or timed out (up to FETCH_TIMEOUT_SECONDS). One started after this point kills itself (above).
+                    processes.forEach { runCatching { Processes.destroyTree(it) } }
+                }
             }
         }
 
