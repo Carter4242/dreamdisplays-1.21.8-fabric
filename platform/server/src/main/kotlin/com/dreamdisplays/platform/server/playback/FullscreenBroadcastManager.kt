@@ -42,6 +42,12 @@ object FullscreenBroadcastManager {
     /** Live preparations by display id; a display holds at most one. */
     private val preparations = ConcurrentHashMap<UUID, Preparation>()
 
+    /**
+     * The one session each player is shown (player -> session id). A player is in at most one: a newer session that
+     * reaches them takes them over from the older one, which gets them back when the newer one is over for them.
+     */
+    private val viewing = ConcurrentHashMap<UUID, String>()
+
     /** Lengths the viewers' clients reported for URL-only (virtual) displays, which no display timeline keeps. */
     private val virtualDurations = VideoDurations()
 
@@ -97,6 +103,8 @@ object FullscreenBroadcastManager {
         val retryUntilMs: MutableMap<UUID, Long> = ConcurrentHashMap(),
         var lastTick: Long = 0,
         var lastTimelineResend: Long = 0,
+        /** When it started (0 for one restored after a restart): the newest session a player is targeted by wins. */
+        val startedAtMs: Long = 0,
     )
 
     /** Wires the platform transport. */
@@ -242,6 +250,7 @@ object FullscreenBroadcastManager {
             title = title,
             namedTargets = namedTargets,
             radius = radius,
+            startedAtMs = now,
             // Prepared clients hold the start frame: schedule it a moment ahead so they all begin together
             timeline = if (virtual) {
                 virtualTimeline(display, loop, timelineAnchorMs ?: (now + preparedLead(display, preparation)))
@@ -363,6 +372,7 @@ object FullscreenBroadcastManager {
 
             // Only from a player it is shown to: anyone else's would stop a session nobody is watching yet
             FullscreenAckAction.DISMISSED -> if (!session.forced && session.shownTo.remove(playerId)) {
+                viewing.remove(playerId, sessionId)
                 session.dismissedBy.add(playerId)
                 if (session.shownTo.isEmpty()) stop(sessionId)
             }
@@ -392,6 +402,7 @@ object FullscreenBroadcastManager {
     }
 
     private fun forget(session: Session, playerId: UUID) {
+        viewing.remove(playerId, session.sessionId)
         session.shownTo.remove(playerId)
         session.confirmedBy.remove(playerId)
         session.deliveredAtMs.remove(playerId)
@@ -400,9 +411,8 @@ object FullscreenBroadcastManager {
 
     /** Re-sends every live session's state to [playerId] on join, in case they're still within a radius/selector. */
     fun onPlayerJoin(playerId: UUID) {
-        for (session in sessions.values) {
-            if (isTargeted(session, playerId)) deliverTo(session, playerId)
-        }
+        // One session per player: the newest that targets them
+        sessions.values.filter { isTargeted(it, playerId) }.maxByOrNull { it.startedAtMs }?.let { deliverTo(it, playerId) }
         val now = transport.nowMs()
         for (preparation in preparations.values) {
             if (isTargeted(preparation, playerId) && supportsPrepare(playerId)) deliverPrepare(preparation, playerId, now)
@@ -746,7 +756,22 @@ object FullscreenBroadcastManager {
         }
     }
 
+    /** True when [playerId] is shown another session than [session] (which then leaves them to it). */
+    private fun watchingOther(session: Session, playerId: UUID): Boolean {
+        val other = viewing[playerId]?.takeIf { it != session.sessionId }?.let { sessions[it] } ?: return false
+        return playerId in other.shownTo
+    }
+
+    /** [playerId] leaves [session] for another one: its overlay closes (a URL-only display goes too) before the new one opens. */
+    private fun handOver(session: Session, playerId: UUID, to: Session) {
+        transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
+        if (session.virtual && session.display.id != to.display.id) transport.sendTo(playerId, DisplayDelete(session.display.id))
+        forget(session, playerId)
+    }
+
     private fun deliverTo(session: Session, playerId: UUID) {
+        viewing[playerId]?.takeIf { it != session.sessionId }?.let { sessions[it] }?.let { handOver(it, playerId, session) }
+        viewing[playerId] = session.sessionId
         // Always forced (load at any distance): the session's own `forced` only means it cannot be dismissed, and an
         // unforced description of a far display is only cached, so the fullscreen would never open
         transport.sendDisplayInfo(playerId, session.display, forced = true)
@@ -788,7 +813,8 @@ object FullscreenBroadcastManager {
             val targeted = isTargeted(session, playerId)
             val shown = playerId in session.shownTo
             if (targeted && !shown) {
-                deliverTo(session, playerId)
+                // Shown a newer session meanwhile: this one waits until that is over for them
+                if (!watchingOther(session, playerId)) deliverTo(session, playerId)
             } else if (!targeted && shown) {
                 transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
                 forget(session, playerId)
@@ -805,6 +831,7 @@ object FullscreenBroadcastManager {
     private fun teardown(session: Session) {
         val now = transport.nowMs()
         for (playerId in session.shownTo) {
+            viewing.remove(playerId, session.sessionId)
             transport.sendTo(playerId, FullscreenState(sessionId = session.sessionId, displayId = session.display.id, active = false))
             if (session.virtual) transport.sendTo(playerId, DisplayDelete(session.display.id))
         }
