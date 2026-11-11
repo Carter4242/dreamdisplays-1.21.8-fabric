@@ -409,7 +409,9 @@ internal class NativeVideoFramePipe(
                     // (or a sync seek) that usually follows can seek in place instead of reopening the stream.
                     eofReported = true
                     // The demuxer is done, the picture and sound are not: the last frames are still queued
-                    prebuffer?.awaitTailPlayed { pendingLavSeek != null || parked?.get() == true }
+                    // A pause or park while it plays holds it (the end comes after the resume, so a looping
+                    // display loops then, instead of finding its end already spent)
+                    prebuffer?.awaitTailPlayed(interrupt = { pendingLavSeek != null }, held = { parked?.get() == true })
                     if (terminated.get() || stopFlag.get()) break
                     if (pendingLavSeek != null) {
                         // Seeked (a sync correction, a loop) while the tail played: that is no end at all
@@ -524,7 +526,7 @@ internal class NativeVideoFramePipe(
         if (!terminated.get() && !stopFlag.get() && rc == NativeMedia.READ_EOF) {
             prebuffer?.finish()
             // Reported below: let the queued tail play first (see awaitTailPlayed)
-            if (!eofReported) prebuffer?.awaitTailPlayed { parked?.get() == true }
+            if (!eofReported) prebuffer?.awaitTailPlayed(held = { parked?.get() == true })
         } else {
             prebuffer?.abort()
         }

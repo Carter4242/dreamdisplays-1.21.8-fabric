@@ -234,7 +234,7 @@ internal class VideoFramePipe(
         if (!terminated.get() && !stopFlag.get() && normalEos) {
             prebuffer?.finish()
             // The end is reported below: let the queued tail play first (see awaitTailPlayed)
-            prebuffer?.awaitTailPlayed { parked?.get() == true }
+            prebuffer?.awaitTailPlayed(held = { parked?.get() == true })
         } else {
             prebuffer?.abort()
         }

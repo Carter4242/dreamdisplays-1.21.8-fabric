@@ -131,17 +131,24 @@ internal class FramePrebuffer(
     /**
      * Producer side at end of file: plays out what is still queued (a cushion of up to [PREBUFFER_MS], never started
      * if the file was too short to fill it) and returns once it has gone out, so the end is reported with the last
-     * frames shown and heard instead of that much early. Gives up on teardown, a seek flush, [interrupt] (a park or
-     * a pending seek), or after a bound sized to the queue. True when the queue played out.
+     * frames shown and heard instead of that much early. Gives up on teardown, a seek flush, [interrupt] (a pending
+     * seek), or after a bound sized to the queue. While [held] (a pause or park froze playout) it waits and the bound
+     * does not run: the tail plays out after the resume, and only then is the end reported. True when the queue played
+     * out.
      */
-    fun awaitTailPlayed(interrupt: () -> Boolean = { false }): Boolean {
+    fun awaitTailPlayed(held: () -> Boolean = { false }, interrupt: () -> Boolean = { false }): Boolean {
         seekStartGate = null
         primed = true
         val budgetNs = ((queue.size + 2L) * frameNs * 2L + TAIL_SLACK_NANOS).coerceAtMost(MAX_TAIL_WAIT_NANOS)
-        val deadline = System.nanoTime() + budgetNs
+        var deadline = System.nanoTime() + budgetNs
+        var last = System.nanoTime()
         while (alive() && !flushRequested && consumer?.isAlive != false) {
             if (queue.isEmpty() && pending.get() == null) return true
-            if (runCatching(interrupt).getOrDefault(true) || System.nanoTime() >= deadline) return false
+            if (runCatching(interrupt).getOrDefault(true)) return false
+            val now = System.nanoTime()
+            if (runCatching(held).getOrDefault(false)) deadline += now - last
+            last = now
+            if (now >= deadline) return false
             try {
                 Thread.sleep(TAIL_POLL_MS)
             } catch (_: InterruptedException) {

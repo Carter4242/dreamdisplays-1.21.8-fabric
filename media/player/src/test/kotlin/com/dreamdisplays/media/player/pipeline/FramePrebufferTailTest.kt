@@ -59,13 +59,32 @@ class FramePrebufferTailTest {
     }
 
     @Test
-    fun `a pending seek or park stops the wait at once`() {
+    fun `a pending seek stops the wait at once`() {
         val presented = AtomicInteger()
         val p = prebuffer({ -1L }, presented)
         submitFrames(p, 8)
         val started = System.nanoTime()
         assertFalse(p.awaitTailPlayed { true })
         assertTrue((System.nanoTime() - started) / 1_000_000 < 100)
+    }
+
+    @Test
+    fun `a pause during the tail holds the wait past its bound, and the end comes once it played after the resume`() {
+        val presented = AtomicInteger()
+        val heldUntil = System.nanoTime() + 4_000_000_000L // Longer than the 3 s bound
+        val firstPts = 10_000_000_000L
+        // The clock stands before the frames while held, then runs through them: nothing plays out until the resume
+        val p = prebuffer({ if (System.nanoTime() < heldUntil) 0L else firstPts + System.nanoTime() - heldUntil }, presented)
+        var spare = surface.takeOrAllocate(frameBytes)
+        for (i in 0 until 8) {
+            spare.clear(); spare.limit(frameBytes)
+            spare = p.submit(spare, firstPts + i * frameNs, frameBytes)
+        }
+        val started = System.nanoTime()
+        val played = p.awaitTailPlayed(held = { System.nanoTime() < heldUntil })
+        val waitedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue(played, "The tail was given up while paused (waited $waitedMs ms).")
+        assertTrue(waitedMs >= 4_000, "Returned after $waitedMs ms, before the resume.")
     }
 
     @Test
