@@ -130,8 +130,8 @@ object DisplayActions {
     /**
      * Takes [displayData]'s video off, with no permission checks (callers check; [actor] is logged): its URL becomes
      * empty and is saved, and everyone who gets its updates (in range, far fullscreen viewers, PiP pinners) is told. Its
-     * clock and length go, a screen share there ends without bringing anything back, karaoke there stops and its
-     * fullscreen sessions end. The queue
+     * clock and length go, a screen share there ends without bringing anything back, and karaoke, a watch party and
+     * fullscreen sessions there end. The queue
      * keeps its entries but does not start them: a skip or a play does. The command form calls this.
      */
     fun clearVideo(displayData: PaperDisplayData, actor: Player?) {
@@ -140,6 +140,8 @@ object DisplayActions {
         val previousUrl = displayData.url
         displayData.url = ""
         displayData.lang = ""
+        // A watch party there ends too (its snapshots carry its own video and would bring it straight back)
+        WatchPartyManager.close(displayData)
         if (actor != null) ClientErrorReports.logCommand(
             actor, displayData.id, "clear", null,
             mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl),
