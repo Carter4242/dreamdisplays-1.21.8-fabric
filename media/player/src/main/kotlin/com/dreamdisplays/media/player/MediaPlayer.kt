@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player
 
+import com.dreamdisplays.media.runtime.diagnostics.ShareTiming
 import com.dreamdisplays.api.media.audio.AudioDspStage
 import com.dreamdisplays.api.media.model.DreamMediaException
 import com.dreamdisplays.api.media.model.FramePixelFormat
@@ -336,6 +337,7 @@ class MediaPlayer(
     }
 
     init {
+        if (relayStream) ShareTiming.mark("view.player", debugLabel)
         this.replayBootstrap?.let { boot -> safeExecute { startReplayBootstrapVideo(boot) } }
         dispatchInitialize()
     }
@@ -1141,6 +1143,7 @@ class MediaPlayer(
         lastAudioFailureNanos = 0L
         audioFaults.reset()
         if (warmingUp) warmUpHold.arm(offsetNanos) else warmUpHold.disarm()
+        if (relayStream) ShareTiming.mark("view.connect", "$debugLabel hw=${currentHwAccel().name.lowercase()}")
         sessionManager.start(
             streamSet,
             offsetNanos,
@@ -1170,6 +1173,7 @@ class MediaPlayer(
         stopSession()
         waitingForStream = true
         lifecycle = PlayerState.Restarting
+        ShareTiming.mark("view.retry", "$debugLabel ${MediaUtil.truncate(reason).replace('\n', ' ').take(120)}")
         val now = System.nanoTime()
         if (lastRelayWaitLogNanos == 0L || now - lastRelayWaitLogNanos >= RELAY_WAIT_LOG_INTERVAL_NS) {
             lastRelayWaitLogNanos = now
@@ -1196,7 +1200,10 @@ class MediaPlayer(
             waitingForStream = false
             if (relayStream) logger.info("$debugLabel Live stream is on the air.")
         }
-        if (relayStream) relayEverOnAir = true
+        if (relayStream) {
+            relayEverOnAir = true
+            ShareTiming.mark("view.decoded", debugLabel)
+        }
         retryPolicy.reset()
         if (warmingUp) {
             warmUpHold.onPlayoutStart { at ->

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.displays
 
+import com.dreamdisplays.media.runtime.diagnostics.ShareTiming
 import com.dreamdisplays.api.media.source.LiveStreamUrls
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareRequest
@@ -298,6 +299,7 @@ object ScreenShare {
         refreshGlfwScreens()
         val nonce = newNonce()
         pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl, nonce)
+        ShareTiming.mark("share.request", displayId.toString().take(8))
         Initializer.sendPacket(ScreenShareRequest(displayId, start = true, nonce = nonce))
     }
 
@@ -328,6 +330,7 @@ object ScreenShare {
                 return
             }
             pending.remove(state.id)
+            ShareTiming.mark("share.url", state.id.toString().take(8))
             current?.let { stop(it, StopReason.SERVER_ENDED) }
             val settings = ScreenCapture.Settings().limitedTo(state.maxFps, state.maxHeight).withServerBitrate(state.bitrateKbps)
             // The server's sound lever wins over the sharer's pick
@@ -461,6 +464,7 @@ object ScreenShare {
             return
         }
         val choice = ScreenCapture.choose(ffmpeg, monitor, r.softwareOnly)
+        ShareTiming.mark("share.plan", choice?.plan?.toString().orEmpty())
         if (r.stopped) return
         if (choice == null) {
             fail(r, SCREEN_GONE)
@@ -800,6 +804,7 @@ object ScreenShare {
             }.also { p ->
                 ScreenCaptureProcesses.register(p)
                 r.process = p
+                ShareTiming.mark("share.ffmpeg", plan.toString())
             }
         }
         r.pipe?.start()

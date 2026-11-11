@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.pipeline
 
+import com.dreamdisplays.media.runtime.diagnostics.ShareTiming
 import com.dreamdisplays.api.media.model.FramePixelFormat
 import com.dreamdisplays.api.media.player.FrameUploaderFactory
 import com.dreamdisplays.api.media.player.GpuTextureRef
@@ -167,7 +168,16 @@ internal class NativeVideoFramePipe(
         prepare(w, h, parkFlag)
         // Live frames are numbered as FFmpeg numbers them, and each one shown is reported with its number
         liveFrames = 0L
-        surface.onShown = liveStamps?.let { stamps -> { tag: Long, nanos: Long -> stamps.onPresented(tag, nanos) } }
+        surface.onShown = if (!liveEdge) null else {
+            var drawn = false
+            { tag: Long, nanos: Long ->
+                if (!drawn) {
+                    drawn = true
+                    ShareTiming.mark("view.drawn", debugLabel)
+                }
+                liveStamps?.onPresented(tag, nanos)
+            }
+        }
         handle = NativeMedia.videoOpen(args, w, h).takeIf { it != 0L } ?: run {
             logger.error("$debugLabel Native FFmpeg session failed to start.")
             return null

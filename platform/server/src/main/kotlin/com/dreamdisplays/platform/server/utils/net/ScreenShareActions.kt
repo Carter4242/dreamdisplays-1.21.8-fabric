@@ -81,7 +81,10 @@ object ScreenShareActions {
     private val byDisplay = ConcurrentHashMap<UUID, Share>()
 
     /** A start the relay lease service has not confirmed yet (nothing on the display changed so far). */
-    private class PendingStart(val displayId: UUID, val sharerId: UUID, val streamId: String, val key: String, val nonce: Long)
+    private class PendingStart(val displayId: UUID, val sharerId: UUID, val streamId: String, val key: String, val nonce: Long) {
+        /** When the start was asked for: the share's start log says how long the relay lease took. */
+        val askedNanos: Long = System.nanoTime()
+    }
 
     /** Starts waiting on the relay lease service, by display. */
     private val starting = ConcurrentHashMap<UUID, PendingStart>()
@@ -179,7 +182,14 @@ object ScreenShareActions {
         byDisplay[displayId] = share
         if (pending != null) starting.remove(displayId, pending)
         DisplayActions.applyVideo(display, ScreenShareRelayTemplates.playUrl(live.relay_play_url, streamId), "", player, persist = false)
-        logger.info("{} started sharing their screen to display {}.", player.name, display.id)
+        if (pending == null) {
+            logger.info("{} started sharing their screen to display {}.", player.name, display.id)
+        } else {
+            logger.info(
+                "{} started sharing their screen to display {} (relay lease {} ms).",
+                player.name, display.id, (System.nanoTime() - pending.askedNanos) / 1_000_000L,
+            )
+        }
         reply(
             player, displayId, active = true,
             publishUrl = ScreenShareRelayTemplates.publishUrl(live.relay_publish_url, streamId, key), nonce = nonce,
