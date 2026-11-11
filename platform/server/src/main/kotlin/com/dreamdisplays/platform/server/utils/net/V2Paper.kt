@@ -78,6 +78,7 @@ object PaperV2Networking : PluginMessageListener {
             is ClientHello -> handleHello(player, packet)
             is RequestSync -> DisplayActions.requestSync(player, packet.id)
             is ReportDuration -> DisplayActions.reportDuration(player, packet.id, packet.durationMs)
+            is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)
             is ReportDisplay -> DisplayManager.report(packet.id, player)
             is SetVideo -> DisplayActions.setVideo(player, packet.id, packet.url, packet.lang)

@@ -1227,7 +1227,7 @@ class DisplayScreen(
         } else {
             updateDistanceQuality((distance / renderDistance.coerceAtLeast(1)).toFloat())
         }
-        if (ClientStateManager.config.audioAcoustics == AcousticQuality.OFF) return
+        if (ServerOverrides.audioAcoustics == AcousticQuality.OFF) return
         val plane = sourcePlane()
         DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.updateSource(
             uuid,
@@ -1243,7 +1243,7 @@ class DisplayScreen(
     }
 
     private fun probeEnvironment(plane: SourcePlane, distance: Double): AcousticEnvironment {
-        val tier = ClientStateManager.config.audioAcoustics
+        val tier = ServerOverrides.audioAcoustics
         if (isPopoutActive || !acousticsEnabled || (tier != AcousticQuality.ADVANCED && tier != AcousticQuality.ULTRA)) {
             cachedEnvironment = AcousticEnvironment.OPEN_AIR
             cachedReverb = null
@@ -1315,14 +1315,14 @@ class DisplayScreen(
          * How far displays stay alive, in blocks: the client's chunk render distance, capped by the
          * server's simulation distance and by the viewer's own display distance setting, whichever is shortest.
          */
-        internal fun clientRenderDistanceBlocks(): Int {
+        internal fun clientRenderDistanceBlocks(ownPolicy: DisplayPolicy? = null): Int {
             val minecraft = Minecraft.getInstance()
             //? if >=1.19 {
             val render = minecraft.options.renderDistance().get()
             //?} else
             /*val render = minecraft.options.renderDistance*/
             val simulation = minecraft.level?.serverSimulationDistance?.takeIf { it > 0 } ?: render
-            val own = ClientStateManager.config.displayDistanceChunks.takeIf { it > 0 } ?: render
+            val own = ServerOverrides.displayDistanceChunks(ownPolicy).takeIf { it > 0 } ?: render
             return minOf(render, simulation, own) * 16
         }
     }

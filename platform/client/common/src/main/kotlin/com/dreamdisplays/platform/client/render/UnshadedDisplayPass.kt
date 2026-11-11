@@ -1,6 +1,6 @@
 package com.dreamdisplays.platform.client.render
 
-import com.dreamdisplays.platform.client.managers.ClientStateManager
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.PoseStack
 import net.minecraft.client.Camera
@@ -22,7 +22,7 @@ object UnshadedDisplayPass {
     private var pendingCamera: Camera? = null
     private val pendingView = Matrix4f()
     private var pending = false
-    private val enabled: Boolean; get() = runCatching { ClientStateManager.config.unshadedDisplays }.getOrDefault(true)
+    private val enabled: Boolean; get() = runCatching { ServerOverrides.unshadedDisplays }.getOrDefault(true)
 
     val active: Boolean get() = tailHookAlive && enabled && ShaderPackCompat.isShaderPackActive
 

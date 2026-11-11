@@ -168,7 +168,7 @@
   "displayHelpInfo": "– /display info: show details of the display you're looking at",
   "displayHelpDelete": "– /display delete: delete the display you're looking at",
   "displayHelpList": "– /display list: list all displays",
-  "displayHelpStats": "– /display stats: show mod usage statistics",
+  "displayHelpStats": "– /display stats [display]: show mod usage statistics and how each viewer's playback is doing",
   "displayHelpReload": "– /display reload: reload the configuration",
   "displayHelpOn": "– /display on [player]: enable displays for yourself or a target player",
   "displayHelpOff": "– /display off [player]: disable displays for yourself or a target player",
@@ -290,5 +290,13 @@
   "configBadValue": "&7D |&f Invalid value for &e%s&f (expected %s)",
   "configWriteFailed": "&7D |&f Could not update config.toml: %s",
   "suggestPolicy": "Show or change one display's policy",
-  "suggestConfig": "Show or change server-wide display settings"
+  "suggestConfig": "Show or change server-wide display settings",
+  "policyServerWideOnly": "&7D |&f &e%s&f only works server-wide; set it with &e/display config policy.%s",
+  "viewerStatsHeader": "&7D |&f Viewers of display &e%s&f (%s reporting):",
+  "viewerStatsLine": "&7D | &f%s &7%s &fdrift &e%s &frate &e%s &flat &e%s &7action %s, seeks %s, stalls %s &f%s &7at %s &8%ss ago",
+  "viewerStatsError": "&7D | &f%s &c%s&7: %s &8%ss ago",
+  "viewerStatsSummary": "&7D |&f %s viewers, %s in sync, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring, %s buffering",
+  "viewerStatsNone": "&7D |&f No viewer reports for display &e%s&f (clients report every few seconds while it is loaded)",
+  "viewerStatsAllHeader": "&7D |&f Displays with viewer reports: %s",
+  "viewerStatsAllLine": "&7D | &e%s&f: %s viewers, max |drift| &e%s&f, spread &e%s&f, &c%s&f erroring"
 }

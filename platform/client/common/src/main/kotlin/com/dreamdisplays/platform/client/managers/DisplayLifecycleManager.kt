@@ -16,6 +16,7 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager.MAX_DISPLAY_BLOCKS
 import com.dreamdisplays.api.display.geometry.DisplayGeometry
 import com.dreamdisplays.platform.client.displays.PlacedDisplays
+import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.displays.acceptedCustomData
 import com.dreamdisplays.platform.client.storage.ClientSettingsStore
 import com.dreamdisplays.util.FacingUtil
@@ -60,6 +61,12 @@ object DisplayLifecycleManager {
             PlaybackMode.fromWire(packet.mode)
         }
         val renderDistance = DisplayPolicyCache.renderDistanceFor(policy)
+
+        // Switched off by the server: remember it so it comes back as soon as the server allows it again
+        if (!ServerOverrides.displayEnabled(policy)) {
+            if (!packet.virtual) cacheUnloadedDisplay(packet, facing, mode, currentDimensionKey())
+            return
+        }
 
         if (!packet.forced && !packet.virtual) {
             Minecraft.getInstance().player?.let { player ->
@@ -138,6 +145,7 @@ object DisplayLifecycleManager {
         DisplayRegistry.unloadedScreens.values
             .filter {
                 sameDimension(it.dimensionKey, dimensionKey) &&
+                        ServerOverrides.displayEnabled(DisplayPolicyCache.get(it.uuid)) &&
                         distanceToData(it, playerPos) <= DisplayPolicyCache.renderDistanceFor(DisplayPolicyCache.get(it.uuid))
             }
             .sortedBy { distanceToData(it, playerPos) }
@@ -155,7 +163,7 @@ object DisplayLifecycleManager {
      * same distance do not keep swapping. Popped-out and virtual displays are not counted.
      */
     fun overBudget(playerPos: BlockPos): Set<DisplayScreen> {
-        val max = ClientStateManager.config.maxActiveDisplays
+        val max = ServerOverrides.maxActiveDisplays
         if (max <= 0) return emptySet()
         val counted = DisplayRegistry.getScreens().filter { !it.isPopoutActive && !it.virtual }
         if (counted.size <= max) return emptySet()
@@ -166,7 +174,7 @@ object DisplayLifecycleManager {
     }
 
     private fun fitsBudget(distance: Double, playerPos: BlockPos): Boolean {
-        val max = ClientStateManager.config.maxActiveDisplays
+        val max = ServerOverrides.maxActiveDisplays
         if (max <= 0) return true
         val playing = DisplayRegistry.getScreens()
             .filter { !it.isPopoutActive && !it.virtual && !it.isDormant }

@@ -10,6 +10,8 @@ import com.dreamdisplays.platform.client.core.ClientLifecycleEvent
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.displays.ServerOverrides
+import com.dreamdisplays.platform.client.displays.ViewerReporter
 import com.dreamdisplays.platform.client.input.*
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
@@ -97,7 +99,9 @@ object ClientTickManager {
             ?.updateListener(ListenerPoseTracker.currentPose(minecraft))
 
         unloadCheckTick++
-        if (unloadCheckTick >= 10 && ClientStateManager.displaysEnabled && DisplayRegistry.unloadedScreens.isNotEmpty()) {
+        if (unloadCheckTick >= 10 && ClientStateManager.displaysEnabled && ServerOverrides.displaysEnabled &&
+            DisplayRegistry.unloadedScreens.isNotEmpty()
+        ) {
             unloadCheckTick = 0
             DisplayLifecycleManager.restoreVisibleUnloadedScreens(playerPos)
         }
@@ -111,8 +115,10 @@ object ClientTickManager {
                 displayScreen.renderDistance + DORMANT_HYSTERESIS_BLOCKS
             }
             val outOfRange = threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
-            val shouldUnload = (outOfRange || !ClientStateManager.displaysEnabled) &&
-                    !displayScreen.isPopoutActive && !displayScreen.virtual
+            // Switched off by the server: everything goes, popouts and virtual displays included
+            val serverDisabled = !ServerOverrides.displayEnabled(displayScreen.policy)
+            val shouldUnload = serverDisabled || ((outOfRange || !ClientStateManager.displaysEnabled) &&
+                    !displayScreen.isPopoutActive && !displayScreen.virtual)
 
             // Already parked warm: wake it when back in range, or tear it down once it has been dormant
             // past the pool TTL (freeing its decoder + texture; the snapshot cache then bridges a return).
@@ -120,7 +126,7 @@ object ClientTickManager {
             // eviction victim in reserveWarmSlot once a newer candidate needs its slot (see below).
             if (displayScreen.isDormant) {
                 if (!shouldUnload) displayScreen.wake()
-                else if (displayScreen.dormantExpired(WarmParkPolicy.ttlNanos)) compressDormant(displayScreen)
+                else if (serverDisabled || displayScreen.dormantExpired(WarmParkPolicy.ttlNanos)) compressDormant(displayScreen)
                 continue
             }
 
@@ -128,7 +134,7 @@ object ClientTickManager {
                 // Keep a bounded pool of Local VOD displays warm (decoder + audio open, frozen), so walking
                 // back is instant. Older / out-of-budget warm parks are compressed into replay snapshots.
                 // Only the natural "left render distance" case parks; disabling displays tears down fully.
-                val warmEligible = outOfRange && ClientStateManager.displaysEnabled
+                val warmEligible = outOfRange && ClientStateManager.displaysEnabled && !serverDisabled
                 if (warmEligible && displayScreen.canWarmPark() && reserveWarmSlot(displayScreen)) {
                     displayScreen.goDormant()
                 } else {
@@ -147,6 +153,8 @@ object ClientTickManager {
                 displayScreen.tick(playerPos)
             }
         }
+
+        ViewerReporter.tick()
 
         // The menu-open button comes from the KeyBindingRegistry; the click itself is routed
         // through the InputHandler chain (DisplayMenuInputHandler consumes sneak + click-on-display).

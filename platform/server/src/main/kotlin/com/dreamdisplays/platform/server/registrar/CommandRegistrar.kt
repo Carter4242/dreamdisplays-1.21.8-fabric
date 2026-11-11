@@ -96,8 +96,12 @@ object CommandRegistrar {
 
     private fun LiteralArgumentBuilder<CommandSourceStack>.statsBranch() {
         literal("stats", tip("suggestStats")) {
-            requires { it.sender.hasPermission(PaperServer.config.permissions.stats) }
+            requires { it.sender.hasPermission(PaperServer.config.permissions.stats) || PolicyCommand.allowed(it.sender) }
             executesCommand { ctx -> StatsCommand().execute(ctx.source.sender, emptyArray()) }
+            target {
+                requires { PolicyCommand.allowed(it.sender) }
+                executesCommand { ctx -> ViewerStatsCommand.execute(ctx.source.sender, target(ctx)) }
+            }
         }
     }
 

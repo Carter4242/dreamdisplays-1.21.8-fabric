@@ -381,11 +381,27 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
     )
     val visibility = DisplayPolicy.Visibility(t.numberOrNull("policy.visibility.max_distance_blocks")?.toDouble())
     val quality = DisplayPolicy.Quality(t.numberOrNull("policy.quality.max_height")?.toInt())
+    val client = DisplayPolicy.Client(
+        enabled = t.boolOrNull("policy.client.enabled"),
+        maxActiveDisplays = t.numberOrNull("policy.client.max_active_displays")?.toInt(),
+        hardwareDecoding = t.boolOrNull("policy.client.hardware_decoding"),
+        audioAcoustics = (t?.get("policy.client.audio_acoustics") as? String)?.trim()?.uppercase()
+            ?.let { name -> DisplayPolicy.Acoustics.entries.firstOrNull { it.name == name } },
+        unshadedDisplays = t.boolOrNull("policy.client.unshaded_displays"),
+        displayDistanceChunks = t.numberOrNull("policy.client.display_distance_chunks")?.toInt(),
+    )
+    val debug = DisplayPolicy.Debug(
+        syncLogIntervalSeconds = t.numberOrNull("policy.debug.sync_log_interval_seconds")?.toInt(),
+        verbose = t.boolOrNull("policy.debug.verbose"),
+        reportIntervalSeconds = t.numberOrNull("policy.debug.report_interval_seconds")?.toInt(),
+    )
     return DisplayPolicy(
         sync = sync.takeIf { it != DisplayPolicy.Sync() },
         audio = audio.takeIf { it != DisplayPolicy.Audio() },
         visibility = visibility.takeIf { it != DisplayPolicy.Visibility() },
         quality = quality.takeIf { it != DisplayPolicy.Quality() },
+        client = client.takeIf { it != DisplayPolicy.Client() },
+        debug = debug.takeIf { it != DisplayPolicy.Debug() },
     )
 }
 

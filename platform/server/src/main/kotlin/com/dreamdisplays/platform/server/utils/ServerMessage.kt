@@ -82,6 +82,7 @@ enum class ServerMessage(val key: String) {
     POLICY_RESET("policyReset"),
     POLICY_RESET_ALL("policyResetAll"),
     POLICY_SET("policySet"),
+    POLICY_SERVER_WIDE_ONLY("policyServerWideOnly"),
     POLICY_UNKNOWN_KEY("policyUnknownKey"),
     REPORT_FAILED("reportFailed"),
     REPORT_SENT("reportSent"),
@@ -91,6 +92,13 @@ enum class ServerMessage(val key: String) {
     SETTED_NAME("settedName"),
     SETTED_URL("settedURL"),
     SUCCESSFUL_CREATION("successfulCreation"),
+    VIEWER_STATS_ALL_HEADER("viewerStatsAllHeader"),
+    VIEWER_STATS_ALL_LINE("viewerStatsAllLine"),
+    VIEWER_STATS_ERROR("viewerStatsError"),
+    VIEWER_STATS_HEADER("viewerStatsHeader"),
+    VIEWER_STATS_LINE("viewerStatsLine"),
+    VIEWER_STATS_NONE("viewerStatsNone"),
+    VIEWER_STATS_SUMMARY("viewerStatsSummary"),
 
     ;
 
