@@ -167,7 +167,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
      * prepared for a broadcast, it tolerates a small paused offset instead of snapping and dropping its warm stream.
      */
     fun onWarmAdopted() {
-        synchronized(lock) { warmAdopted = true }
+        synchronized(lock) {
+            warmAdopted = true
+            // A singer's next song, preloaded at its start: it resumes warm there, while their timeline runs the
+            // karaoke lead ahead (the lead is the same as the last song's, so no packet flags a change). Jump it in
+            // place once it plays, as with a lead that changed.
+            if (karaokeLeadMs > 0) jumpToLead = true
+        }
     }
 
     /** Re-applies a timeline packet that arrived before the media player existed or finished init. */
