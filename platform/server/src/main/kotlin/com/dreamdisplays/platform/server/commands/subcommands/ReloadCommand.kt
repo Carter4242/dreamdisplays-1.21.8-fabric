@@ -30,6 +30,10 @@ class ReloadCommand : SubCommand {
             onSuccess = {
                 ServerMessage.CONFIG_RELOADED.sendTo(sender)
                 ServerMessage.CONFIG_RELOAD_SUMMARY.sendTo(sender)
+                val relayProblem = PaperServer.config.settings.live.relayProblem
+                if (relayProblem != null) {
+                    ServerMessage.CONFIG_RELAY_PROBLEM.sendTo(sender, com.dreamdisplays.api.media.source.LiveStreamUrls.redactCredentials(relayProblem))
+                }
             },
             onFailure = {
                 ServerMessage.CONFIG_RELOAD_FAILED.sendTo(sender)

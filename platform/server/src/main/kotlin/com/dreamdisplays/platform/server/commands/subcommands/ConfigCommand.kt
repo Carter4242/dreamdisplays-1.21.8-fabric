@@ -11,6 +11,7 @@ import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.bukkit.command.CommandSender
+import org.bukkit.entity.Player
 import org.slf4j.LoggerFactory
 import org.tomlj.Toml
 import java.nio.file.Files
@@ -126,6 +127,11 @@ object ConfigCommand {
             ServerMessage.CONFIG_VALUE.sendTo(sender, entry.name, PolicyPaths.format(entry.current(settings)))
             return
         }
+        // A player's command line is logged (server log filters aside, other plugins store it): secrets come from the console
+        if (entry.secret && sender is Player) {
+            ServerMessage.CONFIG_SECRET_FROM_CONSOLE.sendTo(sender, entry.name)
+            return
+        }
         val reset = value.equals(PolicyCommand.RESET, ignoreCase = true)
         val parsed = if (reset) null else entry.kind.parse(value.trim()) ?: run {
             ServerMessage.CONFIG_BAD_VALUE.sendTo(sender, entry.name, hint(entry.kind))
@@ -139,6 +145,9 @@ object ConfigCommand {
         val now = PaperServer.config.settings
         if (reset) ServerMessage.CONFIG_RESET.sendTo(sender, entry.name, PolicyPaths.format(entry.current(now)))
         else ServerMessage.CONFIG_SET.sendTo(sender, entry.name, PolicyPaths.format(entry.current(now)))
+        now.live.relayProblem?.let {
+            ServerMessage.CONFIG_RELAY_PROBLEM.sendTo(sender, com.dreamdisplays.api.media.source.LiveStreamUrls.redactCredentials(it))
+        }
     }
 
     /** Writes [value] (null = comment the key out) into `config.toml` and reloads; returns an error text or null. */

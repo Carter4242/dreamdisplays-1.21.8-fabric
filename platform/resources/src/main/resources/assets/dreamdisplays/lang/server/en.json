@@ -318,6 +318,8 @@
   "configUnknownKey": "&7D |&f Unknown config key &e%s",
   "configBadValue": "&7D |&f Invalid value for &e%s&f (expected %s)",
   "configWriteFailed": "&7D |&f Could not update config.toml: %s",
+  "configSecretFromConsole": "&7D |&f &e%s&f holds a secret: set it from the server console or in config.toml, not from chat (chat commands are logged)",
+  "configRelayProblem": "&7D |&e Screen sharing is off: %s",
   "speedCurrent": "&7D |&f Display &e%s&f plays at &e%s",
   "speedSet": "&7D |&f Display &e%s&f now plays at &e%s&f for everyone watching",
   "speedNotShared": "&7D |&f Display &e%s&f has no shared timeline; only Synced and Broadcast displays have a server speed",

@@ -14,6 +14,8 @@ enum class ServerMessage(val key: String) {
     CONFIG_UNKNOWN_KEY("configUnknownKey"),
     CONFIG_VALUE("configValue"),
     CONFIG_WRITE_FAILED("configWriteFailed"),
+    CONFIG_SECRET_FROM_CONSOLE("configSecretFromConsole"),
+    CONFIG_RELAY_PROBLEM("configRelayProblem"),
     CONFIG_RELOAD_FAILED("configReloadFailed"),
     CONFIG_RELOAD_SUMMARY("configReloadSummary"),
     CONFIG_RELOADED("configReloaded"),
