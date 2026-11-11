@@ -13,7 +13,8 @@ import org.lwjgl.opengl.GL11
 /**
  * Builds the [ClientEnvironment] summary for error reports: OS, Java, GPU strings, how `yt-dlp` and `FFmpeg` run,
  * hardware decoding, the native pipelines, the display audio line and the shader pack. Paths are scrubbed (home
- * directory -> `~`); no user names or hardware ids are included.
+ * directory -> `~`) and owners' names are taken out of device names ([DeviceNames]); no user names or hardware ids
+ * are included.
  */
 object ClientEnvironmentProbe {
     /** GL strings and shader state, read on the render thread (the only one with a GL context). */
@@ -77,7 +78,7 @@ object ClientEnvironmentProbe {
                 !probed -> "probing"
                 else -> s(runCatching { NativeMedia.lavUnavailableReason }.getOrDefault("").ifBlank { "unknown" })
             },
-            audioLine = s(PlaybackDiagnostics.audioLine),
+            audioLine = s(DeviceNames.anonymize(PlaybackDiagnostics.audioLine)),
             shaderPack = render.shaderPack,
         )
     }
