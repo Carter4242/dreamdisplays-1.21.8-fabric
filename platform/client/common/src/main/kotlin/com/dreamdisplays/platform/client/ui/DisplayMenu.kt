@@ -351,7 +351,8 @@ class DisplayMenu private constructor(
         clearVideoButton = addUi(IconButton(icon = { IconButton.modIcon("cross") }, sprites = IconButton.RED_SPRITES) {
             if (clearVideoGuard.press(System.currentTimeMillis())) ds.requestClearVideo()
         })
-        clearVideoButton.visibleWhen = { notErrored() && ds.canClearVideoHere }
+        // Also on the error panel and while loading: a video that fails or never starts is when clearing helps most
+        clearVideoButton.visibleWhen = { ds.canClearVideoHere }
 
         suggestions = addUi(SuggestionsPanel(::onPickSuggested, ds.suggestionsController))
         suggestions.visibleWhen = { !ds.errored && suggestionsRect != null }
@@ -423,7 +424,7 @@ class DisplayMenu private constructor(
                 },
             ],
         )
-        errorPanel = ErrorPanel(retryButton, deleteButton, reportButton) { ds.mediaError }
+        errorPanel = ErrorPanel(retryButton, deleteButton, reportButton, clearVideoButton) { ds.mediaError }
     }
 
     private fun settingsRows(
@@ -582,6 +583,8 @@ class DisplayMenu private constructor(
             suggestionsRect = null
             errorPanel.render(g, width, height)
             drawChildren(g, mouseX, mouseY, partialTick)
+            drawClearVideoArming(g)
+            clearVideoTip(mouseX, mouseY)?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
             return
         }
 
@@ -621,14 +624,7 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
-        if (!clearVideoButton.visible) {
-            clearVideoGuard.disarm()
-        } else if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
-            g.drawOutline(
-                UiRect(clearVideoButton.x - 1, clearVideoButton.y - 1, clearVideoButton.width + 2, clearVideoButton.height + 2),
-                UiTheme.ACCENT_UPDATE,
-            )
-        }
+        drawClearVideoArming(g)
         if (shareButton.visible) {
             if (ScreenShare.isSharing(ds.uuid)) {
                 val bottom = shareButton.y + shareButton.height
@@ -724,16 +720,32 @@ class DisplayMenu private constructor(
         return null
     }
 
+    /** Outlines the Clear button while a second click would confirm it; drops the arming once the button is gone. */
+    private fun drawClearVideoArming(g: GuiGraphicsCompat) {
+        if (!clearVideoButton.visible) {
+            clearVideoGuard.disarm()
+        } else if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
+            g.drawOutline(
+                UiRect(clearVideoButton.x - 1, clearVideoButton.y - 1, clearVideoButton.width + 2, clearVideoButton.height + 2),
+                UiTheme.ACCENT_UPDATE,
+            )
+        }
+    }
+
+    /** The Clear button's tooltip when the pointer is on it, else null. */
+    private fun clearVideoTip(mouseX: Int, mouseY: Int): String? {
+        val b = clearVideoButton
+        if (!b.visible || mouseX < b.x || mouseX >= b.x + b.width || mouseY < b.y || mouseY >= b.y + b.height) return null
+        return if (clearVideoGuard.isArmed(System.currentTimeMillis())) ClientMessage.UI_CLEAR_VIDEO_CONFIRM.text()
+        else ClientMessage.UI_CLEAR_VIDEO.text()
+    }
+
     private fun buttonTip(mouseX: Int, mouseY: Int) {
         fun over(b: IconButton) =
             b.visible && mouseX >= b.x && mouseX < b.x + b.width && mouseY >= b.y && mouseY < b.y + b.height
         when {
             over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
-            over(clearVideoButton) -> queueTip = if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
-                ClientMessage.UI_CLEAR_VIDEO_CONFIRM.text()
-            } else {
-                ClientMessage.UI_CLEAR_VIDEO.text()
-            }
+            over(clearVideoButton) -> queueTip = clearVideoTip(mouseX, mouseY)
             over(queueAddButton) -> queueTip = queueBlockedReason()
                 ?: if (YouTubePlaylists.parseLink(suggestions.searchText) != null) ClientMessage.QUEUE_PLAYLIST_ADD.text()
                 else ClientMessage.QUEUE_ADD.text()

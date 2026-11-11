@@ -264,9 +264,9 @@ class DisplayScreen(
 
     /**
      * True when the menu offers to clear this display's video: the server can clear videos, the viewer may set one,
-     * and there is one.
+     * and there is one — whether it plays, is still loading or failed (see [ClearVideoOffer]).
      */
-    val canClearVideoHere: Boolean get() = ClearVideo.supported && canSetVideoHere && !videoUrl.isNullOrEmpty()
+    val canClearVideoHere: Boolean get() = ClearVideoOffer.offered(ClearVideo.supported, canSetVideoHere, videoUrl)
 
     /** Asks the server to take this display's video off, for everyone (the menu's "Clear"). */
     fun requestClearVideo() {
