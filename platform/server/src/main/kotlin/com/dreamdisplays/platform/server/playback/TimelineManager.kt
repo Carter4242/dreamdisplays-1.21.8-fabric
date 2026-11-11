@@ -491,8 +491,8 @@ object TimelineManager {
     /**
      * Restarts every playing display that reaches the end of its video with nothing queued from 0, for everyone,
      * scheduled at the end instant ([QueueTiming.loopRestartAtMs]); clients hold the last frame at end of stream and
-     * never loop a shared display themselves. A display whose queue moves on at the end, a watch party, a start hold
-     * or a fullscreen session that does not loop is left alone. Called every couple of ticks.
+     * never loop a shared display themselves. A display whose queue moves on at the end, a watch party or a start hold
+     * is left alone; a fullscreen session of it that does not loop ends there. Called every couple of ticks.
      */
     fun tickEnds() {
         if (timelines.isEmpty()) return
@@ -505,7 +505,8 @@ object TimelineManager {
             if (wrappedUnseen(display, timeline, now, durationMs)) continue
             val restartAt = QueueTiming.loopRestartAtMs(timeline, now, LOOP_EARLY_MS, durationMs) ?: continue
             if (WatchPartyManager.hasSession(displayId) || QueueManager.advancesAtEnd(display)) continue
-            if (!FullscreenBroadcastManager.loopsAtEnd(displayId)) continue
+            // A fullscreen session that does not loop is over at this end; the display itself starts over as usual
+            FullscreenBroadcastManager.endNonLoopingSessions(displayId)
             // Late end-of-stream loops from older clients around this end are not seeks
             endOfStream.onVideoChanged(displayId, restartAt)
             runCatching { onLoopRestart(display) }
@@ -532,10 +533,9 @@ object TimelineManager {
         }
         playThroughs[display.id] = timeline to current
         if (!LoopWraps.missedWrap(previous, current)) return false
-        // The queue moves on by itself after a missed end (advanceDue counts past ends); a party or a non-looping
-        // fullscreen session runs its own end
+        // The queue moves on by itself after a missed end (advanceDue counts past ends); a party runs its own
         if (WatchPartyManager.hasSession(display.id) || QueueManager.advancesAtEnd(display)) return false
-        if (!FullscreenBroadcastManager.loopsAtEnd(display.id)) return false
+        FullscreenBroadcastManager.endNonLoopingSessions(display.id)
         endOfStream.onVideoChanged(display.id, now)
         runCatching { onLoopRestart(display) }
             .onFailure { logger.warn("Loop restart hook failed for display {}.", display.id, it) }

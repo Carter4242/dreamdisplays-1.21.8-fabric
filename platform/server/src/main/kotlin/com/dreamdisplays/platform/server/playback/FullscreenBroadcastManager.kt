@@ -110,9 +110,14 @@ object FullscreenBroadcastManager {
     fun knowsDisplay(displayId: UUID): Boolean =
         preparations.containsKey(displayId) || sessions.values.any { it.display.id == displayId }
 
-    /** False when a fullscreen session on real display [displayId] is set not to loop: its end is the session's to handle. */
-    fun loopsAtEnd(displayId: UUID): Boolean =
-        sessions.values.firstOrNull { !it.virtual && it.display.id == displayId }?.loop ?: true
+    /**
+     * Real display [displayId] reached the end of its video: a fullscreen session of it set not to loop is over (its
+     * viewers' clients closed the overlay at their end of stream already; the server forgets it and says so, or a
+     * rejoin would show it again).
+     */
+    fun endNonLoopingSessions(displayId: UUID) {
+        sessions.values.filter { !it.virtual && !it.loop && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it) }
+    }
 
     /** True if a session with [sessionId] is currently live. */
     fun hasSession(sessionId: String): Boolean = sessions.containsKey(sessionId)
