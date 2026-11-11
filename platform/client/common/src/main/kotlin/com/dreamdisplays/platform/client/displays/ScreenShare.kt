@@ -305,6 +305,7 @@ object ScreenShare {
             sameDimension = if (dimension != null && here != null) dimension == here else null,
             distanceBlocks = if (screen != null && playerPos != null) screen.getDistanceToScreen(playerPos) else null,
             urlBeforeShare = r.urlBeforeShare,
+            inWorld = mc.level != null && playerPos != null,
         )
         r.shareUrl = ScreenShareCaptureRules.shareUrlAfter(observation)
         ScreenShareCaptureRules.check(observation.copy(shareUrl = r.shareUrl))?.let { reason ->

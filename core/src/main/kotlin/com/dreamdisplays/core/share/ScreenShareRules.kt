@@ -122,6 +122,11 @@ object ScreenShareCaptureRules {
         val distanceBlocks: Double?,
         /** What the display showed when the share was asked for (never taken for the share's own URL). */
         val urlBeforeShare: String? = null,
+        /**
+         * The client is in a world with a player. False between worlds: a proxy switching backends (its configuration
+         * phase, a resource pack prompt), where no badge can be drawn and the old backend already ended the share.
+         */
+        val inWorld: Boolean = true,
     )
 
     /**
@@ -133,6 +138,7 @@ object ScreenShareCaptureRules {
 
     /** Why the running capture must stop given [o], or null while it may run on. */
     fun check(o: Observation): StopReason? = when {
+        !o.inWorld -> StopReason.SERVER_LEFT
         !o.displayKnown -> StopReason.DISPLAY_REMOVED
         o.sameDimension == false -> StopReason.OTHER_DIMENSION
         o.distanceBlocks != null && o.distanceBlocks > MAX_DISTANCE_BLOCKS -> StopReason.OUT_OF_RANGE

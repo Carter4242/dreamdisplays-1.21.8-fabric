@@ -100,6 +100,15 @@ class ScreenShareRulesTest {
     }
 
     @Test
+    fun `capture stops between worlds, where the display looks fine and no badge can show`() {
+        // A proxy's configuration phase: the display is still known, dimension and distance are unknown
+        val between = seen(url = null, sameDim = null, dist = null).copy(inWorld = false)
+        assertEquals(StopReason.SERVER_LEFT, ScreenShareCaptureRules.check(between))
+        // The old backend ended it already, and the new one never had it
+        assertFalse(ScreenShareCaptureRules.tellServer(StopReason.SERVER_LEFT))
+    }
+
+    @Test
     fun `the sharer hears none of their own share, other displays and videos play on`() {
         assertTrue(ScreenShareViewerRules.muteOwnShare(sharingToIt = true, url = share))
         assertFalse(ScreenShareViewerRules.muteOwnShare(sharingToIt = false, url = share))
