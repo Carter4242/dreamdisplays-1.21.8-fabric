@@ -619,7 +619,9 @@ object FullscreenBroadcastManager {
     }
 
     private fun deliverTo(session: Session, playerId: UUID) {
-        transport.sendDisplayInfo(playerId, session.display, session.forced)
+        // Always forced (load at any distance): the session's own `forced` only means it cannot be dismissed, and an
+        // unforced description of a far display is only cached, so the fullscreen would never open
+        transport.sendDisplayInfo(playerId, session.display, forced = true)
         transport.sendTo(
             playerId,
             FullscreenState(
