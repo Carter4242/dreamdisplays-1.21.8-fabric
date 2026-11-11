@@ -49,8 +49,10 @@ object RelayControl {
     }
 
     /**
-     * Plugin disable, after every share ended: pushes the (now empty) set once more from the calling thread, so a
-     * reload or stop cuts the streams at once rather than at the lease's lapse, and stops the push thread.
+     * Plugin disable, after every share ended: pushes the (now empty) set once more, so a reload or stop cuts the
+     * streams at once rather than at the lease's lapse, and stops the push thread. The push runs on the push thread
+     * (after any push still in flight, so they stay in order) and is waited for at most [SHUTDOWN_WAIT_MS]: an
+     * unreachable service never holds the calling (main) thread for a full HTTP timeout; it lets the set lapse instead.
      */
     fun shutdown() {
         val (s, w) = synchronized(lock) {
@@ -59,13 +61,14 @@ object RelayControl {
             worker = null
             pair
         }
-        if (w != null) {
-            w.shutdown()
-            runCatching { w.awaitTermination(2, TimeUnit.SECONDS) }
-            w.shutdownNow()
-        }
-        if (s != null && s.needsRenewal()) runCatching { s.push() }
+        if (w == null) return
+        if (s != null && s.needsRenewal()) runCatching { w.execute { runCatching { s.push() } } }
+        w.shutdown()
+        runCatching { w.awaitTermination(SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS) }
+        w.shutdownNow()
     }
+
+    private const val SHUTDOWN_WAIT_MS = 1_500L
 
     private fun started(): Pair<RelayLeaseSync, ScheduledExecutorService> = synchronized(lock) {
         val s = sync ?: RelayLeaseSync(RelayLeaseSync.newEpoch(), send = ::post).also { sync = it }
