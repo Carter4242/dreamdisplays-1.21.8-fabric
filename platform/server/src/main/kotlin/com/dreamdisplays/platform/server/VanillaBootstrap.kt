@@ -70,6 +70,7 @@ object VanillaBootstrap {
 
     private fun forgetWorld() {
         DisplayManager.clearAll()
+        TimelineManager.reset()
         FullscreenBroadcastManager.forgetAll()
         WatchPartyManager.forgetAll()
         PipPinManager.forgetAll()

@@ -480,6 +480,8 @@ object FullscreenBroadcastManager {
     fun forgetAll() {
         sessions.clear()
         preparations.clear()
+        viewing.clear()
+        virtualDurations.clear()
     }
 
     /** Re-evaluates radius membership and refreshes drifting clients. Called once per second. */
