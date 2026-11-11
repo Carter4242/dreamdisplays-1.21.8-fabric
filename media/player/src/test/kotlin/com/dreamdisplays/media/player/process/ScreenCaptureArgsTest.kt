@@ -180,6 +180,16 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
+    fun `rtsp publishes through the rtsp muxer over tcp`() {
+        val a = ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.X264, "rtsp://relay.example.com:8554/ddabc")
+        assertEquals("rtsp", a[a.size - 2])
+        assertEquals("tcp", a.valueOf("-rtsp_transport"))
+        assertFalse("-omit_video_pes_length" in a)
+        assertEquals("flv", ScreenCapture.publishMuxer("rtmps://h/x"))
+        assertEquals("mpegts", ScreenCapture.publishMuxer(publish))
+    }
+
+    @Test
     fun `linux shares with x11grab under x11 only, never under wayland where it would be black`() {
         fun env(vararg kv: Pair<String, String>): (String) -> String? = mapOf(*kv)::get
         assertEquals(Source.X11GRAB, ScreenCapture.linuxSource(env("DISPLAY" to ":0", "XDG_SESSION_TYPE" to "x11")))

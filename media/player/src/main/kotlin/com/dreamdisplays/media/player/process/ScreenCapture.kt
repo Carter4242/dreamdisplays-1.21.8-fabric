@@ -460,14 +460,23 @@ object ScreenCapture {
         // A window sends frames only as it draws: keyframes by time, so a viewer joining still waits at most a second
         if (target is Window) addAll(["-force_key_frames", "expr:gte(t,n_forced)"])
         val dest = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
-        val flv = LiveStreamUrls.schemeOf(dest)?.startsWith("rtmp") == true
+        val muxer = publishMuxer(dest)
         addAll(["-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0"])
         // Picture and sound leave interleaved (so a viewer gets them together), but a stream that stalls (a window
         // minimized without dup_frames) holds the other back at most this long rather than the default 10 s
         if (audio != null) addAll(["-max_interleave_delta", MAX_INTERLEAVE_MICROS])
         // MPEG-TS: a video PES with its length written goes out only once the frame is complete (~30 ms later)
-        if (!flv) addAll(["-omit_video_pes_length", "0"])
-        addAll(["-f", if (flv) "flv" else "mpegts", dest])
+        if (muxer == "mpegts") addAll(["-omit_video_pes_length", "0"])
+        // RTSP publishes through its own muxer (an RTSP URL is no output protocol), over TCP: no lost UDP packets
+        if (muxer == "rtsp") addAll(["-rtsp_transport", "tcp"])
+        addAll(["-f", muxer, dest])
+    }
+
+    /** The muxer for publishing to [dest]: FLV for RTMP(S), RTSP's own for RTSP, MPEG-TS (SRT) otherwise. */
+    internal fun publishMuxer(dest: String): String = when (LiveStreamUrls.schemeOf(dest)) {
+        "rtmp", "rtmps" -> "flv"
+        "rtsp" -> "rtsp"
+        else -> "mpegts"
     }
 
     /** How long one stream may run ahead of a stalled other at the muxer (microseconds). */
