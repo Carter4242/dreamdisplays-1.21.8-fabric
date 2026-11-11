@@ -126,11 +126,6 @@ object ShareAudio {
         data object Silence : Input
     }
 
-    /**
-     * The silent track's rate: made at the rate every share sound is encoded at ([AAC_RATE]), so nothing resamples it.
-     */
-    const val SILENCE_RATE = AAC_RATE
-
     /** What the stream carries: AAC at [AAC_BITRATE], stereo, [AAC_RATE]. */
     const val AAC_BITRATE = "160k"
 
@@ -143,6 +138,11 @@ object ShareAudio {
      * measured 121 -> 84 ms glass-to-decode for the picture (and 68 -> 39 ms for the sound) through MediaMTX.
      */
     const val AAC_RATE = 96_000
+
+    /**
+     * The silent track's rate: made at the rate every share sound is encoded at ([AAC_RATE]), so nothing resamples it.
+     */
+    const val SILENCE_RATE = AAC_RATE
 }
 
 /**
