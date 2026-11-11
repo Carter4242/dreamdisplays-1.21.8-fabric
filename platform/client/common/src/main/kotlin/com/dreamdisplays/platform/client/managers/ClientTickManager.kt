@@ -149,10 +149,12 @@ object ClientTickManager {
             // A display in another world is out of range whatever its coordinates
             val outOfRange = !displayScreen.isInWorldHere ||
                     threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
-            // Switched off by the server: everything goes, popouts and virtual displays included
+            // Switched off by the server or by the player (`/display off`): everything goes, popouts, virtual and
+            // prepared displays included (while off no description reaches a loaded display, so one kept would play on
+            // an old video)
             val serverDisabled = !ServerOverrides.displayEnabled(displayScreen.policy)
             // A display held for a fullscreen broadcast stays loaded at any distance until the broadcast takes it
-            val shouldUnload = serverDisabled || ((outOfRange || !ClientStateManager.displaysEnabled) &&
+            val shouldUnload = serverDisabled || !ClientStateManager.displaysEnabled || (outOfRange &&
                     !displayScreen.isPopoutActive && !displayScreen.virtual && !displayScreen.isPrepared)
 
             // Already parked warm: wake it when back in range, or tear it down once it has been dormant
@@ -161,7 +163,9 @@ object ClientTickManager {
             // eviction victim in reserveWarmSlot once a newer candidate needs its slot (see below).
             if (displayScreen.isDormant) {
                 if (!shouldUnload) displayScreen.wake()
-                else if (serverDisabled || displayScreen.dormantExpired(WarmParkPolicy.ttlNanos)) compressDormant(displayScreen)
+                else if (serverDisabled || !ClientStateManager.displaysEnabled ||
+                    displayScreen.dormantExpired(WarmParkPolicy.ttlNanos)
+                ) compressDormant(displayScreen)
                 continue
             }
 
