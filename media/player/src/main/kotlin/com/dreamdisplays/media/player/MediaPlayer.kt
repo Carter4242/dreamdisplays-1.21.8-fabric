@@ -169,7 +169,11 @@ class MediaPlayer(
     private val watchdog = StreamWatchdog(
         debugLabel = debugLabel,
         isSessionActive = { sessionManager.isPlaying && !sessionManager.isParked() && !terminated.get() },
-        getLastFrameNanos = { sessionManager.lastFrameNanos.get() },
+        // A relay stream with a still picture (a still window shared) is alive while its sound plays
+        getLastFrameNanos = {
+            if (relayStream) RelayPicture.progressNanos(sessionManager.lastFrameNanos.get(), sessionManager.lastPcmOutNanos)
+            else sessionManager.lastFrameNanos.get()
+        },
         onStall = { handleSessionStall("no frames") },
     )
 
@@ -533,17 +537,21 @@ class MediaPlayer(
     fun isWaitingForStream(): Boolean = relayStream && waitingForStream && !terminated.get()
 
     /**
-     * True when a live relay stream's last picture must not be shown: stopped, off the air, reconnecting, or no new
-     * frame for [maxAgeNanos], paused or not. A relay stream may be someone's screen share, and its last frame is a
-     * moment of their desktop that has to vanish when the share ends; a paused one would otherwise hold it for as long
-     * as it stays paused (out of range, where the share's end never reaches this client). Always false for any other
-     * stream.
+     * True when a live relay stream's picture must not be shown (see [RelayPicture.stale]): the stream ended, is off
+     * the air or reconnecting, has shown nothing yet, or is paused with a frame older than [maxAgeNanos]. A still
+     * picture on an open connection stays. Always false for any other stream.
      */
     fun isRelayPictureStale(maxAgeNanos: Long): Boolean {
         if (!relayStream) return false
-        if (terminated.get() || waitingForStream) return true
-        val last = sessionManager.lastFrameNanos.get()
-        return last <= 0L || System.nanoTime() - last > maxAgeNanos
+        val state = lifecycle
+        val connected = !terminated.get() && !waitingForStream && (state == PlayerState.Playing || state == PlayerState.Paused)
+        return RelayPicture.stale(
+            connected = connected,
+            paused = pauseRequested || state == PlayerState.Paused,
+            lastFrameNanos = sessionManager.lastFrameNanos.get(),
+            nowNanos = System.nanoTime(),
+            maxAgeNanos = maxAgeNanos,
+        )
     }
 
     /** @return `true` if the stream supports seeking. */
