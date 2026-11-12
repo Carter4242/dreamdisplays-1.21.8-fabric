@@ -12,6 +12,10 @@ import com.dreamdisplays.platform.client.replay.ReplayBridge
 import com.dreamdisplays.platform.client.replay.ReplayCard
 import com.dreamdisplays.platform.client.replay.ReplayHooks
 import com.dreamdisplays.platform.client.utils.identifier
+//? if >=1.21.11 {
+import net.minecraft.client.renderer.rendertype.RenderType
+//?} else
+/*import net.minecraft.client.renderer.RenderType*/
 import com.dreamdisplays.shared.protocol.PacketDirection
 import io.netty.buffer.ByteBuf
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
@@ -58,6 +62,7 @@ object FlashbackCompat : ReplayBridge {
     private var recording: Any? = null
     private var lastFullFrameMs = Long.MIN_VALUE
     private var wasInReplay = false
+    private var exportStartMs: Long? = null
 
     // Replay-server thread
     private var actionServer: Any? = null
@@ -110,6 +115,30 @@ object FlashbackCompat : ReplayBridge {
 
     override fun card(displayId: UUID): ReplayCard? = driver.card(displayId)
 
+    // Render thread: a Flashback export draws each frame at the export's time, so the displays are decoded for it
+    private var export: ReplayExport? = null
+
+    override fun beforeDisplaysRender() = guarded("export") {
+        if (!api.isExporting()) {
+            endExport()
+            return@guarded
+        }
+        val e = export ?: ReplayExport(api.exportFramerate(), api.exportRecordsAudio(),
+            if (trace()) { line -> logger.info("[replay] {}", line) } else null).also {
+            export = it
+            logger.info("Flashback export: displays are decoded frame by frame{}.", if (api.exportRecordsAudio()) ", with their sound" else "")
+        }
+        val t = api.exportReplayMs()
+        e.frame(t, model.at(t))
+    }
+
+    override fun exportPicture(displayId: UUID): RenderType? = export?.picture(displayId)
+
+    private fun endExport() {
+        export?.close()
+        export = null
+    }
+
     // ---------------------------------------------------------------------------------------------- client tick
 
     private fun tick() = guarded("tick") {
@@ -122,6 +151,7 @@ object FlashbackCompat : ReplayBridge {
             wasInReplay = false
             driver.reset()
             model.clear()
+            endExport()
         }
         record()
     }
@@ -170,8 +200,12 @@ object FlashbackCompat : ReplayBridge {
         val ticks = server.tickRateManager()
         // Mid-seek the replay time runs ahead of the actions handled so far: wait for it to settle
         if (api.replaySeeking(replay)) return
-        val held = api.replayPaused(replay) || ticks.isFrozen || server.isPaused
-        val clock = ReplayDriver.Clock(api.visualMillis(), held, ticks.tickrate() / 20.0)
+        // Exporting: the players hold still where the export began (its frames are decoded for it, see ReplayExport)
+        val exporting = api.isExporting()
+        if (!exporting) exportStartMs = null
+        val held = exporting || api.replayPaused(replay) || ticks.isFrozen || server.isPaused
+        val replayMs = if (exporting) exportStartMs ?: api.exportReplayMs().also { exportStartMs = it } else api.visualMillis()
+        val clock = ReplayDriver.Clock(replayMs, held, ticks.tickrate() / 20.0)
         driver.tick(nowMs(), clock, model.at(clock.replayMs), ::clientHas, oneWayLatencyMs())
         if (outbox.isEmpty()) return
         val packets = outbox.toList()
@@ -254,6 +288,13 @@ object FlashbackCompat : ReplayBridge {
         private val fastForwarding: MethodHandle,
         private val processingSnapshot: MethodHandle,
         private val currentTick: MethodHandle,
+        private val isExporting: MethodHandle,
+        private val exportJob: MethodHandle,
+        private val exportSettings: MethodHandle,
+        private val settingsFramerate: MethodHandle,
+        private val settingsRecordAudio: MethodHandle,
+        private val settingsStartTick: MethodHandle,
+        private val exportTick: MethodHandle,
         private val writerState: MethodHandle,
         private val writingData: Int,
         private val action: Any,
@@ -268,6 +309,25 @@ object FlashbackCompat : ReplayBridge {
         fun readyToWrite(recorder: Any): Boolean = readyToWrite.invoke(recorder) as Boolean
 
         fun replayPaused(server: Any): Boolean = replayPaused.invoke(server) as Boolean
+
+        fun isExporting(): Boolean = isExporting.invoke() as Boolean
+
+        private fun settings(): Any? = exportJob.invoke()?.let { exportSettings.invoke(it) }
+
+        fun exportFramerate(): Double = settings()?.let { settingsFramerate.invoke(it) as Double } ?: 60.0
+
+        fun exportRecordsAudio(): Boolean = settings()?.let { settingsRecordAudio.invoke(it) as Boolean } ?: false
+
+        /**
+         * The replay time (ms) of the frame being exported. Flashback's own "visual" time counts from the export's
+         * start; replay data is on the replay's clock, so the export's start tick is added.
+         */
+        fun exportReplayMs(): Long {
+            val job = exportJob.invoke() ?: return visualMillis()
+            val start = settingsStartTick.invoke(exportSettings.invoke(job)) as Int
+            val tick = exportTick.invoke(job) as Double
+            return ((start + tick) * 50.0).toLong()
+        }
 
         /** Seeking: running through recorded ticks, or rebuilding the world from a snapshot. */
         fun replaySeeking(server: Any): Boolean =
@@ -316,6 +376,8 @@ object FlashbackCompat : ReplayBridge {
                 fun field(name: String) = generic(lookup.findGetter(replayServer, name, Boolean::class.javaPrimitiveType))
 
                 val writingData = writer.getDeclaredField("STATE_WRITING_DATA").also { it.isAccessible = true }.getInt(null)
+                val exportJobType = Class.forName("com.moulberry.flashback.exporting.ExportJob")
+                val settingsType = Class.forName("com.moulberry.flashback.exporting.ExportSettings")
                 val currentTick = replayServer.getDeclaredField("currentTick")
                 require(currentTick.type == Int::class.javaPrimitiveType) { "ReplayServer.currentTick is not an int" }
                 currentTick.isAccessible = true
@@ -346,6 +408,13 @@ object FlashbackCompat : ReplayBridge {
                     fastForwarding = field("fastForwarding"),
                     processingSnapshot = field("isProcessingSnapshot"),
                     currentTick = generic(MethodHandles.lookup().unreflectGetter(currentTick)),
+                    isExporting = static("isExporting", Boolean::class.javaPrimitiveType!!),
+                    exportJob = generic(lookup.findStaticGetter(flashback, "EXPORT_JOB", exportJobType)),
+                    exportSettings = virtual(exportJobType, "getSettings", settingsType),
+                    settingsFramerate = virtual(settingsType, "framerate", Double::class.javaPrimitiveType!!),
+                    settingsRecordAudio = virtual(settingsType, "recordAudio", Boolean::class.javaPrimitiveType!!),
+                    settingsStartTick = virtual(settingsType, "startTick", Int::class.javaPrimitiveType!!),
+                    exportTick = virtual(exportJobType, "getCurrentTickDouble", Double::class.javaPrimitiveType!!),
                     writerState = generic(lookup.findGetter(writer, "state", Int::class.javaPrimitiveType)),
                     writingData = writingData,
                     action = action,

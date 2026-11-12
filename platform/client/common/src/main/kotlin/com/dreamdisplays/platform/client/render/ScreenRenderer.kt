@@ -53,6 +53,7 @@ object ScreenRenderer {
         //?} else
         /*camera.getPosition()*/
         DisplayCulling.begin(camera, cameraPos)
+        com.dreamdisplays.platform.client.replay.ReplayHooks.beforeDisplaysRender()
         for (displayScreen in DisplayRegistry.getScreens()) {
             if (displayScreen.isDormant || !displayScreen.hasTexture) continue
             // Held out of sight for a fullscreen broadcast, virtual, or in another world: decoding on (for its popouts),

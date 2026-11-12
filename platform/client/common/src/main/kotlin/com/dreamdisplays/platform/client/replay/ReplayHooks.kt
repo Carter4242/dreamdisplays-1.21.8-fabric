@@ -37,9 +37,19 @@ object ReplayHooks {
         return b.inReplay() && b.onClientPayload(payload)
     }
 
-    /** What a display shows instead of its media in a replay (a card saying it was not saved), or null. */
+    /** Once per drawn frame, before the displays are drawn (outside any render pass). */
+    fun beforeDisplaysRender() {
+        bridge?.beforeDisplaysRender()
+    }
+
+    /**
+     * What a display shows instead of its player's picture in a replay: during a Flashback export the frame for the
+     * export's time, else a card saying it was not saved; null to show the player's picture.
+     */
     fun card(displayId: UUID): RenderType? {
-        val kind = bridge?.card(displayId) ?: return null
+        val b = bridge ?: return null
+        b.exportPicture(displayId)?.let { return it }
+        val kind = b.card(displayId) ?: return null
         return cards.getOrPut(kind) {
             val id = identifier(Initializer.MOD_ID, kind.texture)
             // Loaded now, before any draw: loading it on first use would upload it while the draw's render pass is open
@@ -94,4 +104,8 @@ interface ReplayBridge {
     fun onClientPayload(payload: CustomPacketPayload): Boolean
 
     fun card(displayId: UUID): ReplayCard?
+
+    fun beforeDisplaysRender() {}
+
+    fun exportPicture(displayId: UUID): RenderType? = null
 }
