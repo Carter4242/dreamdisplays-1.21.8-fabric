@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "טוען",
   "dreamdisplays.viewers.status.buffering": "ממתין לטעינה",
   "dreamdisplays.viewers.status.error": "לא יכול להפעיל",
-  "dreamdisplays.viewers.status.no_mod": "אין מוד, לא רואה"
+  "dreamdisplays.viewers.status.no_mod": "אין מוד, לא רואה",
+  "dreamdisplays.display.ad_break": "הפסקת פרסומות של Twitch",
+  "dreamdisplays.display.ad_break.countdown": "השידור מתחיל בעוד %s שניות",
+  "dreamdisplays.display.ad_break.soon": "השידור יתחיל בעוד רגע"
 }

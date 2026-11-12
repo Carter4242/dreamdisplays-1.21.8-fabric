@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "chargement",
   "dreamdisplays.viewers.status.buffering": "mise en mémoire tampon",
   "dreamdisplays.viewers.status.error": "ne peut pas la lire",
-  "dreamdisplays.viewers.status.no_mod": "pas de mod, ne la voit pas"
+  "dreamdisplays.viewers.status.no_mod": "pas de mod, ne la voit pas",
+  "dreamdisplays.display.ad_break": "Pause publicitaire Twitch",
+  "dreamdisplays.display.ad_break.countdown": "le stream commence dans %s s",
+  "dreamdisplays.display.ad_break.soon": "le stream commence dans un instant"
 }

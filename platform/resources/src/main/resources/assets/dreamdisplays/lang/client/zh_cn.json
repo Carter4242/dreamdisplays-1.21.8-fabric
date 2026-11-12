@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "加载中",
   "dreamdisplays.viewers.status.buffering": "缓冲中",
   "dreamdisplays.viewers.status.error": "无法播放",
-  "dreamdisplays.viewers.status.no_mod": "没有模组，看不到"
+  "dreamdisplays.viewers.status.no_mod": "没有模组，看不到",
+  "dreamdisplays.display.ad_break": "Twitch 广告时间",
+  "dreamdisplays.display.ad_break.countdown": "直播将在 %s 秒后开始",
+  "dreamdisplays.display.ad_break.soon": "直播即将开始"
 }

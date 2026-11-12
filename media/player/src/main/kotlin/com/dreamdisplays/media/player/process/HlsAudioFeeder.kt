@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.media.player.adskip.TwitchAdSkip
 import com.dreamdisplays.media.player.util.daemon
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
@@ -42,7 +43,8 @@ internal class HlsAudioFeeder(
     @Volatile
     var unreadable: Boolean = false; private set
 
-    private val stopAtSplice = playlistUrl.contains(".ttvnw.net/")
+    /** Twitch splices its ads in at a discontinuity; its ad-free playlists ([TwitchAdSkip]) mark where a stream rejoins the same way. */
+    private val stopAtSplice = playlistUrl.contains(".ttvnw.net/") || TwitchAdSkip.servesPlaylist(playlistUrl)
 
     private class Segment(
         @JvmField val url: String,

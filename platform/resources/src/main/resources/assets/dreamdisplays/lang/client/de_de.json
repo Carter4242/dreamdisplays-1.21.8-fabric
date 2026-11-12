@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "lädt",
   "dreamdisplays.viewers.status.buffering": "puffert",
   "dreamdisplays.viewers.status.error": "kann es nicht abspielen",
-  "dreamdisplays.viewers.status.no_mod": "keine Mod, sieht es nicht"
+  "dreamdisplays.viewers.status.no_mod": "keine Mod, sieht es nicht",
+  "dreamdisplays.display.ad_break": "Twitch-Werbepause",
+  "dreamdisplays.display.ad_break.countdown": "Stream startet in %s s",
+  "dreamdisplays.display.ad_break.soon": "Stream startet gleich"
 }

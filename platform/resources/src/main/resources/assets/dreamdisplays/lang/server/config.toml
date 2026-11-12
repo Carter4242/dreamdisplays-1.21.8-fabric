@@ -121,6 +121,8 @@ auto_pause_when_empty_seconds = 0
 #                           # installed Deno/Node/Bun, else Deno downloaded the first time yt-dlp fails without one)
 # queue_preload = true      # false = the next queue entry is not loaded ahead of time
 # auto_warm = true          # false = paused displays are not kept ready to play on their own (starts don't wait for them)
+# twitch_ad_skip = "auto"   # "off" = Twitch ads play as they come ("auto": an ad-free copy of a live channel while an ad
+#                           # runs, else the ad is cut out and the display shows a countdown card until the stream is back)
 
 [policy.debug]
 # Client diagnostics (server-wide only); clients read these without needing an update.

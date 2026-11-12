@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "načítá se",
   "dreamdisplays.viewers.status.buffering": "ukládá do vyrovnávací paměti",
   "dreamdisplays.viewers.status.error": "nemůže ho přehrát",
-  "dreamdisplays.viewers.status.no_mod": "bez modu, nevidí ho"
+  "dreamdisplays.viewers.status.no_mod": "bez modu, nevidí ho",
+  "dreamdisplays.display.ad_break": "Reklama na Twitchi",
+  "dreamdisplays.display.ad_break.countdown": "stream začne za %s s",
+  "dreamdisplays.display.ad_break.soon": "stream za chvíli začne"
 }

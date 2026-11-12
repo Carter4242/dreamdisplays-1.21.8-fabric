@@ -253,5 +253,8 @@
   "dreamdisplays.viewers.status.loading": "loading",
   "dreamdisplays.viewers.status.buffering": "buffering",
   "dreamdisplays.viewers.status.error": "can't play it",
-  "dreamdisplays.viewers.status.no_mod": "no mod, can't see it"
+  "dreamdisplays.viewers.status.no_mod": "no mod, can't see it",
+  "dreamdisplays.display.ad_break": "Twitch ad break",
+  "dreamdisplays.display.ad_break.countdown": "stream starts in %ss",
+  "dreamdisplays.display.ad_break.soon": "stream starts in a moment"
 }

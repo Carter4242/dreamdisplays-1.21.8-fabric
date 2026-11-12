@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "загрузка",
   "dreamdisplays.viewers.status.buffering": "буферизация",
   "dreamdisplays.viewers.status.error": "не может воспроизвести",
-  "dreamdisplays.viewers.status.no_mod": "нет мода, не видит"
+  "dreamdisplays.viewers.status.no_mod": "нет мода, не видит",
+  "dreamdisplays.display.ad_break": "Реклама на Twitch",
+  "dreamdisplays.display.ad_break.countdown": "трансляция начнётся через %s с",
+  "dreamdisplays.display.ad_break.soon": "трансляция скоро начнётся"
 }

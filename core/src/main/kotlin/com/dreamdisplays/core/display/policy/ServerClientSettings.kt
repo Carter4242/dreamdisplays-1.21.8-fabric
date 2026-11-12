@@ -81,6 +81,9 @@ data class ServerClientSettings(val serverWide: DisplayPolicy? = null) {
     /** False when the server turned automatic holding of the nearest paused displays off. */
     val autoWarm: Boolean get() = client?.autoWarm != false
 
+    /** False when the server turned Twitch ad skipping off (`client.twitch_ad_skip = "off"`). */
+    val twitchAdSkip: Boolean get() = client?.twitchAdSkip != DisplayPolicy.AdSkip.OFF
+
     /** Display distance in chunks (0 = follow render distance): the display's, else the server's, else [own]. */
     fun displayDistanceChunks(own: Int, policy: DisplayPolicy? = null): Int =
         (policy?.client?.displayDistanceChunks ?: client?.displayDistanceChunks)?.coerceIn(0, MAX_DISTANCE_CHUNKS) ?: own

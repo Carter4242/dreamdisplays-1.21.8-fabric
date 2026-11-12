@@ -139,33 +139,36 @@ class SubtitleOverlayTexture {
         return out.ifEmpty { [""] }.take(MAX_LINES)
     }
 
-    private fun toNativeImage(image: BufferedImage): NativeImage {
-        val w = image.width
-        val h = image.height
-        val native = NativeImage(NativeImage.Format.RGBA, w, h, false)
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val argb = image.getRGB(x, y)
-                //? if >=1.21.5 {
-                native.setPixel(x, y, argb)
-                //?} else
-                /*val a = (argb ushr 24) and 0xFF
-                val r = (argb ushr 16) and 0xFF
-                val gr = (argb ushr 8) and 0xFF
-                val b = argb and 0xFF
-                //? if >=1.19 {
-                native.setPixelRGBA(x, y, FastColor.ABGR32.color(a, r, gr, b))
-                //?}
-                //? if <1.19 {
-                native.setPixelRGBA(x, y, NativeImage.combine(a, b, gr, r))
-                //?}
-                */
+    companion object {
+        /** Copies an AWT [image] into a new [NativeImage] (RGBA) for a [DynamicTexture]. */
+        internal fun toNativeImage(image: BufferedImage): NativeImage =
+            NativeImage(NativeImage.Format.RGBA, image.width, image.height, false).also { writePixels(it, image) }
+
+        /** Copies an AWT [image] into [native], which is at least as large. */
+        internal fun writePixels(native: NativeImage, image: BufferedImage) {
+            val w = image.width
+            val h = image.height
+            for (y in 0 until h) {
+                for (x in 0 until w) {
+                    val argb = image.getRGB(x, y)
+                    //? if >=1.21.5 {
+                    native.setPixel(x, y, argb)
+                    //?} else
+                    /*val a = (argb ushr 24) and 0xFF
+                    val r = (argb ushr 16) and 0xFF
+                    val gr = (argb ushr 8) and 0xFF
+                    val b = argb and 0xFF
+                    //? if >=1.19 {
+                    native.setPixelRGBA(x, y, FastColor.ABGR32.color(a, r, gr, b))
+                    //?}
+                    //? if <1.19 {
+                    native.setPixelRGBA(x, y, NativeImage.combine(a, b, gr, r))
+                    //?}
+                    */
+                }
             }
         }
-        return native
-    }
 
-    companion object {
         private val INSTANCE_ID = AtomicInteger(0)
         private const val FONT_SIZE_PX = 34
         private const val PADDING_X = 18

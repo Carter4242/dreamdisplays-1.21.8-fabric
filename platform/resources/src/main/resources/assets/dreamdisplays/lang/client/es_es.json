@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "cargando",
   "dreamdisplays.viewers.status.buffering": "almacenando en búfer",
   "dreamdisplays.viewers.status.error": "no puede reproducirlo",
-  "dreamdisplays.viewers.status.no_mod": "sin mod, no puede verlo"
+  "dreamdisplays.viewers.status.no_mod": "sin mod, no puede verlo",
+  "dreamdisplays.display.ad_break": "Pausa publicitaria de Twitch",
+  "dreamdisplays.display.ad_break.countdown": "la emisión empieza en %s s",
+  "dreamdisplays.display.ad_break.soon": "la emisión empieza enseguida"
 }

@@ -197,5 +197,8 @@
   "dreamdisplays.viewers.status.loading": "ładowanie",
   "dreamdisplays.viewers.status.buffering": "buforowanie",
   "dreamdisplays.viewers.status.error": "nie może go odtworzyć",
-  "dreamdisplays.viewers.status.no_mod": "brak modyfikacji, nie widzi go"
+  "dreamdisplays.viewers.status.no_mod": "brak modyfikacji, nie widzi go",
+  "dreamdisplays.display.ad_break": "Przerwa reklamowa na Twitchu",
+  "dreamdisplays.display.ad_break.countdown": "transmisja zacznie się za %s s",
+  "dreamdisplays.display.ad_break.soon": "transmisja zaraz się zacznie"
 }
