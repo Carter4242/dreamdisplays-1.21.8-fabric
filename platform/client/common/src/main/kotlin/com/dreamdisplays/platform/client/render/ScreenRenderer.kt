@@ -120,8 +120,9 @@ object ScreenRenderer {
                 drawQuad(replayCard) { pose, builder -> appendQuad(pose, builder, 255, 255, 255, displayScreen.rotation) }
             }
         } else when (val face = displayScreen.face) {
-            DisplayFace.PLAYING -> drawLayer(stack, facing, w, h, lift) {
-                renderGpuTexture(drawQuad, displayScreen)
+            DisplayFace.PLAYING -> {
+                PlaceholderClock.of(displayScreen, face, System.nanoTime())
+                drawLayer(stack, facing, w, h, lift) { renderGpuTexture(drawQuad, displayScreen) }
             }
             DisplayFace.IDLE, DisplayFace.LOADING, DisplayFace.ERROR -> renderPlaceholder(
                 stack,
@@ -131,6 +132,7 @@ object ScreenRenderer {
                 w,
                 h,
                 face,
+                PlaceholderClock.of(displayScreen, face, System.nanoTime()),
                 lift,
                 displayScreen.rotation,
             )
@@ -188,17 +190,17 @@ object ScreenRenderer {
 
     private fun renderPlaceholder(
         stack: PoseStack, drawQuad: QuadRenderer, type: RenderType,
-        facing: DisplayFacing, w: Int, h: Int, face: DisplayFace, lift: Float, rotation: DisplayRotation,
+        facing: DisplayFacing, w: Int, h: Int, face: DisplayFace, clock: PlaceholderClock, lift: Float,
+        rotation: DisplayRotation,
     ) {
-        // Animated while loading, frozen for a display without a video (see PlaceholderLook)
+        // Animated while loading, at rest for a display without a video (see PlaceholderLook, PlaceholderClock)
         val error = face == DisplayFace.ERROR
-        val now = System.nanoTime()
         // Backdrop on the screen plane
         drawLayer(stack, facing, w, h, lift) {
             val (r, g, b) = if (error) {
                 Triple(28, 6, 6)
             } else {
-                val v = PlaceholderLook.backdropShade(face, now)
+                val v = PlaceholderLook.backdropShade(clock.breatheNanos)
                 Triple(v, v, v)
             }
             drawQuad(type) { pose, vb -> appendRect(pose, vb, 0f, 0f, 1f, 1f, r, g, b) }
@@ -216,7 +218,7 @@ object ScreenRenderer {
         }
         // Accent segment (sweeping while loading, clipped at the ends so it grows in and shrinks out), lifted again so
         // it never fights the track.
-        val segment = PlaceholderLook.segment(face, now) ?: return
+        val segment = PlaceholderLook.segment(clock.sweepNanos) ?: return
         val sx0 = segment[0]
         val sx1 = segment[1]
         drawLayer(stack, facing, w, h, lift + OVERLAY_LIFT * 2f) {
