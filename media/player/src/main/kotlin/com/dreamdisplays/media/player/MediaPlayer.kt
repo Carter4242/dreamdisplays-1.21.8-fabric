@@ -611,10 +611,15 @@ class MediaPlayer(
         // Whatever becomes of the switch (superseded by a seek, a pause, no sound in time), the session ends up at the
         // asked speed: applySpeed does nothing when it already plays at it
         val seamless = sessionManager.beginTempoSwitch(ss, target, atNanos) { live ->
-            if (!live && word == speedWord.get()) safeExecute(::applySpeed)
+            if (!live && word == speedWord.get()) applySpeedAtInstant(atNanos, word)
         }
         if (seamless) return
         logger.debug("$debugLabel Speed ${target}x can't switch in the background: restarting at its instant.")
+        applySpeedAtInstant(atNanos, word)
+    }
+
+    /** Restarts at the asked speed at [atNanos] (now, if that has passed), unless a newer speed was asked for meanwhile. */
+    private fun applySpeedAtInstant(atNanos: Long, word: Long) {
         val delayNanos = (atNanos - System.nanoTime()).coerceAtLeast(0L)
         SPEED_SCHEDULER.schedule({ safeExecute { if (word == speedWord.get()) applySpeed() } }, delayNanos, TimeUnit.NANOSECONDS)
     }

@@ -243,14 +243,20 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         }
         if (waitMs < MIN_SCHEDULE_MS) {
             // Too late to wait: play from where the start has got to by now
-            if (speedSwitch) synchronized(lock) { speedSwitchDueNanos = System.nanoTime() }
+            if (speedSwitch) synchronized(lock) {
+                speedSwitchDueNanos = System.nanoTime()
+                speedSwitchRate = rate
+            }
             applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
             return System.nanoTime()
         }
         if (!speedSwitch) applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
         val waitNanos = (waitMs * 1_000_000.0).toLong()
         val dueNanos = System.nanoTime() + waitNanos
-        if (speedSwitch) synchronized(lock) { speedSwitchDueNanos = dueNanos }
+        if (speedSwitch) synchronized(lock) {
+            speedSwitchDueNanos = dueNanos
+            speedSwitchRate = rate
+        }
         scheduledStart = START_SCHEDULER.schedule({
             // The player is told on the client thread like every other packet: at most a frame later. It keeps the
             // packet's own stamp: a pause or seek the server stamped before the start instant, arriving after this
@@ -266,11 +272,14 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     }
 
     /**
-     * A speed change switched without a stop is due at this instant (0 = none pending). From it until the player plays
-     * at the timeline's new speed (its new sound goes live a little later, or restarts), drift is not acted on: it is
-     * the switch still going on, not the player being off.
+     * A speed change switched without a stop is due at this instant (0 = none pending). From its packet until the player
+     * plays at the new speed (its new sound goes live a little after the instant, or restarts), drift is not acted on:
+     * it is the switch still going on, not the player being off, and a seek meanwhile would cancel the switch.
      */
     private var speedSwitchDueNanos = 0L
+
+    /** The speed that switch goes to: the player has switched once it plays at it. */
+    private var speedSwitchRate = 1.0
 
     /**
      * When the player took up the new speed (0 = not just now). Once its drift has settled, a player off by more than a
@@ -647,8 +656,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
      * the whole tick.
      */
     private fun speedSwitchSettling(now: Long, drift: Long, target: Long, settings: SyncSettings): Boolean {
-        if (speedSwitchDueNanos != 0L && now >= speedSwitchDueNanos) {
-            val live = abs(screen.playerSpeed - estimator.rate) < 1e-6
+        // From the packet on (a seek before the instant would also restart the stream it is opening), until it is live
+        if (speedSwitchDueNanos != 0L) {
+            // Against the new speed itself, not the estimate's: the estimate takes it up when the client thread gets
+            // to it, which a game stall can hold back past the instant
+            val live = abs(screen.playerSpeed - speedSwitchRate) < 1e-6 && abs(estimator.rate - speedSwitchRate) < 1e-6
             if (!live && now - speedSwitchDueNanos < SWITCH_GRACE_NANOS) {
                 controller.resetMeasurement()
                 return true
