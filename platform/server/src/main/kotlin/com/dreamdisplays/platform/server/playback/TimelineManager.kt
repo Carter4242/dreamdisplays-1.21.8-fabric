@@ -639,9 +639,10 @@ object TimelineManager {
         val pinners = pinReceivers(display.id)
         if (!DisplayFollowers.mayReportDuration(senderId, nearby, extra, pinners)) return
         // Report cooldowns start afresh with each video ([VideoDurations])
+        // Who watches it now decides observed ends: a pin whose client no longer shows the display is not among them
         val mediaMs = durations.report(
             display.id, display.url, senderId, durationMs, QueueManager.playingEntryDurationMs(display), transport.nowMs(),
-            observedEnd, (nearby + extra + pinners).toSet(),
+            observedEnd, audienceOf(display).toSet() + senderId,
         ) ?: return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L
@@ -804,7 +805,7 @@ object TimelineManager {
         for ((displayId, timeline) in timelines) {
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
-            val present = (transport.nearbyPlayerIds(display) + extraReceivers(displayId) + pinReceivers(displayId)).toSet()
+            val present = audienceOf(display).toSet()
             val mediaMs = durations.recheck(displayId, display.url, QueueManager.playingEntryDurationMs(display), present) ?: continue
             val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
             display.duration = scheduledMs * 1_000_000L
