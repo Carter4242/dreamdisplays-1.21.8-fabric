@@ -28,12 +28,6 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ShareAudio
-import com.dreamdisplays.api.media.source.CustomMediaUrls
-import com.dreamdisplays.api.media.source.YouTubeUrls
-import com.dreamdisplays.util.DreamCoroutines
-import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
-import com.dreamdisplays.media.source.youtube.YouTubePlaylists
-import kotlinx.coroutines.launch
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.popout.PopoutManager
@@ -781,75 +775,6 @@ class DisplayMenu private constructor(
         )
     }
 
-    /**
-     * Queues the link typed in the search box (resolving a YouTube title first) instead of playing it. A playlist link
-     * queues the playlist: all of it, or for a `watch?v=X&list=Y` link X and everything after it.
-     */
-    private fun queueFromSearch() {
-        val ds = displayScreen
-        val lang = ds.lang ?: ""
-        YouTubePlaylists.parseLink(suggestions.searchText)?.let { return queuePlaylist(it, lang) }
-        val url = linkOf(suggestions.searchText) ?: return
-        val videoId = YouTubeUrls.extractVideoId(url)
-        if (videoId == null) {
-            DisplayQueues.add(ds.uuid, url, lang, CustomMediaUrls.displayName(url), 0L, "")
-            return
-        }
-        DreamCoroutines.clientIo.launch {
-            val meta = runCatching { DreamServices.registry.getOrNull(MediaServices.SEARCH)?.metadata(videoId) }.getOrNull()
-            Minecraft.getInstance().execute {
-                if (meta != null) DisplayQueues.add(ds.uuid, meta, lang)
-                else DisplayQueues.add(ds.uuid, YouTubeUrls.watchUrl(videoId), lang, "", 0L, "")
-            }
-        }
-    }
-
-    /** Lists [link]'s playlist off-thread and queues as many of its videos as fit, in order, in one batch. */
-    private fun queuePlaylist(link: YouTubePlaylists.Link, lang: String) {
-        val ds = displayScreen
-        val room = DisplayQueues.room(ds.uuid, exempt = ds.owner || ds.isAdmin, atMost = MAX_PLAYLIST_BATCH)
-        if (room <= 0) return DisplayQueues.notifyLocal(ClientMessage.QUEUE_FULL.component())
-        // A second "+" while the listing loads (it takes seconds) would queue the whole playlist twice
-        val loadingKey = "${ds.uuid}/${link.listId}"
-        if (!playlistsLoading.add(loadingKey)) return
-        DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_LOADING.component().withStyle(ChatFormatting.GRAY))
-        DreamCoroutines.clientIo.launch {
-            val listing = runCatching { YouTubePlaylists.fetch(link, room) }
-                .onFailure { org.slf4j.LoggerFactory.getLogger(DisplayMenu::class.java).warn("Playlist {}: {}", link.listId, it.message) }
-                .getOrNull()
-            Minecraft.getInstance().execute {
-                playlistsLoading.remove(loadingKey)
-                if (listing == null || listing.entries.isEmpty()) {
-                    DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_FAILED.component().withStyle(ChatFormatting.RED))
-                    return@execute
-                }
-                DisplayQueues.addBatch(ds.uuid, listing.entries.map { entry ->
-                    QueueItemWire(
-                        url = YouTubeUrls.watchUrl(entry.videoId), lang = lang, title = entry.title.take(100),
-                        durationMs = entry.durationSec * 1_000L,
-                    )
-                })
-                listing.entries.forEach { VideoTitleCache.put(it.videoId, it.title) }
-                val title = listing.title.ifBlank { link.listId }
-                DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_ADDED.component(listing.entries.size, title))
-                if (listing.more) DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_MORE.component().withStyle(ChatFormatting.GRAY))
-                if (listing.unavailable > 0) {
-                    DisplayQueues.notifyLocal(
-                        ClientMessage.QUEUE_PLAYLIST_UNAVAILABLE.component(listing.unavailable).withStyle(ChatFormatting.GRAY),
-                    )
-                }
-            }
-        }
-    }
-
-    /** The playable link in [text] (a URL or a YouTube id / link), or null for a search query. */
-    private fun linkOf(text: String): String? {
-        val q = text.trim()
-        if (q.isEmpty() || q.any { it.isWhitespace() }) return null
-        YouTubeUrls.extractVideoId(q)?.let { return YouTubeUrls.watchUrl(it) }
-        return q.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
-    }
-
     private fun resyncQualitySlider() {
         val ds = displayScreen
         val qualityList = ds.qualityList
@@ -1121,14 +1046,8 @@ class DisplayMenu private constructor(
         private const val CLEAR_CONFIRM_MS = 3_000L
         private const val QUEUE_FLASH_MS = 700L
 
-        /** Most playlist videos one "+" queues; the server takes at most this many per batch as well. */
-        private const val MAX_PLAYLIST_BATCH = 100
-
         /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
         private var queueTabOpen = false
-
-        /** Playlists being listed for a display ("<display>/<list id>"); render thread only. */
-        private val playlistsLoading = mutableSetOf<String>()
         private const val MIN_CONTENT_W = 640
         private const val MIN_CONTENT_H = 410
 
