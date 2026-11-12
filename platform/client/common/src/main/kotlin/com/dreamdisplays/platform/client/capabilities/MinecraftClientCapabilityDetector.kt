@@ -85,7 +85,7 @@ object MinecraftClientCapabilityDetector : ClientCapabilityDetector {
         ClientFeature.MEDIA_GEN, ClientFeature.CLEAR_VIDEO, ClientFeature.REPORT_REQUEST, ClientFeature.SHARE_HEARTBEAT,
         ClientFeature.SHARE_NONCE, ClientFeature.SHARE_LIMITS, ClientFeature.READINESS_UNHOLDABLE,
         ClientFeature.SERVER_GREETING, ClientFeature.POLICY_LEVERS, ClientFeature.SCHEDULED_SPEED,
-        ClientFeature.REGION_FADE, ClientFeature.ACTIVITY_LOG, ClientFeature.VIEWER_LIST,
+        ClientFeature.REGION_FADE, ClientFeature.ACTIVITY_LOG, ClientFeature.VIEWER_LIST, ClientFeature.PUSHED_DEFAULTS,
     ].map { it.wire }
 
     private fun safeInt(block: () -> Int): Int = runCatching(block).getOrDefault(0)

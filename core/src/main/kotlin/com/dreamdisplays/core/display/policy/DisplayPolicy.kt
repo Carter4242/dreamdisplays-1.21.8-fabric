@@ -103,6 +103,9 @@ data class DisplayPolicy(
             singerGain = singerGain ?: base?.singerGain,
         )
 
+        /** A player's own [volume] as this display plays it: limited to [maxVolume] when that is set. */
+        fun capVolume(volume: Float): Float = maxVolume?.let { minOf(volume, it.toFloat().coerceIn(0f, 2f)) } ?: volume
+
         /** [gain] clamped to 0..2; 1 when unset. */
         val resolvedGain: Double get() = gain?.takeIf { !it.isNaN() }?.coerceIn(0.0, 2.0) ?: 1.0
 

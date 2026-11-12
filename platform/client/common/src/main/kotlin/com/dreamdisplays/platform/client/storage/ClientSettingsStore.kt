@@ -146,6 +146,15 @@ object ClientSettingsStore : ClientSettingsStorage {
         save()
     }
 
+    /** Records that the pushed values at [revisions] (setting name to revision) were applied to this display. */
+    fun markPushedApplied(displayUuid: UUID, revisions: Map<String, Long>) {
+        if (revisions.isEmpty()) return
+        val s = getSettings(displayUuid)
+        // A fresh map: the writer thread may be serializing the old one
+        s.pushedRevisions = (s.pushedRevisions + revisions).toMutableMap()
+        save()
+    }
+
     override fun remove(displayUuid: UUID): Boolean {
         val removed = settings.remove(displayUuid) != null
         if (removed) save()

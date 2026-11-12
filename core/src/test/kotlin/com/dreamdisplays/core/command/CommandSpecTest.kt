@@ -81,7 +81,7 @@ class CommandSpecTest {
             "karaoke.join" to Perm.KARAOKE_JOIN, "karaoke.line.list" to Perm.KARAOKE_JOIN, "karaoke.leave" to Perm.KARAOKE_JOIN,
             "karaoke.line.add" to Perm.KARAOKE_MANAGE, "karaoke.stop" to Perm.KARAOKE_MANAGE, "prepare.start" to Perm.PREPARE,
             "fullscreen.stop" to Perm.FULLSCREEN, "share.stop" to Perm.SHARE_MANAGE, "config" to Perm.ADMIN_CONFIG,
-            "reload" to Perm.ADMIN_CONFIG, "policy" to Perm.ADMIN_POLICY, "diag.errors" to Perm.DIAG,
+            "reload" to Perm.ADMIN_CONFIG, "policy" to Perm.ADMIN_POLICY, "defaults" to Perm.ADMIN_POLICY, "diag.errors" to Perm.DIAG,
             "on" to Perm.VIEWING_TOGGLE, "off" to Perm.VIEWING_TOGGLE,
         )
         expected.forEach { (id, perm) -> assertEquals(perm, DisplayCommands.byId(id).permission, id) }

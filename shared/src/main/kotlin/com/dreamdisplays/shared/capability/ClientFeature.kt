@@ -79,7 +79,13 @@ enum class ClientFeature(override val wire: String) : WireEnum {
     ACTIVITY_LOG("activity_log"),
 
     /** Shows a display's Viewers tab: asks with `MenuPanelRequest.viewers` and reads `ViewersState`. Without it none is sent. */
-    VIEWER_LIST("viewer_list");
+    VIEWER_LIST("viewer_list"),
+
+    /**
+     * Applies the values `/display defaults` pushes in a display's custom data (`dd:defaults`) to the player's own
+     * settings for it, once per push. Without it the player's own settings stay as they are.
+     */
+    PUSHED_DEFAULTS("pushed_defaults");
 
     companion object {
         /** Decodes a feature token, or returns `null` when unknown. */

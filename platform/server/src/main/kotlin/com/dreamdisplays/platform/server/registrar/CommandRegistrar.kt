@@ -151,6 +151,7 @@ object CommandRegistrar {
         "config" to h { s, c -> ConfigCommand.execute(s, c["key"], c["value"]) },
         "policy" to h { s, c -> PolicyCommand.execute(s, c.display, c["key"], c["value"]) },
         "policy.player" to h { s, c -> PolicyCommand.executePlayer(s, c["player"]!!, c["key"], c["value"]) },
+        "defaults" to h { s, c -> DefaultsCommand.execute(s, c.display, c["setting"], c["value"]) },
         "reload" to h { s, _ -> ReloadCommand().execute(s, emptyArray()) },
 
         "diag.clients" to h { s, _ ->
@@ -233,7 +234,12 @@ object CommandRegistrar {
                 }
                     .map { Suggestion(it) }.startingWith(typed)
 
+                "setting" -> DefaultsCommand.settingSuggestions().map { Suggestion(it) }.startingWith(typed)
                 "value" -> {
+                    if (r.def.id == "defaults") {
+                        val setting = values["setting"] ?: return emptyList()
+                        return DefaultsCommand.valueSuggestions(setting).map { Suggestion(it) }.startingWith(typed)
+                    }
                     val key = values["key"] ?: return emptyList()
                     (if (r.def.id == "config") ConfigCommand.valueSuggestions(key) else PolicyCommand.valueSuggestions(key))
                         .map { Suggestion(it) }.startingWith(typed)

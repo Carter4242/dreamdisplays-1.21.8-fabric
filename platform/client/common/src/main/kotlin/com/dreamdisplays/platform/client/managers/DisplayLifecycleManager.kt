@@ -24,6 +24,7 @@ import com.dreamdisplays.api.display.geometry.DisplayGeometry
 import com.dreamdisplays.platform.client.displays.PlacedDisplays
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.displays.acceptedCustomData
+import com.dreamdisplays.platform.client.displays.PushedDefaultsClient
 import com.dreamdisplays.platform.client.storage.ClientSettingsStore
 import com.dreamdisplays.util.FacingUtil
 import net.minecraft.client.Minecraft
@@ -71,6 +72,8 @@ object DisplayLifecycleManager {
         lastInfo[packet.id] = packet
         // First sight of a display seeds the player's volume for it from the server's audio.startVolume
         ClientSettingsStore.getSettings(packet.id, DisplayScreen.defaultVolume(policy))
+        // Then whatever an admin pushed for it since this client last applied a push (`/display defaults`)
+        PushedDefaultsClient.apply(packet.id, acceptedCustomData(packet))
 
         DisplayRegistry.screens[packet.id]?.let {
             // A warm-parked display that gets another video is retired and taken through the path below like an

@@ -163,6 +163,7 @@ object PolicyCommand {
         ServerMessage.POLICY_HEADER.sendTo(sender, display.shortLabel)
         perDisplay.forEach { showOne(sender, display, it, header = false) }
         (display as? PaperDisplayData)?.let { RegionStatus.send(sender, it) }
+        DefaultsCommand.show(sender, display)
     }
 
     private fun showOne(sender: CommandSender, display: DisplayData, path: PolicyPaths.Path, header: Boolean = true) {

@@ -62,6 +62,12 @@ data class ClientDisplaySettings(
      * default tier.
      */
     var acoustics: String? = null,
+
+    /**
+     * Per setting (`volume`, `quality`, ...), the revision of the server's last pushed value for this display that was
+     * applied here (`/display defaults`): a push applies once, then the viewer's own changes stand.
+     */
+    var pushedRevisions: MutableMap<String, Long> = mutableMapOf(),
 ) {
 
     companion object {

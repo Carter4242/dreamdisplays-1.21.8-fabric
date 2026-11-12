@@ -109,6 +109,10 @@ class DisplayCommandTreeTest {
         ranAs("config", "config")
         ranAs("config live.relay_play_url rtmp://h:1/live/{id}", "config", "key" to "live.relay_play_url", "value" to "rtmp://h:1/live/{id}")
         ranAs("policy lobby reset", "policy", "display" to "lobby", "key" to "reset")
+        ranAs("defaults lobby", "defaults", "display" to "lobby")
+        ranAs("defaults lobby volume 100%", "defaults", "display" to "lobby", "setting" to "volume", "value" to "100%")
+        ranAs("defaults lobby clear", "defaults", "display" to "lobby", "setting" to "clear")
+        ranAs("defaults lobby clear quality", "defaults", "display" to "lobby", "setting" to "clear", "value" to "quality")
         ranAs(
             "policy player Steve client.gpu_yuv false", "policy.player",
             "player" to "Steve", "key" to "client.gpu_yuv", "value" to "false",
@@ -188,7 +192,7 @@ class DisplayCommandTreeTest {
                 " prepare: start  list  cancel",
                 " fullscreen: start  list  stop",
                 " share: stop  list",
-                " admin: config  policy  reload",
+                " admin: config  policy  defaults  reload",
                 " diag: clients  env  loglevel  errors",
                 " viewing: on  off",
                 Lang.en.getValue("cmd.help.target").replace("&7", ""),

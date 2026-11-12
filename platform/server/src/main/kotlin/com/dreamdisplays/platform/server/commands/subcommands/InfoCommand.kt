@@ -86,6 +86,8 @@ class InfoCommand : SubCommand {
             )
         )
         RegionStatus.send(player, data)
+        // What `/display defaults` pushes on it, when anything (for those who may push)
+        if (PolicyCommand.allowed(player)) DefaultsCommand.show(player, data)
         data.scheduledStart?.let { at ->
             val localSecond = ScheduleTimeUtil.localSecondOfDay(at, ScheduleTimeUtil.offsetMinutesOf(player.uniqueId))
             val actionKey =

@@ -138,6 +138,11 @@ object DisplayCommands {
             "policy.player", "policy player", Area.ADMIN, Perm.ADMIN_POLICY,
             req("player", KNOWN_PLAYER), opt("key", WORD, "key|reset"), opt("value", WORD, "value|reset"),
         )
+        cmd(
+            "defaults", "defaults", Area.ADMIN, Perm.ADMIN_POLICY,
+            opt("display", DISPLAY), opt("setting", WORD, "setting|clear"), opt("value", WORD, "value|setting"),
+            usage = "<display> [<setting> <value> | clear [setting]]",
+        )
         cmd("reload", "reload", Area.ADMIN, Perm.ADMIN_CONFIG)
 
         cmd("diag.clients", "diag clients", Area.DIAG, Perm.DIAG)
@@ -155,6 +160,9 @@ object DisplayCommands {
 
     /** The word in `/display video <display> <url>`'s url slot that clears the display's video instead. */
     const val CLEAR_VIDEO = "clear"
+
+    /** The word in `/display defaults <display>`'s setting slot that stops pushing (one setting, or all). */
+    const val CLEAR_DEFAULTS = "clear"
 
     /** Words a display name may not be, because they mean something else where a display goes. */
     val RESERVED_NAMES: Set<String> = setOf("this", "all", "reset", "id", "url")

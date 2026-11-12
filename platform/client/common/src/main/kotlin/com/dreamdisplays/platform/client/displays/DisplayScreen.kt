@@ -1346,7 +1346,7 @@ class DisplayScreen(
 
     /** [volume] limited to the server's `audio.maxVolume` for this display, when set. */
     private fun capVolume(volume: Float): Float =
-        policy.audio?.maxVolume?.let { minOf(volume, it.toFloat().coerceIn(0f, 2f)) } ?: volume
+        policy.audio?.capVolume(volume) ?: volume
 
     /** Distance at which this display's sound fades out: the server's `audio.radiusBlocks`, else the client's. */
     private fun audioRadius(): Double =
