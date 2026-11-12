@@ -51,10 +51,10 @@ class PlaceholderClockTest {
     fun loadingAnimatesFromTheMiddleWithElapsedTime() {
         val t0 = 777_000_000L
         for (elapsed in listOf(10_000_000L, 400_000_000L, 1_299_000_000L, 2_500_000_000L, 9_000_000_000L)) {
-            // a frame every 0.1 s keeps the clock fed
+            // a frame every 40 ms (25 fps) keeps the clock at real time
             var t = t0
             val fresh = PlaceholderClock().also { it.advance(DisplayFace.IDLE, t0 - frame); it.advance(DisplayFace.LOADING, t0) }
-            while (t < t0 + elapsed) { t = minOf(t + 100_000_000L, t0 + elapsed); fresh.advance(DisplayFace.LOADING, t) }
+            while (t < t0 + elapsed) { t = minOf(t + 40_000_000L, t0 + elapsed); fresh.advance(DisplayFace.LOADING, t) }
             assertEquals(elapsed % PlaceholderLook.SWEEP_PERIOD_NANOS, fresh.sweepNanos)
             assertEquals(elapsed % PlaceholderLook.BREATHE_PERIOD_NANOS, fresh.breatheNanos)
         }
@@ -119,6 +119,17 @@ class PlaceholderClockTest {
         val (_, t) = run(clock, DisplayFace.LOADING, 0L, 40)
         clock.advance(DisplayFace.IDLE, t + 5_000_000_000L)
         assertEquals(restLook, look(clock))
+    }
+
+    @Test
+    fun aHitchSlowsTheBarInsteadOfSkipping() {
+        val clock = PlaceholderClock()
+        clock.advance(DisplayFace.IDLE, 0L)
+        clock.advance(DisplayFace.LOADING, frame)
+        assertEquals(restLook, look(clock))
+        clock.advance(DisplayFace.LOADING, frame + 400_000_000L) // a 400 ms frame right after the video was set
+        assertEquals(PlaceholderClock.MAX_STEP_NANOS, clock.sweepNanos)
+        assertEquals(PlaceholderClock.MAX_STEP_NANOS, clock.breatheNanos)
     }
 
     @Test

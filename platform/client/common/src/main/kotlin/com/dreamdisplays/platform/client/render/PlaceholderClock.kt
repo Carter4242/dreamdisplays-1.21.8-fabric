@@ -11,7 +11,8 @@ import java.util.WeakHashMap
  * the first loading frame is the frozen bar. A display without a video lets each motion run on to its next rest (the
  * segment back to the middle, the breath to its middle shade) and stops there, so a cleared display settles into the
  * frozen bar instead of snapping to it. An error or a picture hides the bar and puts it back at rest, as does a gap of
- * more than [STALE_GAP_NANOS] between frames (the display was not drawn).
+ * more than [STALE_GAP_NANOS] between frames (the display was not drawn). One frame moves it by at most
+ * [MAX_STEP_NANOS], so a hitch (setting a video often costs a frame or two) slows the bar instead of making it skip.
  */
 internal class PlaceholderClock {
     /** Sweep animation time, within one sweep period. */
@@ -36,6 +37,7 @@ internal class PlaceholderClock {
             face == DisplayFace.LOADING && previous != DisplayFace.LOADING -> 0L
             else -> nanos - lastNanos
         }
+        val step = dt.coerceAtMost(MAX_STEP_NANOS)
         lastFace = face
         lastNanos = nanos
         if (face == DisplayFace.PLAYING || face == DisplayFace.ERROR || dt !in 0..STALE_GAP_NANOS) {
@@ -44,11 +46,11 @@ internal class PlaceholderClock {
             return
         }
         if (face == DisplayFace.LOADING) {
-            sweepNanos = (sweepNanos + dt) % PlaceholderLook.SWEEP_PERIOD_NANOS
-            breatheNanos = (breatheNanos + dt) % PlaceholderLook.BREATHE_PERIOD_NANOS
+            sweepNanos = (sweepNanos + step) % PlaceholderLook.SWEEP_PERIOD_NANOS
+            breatheNanos = (breatheNanos + step) % PlaceholderLook.BREATHE_PERIOD_NANOS
         } else {
-            sweepNanos = settle(sweepNanos, dt, PlaceholderLook.SWEEP_REST_NANOS) % PlaceholderLook.SWEEP_PERIOD_NANOS
-            breatheNanos = settle(breatheNanos, dt, PlaceholderLook.BREATHE_REST_NANOS) % PlaceholderLook.BREATHE_PERIOD_NANOS
+            sweepNanos = settle(sweepNanos, step, PlaceholderLook.SWEEP_REST_NANOS) % PlaceholderLook.SWEEP_PERIOD_NANOS
+            breatheNanos = settle(breatheNanos, step, PlaceholderLook.BREATHE_REST_NANOS) % PlaceholderLook.BREATHE_PERIOD_NANOS
         }
     }
 
@@ -59,6 +61,9 @@ internal class PlaceholderClock {
 
     companion object {
         const val STALE_GAP_NANOS = 1_000_000_000L
+
+        /** Most animation time one frame adds: real time at 20 fps and above. */
+        const val MAX_STEP_NANOS = 50_000_000L
 
         /** [t] advanced by [dt] but not past the next multiple of [rest]; a time already at rest stays. */
         fun settle(t: Long, dt: Long, rest: Long): Long {
