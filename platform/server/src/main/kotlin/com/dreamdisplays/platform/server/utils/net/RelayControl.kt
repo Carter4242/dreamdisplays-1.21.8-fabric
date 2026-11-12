@@ -2,11 +2,16 @@ package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.core.share.RelayLeaseSync
 import com.dreamdisplays.platform.server.PaperServer
-import com.dreamdisplays.util.net.DreamHttpClient
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.jspecify.annotations.NullMarked
 import org.slf4j.LoggerFactory
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.time.Duration
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -27,6 +32,7 @@ object RelayControl {
     private val lock = Any()
     private var worker: ScheduledExecutorService? = null
     private var sync: RelayLeaseSync? = null
+    private var http: RelayHttp? = null
 
     @Volatile
     private var lastPushFailed = false
@@ -54,9 +60,9 @@ object RelayControl {
 
     /**
      * Keeps the HTTPS connection to the lease service open while nothing is leased but someone online may share: the
-     * current set (empty) is pushed again every [WARM_EVERY_MS], inside the client's and the service's idle limits
-     * (5 minutes). A share's start waits for its lease, and a cold connection added a TCP and TLS handshake to it
-     * (measured: 0.46 s to the relay, against 0.06 s warm).
+     * current set (empty) is pushed again every [WARM_EVERY_MS], inside the client's idle limit (the JDK client closes
+     * a connection idle for 30 s) and the service's (5 minutes). A share's start waits for its lease, and a cold
+     * connection added a TCP and TLS handshake to it (measured: 0.46 s to the relay, against 0.06 s warm).
      */
     fun keepWarm() {
         if (!enabled || System.currentTimeMillis() - lastSentMs < WARM_EVERY_MS) return
@@ -65,32 +71,37 @@ object RelayControl {
         runCatching { w.execute { runCatching { s.warm() } } }
     }
 
-    private const val WARM_EVERY_MS = 4L * 60_000L
+    private const val WARM_EVERY_MS = 25_000L
 
     /**
      * Plugin disable, after every share ended: pushes the (now empty) set once more, so a reload or stop cuts the
-     * streams at once rather than at the lease's lapse, and stops the push thread. The push runs on the push thread
-     * (after any push still in flight, so they stay in order) and is waited for at most [SHUTDOWN_WAIT_MS]: an
-     * unreachable service never holds the calling (main) thread for a full HTTP timeout; it lets the set lapse instead.
+     * streams at once rather than at the lease's lapse, and stops the push thread and the HTTP client's threads. The
+     * push runs on the push thread (after any push still in flight, so they stay in order) and is waited for at most
+     * [SHUTDOWN_WAIT_MS]: an unreachable service never holds the calling (main) thread for a full HTTP timeout; it lets
+     * the set lapse instead.
      */
     fun shutdown() {
-        val (s, w) = synchronized(lock) {
-            val pair = sync to worker
+        val (s, w, h) = synchronized(lock) {
+            val taken = Triple(sync, worker, http)
             sync = null
             worker = null
-            pair
+            http = null
+            taken
         }
-        if (w == null) return
-        if (s != null && s.needsRenewal()) runCatching { w.execute { runCatching { s.push() } } }
-        w.shutdown()
-        runCatching { w.awaitTermination(SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS) }
-        w.shutdownNow()
+        if (w != null) {
+            if (s != null && s.needsRenewal()) runCatching { w.execute { runCatching { s.push() } } }
+            w.shutdown()
+            runCatching { w.awaitTermination(SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS) }
+            w.shutdownNow()
+        }
+        h?.close()
     }
 
     private const val SHUTDOWN_WAIT_MS = 1_500L
 
     private fun started(): Pair<RelayLeaseSync, ScheduledExecutorService> = synchronized(lock) {
-        val s = sync ?: RelayLeaseSync(RelayLeaseSync.newEpoch(), send = ::post).also { sync = it }
+        val h = http ?: RelayHttp().also { http = it }
+        val s = sync ?: RelayLeaseSync(RelayLeaseSync.newEpoch(), send = { body -> post(h, body) }).also { sync = it }
         val w = worker ?: Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "DreamDisplays relay leases").apply { isDaemon = true }
         }.also {
@@ -114,37 +125,71 @@ object RelayControl {
         if (s.needsRenewal()) runCatching { s.push() }
     }
 
-    private fun post(body: String): Boolean {
+    private fun post(http: RelayHttp, body: String): Boolean {
         lastSentMs = System.currentTimeMillis()
         val live = PaperServer.config.settings.live
-        var problem: String? = null
-        val ok = runCatching {
-            DreamHttpClient.execute(
-                live.relay_control_url,
-                DreamHttpClient.RequestOptions(
-                    method = "PUT",
-                    headers = DreamHttpClient.headersOf(
-                        "Authorization" to "Bearer ${live.relay_control_token}",
-                        "User-Agent" to "DreamDisplays relay leases",
-                    ),
-                    body = body.toByteArray(StandardCharsets.UTF_8),
-                    contentType = "application/json",
-                    connectTimeoutMs = 3_000L,
-                    readTimeoutMs = 4_000L,
-                    writeTimeoutMs = 4_000L,
-                    callTimeoutMs = 6_000L,
-                    followRedirects = false,
-                ),
-            ).also { if (!it.isSuccessful) problem = "it answered ${it.code} ${it.message}" }.isSuccessful
-        }.getOrElse {
+        val problem = try {
+            http.put(live.relay_control_url, live.relay_control_token, body)
+        } catch (e: Exception) {
             // The body carries publish keys: never log it (the URL and the exception carry none)
-            problem = it.toString()
-            false
+            e.toString()
         }
+        val ok = problem == null
         // Once per outage, not every renewal
         if (!ok && !lastPushFailed) logger.warn("Could not update the relay lease service ({}): new shares are refused until it answers.", problem)
         if (ok && lastPushFailed) logger.info("The relay lease service answers again.")
         lastPushFailed = !ok
         return ok
+    }
+}
+
+/**
+ * The lease service's HTTPS client. The JDK's, not `DreamHttpClient`'s `OkHttp`: `OkHttp` runs its timeouts on
+ * `Okio`'s watchdog thread, which nothing can stop and which outlives the last request by a minute, so a plugin
+ * unloaded within a minute of a push (during or right after a share, or after a warm-up) left that thread holding its
+ * classes. This client's threads end in [close].
+ */
+@PaperOnly
+@NullMarked
+private class RelayHttp {
+    private val executor: ExecutorService = Executors.newCachedThreadPool { r ->
+        Thread(r, "DreamDisplays relay HTTP").apply { isDaemon = true }
+    }
+    private val client: HttpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .executor(executor)
+        .build()
+
+    /** PUTs [body] to [url]: null when the service took it (2xx), otherwise what it answered. Throws when unreachable. */
+    fun put(url: String, token: String, body: String): String? {
+        val request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofMillis(ANSWER_TIMEOUT_MS))
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", "DreamDisplays relay leases")
+            .header("Content-Type", "application/json")
+            .PUT(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+            .build()
+        val code = client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode()
+        return if (code in 200..299) null else "it answered $code"
+    }
+
+    /** Stops the client's threads, cutting a push still in flight. */
+    fun close() {
+        // shutdownNow and awaitTermination came in Java 21; on older Java the client's thread ends once it is unreachable
+        runCatching { HttpClient::class.java.getMethod("shutdownNow").invoke(client) }
+        runCatching {
+            HttpClient::class.java.getMethod("awaitTermination", Duration::class.java)
+                .invoke(client, Duration.ofMillis(CLOSE_WAIT_MS))
+        }
+        executor.shutdownNow()
+    }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_MS = 3_000L
+
+        /** Until the service's answer starts; the JSON pushed is tiny. */
+        const val ANSWER_TIMEOUT_MS = 6_000L
+        const val CLOSE_WAIT_MS = 500L
     }
 }

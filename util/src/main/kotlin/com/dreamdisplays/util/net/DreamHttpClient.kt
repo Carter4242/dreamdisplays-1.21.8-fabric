@@ -61,6 +61,16 @@ object DreamHttpClient {
         .build()
 
     /**
+     * Closes the pooled connections and stops the dispatcher's threads (every client here shares them): a server
+     * plugin's disable, so nothing keeps its classes after an unload. Requests made later still work; they connect
+     * again. `Okio`'s timeout watchdog thread is not ours to stop: it ends a minute after the last request.
+     */
+    fun shutdown() {
+        baseClient.connectionPool.evictAll()
+        baseClient.dispatcher.executorService.shutdown()
+    }
+
+    /**
      * Decides whether a request may talk to [InetAddress]es [host] resolved to; throws an [IOException] to refuse.
      * Checked twice: on the name's lookup (so nothing is dialed), and on the address each connection really reached
      * (redirect hops, IP-literal hosts, which skip the lookup, and a name that re-resolves between check and use).

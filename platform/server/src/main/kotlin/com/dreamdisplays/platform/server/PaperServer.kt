@@ -180,6 +180,8 @@ class PaperServer : JavaPlugin() {
         disableStep("save PiP pins") { PipPinManager.flush() }
         disableStep("stop the client error log") { com.dreamdisplays.platform.server.policy.ClientErrorReports.shutdown() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }
+        // Its pooled connections and threads would hold this plugin's classes after an unload
+        disableStep("close HTTP connections") { com.dreamdisplays.util.net.DreamHttpClient.shutdown() }
         disableStep("stop metrics") { metrics?.shutdown(); metrics = null }
         disableStep("close storage") { storage.disconnect() }
         disableStep("remove the log filter") { com.dreamdisplays.platform.server.utils.SecretLogFilter.uninstall() }
