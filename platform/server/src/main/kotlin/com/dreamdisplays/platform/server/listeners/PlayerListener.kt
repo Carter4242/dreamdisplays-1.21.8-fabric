@@ -94,6 +94,7 @@ class PlayerListener : Listener {
         // Each step on its own: one failing must not leave the rest of the player's state behind
         quitStep("version") { PlayerManager.removeVersion(event.player) }
         quitStep("handshake") { V2PlayerTracker.clear(id) }
+        quitStep("permission watch") { com.dreamdisplays.platform.server.utils.net.PaperHelloResync.onQuit(id) }
         quitStep("screen share") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onPlayerQuit(id) }
         quitStep("fullscreen") { FullscreenBroadcastManager.onPlayerQuit(id) }
         quitStep("readiness") { ReadinessTracker.forgetPlayer(id) }
@@ -159,6 +160,7 @@ object VanillaPlayerListener {
     fun onLeave(playerId: UUID) {
         PlayerManager.removePlayer(playerId)
         V2PlayerTracker.clear(playerId)
+        com.dreamdisplays.platform.server.utils.net.VanillaHelloResync.onLeave(playerId)
         FullscreenBroadcastManager.onPlayerQuit(playerId)
         ReadinessTracker.forgetPlayer(playerId)
         SelectionManager.resetSelection(playerId)

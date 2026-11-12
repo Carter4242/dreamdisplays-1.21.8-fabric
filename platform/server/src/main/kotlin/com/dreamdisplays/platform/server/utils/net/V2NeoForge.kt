@@ -1,17 +1,14 @@
 package com.dreamdisplays.platform.server.utils.net
 
-import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenPrepareState
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.shared.protocol.PacketDirection
-import com.dreamdisplays.shared.protocol.ProtocolVersion
 import com.dreamdisplays.core.protocol.common.PacketRegistry
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.net.V2Payload
-import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
@@ -123,18 +120,7 @@ object NeoForgeV2Networking {
     private fun handleHello(player: ServerPlayer, server: MinecraftServer, hello: ClientHello) {
         if (V2PlayerTracker.isV2(player.uuid)) return
         V2PlayerTracker.markV2(player.uuid, hello)
-        send(
-            [player],
-            ServerHello(
-                protocolVersion = ProtocolVersion.CURRENT,
-                isPremium = VanillaDisplayActions.isPremium(player),
-                isAdmin = VanillaDisplayActions.isAdmin(player),
-                isReportingEnabled = VanillaServerState.config.settings.webhookUrl.isNotEmpty(),
-                allowedFeatures = ServerFeature.playbackFeatureWires,
-                defaultVolume = VanillaServerState.config.settings.defaultVolume,
-                maxDisplays = VanillaDisplayActions.maxDisplaysFor(player),
-            ),
-        )
+        VanillaHelloResync.sendHello(player)
         VanillaDisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)
         VanillaDisplayActions.sendAllDisplays(player, server)
         FullscreenBroadcastManager.onPlayerJoin(player.uuid)

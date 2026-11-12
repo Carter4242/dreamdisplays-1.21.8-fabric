@@ -53,6 +53,8 @@ object VanillaBootstrap {
             VanillaServerState.config.proxy.enabled,
             VanillaServerState.config.proxy.clock_sync_interval
         )
+        // Permission changes reach online clients without a relog
+        com.dreamdisplays.platform.server.utils.net.VanillaHelloResync.start()
         startRepeatingTasks(server)
         VanillaServerApi.start()
     }
@@ -64,6 +66,7 @@ object VanillaBootstrap {
      */
     fun onServerStopping() {
         VanillaServerApi.stop()
+        com.dreamdisplays.platform.server.utils.net.VanillaHelloResync.stop()
         DisplayManager.save { VanillaServerState.storage?.saveDisplay(it) }
         // A debounced save still waiting is cancelled with the background scope: write now, as Paper's disable does
         PipPinManager.flush()
@@ -107,6 +110,8 @@ object VanillaBootstrap {
                     server.execute {
                         TimelineManager.tickEnds()
                         FullscreenBroadcastManager.tickEnds()
+                        // A permission granted or revoked while a player is online reaches their client
+                        runCatching { com.dreamdisplays.platform.server.utils.net.VanillaHelloResync.tick(server) }
                     }
                 }
             }

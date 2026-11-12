@@ -56,6 +56,8 @@ object SchedulerRegistrar {
             step("karaoke tick") { KaraokeManager.tick() }
             // Sharers and their viewers learn the server's clock, so share latency can be measured end to end
             step("share clock pings") { pingShareParticipants() }
+            // A permission granted or revoked while a player is online reaches their client
+            step("permission resync") { com.dreamdisplays.platform.server.utils.net.PaperHelloResync.tick() }
         }
         val settings = PaperServer.config.settings
         if (settings.updatesEnabled) {

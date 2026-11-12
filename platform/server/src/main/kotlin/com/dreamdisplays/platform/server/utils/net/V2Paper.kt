@@ -96,7 +96,14 @@ object PaperV2Networking : PluginMessageListener {
      */
     fun refreshServerHellos() {
         val players = plugin.server.onlinePlayers.filter { V2PlayerTracker.isV2(it.uniqueId) }
-        players.forEach { send([it], buildServerHello(it)) }
+        players.forEach(::sendServerHello)
+    }
+
+    /** Sends [player] their hello as it stands now, remembered so a later change is sent too ([PaperHelloResync]). */
+    private fun sendServerHello(player: Player) {
+        val hello = buildServerHello(player)
+        send([player], hello)
+        PaperHelloResync.onSent(player, hello)
     }
 
     private fun serverFeatureWires(): List<String> = buildList {
@@ -212,7 +219,7 @@ object PaperV2Networking : PluginMessageListener {
     private fun handleHello(player: Player, hello: ClientHello) {
         if (V2PlayerTracker.isV2(player.uniqueId)) return
         V2PlayerTracker.markV2(player.uniqueId, hello)
-        send([player], buildServerHello(player))
+        sendServerHello(player)
         // Before the displays: the policy decides how their players are opened
         com.dreamdisplays.platform.server.policy.ClientDiagnostics.sendPolicy(player)
         DisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)

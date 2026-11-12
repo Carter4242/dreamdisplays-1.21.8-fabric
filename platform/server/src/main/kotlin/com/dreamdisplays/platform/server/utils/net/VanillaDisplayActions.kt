@@ -9,6 +9,9 @@ import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.shared.policy.MediaUrlPolicy
 import com.dreamdisplays.core.protocol.common.ClientBuild
+import com.dreamdisplays.core.protocol.common.packets.ServerHello
+import com.dreamdisplays.shared.capability.ServerFeature
+import com.dreamdisplays.shared.protocol.ProtocolVersion
 import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.api.ServerApiHost
 import com.dreamdisplays.platform.server.datatypes.display.VanillaDisplayData
@@ -288,6 +291,17 @@ object VanillaDisplayActions {
         )
         return if (hasBypass || cap <= 0) -1 else cap
     }
+
+    /** What [player] may do, as their hello tells their client; [VanillaHelloResync] sends it again when it changes. */
+    fun buildServerHello(player: ServerPlayer): ServerHello = ServerHello(
+        protocolVersion = ProtocolVersion.CURRENT,
+        isPremium = isPremium(player),
+        isAdmin = isAdmin(player),
+        isReportingEnabled = VanillaServerState.config.settings.webhookUrl.isNotEmpty(),
+        allowedFeatures = ServerFeature.playbackFeatureWires,
+        defaultVolume = VanillaServerState.config.settings.defaultVolume,
+        maxDisplays = maxDisplaysFor(player),
+    )
 
     /**
      * Checks if [player] has operator level 2 permissions, the no-LuckPerms fallback for privileged actions. The host of

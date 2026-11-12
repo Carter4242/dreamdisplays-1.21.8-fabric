@@ -133,6 +133,8 @@ class PaperServer : JavaPlugin() {
 
         ProxyBridge.init(Companion.config.proxy.enabled, Companion.config.proxy.clock_sync_interval)
 
+        // Permission changes reach online clients without a relog (before any hello goes out)
+        com.dreamdisplays.platform.server.utils.net.PaperHelloResync.start(this)
         ListenerRegistrar.registerListeners(this)
         ChannelRegistrar.registerChannels(this)
         // Players still online across a plugin reload: let their clients handshake again
@@ -170,6 +172,7 @@ class PaperServer : JavaPlugin() {
         disableStep("stop addons") { PaperServerApi.stop() }
         disableStep("stop karaoke") { KaraokeManager.shutdown() }
         disableStep("end transient fullscreen sessions") { FullscreenBroadcastManager.endTransientSessions() }
+        disableStep("stop watching permissions") { com.dreamdisplays.platform.server.utils.net.PaperHelloResync.stop() }
         disableStep("end screen shares") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.stopAll() }
         disableStep("save timelines") { TimelineStore.save(TimelineManager.snapshot()) }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }

@@ -10,17 +10,14 @@ import com.dreamdisplays.platform.client.net.ProxyPayload
 import com.dreamdisplays.platform.client.net.V2Payload
 import com.dreamdisplays.platform.client.net.compat.CustomPacketPayload
 import com.dreamdisplays.platform.client.net.compat.CompatPayloads
-import com.dreamdisplays.platform.server.VanillaServerState
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.proxy.VanillaProxyBridge
 import com.dreamdisplays.platform.server.utils.RegionUtil
-import com.dreamdisplays.shared.capability.ServerFeature
 import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.protocol.PacketDirection
-import com.dreamdisplays.shared.protocol.ProtocolVersion
 import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.MinecraftServer
@@ -156,18 +153,7 @@ object ForgeV2Networking {
     private fun handleHello(player: ServerPlayer, server: MinecraftServer, hello: ClientHello) {
         if (V2PlayerTracker.isV2(player.uuid)) return
         V2PlayerTracker.markV2(player.uuid, hello)
-        send(
-            [player],
-            ServerHello(
-                protocolVersion = ProtocolVersion.CURRENT,
-                isPremium = VanillaDisplayActions.isPremium(player),
-                isAdmin = VanillaDisplayActions.isAdmin(player),
-                isReportingEnabled = VanillaServerState.config.settings.webhookUrl.isNotEmpty(),
-                allowedFeatures = ServerFeature.playbackFeatureWires,
-                defaultVolume = VanillaServerState.config.settings.defaultVolume,
-                maxDisplays = VanillaDisplayActions.maxDisplaysFor(player),
-            ),
-        )
+        VanillaHelloResync.sendHello(player)
         VanillaDisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion)
         VanillaDisplayActions.sendAllDisplays(player, server)
         FullscreenBroadcastManager.onPlayerJoin(player.uuid)
