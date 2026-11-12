@@ -56,9 +56,12 @@ data class MediaSearchResult(
 
     /** True when this result is a currently-live broadcast. */
     val isLive: Boolean = false,
+
+    /** True when this card stands for a whole YouTube playlist ([getWatchUrl] is its link), not one video. */
+    val isPlaylist: Boolean = false,
 ) {
-    /** True when thumbnail can be derived from [id] as YouTube image (real YouTube results only). */
-    val isYouTubeResult: Boolean get() = !isCustom && !isTwitch && platform == MediaPlatform.YOUTUBE
+    /** True when thumbnail can be derived from [id] as YouTube image (real YouTube video results only). */
+    val isYouTubeResult: Boolean get() = !isCustom && !isTwitch && !isPlaylist && platform == MediaPlatform.YOUTUBE
 
     /** Returns true if the video was published within the last [daysWindow] days. */
     fun isRecent(daysWindow: Int): Boolean =

@@ -94,6 +94,8 @@ enum class ClientMessage(val key: String) {
     SUGGESTIONS_ERROR("dreamdisplays.suggestions.error"),
     SUGGESTIONS_LOADING("dreamdisplays.suggestions.loading"),
     SUGGESTIONS_NO_LINKS("dreamdisplays.suggestions.no_links"),
+    SUGGESTIONS_PLAYLIST("dreamdisplays.suggestions.playlist"),
+    SUGGESTIONS_PLAYLIST_COUNT("dreamdisplays.suggestions.playlist.count"),
     SUGGESTIONS_SEARCH("dreamdisplays.suggestions.search"),
     SHARE_AUDIO("dreamdisplays.share.audio"),
     SHARE_AUDIO_EXCEPT_GAME("dreamdisplays.share.audio.except_game"),

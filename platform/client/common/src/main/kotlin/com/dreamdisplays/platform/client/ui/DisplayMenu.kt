@@ -28,7 +28,6 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ShareAudio
-import com.dreamdisplays.api.media.source.CustomMediaUrls
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.util.DreamCoroutines
 import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
@@ -116,7 +115,6 @@ class DisplayMenu private constructor(
     private lateinit var skipButton: IconButton
     private lateinit var clearVideoButton: IconButton
     private lateinit var loopButton: IconButton
-    private lateinit var queueAddButton: IconButton
     private lateinit var clearQueueButton: IconButton
     private var clearArmedUntilMs = 0L
     private var lastQueueCount = -1
@@ -358,16 +356,8 @@ class DisplayMenu private constructor(
         // A press on a card's "+" queues it; the card under it must never also play it
         suggestions.cardPressBlocked = { mx, my -> suggestionQueueButtonRect()?.contains(mx, my) == true }
 
-        // "Up next": the bottom panel's second tab, the search row's "+" and the loop toggle in the tab header
+        // "Up next": the bottom panel's second tab and the loop toggle in the tab header
         queueSection = QueueSection(ds)
-        queueAddButton = addUi(IconButton(icon = { IconButton.modIcon("plus") }, margin = 4) { queueFromSearch() })
-        queueAddButton.visibleWhen = {
-            !showingQueue() && suggestions.visible && DisplayQueues.supported && suggestions.available()
-        }
-        queueAddButton.enabledWhen = {
-            ds.canAddToQueueHere && queueBlockedReason() == null &&
-                (linkOf(suggestions.searchText) != null || YouTubePlaylists.parseLink(suggestions.searchText) != null)
-        }
         loopButton = addUi(IconButton("loop") {
             DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
         })
@@ -543,6 +533,8 @@ class DisplayMenu private constructor(
     private fun onPickSuggested(info: MediaSearchResult) {
         val ds = displayScreen
         if (!ds.canSetVideoHere) return
+        // A playlist card queues its playlist; there is no single video to play
+        if (info.isPlaylist) return queuePlaylistCard(info)
         DreamServices.registry.get(DisplayServices.DISPLAY).setUrl(DisplayId(ds.uuid), info.getWatchUrl(), ds.lang)
 
         // A pasted link exists nowhere else, so remember it locally the moment it is used
@@ -600,11 +592,9 @@ class DisplayMenu private constructor(
         if (suggestionsArea != null) {
             suggestions.visible = !showingQueue()
             suggestions.showTitle = !tabs
-            suggestions.extraSearchActions = if (tabs) 1 else 0
             suggestions.setVertical(layout.suggestionsVertical)
             suggestions.setCompactCards(false)
             suggestions.place(suggestionsArea)
-            queueAddButton.place(suggestions.extraActionRect(0))
             loopButton.place(UiRect(suggestionsArea.right - 10 - LOOP_BUTTON, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON))
             clearQueueButton.place(
                 UiRect(suggestionsArea.right - 10 - LOOP_BUTTON * 2 - 4, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON),
@@ -690,7 +680,11 @@ class DisplayMenu private constructor(
         val r = suggestionQueueButtonRect() ?: return
         val hover = r.contains(mouseX, mouseY)
         QueueSection.drawMiniButton(g, r, "plus", hover)
-        if (hover) queueTip = queueBlockedReason() ?: ClientMessage.QUEUE_ADD.text()
+        if (hover) {
+            queueTip = queueBlockedReason()
+                ?: if (suggestions.hoveredResult?.isPlaylist == true) ClientMessage.QUEUE_PLAYLIST_ADD.text()
+                else ClientMessage.QUEUE_ADD.text()
+        }
     }
 
     private fun suggestionQueueButtonRect(): UiRect? {
@@ -729,9 +723,6 @@ class DisplayMenu private constructor(
         when {
             over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
             over(clearVideoButton) -> queueTip = clearVideoTip(mouseX, mouseY)
-            over(queueAddButton) -> queueTip = queueBlockedReason()
-                ?: if (YouTubePlaylists.parseLink(suggestions.searchText) != null) ClientMessage.QUEUE_PLAYLIST_ADD.text()
-                else ClientMessage.QUEUE_ADD.text()
             over(clearQueueButton) -> queueTip = if (System.currentTimeMillis() < clearArmedUntilMs) {
                 ClientMessage.QUEUE_CLEAR_CONFIRM.text()
             } else {
@@ -780,42 +771,26 @@ class DisplayMenu private constructor(
             val result = suggestions.hoveredResult ?: return false
             playClick()
             val blocked = queueBlockedReason()
-            if (blocked == null) DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
-            else DisplayQueues.notifyLocal(literalText(blocked).withStyle(ChatFormatting.GRAY))
+            if (blocked != null) DisplayQueues.notifyLocal(literalText(blocked).withStyle(ChatFormatting.GRAY))
+            else if (result.isPlaylist) queuePlaylistCard(result)
+            else DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
             return true
         }
         return false
     }
 
-    private fun playClick() {
-        Minecraft.getInstance().soundManager.play(
-            net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
-                com.dreamdisplays.platform.client.utils.buttonClickSound(), 1.0f,
-            ),
-        )
-    }
-
     /**
-     * Queues the link typed in the search box (resolving a YouTube title first) instead of playing it. A playlist link
-     * queues the playlist: all of it, or for a `watch?v=X&list=Y` link X and everything after it.
+     * A playlist card's click or "+": queues its playlist (all of it, or for a `watch?v=X&list=Y` link X and everything
+     * after it) when Up next runs here and has room.
      */
-    private fun queueFromSearch() {
+    private fun queuePlaylistCard(card: MediaSearchResult) {
         val ds = displayScreen
-        val lang = ds.lang ?: ""
-        YouTubePlaylists.parseLink(suggestions.searchText)?.let { return queuePlaylist(it, lang) }
-        val url = linkOf(suggestions.searchText) ?: return
-        val videoId = YouTubeUrls.extractVideoId(url)
-        if (videoId == null) {
-            DisplayQueues.add(ds.uuid, url, lang, CustomMediaUrls.displayName(url), 0L, "")
-            return
+        val link = PlaylistCards.linkOf(card) ?: return
+        if (!ds.canAddToQueueHere) {
+            return DisplayQueues.notifyLocal(ClientMessage.QUEUE_NOT_RUNNING.component().withStyle(ChatFormatting.GRAY))
         }
-        DreamCoroutines.clientIo.launch {
-            val meta = runCatching { DreamServices.registry.getOrNull(MediaServices.SEARCH)?.metadata(videoId) }.getOrNull()
-            Minecraft.getInstance().execute {
-                if (meta != null) DisplayQueues.add(ds.uuid, meta, lang)
-                else DisplayQueues.add(ds.uuid, YouTubeUrls.watchUrl(videoId), lang, "", 0L, "")
-            }
-        }
+        queueBlockedReason()?.let { return DisplayQueues.notifyLocal(literalText(it).withStyle(ChatFormatting.GRAY)) }
+        queuePlaylist(link, ds.lang ?: "")
     }
 
     /** Lists [link]'s playlist off-thread and queues as many of its videos as fit, in order, in one batch. */
@@ -856,12 +831,12 @@ class DisplayMenu private constructor(
         }
     }
 
-    /** The playable link in [text] (a URL or a YouTube id / link), or null for a search query. */
-    private fun linkOf(text: String): String? {
-        val q = text.trim()
-        if (q.isEmpty() || q.any { it.isWhitespace() }) return null
-        YouTubeUrls.extractVideoId(q)?.let { return YouTubeUrls.watchUrl(it) }
-        return q.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+    private fun playClick() {
+        Minecraft.getInstance().soundManager.play(
+            net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                com.dreamdisplays.platform.client.utils.buttonClickSound(), 1.0f,
+            ),
+        )
     }
 
     private fun resyncQualitySlider() {

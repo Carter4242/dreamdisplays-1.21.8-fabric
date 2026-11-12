@@ -27,7 +27,15 @@ object YouTubePlaylists {
     data class Listing(val title: String, val entries: List<Entry>, val unavailable: Int, val more: Boolean)
 
     /** A playlist link: its list id, and the video a `watch?v=X&list=Y` link points at (to start from), if any. */
-    data class Link(val listId: String, val startVideoId: String?)
+    data class Link(val listId: String, val startVideoId: String?) {
+        /** The canonical link: `watch?v=X&list=Y` with a start video, else `playlist?list=Y`; [parseLink] reads it back. */
+        val url: String
+            get() = if (startVideoId != null) "https://www.youtube.com/watch?v=$startVideoId&list=$listId"
+            else "https://www.youtube.com/playlist?list=$listId"
+    }
+
+    /** A playlist's name, its size as YouTube reports it (null when unknown) and its first video, from one page. */
+    data class Summary(val title: String, val videoCount: Long?, val firstVideoId: String?)
 
     /**
      * The playlist [input] links to, or null. `youtube.com/playlist?list=Y` lists the whole playlist; a
@@ -44,6 +52,14 @@ object YouTubePlaylists {
         val params = query(uri.rawQuery)
         val listId = params["list"]?.takeIf { LIST_ID.matches(it) } ?: return null
         return Link(listId, YouTubeUrls.extractVideoId(raw))
+    }
+
+    /** Reads [link]'s playlist name, size and first video from its first page only. Blocking (network). */
+    fun summary(link: Link): Summary {
+        NewPipeResolver.ensureInitialized()
+        val info = PlaylistInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/playlist?list=${link.listId}")
+        val first = info.relatedItems.firstNotNullOfOrNull { YouTubeUrls.extractVideoId(it.url) }
+        return Summary(info.name.orEmpty(), runCatching { info.streamCount }.getOrNull()?.takeIf { it >= 0 }, first)
     }
 
     /**

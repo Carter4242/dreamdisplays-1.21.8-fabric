@@ -44,7 +44,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** Scrollable search / related-videos panel: a search row (edit box + clear + search buttons) above a strip of result cards. */
+/** Scrollable search / related-videos panel: a search row (edit box + sort button) above a strip of result cards. */
 class SuggestionsPanel(
     private val onPick: (MediaSearchResult) -> Unit,
     private val controller: SuggestionsController,
@@ -55,13 +55,11 @@ class SuggestionsPanel(
     }
 
     private val searchBox: EditBox
-    private val clearButton: IconButton
     private val sortButton: IconButton
     private val sortDropdown: SortDropdown = SortDropdown(
         current = { controller.sortOption },
         onSelect = { controller.setSort(it) },
     )
-    private val searchButton: IconButton
 
     /** When this returns false the panel is locked: it shows an "unavailable" notice and ignores input. */
     var available: () -> Boolean = { true }
@@ -71,9 +69,6 @@ class SuggestionsPanel(
 
     /** False when the screen draws its own header (e.g. tabs) over the panel's title line. */
     var showTitle: Boolean = true
-
-    /** Room for this many extra screen-owned buttons at the right end of the search row ([extraActionRect]). */
-    var extraSearchActions: Int = 0
 
     /** The card under the mouse in the last frame, and its on-screen rect (for screen-drawn card overlays). */
     var hoveredCardRect: UiRect? = null
@@ -110,20 +105,8 @@ class SuggestionsPanel(
         //?}
         // A pasted link is kept whole up to the length the server accepts (signed CDN links run past 200)
         searchBox.setMaxLength(MediaUrlPolicy.MAX_URL_LENGTH)
-        clearButton = IconButton(icon = { IconButton.modIcon("cross") }, margin = 4) {
-            searchBox.value = ""
-            //? if >=1.19.4 {
-            searchBox.isFocused = true
-            //?}
-            //? if <1.19.4 {
-            searchBox.setFocus(true)
-            //?}
-        }
         sortButton = IconButton(icon = { IconButton.modIcon("filter") }, margin = 4) {
             sortDropdown.toggle()
-        }
-        searchButton = IconButton(icon = { IconButton.modIcon("search") }, margin = 4) {
-            controller.runSearch(searchBox.value)
         }
     }
 
@@ -150,18 +133,12 @@ class SuggestionsPanel(
     private fun stripRight(): Int = x + width - 10
 
     private fun layoutChildren() {
-        searchBox.x = x + 10
-        searchBox.y = searchRowY()
-        val extra = extraSearchActions * (ACTION_W + ACTION_GAP)
-        searchBox.width = width - 20 - (ACTION_W + ACTION_GAP) * 3 - extra
-        clearButton.place(UiRect(x + width - 10 - ACTION_W * 3 - ACTION_GAP * 2 - extra, searchRowY(), ACTION_W, SEARCH_H))
-        sortButton.place(UiRect(x + width - 10 - ACTION_W * 2 - ACTION_GAP - extra, searchRowY(), ACTION_W, SEARCH_H))
-        searchButton.place(UiRect(x + width - 10 - ACTION_W - extra, searchRowY(), ACTION_W, SEARCH_H))
+        val row = searchRowLayout(x, searchRowY(), width)
+        searchBox.x = row.box.x
+        searchBox.y = row.box.y
+        searchBox.width = row.box.w
+        sortButton.place(row.sort)
     }
-
-    /** Rect of extra search-row slot [index] (0 = right-most), reserved by [extraSearchActions]. */
-    fun extraActionRect(index: Int): UiRect =
-        UiRect(x + width - 10 - ACTION_W - index * (ACTION_W + ACTION_GAP), searchRowY(), ACTION_W, SEARCH_H)
 
     /** The card strip's rect. */
     fun stripRect(): UiRect = UiRect(stripLeft(), stripTop(), stripRight() - stripLeft(), stripBottom() - stripTop())
@@ -233,9 +210,7 @@ class SuggestionsPanel(
         // Newer vanilla EditBoxes request the text cursor themselves; the search box is always editable.
         if (searchBox.isHovered()) LegacyCursor.IBEAM.request()
         //?}
-        clearButton.renderChild(g, mouseX, mouseY, partialTick)
         sortButton.renderChild(g, mouseX, mouseY, partialTick)
-        searchButton.renderChild(g, mouseX, mouseY, partialTick)
 
         val stripTop = stripTop()
         val stripBottom = stripBottom()
@@ -647,9 +622,7 @@ class SuggestionsPanel(
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
         if (claimPopupClick(mx, my, event.button())) return true
-        if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(event, dbl)
         if (onSortButton) return sortButton.mouseClicked(event, dbl)
-        if (searchButton.isMouseOver(mouseX, mouseY)) return searchButton.mouseClicked(event, dbl)
         if (searchBox.isMouseOver(mouseX, mouseY)) {
             val handled = searchBox.mouseClicked(event, dbl)
             //? if >=1.19.4 {
@@ -706,9 +679,7 @@ class SuggestionsPanel(
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
         if (claimPopupClick(mx, my, button)) return true
-        if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(mouseX, mouseY, button)
         if (onSortButton) return sortButton.mouseClicked(mouseX, mouseY, button)
-        if (searchButton.isMouseOver(mouseX, mouseY)) return searchButton.mouseClicked(mouseX, mouseY, button)
         if (searchBox.isMouseOver(mouseX, mouseY)) {
             val handled = searchBox.mouseClicked(mouseX, mouseY, button)
             //? if >=1.19.4 {
@@ -849,9 +820,9 @@ class SuggestionsPanel(
         private const val THUMB_H = StripCardMetrics.THUMB_H
         private const val BOTTOM_PAD = 4
         private const val CARD_H = THUMB_H + CARD_TEXT_H
-        private const val SEARCH_H = 22
-        private const val ACTION_W = SEARCH_H
-        private const val ACTION_GAP = 4
+        internal const val SEARCH_H = 22
+        internal const val ACTION_W = SEARCH_H
+        internal const val ACTION_GAP = 4
         private const val CARD_INNER_PAD = 2 + 3 + 2
         private const val BOTTOM_MARGIN = 6
 
@@ -867,4 +838,18 @@ class SuggestionsPanel(
         /** Smallest strip viewport that still shows a card (min 30px thumbnail) without clipping it. */
         const val MIN_CARD_VIEWPORT_H = 30 + CARD_TEXT_H + CARD_INNER_PAD + BOTTOM_MARGIN
     }
+}
+
+/** Where the search row's parts sit: the edit box takes all the width the sort button leaves it. */
+internal data class SearchRowLayout(val box: UiRect, val sort: UiRect)
+
+/** The search row of a panel at [panelX] that is [panelW] wide, at row top [rowY]: 10 px insets, [SuggestionsPanel.ACTION_GAP] between parts. */
+internal fun searchRowLayout(panelX: Int, rowY: Int, panelW: Int): SearchRowLayout {
+    val h = SuggestionsPanel.SEARCH_H
+    val w = SuggestionsPanel.ACTION_W
+    val gap = SuggestionsPanel.ACTION_GAP
+    val right = panelX + panelW - 10
+    val sort = UiRect(right - w, rowY, w, h)
+    val box = UiRect(panelX + 10, rowY, sort.x - gap - (panelX + 10), h)
+    return SearchRowLayout(box, sort)
 }
