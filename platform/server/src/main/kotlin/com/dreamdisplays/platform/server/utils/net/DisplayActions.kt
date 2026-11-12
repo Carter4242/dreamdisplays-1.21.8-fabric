@@ -78,7 +78,7 @@ object DisplayActions {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return
         }
-        if (displayData !is PaperDisplayData || !DisplayManager.isPlayerInRange(player, displayData)) {
+        if (displayData !is PaperDisplayData || !DisplayManager.isPlayerPresent(player, displayData)) {
             return ServerMessage.NO_DISPLAY.sendTo(player)
         }
 
@@ -95,9 +95,9 @@ object DisplayActions {
     fun setVideo(player: Player, displayId: UUID, url: String, lang: String) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!PlaybackPermissions.canSetVideo(context(displayData, player))) return
-        // Checked before the throttle below: an attacker who is never nearby must not be able to
-        // burn the per-display cooldown window against the display's real, present owner.
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Checked before the throttle below: an attacker who is never nearby (nor watching in PiP) must not
+        // be able to burn the per-display cooldown window against the display's real, present owner.
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         if (!videoRequests.tryTake(player.uniqueId, System.currentTimeMillis())) return
         if (!MediaUrlPolicy.isAllowed(url)) return
         // Custom links go through the server's own policy on top of the URL-shape check: a player
@@ -128,7 +128,7 @@ object DisplayActions {
     fun clearVideo(player: Player, displayId: UUID) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!PlaybackPermissions.canSetVideo(context(displayData, player))) return
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         if (!videoRequests.tryTake(player.uniqueId, System.currentTimeMillis())) return
         if (!setVideoThrottle.tryAcquire(displayId, SET_VIDEO_COOLDOWN_MS)) return
         ServerApiHost.current?.askSetUrl(displayData, "", "", player.uniqueId)?.let { reason ->
@@ -207,7 +207,7 @@ object DisplayActions {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!player.hasPermission(PaperServer.config.permissions.lock)) return
         if (!PlaybackPermissions.canToggleLock(lockContext(displayData, player))) return
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         // Already so: nothing to save or tell everyone, only the asker (whose menu may be behind)
         if (displayData.access == access) return DisplayManager.sendUpdate(displayData, [player])
 
@@ -237,7 +237,7 @@ object DisplayActions {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return
         }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         // Already in that mode: the clock carries on as it is anyway, so only the asker is told
         if (displayData.mode == mode) return DisplayManager.sendUpdate(displayData, [player])
 
@@ -310,7 +310,7 @@ object DisplayActions {
     /**
      * A protocol-12 client holds another description of [displayId] than the server's ([knownMediaGen] differs; 0 = it
      * holds none): send it the current one before the timeline, so it plays the right video. Only to players the
-     * display is for: in range, or following it from afar (fullscreen, preparation).
+     * display is for: in range, or following it from afar (fullscreen, preparation, PiP).
      */
     private fun resendInfoIfStale(player: Player, displayId: UUID, knownMediaGen: Long) {
         if ((V2PlayerTracker.helloOf(player.uniqueId)?.protocolVersion ?: 0) < MEDIA_GEN_PROTOCOL) return
@@ -320,6 +320,8 @@ object DisplayActions {
             DisplayManager.isPlayerInRange(player, display) -> DisplayManager.sendUpdate(display, [player])
             player.uniqueId in TimelineManager.extraReceivers(displayId) ->
                 DisplayManager.sendUpdate(display, [player], forced = true)
+            // Unforced, as every description a pinner gets: it never loads a display the client does not hold
+            player.uniqueId in TimelineManager.pinReceivers(displayId) -> DisplayManager.sendUpdate(display, [player])
         }
     }
 
