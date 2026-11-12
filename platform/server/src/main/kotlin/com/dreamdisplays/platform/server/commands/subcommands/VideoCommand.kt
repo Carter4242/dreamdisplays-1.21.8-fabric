@@ -247,8 +247,9 @@ object VanillaVideoCommand {
 
 /**
  * `/display video <display> clear`: takes the video off [display] for everyone, with the same ownership rule as
- * setting one. The clearing itself is [DisplayActions.clearVideo], the menu's Clear button's path (share ended, karaoke
- * stopped, clock dropped, followers told).
+ * setting one. The clearing itself is [DisplayActions.clearVideo], the menu's Clear button's path (share ended; the
+ * next queued entry starts as on a skip, or with none the display goes blank: karaoke stopped, clock dropped,
+ * followers told).
  */
 @PaperOnly
 fun clearDisplayVideo(player: Player, display: PaperDisplayData) {
@@ -257,6 +258,6 @@ fun clearDisplayVideo(player: Player, display: PaperDisplayData) {
         ServerMessage.DISPLAY_VIDEO_NOT_OWNER.sendTo(player)
         return
     }
-    DisplayActions.clearVideo(display, player)
-    MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.video.cleared", display.name ?: display.id.toString().take(8)))
+    val key = if (DisplayActions.clearVideo(display, player)) "cmd.video.clearedNext" else "cmd.video.cleared"
+    MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, key, display.name ?: display.id.toString().take(8)))
 }

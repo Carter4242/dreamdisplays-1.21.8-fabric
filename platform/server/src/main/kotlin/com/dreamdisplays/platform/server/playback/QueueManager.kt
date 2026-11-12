@@ -5,6 +5,7 @@ import com.dreamdisplays.core.queue.DisplayQueue
 import com.dreamdisplays.core.queue.QueueAddResult
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.queue.QueueLimits
+import com.dreamdisplays.core.queue.QueueOnClear
 import com.dreamdisplays.core.queue.QueueText
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.sync.DisplayFollowers
@@ -273,6 +274,18 @@ object QueueManager {
         if (synchronized(queue) { queue.isEmpty() }) return Result.EMPTY
         if (!editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
         return if (advance(display) != null) Result.OK else Result.REFUSED
+    }
+
+    /**
+     * [display]'s video is being cleared ([QueueOnClear]): with an entry waiting it moves on to it exactly like a [skip]
+     * (no permission or throttle here: the clear checked its own) and returns true. False when nothing waits, the queue
+     * does not run there, or every waiting entry was refused: the display goes blank instead.
+     */
+    fun advanceOnClear(display: DisplayData): Boolean {
+        val runs = settings().enabled && !display.virtual && PlaybackPermissions.queueRuns(display.mode)
+        val queue = queues[display.id]
+        val outcome = if (queue == null) QueueOnClear.outcome(runs, null) else synchronized(queue) { QueueOnClear.outcome(runs, queue) }
+        return outcome == QueueOnClear.Outcome.NEXT_ENTRY && advance(display) != null
     }
 
     /**
