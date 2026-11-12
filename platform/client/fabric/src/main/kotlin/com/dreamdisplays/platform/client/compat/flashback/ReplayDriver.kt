@@ -23,8 +23,11 @@ import kotlin.math.roundToLong
  * exact frame); replay speed scales the timeline's rate. Client thread only, except [requestSync].
  */
 class ReplayDriver(private val send: (DreamPacket) -> Unit) {
-    /** The replay clock: [replayMs] its current time, [speed] replay ms per real ms, [held] not advancing. */
-    data class Clock(val replayMs: Long, val held: Boolean, val speed: Double)
+    /**
+     * The replay clock: [replayMs] its current time, [speed] replay ms per real ms, [held] not advancing.
+     * [positionsFrozen]: the players stay where they are (an export draws the frames itself); descriptions still follow.
+     */
+    data class Clock(val replayMs: Long, val held: Boolean, val speed: Double, val positionsFrozen: Boolean = false)
 
     private class Told(
         var info: DisplayInfo,
@@ -106,6 +109,7 @@ class ReplayDriver(private val send: (DreamPacket) -> Unit) {
             forced || last == null || last.mediaGen != sample.mediaGen || last.paused != paused -> true
             abs(last.rate - rate) > RATE_EPSILON -> true
             nowMs - last.atMs < MIN_INTERVAL_MS -> false
+            clock.positionsFrozen -> false
             paused -> abs(position - last.positionMs) > PAUSED_MOVE_MS
             else -> nowMs - last.atMs >= KEEPALIVE_MS || abs(position - (t.expectedMs(nowMs) ?: position)) > DRIFT_MS * rate
         }

@@ -86,7 +86,9 @@ class ReplayRecordCache {
 
     private fun entryFor(id: UUID, info: DisplayInfo, sample: ReplaySample?): ReplayEntry {
         val card = cardOf(info)
-        // Nothing of a screen share is stored, not even its relay address; a local display's video is not replayed
+        // This action keeps no screen share address (Flashback's own recording of the network traffic still holds the
+        // raw packets, the share's relay address among them, and for the sharer its publish URL: both stop working when
+        // the share ends); a local display's video is not replayed
         val stored = if (card == null) info else info.copy(url = "", lang = "")
         return ReplayEntry(id, stored, card, sample)
     }

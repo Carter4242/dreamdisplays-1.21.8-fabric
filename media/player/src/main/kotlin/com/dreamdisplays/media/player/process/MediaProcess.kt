@@ -75,6 +75,9 @@ object MediaProcess {
         "Error opening input", "Unknown error", "I/O error", "HTTP error",
     ]
 
+    /** The `-headers` arguments the players send with [url] (User-Agent, and a Referer where the host needs one). */
+    fun inputHeaderArgs(url: String): List<String> = headerArgs(url)
+
     private fun headerArgs(url: String): List<String> {
         val referer = MediaHosts.refererFor(url)?.let { "Referer: $it\r\n" }.orEmpty()
         return ["-headers", "User-Agent: $USER_AGENT\r\n$referer"]

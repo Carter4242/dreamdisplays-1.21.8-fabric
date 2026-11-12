@@ -95,7 +95,9 @@ object ScreenRenderer {
     ) {
         if (!replay) displayScreen.fitTexture()
 
-        if (displayScreen.conforming) {
+        // A replay's card or export frame is drawn flat, also on a display wrapped over blocks
+        val replayCard = com.dreamdisplays.platform.client.replay.ReplayHooks.card(displayScreen.uuid)
+        if (displayScreen.conforming && replayCard == null) {
             val wrapped = ConformingWorldMesh.quads(displayScreen)
             if (wrapped != null) {
                 ConformingScreenDraw.render(displayScreen, wrapped, if (replay) REPLAY_LIFT else 0f, drawQuad)
@@ -108,7 +110,6 @@ object ScreenRenderer {
         val h = displayScreen.height
         val lift = if (replay) REPLAY_LIFT else 0f
 
-        val replayCard = com.dreamdisplays.platform.client.replay.ReplayHooks.card(displayScreen.uuid)
         if (replayCard != null) {
             drawLayer(stack, facing, w, h, lift) {
                 drawQuad(replayCard) { pose, builder -> appendQuad(pose, builder, 255, 255, 255, displayScreen.rotation) }

@@ -408,7 +408,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             if (screen.isWarmingUp) return
             // A display held ready (prepared, held by DisplayWarmup, or a queue preload just adopted) tolerates a little
             // offset rather than drop its open stream
-            val held = screen.isPrepared || screen.isHeldReady || warmAdopted
+            // In a replay a held display is a scrubbed one (nobody waits on it): it follows every step, not 250 ms ones
+            val inReplay = com.dreamdisplays.platform.client.replay.ReplayHooks.inReplay()
+            val held = !inReplay && (screen.isPrepared || screen.isHeldReady || warmAdopted)
             val tolerance = if (held) maxOf(settings.deadBandMs, PREPARED_SNAP_TOLERANCE_MS) else settings.deadBandMs
             // A singer's preloaded queue entry is held at the start, while their timeline runs the karaoke lead ahead:
             // keep the warm hold and jump the lead in place once it plays, rather than snap to a cold start
@@ -419,7 +421,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // Held where this player's media can show the paused position: a clock paused past the media's end (the
             // server's tail before its restart) is measured against the last frame shown, not snapped at forever
             val snapMs = clampSeek(target, loop)
-            if (abs(snapMs - localMs) > tolerance && now - lastSnapNanos >= SNAP_COOLDOWN_NANOS) {
+            val cooldown = if (inReplay) REPLAY_SNAP_COOLDOWN_NANOS else SNAP_COOLDOWN_NANOS
+            if (abs(snapMs - localMs) > tolerance && now - lastSnapNanos >= cooldown) {
                 screen.seekVideoTo(snapMs * 1_000_000L)
                 lastSnapNanos = now
                 coldAfterSnap = true
@@ -759,6 +762,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** A player held at its end restarts once the shared clock is this far before the end (it wrapped / was seeked). */
         private const val END_HOLD_MS = 2_000L
         private const val SNAP_COOLDOWN_NANOS = 1_000_000_000L
+
+        /** Paused snaps in a replay (scrubbing): paused seeks are coalesced, so the picture can follow closely. */
+        private const val REPLAY_SNAP_COOLDOWN_NANOS = 200_000_000L
         private const val PREPARED_SNAP_TOLERANCE_MS = 250
         private const val LANDING_SETTLE_NANOS = 1_500_000_000L
 

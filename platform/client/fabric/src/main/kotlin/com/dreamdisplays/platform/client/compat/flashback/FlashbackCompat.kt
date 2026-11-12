@@ -41,9 +41,10 @@ import kotlin.math.abs
  * If any of them is missing (another Flashback version), replay support stays off and that is logged once.
  *
  * Recording: what the server says about displays nearby is written into the replay as an optional action (a full
- * picture every few seconds, each change as it arrives). Screen shares are written without their address and replay as
- * a card. Playback: the recorded Dream Displays traffic is ignored; [ReplayDriver] feeds the client from the actions
- * instead, on the replay's clock.
+ * picture every few seconds, each change as it arrives). Screen shares go into that action without their address and
+ * replay as a card. Flashback still records the raw packets themselves (a share's relay address, the sharer's publish
+ * URL), which stop working when the share ends. Playback: the recorded Dream Displays traffic is ignored; [ReplayDriver]
+ * feeds the client from the actions instead, on the replay's clock.
  */
 object FlashbackCompat : ReplayBridge {
     private val logger = LoggerFactory.getLogger("DreamDisplays/Flashback")
@@ -62,7 +63,13 @@ object FlashbackCompat : ReplayBridge {
     private var recording: Any? = null
     private var lastFullFrameMs = Long.MIN_VALUE
     private var wasInReplay = false
-    private var exportStartMs: Long? = null
+
+    /**
+     * Set when anything here failed: replay support is off for the session, but a replay still keeps its recorded
+     * Dream Displays traffic away from the client and its requests away from the replay server.
+     */
+    @Volatile
+    private var failed = false
 
     // Replay-server thread
     private var actionServer: Any? = null
@@ -79,6 +86,8 @@ object FlashbackCompat : ReplayBridge {
             return
         }
         ClientTickEvents.END_CLIENT_TICK.register { tick() }
+        // Before the sound engine's tick, which moves the game's sound back off the export device once an export ends
+        ClientTickEvents.START_CLIENT_TICK.register { if (export != null && (failed || !api.isExporting())) endExport() }
         ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> Minecraft.getInstance().execute(cache::clear) }
         ReplayHooks.bridge = this
         logger.info("Flashback {} found: displays are recorded into replays and play back in them.", version)
@@ -90,6 +99,7 @@ object FlashbackCompat : ReplayBridge {
 
     override fun onServerPacket(bytes: ByteArray): Boolean {
         if (api.isInReplay()) return true // recorded traffic: the driver speaks for the server in replays
+        if (failed) return false
         guarded("recording") {
             val packet = PacketRegistry.decode(bytes, PacketDirection.SERVER_TO_CLIENT) ?: return@guarded
             val now = nowMs()
@@ -103,6 +113,7 @@ object FlashbackCompat : ReplayBridge {
 
     override fun onClientPayload(payload: CustomPacketPayload): Boolean {
         val bytes = (payload as? V2Payload)?.bytes ?: return true
+        if (failed) return true
         guarded("replay") {
             when (val packet = PacketRegistry.decode(bytes, PacketDirection.CLIENT_TO_SERVER)) {
                 is ClientHello -> Minecraft.getInstance().execute(::greet)
@@ -113,7 +124,7 @@ object FlashbackCompat : ReplayBridge {
         return true
     }
 
-    override fun card(displayId: UUID): ReplayCard? = driver.card(displayId)
+    override fun card(displayId: UUID): ReplayCard? = if (failed) null else driver.card(displayId)
 
     // Render thread: a Flashback export draws each frame at the export's time, so the displays are decoded for it
     private var export: ReplayExport? = null
@@ -129,14 +140,15 @@ object FlashbackCompat : ReplayBridge {
             logger.info("Flashback export: displays are decoded frame by frame{}.", if (api.exportRecordsAudio()) ", with their sound" else "")
         }
         val t = api.exportReplayMs()
-        e.frame(t, model.at(t))
+        e.frame(t, model.at(t.toLong()))
     }
 
     override fun exportPicture(displayId: UUID): RenderType? = export?.picture(displayId)
 
     private fun endExport() {
-        export?.close()
+        val e = export ?: return
         export = null
+        runCatching { e.close() }
     }
 
     // ---------------------------------------------------------------------------------------------- client tick
@@ -158,12 +170,25 @@ object FlashbackCompat : ReplayBridge {
 
     /** Runs [body]; a failure turns replay support off for the session (logged once) and never reaches normal play. */
     private inline fun guarded(what: String, body: () -> Unit) {
-        if (ReplayHooks.bridge == null) return
+        if (failed) return
         try {
             body()
         } catch (t: Throwable) {
-            ReplayHooks.bridge = null
-            logger.error("Replay support failed ({}); it is off until the game restarts.", what, t)
+            fail(what, t)
+        }
+    }
+
+    /** Turns replay support off for the session and lets go of everything it holds. */
+    private fun fail(what: String, t: Throwable) {
+        failed = true
+        logger.error("Replay support failed ({}); it is off until the game restarts.", what, t)
+        runCatching { endExport() }
+        runCatching {
+            driver.reset()
+            model.clear()
+            cache.clear()
+            pending.clear()
+            outbox.clear()
         }
     }
 
@@ -200,12 +225,12 @@ object FlashbackCompat : ReplayBridge {
         val ticks = server.tickRateManager()
         // Mid-seek the replay time runs ahead of the actions handled so far: wait for it to settle
         if (api.replaySeeking(replay)) return
-        // Exporting: the players hold still where the export began (its frames are decoded for it, see ReplayExport)
+        // Exporting: descriptions follow the export's time, but the players hold still where they are (the export's
+        // frames are decoded for it, see ReplayExport)
         val exporting = api.isExporting()
-        if (!exporting) exportStartMs = null
         val held = exporting || api.replayPaused(replay) || ticks.isFrozen || server.isPaused
-        val replayMs = if (exporting) exportStartMs ?: api.exportReplayMs().also { exportStartMs = it } else api.visualMillis()
-        val clock = ReplayDriver.Clock(replayMs, held, ticks.tickrate() / 20.0)
+        val replayMs = if (exporting) api.exportReplayMs().toLong() else api.visualMillis()
+        val clock = ReplayDriver.Clock(replayMs, held, ticks.tickrate() / 20.0, positionsFrozen = exporting)
         driver.tick(nowMs(), clock, model.at(clock.replayMs), ::clientHas, oneWayLatencyMs())
         if (outbox.isEmpty()) return
         val packets = outbox.toList()
@@ -322,11 +347,11 @@ object FlashbackCompat : ReplayBridge {
          * The replay time (ms) of the frame being exported. Flashback's own "visual" time counts from the export's
          * start; replay data is on the replay's clock, so the export's start tick is added.
          */
-        fun exportReplayMs(): Long {
-            val job = exportJob.invoke() ?: return visualMillis()
+        fun exportReplayMs(): Double {
+            val job = exportJob.invoke() ?: return visualMillis().toDouble()
             val start = settingsStartTick.invoke(exportSettings.invoke(job)) as Int
             val tick = exportTick.invoke(job) as Double
-            return ((start + tick) * 50.0).toLong()
+            return (start + tick) * 50.0
         }
 
         /** Seeking: running through recorded ticks, or rebuilding the world from a snapshot. */

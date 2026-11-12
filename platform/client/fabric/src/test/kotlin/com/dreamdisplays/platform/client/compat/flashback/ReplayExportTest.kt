@@ -21,11 +21,26 @@ class ReplayExportTest {
     }
 
     @Test
-    fun `a frame covers its length of content at the timeline's speed, nothing while paused`() {
+    fun `a frame's sound covers the content the replay moves on by, nothing while paused`() {
         val playing = ReplaySample(1, 10_000, 0, 2.0, paused = false, loop = false, durationMs = 60_000)
-        assertEquals(10_500_000_000L to 10_566_666_666L, ReplayExport.contentOfFrame(playing, 250, 1000.0 / 30))
+        val frameMs = 1000.0 / 30
+        // First frame: a frame's length at the timeline's rate
+        val from = playing.positionNanosAt(250.0)
+        assertEquals(10_500_000_000L, from)
+        assertEquals(from + 66_666_666L, ReplayExport.endOfFrame(playing, from, null, frameMs))
+        // A speed keyframe doubled the replay's pace: the frame before moved 133 ms, so does this one
+        assertEquals(from + 133_333_332L, ReplayExport.endOfFrame(playing, from, from - 133_333_332L, frameMs))
+        // A jump: back to a frame's length
+        assertEquals(from + 66_666_666L, ReplayExport.endOfFrame(playing, from, from - 9_000_000_000L, frameMs))
         val paused = playing.copy(paused = true)
-        assertEquals(10_000_000_000L to 10_000_000_000L, ReplayExport.contentOfFrame(paused, 250, 1000.0 / 30))
+        assertEquals(from, ReplayExport.endOfFrame(paused, from, from - 1, frameMs))
+    }
+
+    @Test
+    fun `export positions are exact between whole milliseconds`() {
+        val s = ReplaySample(1, 0, 0, 1.0, paused = false, loop = false, durationMs = 60_000)
+        assertEquals(33_333_333L, s.positionNanosAt(1000.0 / 30))
+        assertEquals(s.positionAt(2_000) * 1_000_000L, s.positionNanosAt(2_000.0))
     }
 
     @Test

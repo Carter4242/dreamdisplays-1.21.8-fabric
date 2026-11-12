@@ -21,11 +21,12 @@ internal class ReplayExport(
     private val pictures = HashMap<UUID, ExportPicture>()
     private val sounds = HashMap<UUID, ExportSound>()
     private val shown = HashMap<UUID, RenderType>()
-    private var lastFrameMs = Long.MIN_VALUE
+    private val previous = HashMap<UUID, Long>() // each display's content position (ns) in the frame before
+    private var lastFrameMs = Double.NaN
     private var sampleCarry = 0.0
 
     /** The frame at replay time [replayMs]: decodes each playing display's picture there and queues its sound. */
-    fun frame(replayMs: Long, views: Map<UUID, ReplayView>) {
+    fun frame(replayMs: Double, views: Map<UUID, ReplayView>) {
         if (replayMs == lastFrameMs) return
         lastFrameMs = replayMs
         val (samples, carry) = samplesForFrame(sampleCarry, framerate)
@@ -36,28 +37,34 @@ internal class ReplayExport(
             val sample = view.sample ?: continue
             if (view.card != null || view.info.url.isEmpty()) continue
             val screen = DisplayRegistry.screens[id] ?: continue
-            val url = screen.scrubPreviewRawUrl ?: view.info.url
-            val fromMs = sample.positionAt(replayMs)
-            trace?.invoke("export frame T=$replayMs ${id.toString().take(8)} content=$fromMs")
+            // The player's resolved streams only while it holds this video (a description may have changed since)
+            val ownVideo = screen.videoUrl == view.info.url
+            val pictureUrl = (if (ownVideo) screen.scrubPreviewRawUrl else null) ?: view.info.url
+            val audioUrl = (if (ownVideo) screen.currentAudioTrackUrl.ifEmpty { null } else null) ?: pictureUrl
+            val fromNanos = sample.positionNanosAt(replayMs)
+            trace?.invoke("export frame T=${replayMs.toLong()} ${id.toString().take(8)} content=${fromNanos / 1_000_000L}")
             val w = screen.textureWidth.takeIf { it > 0 } ?: DEFAULT_W
             val h = screen.textureHeight.takeIf { it > 0 } ?: DEFAULT_H
-            pictures.getOrPut(id) { ExportPicture(id) }.frameAt(url, w, h, fromMs * 1_000_000L)?.let { shown[id] = it }
+            pictures.getOrPut(id) { ExportPicture(id) }.frameAt(pictureUrl, w, h, fromNanos)?.let { shown[id] = it }
+            val before = previous.put(id, fromNanos)
             if (!recordAudio) continue
-            val (fromNanos, toNanos) = contentOfFrame(sample, replayMs, frameMs)
+            val toNanos = endOfFrame(sample, fromNanos, before, frameMs)
             val c = centre(view)
             sounds.getOrPut(id) { ExportSound(id) }.frame(
-                sourceUrl = url, playing = !sample.paused, fromNanos = fromNanos, toNanos = toNanos, outSamples = samples,
+                audioUrl = audioUrl, playing = !sample.paused, fromNanos = fromNanos, toNanos = toNanos, outSamples = samples,
                 x = c[0], y = c[1], z = c[2], gain = if (screen.muted) 0f else screen.volume, maxDistance = MAX_DISTANCE,
             )
         }
+        previous.keys.retainAll(views.keys)
     }
 
     /** What display [id] shows in the frame being exported, or null to leave it to its player. */
     fun picture(id: UUID): RenderType? = shown[id]
 
+    /** Ends the export's pictures and sounds. Render thread, while the export's sound device is still the game's. */
     fun close() {
-        pictures.values.forEach { it.close() }
-        sounds.values.forEach { it.close() }
+        pictures.values.forEach { runCatching { it.dispose() } }
+        sounds.values.forEach { runCatching { it.close() } }
         pictures.clear()
         sounds.clear()
         shown.clear()
@@ -82,11 +89,20 @@ internal class ReplayExport(
             return n to (total - n)
         }
 
-        /** The content (ns) one export frame from [replayMs] covers: none while paused, its length times the speed. */
-        fun contentOfFrame(sample: ReplaySample, replayMs: Long, frameMs: Double): Pair<Long, Long> {
-            val from = sample.positionAt(replayMs) * 1_000_000L
-            return from to (if (sample.paused) from else from + (frameMs * 1_000_000.0 * sample.rate).toLong())
+        /**
+         * Where the content one export frame covers ends, from where it starts ([fromNanos]): as far as the frame before
+         * moved ([before], its start), which follows the replay's own pace (speed keyframes); a frame's length at the
+         * timeline's rate for the first frame or after a jump; nowhere while paused.
+         */
+        fun endOfFrame(sample: ReplaySample, fromNanos: Long, before: Long?, frameMs: Double): Long {
+            if (sample.paused) return fromNanos
+            val step = before?.let { fromNanos - it }?.takeIf { it in 1..MAX_FRAME_STEP_NANOS }
+                ?: (frameMs * 1_000_000.0 * sample.rate).toLong()
+            return fromNanos + step
         }
+
+        /** A frame-to-frame move larger than this is a jump, not the replay's pace. */
+        private const val MAX_FRAME_STEP_NANOS = 1_000_000_000L
 
         private const val DEFAULT_W = 854
         private const val DEFAULT_H = 480

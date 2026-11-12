@@ -88,7 +88,7 @@ object ReplayHooks {
 
 /** Why a display shows a card in a replay instead of its media. */
 enum class ReplayCard(val texture: String) {
-    /** A screen share: never stored in replays. */
+    /** A screen share: its picture and sound are never recorded or replayed. */
     SHARE("textures/replay/share_not_saved.png"),
 
     /** A display in local mode: each player's own playback, not recorded. */

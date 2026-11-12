@@ -29,6 +29,19 @@ data class ReplaySample(
         mediaGen == other.mediaGen && positionMs == other.positionMs && rate == other.rate && paused == other.paused &&
             loop == other.loop && durationMs == other.durationMs
 
+    /** The content position (ns) at replay time [replayMs], not rounded to whole ms (export frames fall between them). */
+    fun positionNanosAt(replayMs: Double): Long {
+        val raw = if (paused) positionMs * 1_000_000.0
+        else positionMs * 1_000_000.0 + (replayMs - anchorMs).coerceAtLeast(0.0) * rate * 1_000_000.0
+        val r = raw.toLong()
+        val d = durationMs * 1_000_000L
+        return when {
+            durationMs <= 0 -> r.coerceAtLeast(0)
+            loop -> Math.floorMod(r, d)
+            else -> r.coerceIn(0, d)
+        }
+    }
+
     /** The content position at replay time [replayMs]. */
     fun positionAt(replayMs: Long): Long {
         val raw = if (paused) positionMs else positionMs + ((replayMs - anchorMs).coerceAtLeast(0) * rate).roundToLong()
