@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.policy
 
 import com.dreamdisplays.core.diagnostics.ClientErrorLog
+import com.dreamdisplays.core.diagnostics.ReportByteBudget
 import com.dreamdisplays.core.diagnostics.ReportLimits
 import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.core.protocol.common.packets.ClientEnvironment
@@ -25,7 +26,9 @@ import java.util.concurrent.atomic.AtomicLong
  * summaries from players, appends them to `[clients] error_log` as JSON lines (with the reporter's environment the
  * first time they report something each session), and keeps the latest ones in memory for `/display errors` and
  * `/display diag`. Display commands (who paused, seeked, changed the video or mode) go to the same log. Nothing is
- * ever shown to the reporting player.
+ * ever shown to the reporting player. Each player's reports and summaries share a [ReportByteBudget]: one client
+ * sending large reports at the full rate can fill only its own share of the log and the in-memory list, never push
+ * everyone else's lines out.
  */
 @PaperOnly
 object ClientErrorReports {
@@ -69,6 +72,7 @@ object ClientErrorReports {
     private val envLoggedThisSession = ConcurrentHashMap.newKeySet<UUID>()
     private val reportRate = ReportLimits.Rate(REPORTS_PER_MINUTE)
     private val envRate = ReportLimits.Rate(ENVIRONMENTS_PER_MINUTE)
+    private val byteBudget = ReportByteBudget()
     private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "DreamDisplays-client-errors").apply { isDaemon = true } }
 
     @Volatile
@@ -86,10 +90,32 @@ object ClientErrorReports {
         val version = hello?.modVersion?.take(32)
         val displayName = DisplayManager.getDisplayData(report.id)?.shortLabel
         val name = player.name
-        remember(Entry(seq.incrementAndGet(), now, name, player.uniqueId, build, report.id, displayName, report))
         // The environment goes with the first report of the session, so one log line has what is needed
-        val env = if (envLoggedThisSession.add(player.uniqueId)) environments[player.uniqueId]?.env else null
-        write(ClientErrorLog.reportLine(now, name, player.uniqueId, build, version, report, displayName, env))
+        val firstOfSession = player.uniqueId !in envLoggedThisSession
+        val env = if (firstOfSession) environments[player.uniqueId]?.env else null
+        val line = ClientErrorLog.reportLine(now, name, player.uniqueId, build, version, report, displayName, env)
+        if (!withinBudget(player, line, now)) return
+        if (firstOfSession) envLoggedThisSession.add(player.uniqueId)
+        remember(Entry(seq.incrementAndGet(), now, name, player.uniqueId, build, report.id, displayName, report))
+        write(line)
+    }
+
+    /**
+     * Counts [line] against [player]'s share of the log; false when it is used up (the line is dropped). The first line
+     * after a window in which some were dropped is preceded by one saying how many.
+     */
+    private fun withinBudget(player: Player, line: String, now: Long): Boolean {
+        val decision = byteBudget.admit(player.uniqueId, ReportByteBudget.utf8Length(line) + 1, now)
+        decision.ended?.let { writeSuppressed(player.name, player.uniqueId, it, now) }
+        return decision.allowed
+    }
+
+    private fun writeSuppressed(name: String, playerId: UUID, suppressed: ReportByteBudget.Suppressed, now: Long) {
+        write(
+            ClientErrorLog.suppressedLine(
+                now, name, playerId, suppressed.reports, suppressed.bytes, suppressed.sinceMs, suppressed.untilMs,
+            )
+        )
     }
 
     fun onEnvironment(player: Player, packet: ClientEnvironment) {
@@ -101,15 +127,14 @@ object ClientErrorReports {
         environments[player.uniqueId] = Environment(player.name, player.uniqueId, now, env)
         // This session's reports were already logged without this summary: log it on its own line
         if (previous?.env != env && player.uniqueId in envLoggedThisSession) {
-            write(
-                kotlinx.serialization.json.buildJsonObject {
-                    put("type", kotlinx.serialization.json.JsonPrimitive("environment"))
-                    put("time", kotlinx.serialization.json.JsonPrimitive(ClientErrorLog.time(now)))
-                    put("player", kotlinx.serialization.json.JsonPrimitive(player.name))
-                    put("uuid", kotlinx.serialization.json.JsonPrimitive(player.uniqueId.toString()))
-                    put("env", ClientErrorLog.envJson(env))
-                }.toString()
-            )
+            val line = kotlinx.serialization.json.buildJsonObject {
+                put("type", kotlinx.serialization.json.JsonPrimitive("environment"))
+                put("time", kotlinx.serialization.json.JsonPrimitive(ClientErrorLog.time(now)))
+                put("player", kotlinx.serialization.json.JsonPrimitive(player.name))
+                put("uuid", kotlinx.serialization.json.JsonPrimitive(player.uniqueId.toString()))
+                put("env", ClientErrorLog.envJson(env))
+            }.toString()
+            if (withinBudget(player, line, now)) write(line)
         }
     }
 
@@ -161,7 +186,9 @@ object ClientErrorReports {
         return names.sorted()
     }
 
-    fun onQuit(playerId: UUID) {
+    /** [playerName] is for the "suppressed" line written when some of their reports were dropped this window. */
+    fun onQuit(playerId: UUID, playerName: String) {
+        byteBudget.forget(playerId)?.let { writeSuppressed(playerName, playerId, it, System.currentTimeMillis()) }
         envLoggedThisSession.remove(playerId)
         reportRate.forget(playerId)
         envRate.forget(playerId)

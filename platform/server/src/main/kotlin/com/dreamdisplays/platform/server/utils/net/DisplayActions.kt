@@ -7,6 +7,7 @@ import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.protocol.common.ClientBuild
 import com.dreamdisplays.core.protocol.common.packets.MediaGen
+import com.dreamdisplays.core.queue.TokenBuckets
 import com.dreamdisplays.api.playback.model.DisplayAccess
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
@@ -50,6 +51,16 @@ object DisplayActions {
     private val setVideoThrottle = ActionThrottle()
     private const val SET_VIDEO_COOLDOWN_MS = 250L
 
+    /**
+     * Video sets / clears per player, before the URL is validated: the per-display cooldown above comes after that
+     * (an invalid URL must not use it up), so without this a flood of them would each pay for a validation.
+     */
+    private val videoRequests = TokenBuckets(capacity = 5.0, refillPerSecond = 2.0)
+
+    /** A refused switch to Local is logged at most once a minute per player: the log is not theirs to fill. */
+    private val localRefusalLog = ActionThrottle()
+    private const val LOCAL_REFUSAL_LOG_MS = 60_000L
+
     private fun String.sanitizedForLog(maxLength: Int = 200): String = take(maxLength).filter { !it.isISOControl() }
 
     private val requestSyncThrottle = ActionThrottle()
@@ -84,6 +95,10 @@ object DisplayActions {
     fun setVideo(player: Player, displayId: UUID, url: String, lang: String) {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!PlaybackPermissions.canSetVideo(context(displayData, player))) return
+        // Checked before the throttle below: an attacker who is never nearby must not be able to
+        // burn the per-display cooldown window against the display's real, present owner.
+        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!videoRequests.tryTake(player.uniqueId, System.currentTimeMillis())) return
         if (!MediaUrlPolicy.isAllowed(url)) return
         // Custom links go through the server's own policy on top of the URL-shape check: a player
         // is told why the link was refused rather than watching the display silently not change.
@@ -93,9 +108,6 @@ object DisplayActions {
             player.hasPermission(PaperServer.config.permissions.custom),
             player.uniqueId,
         )?.let { return MessageUtil.sendMessage(player, it) }
-        // Checked before the throttle below: an attacker who is never nearby must not be able to
-        // burn the per-display cooldown window against the display's real, present owner.
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
         if (!setVideoThrottle.tryAcquire(displayId, SET_VIDEO_COOLDOWN_MS)) return
 
         val sanitizedLang = MediaUrlPolicy.sanitizeLang(lang)
@@ -117,6 +129,7 @@ object DisplayActions {
         val displayData = DisplayManager.getDisplayData(displayId) as? PaperDisplayData ?: return
         if (!PlaybackPermissions.canSetVideo(context(displayData, player))) return
         if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!videoRequests.tryTake(player.uniqueId, System.currentTimeMillis())) return
         if (!setVideoThrottle.tryAcquire(displayId, SET_VIDEO_COOLDOWN_MS)) return
         ServerApiHost.current?.askSetUrl(displayData, "", "", player.uniqueId)?.let { reason ->
             if (reason.isNotEmpty()) MessageUtil.sendColoredMessage(player, reason)
@@ -213,7 +226,9 @@ object DisplayActions {
         // Local takes a display off the shared clock for everyone. The menu no longer offers a mode switch
         // (`/display mode` does it), so only an op's client may still ask for Local.
         if (mode == PlaybackMode.LOCAL && !player.isOp) {
-            logger.info("Refused a switch to Local for display ${displayData.id} from ${player.name} (not op)")
+            if (localRefusalLog.tryAcquire(player.uniqueId, LOCAL_REFUSAL_LOG_MS)) {
+                logger.info("Refused a switch to Local for display ${displayData.id} from ${player.name} (not op)")
+            }
             return
         }
 

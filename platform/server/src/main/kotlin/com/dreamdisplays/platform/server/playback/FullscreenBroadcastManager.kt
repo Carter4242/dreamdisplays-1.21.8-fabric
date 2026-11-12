@@ -17,6 +17,7 @@ import com.dreamdisplays.core.queue.DurationReports
 import com.dreamdisplays.core.queue.QueueTiming
 import com.dreamdisplays.core.queue.VideoDurations
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
+import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.storage.FullscreenSessionStore
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
@@ -30,6 +31,8 @@ data class FullscreenRadiusTarget(val world: String, val x: Double, val y: Doubl
 /** Manages server-forced fullscreen broadcast sessions targeting players by name or radius. */
 object FullscreenBroadcastManager {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val prepareFailedLog = ActionThrottle()
+    private const val PREPARE_FAILED_LOG_MS = 10_000L
     private const val TICK_MS = 1_000L
     private const val TIMELINE_RESEND_MS = 5_000L
     private const val REDELIVER_UNCONFIRMED_MS = 1_500L
@@ -580,7 +583,8 @@ object FullscreenBroadcastManager {
     fun onPrepareStatus(playerId: UUID, prepareId: String, displayId: UUID, state: FullscreenPrepareState) {
         val preparation = preparations[displayId] ?: return
         if (!preparation.roster.onStatus(playerId, prepareId, state)) return
-        if (state == FullscreenPrepareState.FAILED) {
+        // Once per player and preparation in a while: a client repeating FAILED must not fill the console
+        if (state == FullscreenPrepareState.FAILED && prepareFailedLog.tryAcquire(playerId to prepareId, PREPARE_FAILED_LOG_MS)) {
             logger.info("Player $playerId could not load display $displayId for preparation $prepareId.")
         }
     }

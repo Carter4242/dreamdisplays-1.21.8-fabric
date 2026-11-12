@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.core.protocol.common.packets.QueueState
 import com.dreamdisplays.core.queue.DisplayQueue
+import com.dreamdisplays.core.queue.QueueAddGate
 import com.dreamdisplays.core.queue.QueueAddResult
 import com.dreamdisplays.core.queue.QueueItem
 import com.dreamdisplays.core.queue.QueueLimits
@@ -74,7 +75,7 @@ object QueueManager {
     private const val MAX_SKIPS_PER_ADVANCE = 5
 
     /** Most entries one batch (playlist) add looks at. */
-    const val MAX_BATCH = 100
+    const val MAX_BATCH = QueueAddGate.MAX_BATCH
     private const val PERSIST_DEBOUNCE_MS = 2_000L
 
     private lateinit var transport: PlaybackTransport
@@ -168,9 +169,7 @@ object QueueManager {
         display: DisplayData, ctx: PlaybackContext, actorId: UUID, actorName: String,
         entries: List<NewEntry>, throttled: Boolean = true,
     ): AddOutcome {
-        if (!settings().enabled) return AddOutcome(Result.DISABLED, 0)
-        if (display.virtual || !PlaybackPermissions.queueRuns(ctx.mode)) return AddOutcome(Result.NOT_RUNNING, 0)
-        if (!PlaybackPermissions.canAddToQueue(ctx)) return AddOutcome(Result.NOT_ALLOWED, 0)
+        addRefusal(display, ctx)?.let { return AddOutcome(it, 0) }
         val valid = entries.take(MAX_BATCH).filter { it.url.isNotBlank() && it.url.length <= QueueText.MAX_URL }
         if (valid.isEmpty()) return AddOutcome(Result.REFUSED, 0)
         if (throttled && !addThrottle.tryAcquire(actorId, ADD_COOLDOWN_MS)) return AddOutcome(Result.THROTTLED, 0)
@@ -217,6 +216,31 @@ object QueueManager {
         }
         return AddOutcome(Result.OK, added)
     }
+
+    /**
+     * Why [ctx] may not add to [display]'s queue at all (the checks [addAll] starts with), or null when it may. Cheap:
+     * a client's add is checked with it before any of its URLs is validated.
+     */
+    fun addRefusal(display: DisplayData, ctx: PlaybackContext): Result? =
+        when (QueueAddGate.refusal(settings().enabled, display.virtual, ctx)) {
+            null -> null
+            QueueAddGate.Refusal.DISABLED -> Result.DISABLED
+            QueueAddGate.Refusal.NOT_RUNNING -> Result.NOT_RUNNING
+            QueueAddGate.Refusal.NOT_ALLOWED -> Result.NOT_ALLOWED
+        }
+
+    /** How many entries [actorId] can still add to [display]'s queue ([QueueAddGate.room]). */
+    fun addRoom(display: DisplayData, ctx: PlaybackContext, actorId: UUID): Int {
+        val exempt = ctx.isOwner || ctx.isAdmin
+        val queue = queues[display.id] ?: return QueueAddGate.room(null, actorId, limits(), exempt)
+        return synchronized(queue) { QueueAddGate.room(queue, actorId, limits(), exempt) }
+    }
+
+    /**
+     * Takes [actorId]'s add cooldown now, for a caller that checks it before validating what it adds and then calls
+     * [addAll] with `throttled = false`. False while it is still running.
+     */
+    fun tryAcquireAdd(actorId: UUID): Boolean = addThrottle.tryAcquire(actorId, ADD_COOLDOWN_MS)
 
     /** Removes entry [itemId]; the adder, owner or admin may. */
     fun remove(display: DisplayData, ctx: PlaybackContext, actorId: UUID, itemId: String): Result {
