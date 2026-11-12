@@ -164,7 +164,7 @@ class DisplayCommandTreeTest {
             listOf(
                 "D | Usage:",
                 " /display video <display> <url> [lang] — Set what a display plays",
-                " /display video <display> clear — Take the video off a display for everyone",
+                " /display video <display> clear — Take the video off a display for everyone; the next queued video plays, if any",
             ),
             platform.texts(),
         )

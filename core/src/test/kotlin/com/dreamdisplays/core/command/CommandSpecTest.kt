@@ -29,8 +29,8 @@ class CommandSpecTest {
             "cmd.error.notLooking", "cmd.error.needsPlayer", "cmd.error.flagUnknown", "cmd.error.flagTwice",
             "cmd.error.flagMissing", "cmd.error.flagNumber", "cmd.error.flagValue",
             // Handlers and platform suggestions
-            "cmd.karaoke.usage", "cmd.queue.badPosition", "cmd.name.cleared", "cmd.video.cleared", "cmd.share.none",
-            "cmd.share.stopped", "cmd.share.listNone", "cmd.share.listHeader", "cmd.share.listLine",
+            "cmd.karaoke.usage", "cmd.queue.badPosition", "cmd.name.cleared", "cmd.video.cleared", "cmd.video.clearedNext",
+            "cmd.share.none", "cmd.share.stopped", "cmd.share.listNone", "cmd.share.listHeader", "cmd.share.listLine",
             "cmd.suggest.allDisplays", "cmd.suggest.clearVideo", "cmd.suggest.clearName",
         ) + (Flags.START + Flags.PREPARE).flatMap { f ->
             listOf(f.tooltip) + ((f.value as? Flag.Value.Choice)?.choices?.values ?: emptyList())

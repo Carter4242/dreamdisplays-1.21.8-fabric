@@ -126,16 +126,24 @@ object DisplayActions {
     }
 
     /**
-     * Takes [displayData]'s video off, with no permission checks (callers check; [actor] is logged): its URL becomes
-     * empty and is saved, and everyone who gets its updates (in range, far fullscreen viewers, PiP pinners) is told. Its
-     * clock and length go, a screen share there ends without bringing anything back, and karaoke and
-     * fullscreen sessions there end. The queue
-     * keeps its entries but does not start them: a skip or a play does. The command form calls this.
+     * Takes [displayData]'s video off and moves on, with no permission checks (callers check; [actor] is logged). A
+     * screen share there ends first without bringing anything back. With an entry waiting in the queue the display then
+     * moves on to it exactly like a skip ([QueueManager.advanceOnClear]: preloads, karaoke line and loop as there) and
+     * this returns true. Otherwise it goes blank: its URL becomes empty and is saved, everyone who gets its updates (in
+     * range, far fullscreen viewers, PiP pinners) is told, its clock and length go, and karaoke singers and fullscreen
+     * sessions there end. The command form calls this.
      */
-    fun clearVideo(displayData: PaperDisplayData, actor: Player?) {
+    fun clearVideo(displayData: PaperDisplayData, actor: Player?): Boolean {
         ScreenShareActions.onVideoSetByHand(displayData.id)
-        KaraokeManager.endSinging(displayData)
         val previousUrl = displayData.url
+        if (QueueManager.advanceOnClear(displayData)) {
+            if (actor != null) ClientErrorReports.logCommand(
+                actor, displayData.id, "clear", null,
+                mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl, "next" to displayData.url),
+            )
+            return true
+        }
+        KaraokeManager.endSinging(displayData)
         displayData.url = ""
         displayData.lang = ""
         if (actor != null) ClientErrorReports.logCommand(
@@ -150,6 +158,7 @@ object DisplayActions {
         FullscreenBroadcastManager.endSessionsOf(displayData.id)
         QueueManager.onVideoSetByHand(displayData)
         ServerApiHost.current?.urlChanged(displayData)
+        return false
     }
 
     /**
