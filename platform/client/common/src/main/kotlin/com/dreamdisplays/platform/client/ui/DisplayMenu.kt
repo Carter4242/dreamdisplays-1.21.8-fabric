@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.client.ui
 
 import com.dreamdisplays.platform.client.utils.literalText
+import com.dreamdisplays.core.menu.TabStrip
+import com.dreamdisplays.platform.client.displays.DisplayPanels
 import com.dreamdisplays.platform.client.utils.translatableText
 //? if >=1.21.11 {
 import net.minecraft.client.input.KeyEvent
@@ -119,9 +121,11 @@ class DisplayMenu private constructor(
     private var clearArmedUntilMs = 0L
     private var lastQueueCount = -1
     private var queueFlashUntilMs = 0L
-    private var suggestionsTabRect: UiRect? = null
-    private var queueTabRect: UiRect? = null
+    private var tabRects: List<Pair<BottomTab, UiRect>> = emptyList()
     private var queueTip: String? = null
+    private var panelTip: List<String>? = null
+    private lateinit var activitySection: ActivitySection
+    private lateinit var viewersSection: ViewersSection
 
     override fun onInit() {
         val ds = displayScreen
@@ -348,6 +352,8 @@ class DisplayMenu private constructor(
 
         // "Up next": the bottom panel's second tab and the loop toggle in the tab header
         queueSection = QueueSection(ds)
+        activitySection = ActivitySection(ds)
+        viewersSection = ViewersSection(ds)
         loopButton = addUi(IconButton("loop") {
             DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
         })
@@ -564,6 +570,7 @@ class DisplayMenu private constructor(
             suggestions.hidePopups()
             suggestionsRect = null
             errorPanel.render(g, width, height)
+            DisplayPanels.sync(ds.uuid, activityOpen = false, viewersOpen = false)
             drawChildren(g, mouseX, mouseY, partialTick)
             clearVideoTip(mouseX, mouseY)?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
             return
@@ -578,11 +585,17 @@ class DisplayMenu private constructor(
         settings.render(g, layout.settings)
 
         val suggestionsArea = layout.suggestions
-        val tabs = DisplayQueues.supported
-        if (!tabs) queueTabOpen = false
+        val tabs = availableTabs().size > 1
+        if (bottomTab !in availableTabs()) bottomTab = BottomTab.SUGGESTIONS
+        // The server sends the Activity rows only while that tab shows, and the viewers while the tab row (their
+        // count) does
+        DisplayPanels.sync(
+            ds.uuid, activityOpen = suggestionsArea != null && showingActivity(), viewersOpen = suggestionsArea != null && tabs,
+        )
         queueTip = null
+        panelTip = null
         if (suggestionsArea != null) {
-            suggestions.visible = !showingQueue()
+            suggestions.visible = bottomTab == BottomTab.SUGGESTIONS
             suggestions.showTitle = !tabs
             suggestions.setVertical(layout.suggestionsVertical)
             suggestions.setCompactCards(false)
@@ -595,6 +608,14 @@ class DisplayMenu private constructor(
                 queueSection.vertical = layout.suggestionsVertical
                 queueSection.render(g, suggestionsArea, mouseX, mouseY)
                 queueTip = queueSection.tooltip
+            }
+            if (showingActivity()) {
+                activitySection.render(g, suggestionsArea, mouseX, mouseY)
+                panelTip = activitySection.tooltip
+            }
+            if (showingViewers()) {
+                viewersSection.render(g, suggestionsArea, mouseX, mouseY)
+                panelTip = viewersSection.tooltip
             }
         } else {
             suggestions.visible = false
@@ -614,7 +635,7 @@ class DisplayMenu private constructor(
         }
         if (suggestionsArea != null && tabs) {
             drawPanelTabs(g, suggestionsArea, mouseX, mouseY)
-            drawSuggestionQueueButton(g, mouseX, mouseY)
+            if (bottomTab == BottomTab.SUGGESTIONS) drawSuggestionQueueButton(g, mouseX, mouseY)
             if (loopButton.visible && DisplayQueues.of(ds.uuid)?.loop == true) {
                 val bottom = loopButton.y + loopButton.height
                 g.fill(loopButton.x + 2, bottom + 1, loopButton.x + loopButton.width - 2, bottom + 3, UiTheme.ACCENT)
@@ -632,29 +653,97 @@ class DisplayMenu private constructor(
         //?}
         settings.renderTooltips(g, mouseX, mouseY, toRealX(mouseX), toRealY(mouseY))
         queueTip?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
+            ?: panelTip?.let { renderTooltipLines(g, it, toRealX(mouseX), toRealY(mouseY)) }
     }
 
-    private fun showingQueue(): Boolean = queueTabOpen && DisplayQueues.supported
+    private fun showingQueue(): Boolean = bottomTab == BottomTab.QUEUE && DisplayQueues.supported
 
-    /** "Suggestions | Up next (N)" in the bottom panel's title line. */
+    private fun showingActivity(): Boolean = bottomTab == BottomTab.ACTIVITY && DisplayPanels.activitySupported
+
+    private fun showingViewers(): Boolean = bottomTab == BottomTab.VIEWERS && DisplayPanels.viewersSupported
+
+    /** The bottom panel's tabs this server offers, in order. */
+    private fun availableTabs(): List<BottomTab> = buildList {
+        add(BottomTab.SUGGESTIONS)
+        if (DisplayQueues.supported) add(BottomTab.QUEUE)
+        if (DisplayPanels.activitySupported) add(BottomTab.ACTIVITY)
+        if (DisplayPanels.viewersSupported) add(BottomTab.VIEWERS)
+    }
+
+    /**
+     * "Suggestions | Up next (N) | Activity | Viewers (N)" in the bottom panel's title line: full labels when they fit
+     * next to the header's buttons, else short ones, else icons (with their counts while those fit) whose tooltip is
+     * the full label ([TabStrip]).
+     */
     private fun drawPanelTabs(g: GuiGraphicsCompat, area: UiRect, mouseX: Int, mouseY: Int) {
         val ds = displayScreen
         val x = area.x + UiTheme.PANEL_PADDING_X
         val y = area.y + UiTheme.PANEL_PADDING_Y
-        val first = ClientMessage.BUTTON_SUGGESTIONS.text()
         val count = DisplayQueues.items(ds.uuid).size
         val now = System.currentTimeMillis()
         if (lastQueueCount >= 0 && count > lastQueueCount) queueFlashUntilMs = now + QUEUE_FLASH_MS
         lastQueueCount = count
-        val second = ClientMessage.QUEUE_TAB.text(count)
-        val firstRect = UiRect(x - 2, y - 2, font.width(first) + 4, font.lineHeight + 4)
-        val secondRect = UiRect(firstRect.right + TAB_GAP, y - 2, font.width(second) + 4, font.lineHeight + 4)
-        suggestionsTabRect = firstRect
-        queueTabRect = secondRect
-        drawTab(g, first, firstRect, active = !showingQueue(), hover = firstRect.contains(mouseX, mouseY))
-        drawTab(g, second, secondRect, active = showingQueue(), hover = secondRect.contains(mouseX, mouseY))
-        // Just queued something: the count lights up so the add is visibly confirmed
-        if (now < queueFlashUntilMs) g.drawText(font, second, secondRect.x + 2, secondRect.y + 2, UiTheme.ACCENT, false)
+        val viewers = DisplayPanels.viewersOf(ds.uuid)?.total
+        val viewerCount = viewers?.toString() ?: "\u2026"
+        val tabs = availableTabs()
+        val labels = tabs.map { tab ->
+            when (tab) {
+                BottomTab.SUGGESTIONS -> TabStrip.Tab(ClientMessage.BUTTON_SUGGESTIONS.text(), ClientMessage.BUTTON_SUGGESTIONS_SHORT.text())
+                BottomTab.QUEUE -> TabStrip.Tab(ClientMessage.QUEUE_TAB.text(count), ClientMessage.QUEUE_TAB_SHORT.text(count), count.toString())
+                BottomTab.ACTIVITY -> TabStrip.Tab(ClientMessage.ACTIVITY_TAB.text(), ClientMessage.ACTIVITY_TAB_SHORT.text())
+                BottomTab.VIEWERS -> TabStrip.Tab(ClientMessage.VIEWERS_TAB.text(viewerCount), ClientMessage.VIEWERS_TAB_SHORT.text(viewerCount), viewerCount)
+            }
+        }
+        // The loop / clear buttons sit at the header's right end whenever Up next is offered
+        val reserved = if (DisplayQueues.supported) LOOP_BUTTON * 2 + 4 + 10 + TAB_GAP else 0
+        val available = area.right - 10 - reserved - x
+        val strip = TabStrip.layout(labels, available, TAB_GAP, ICON_TAB_GAP, TAB_ICON, font::width)
+        tabRects = tabs.indices.map { i ->
+            val item = strip.items[i]
+            tabs[i] to UiRect(x - 2 + item.x, y - 2, item.w, font.lineHeight + 4)
+        }
+        for ((i, pair) in tabRects.withIndex()) {
+            val (tab, r) = pair
+            val item = strip.items[i]
+            val hover = r.contains(mouseX, mouseY)
+            val active = tab == bottomTab
+            val label = item.label
+            if (label != null) {
+                drawTab(g, label, r, active, hover)
+            } else {
+                drawIconTab(g, tab, item.count, r, active, hover)
+                if (hover) queueTip = labels[i].full
+            }
+            // Just queued something: the count lights up so the add is visibly confirmed
+            if (tab == BottomTab.QUEUE && now < queueFlashUntilMs) {
+                if (label != null) g.drawText(font, label, r.x + 2, r.y + 2, UiTheme.ACCENT, false)
+                else item.count?.let { g.drawText(font, it, r.x + 2 + TAB_ICON + 2, r.y + 2, UiTheme.ACCENT, false) }
+            }
+        }
+    }
+
+    private fun drawIconTab(g: GuiGraphicsCompat, tab: BottomTab, count: String?, r: UiRect, active: Boolean, hover: Boolean) {
+        val color = when {
+            active -> UiTheme.TEXT_PRIMARY
+            hover -> UiTheme.TEXT_DIM
+            else -> UiTheme.TEXT_SECONDARY
+        }
+        val sprite = IconButton.modIcon(tab.icon)
+        val iconY = r.y + (r.h - TAB_ICON) / 2
+        //? if >=1.21.6 {
+        g.blitSprite(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, sprite, r.x + 2, iconY, TAB_ICON, TAB_ICON, color)
+        //?} else
+        /*g.blitSprite(sprite, r.x + 2, iconY, TAB_ICON, TAB_ICON)*/
+        count?.let { g.drawText(font, it, r.x + 2 + TAB_ICON + 2, r.y + 2, color, false) }
+        if (active) g.fill(r.x + 2, r.bottom, r.right - 2, r.bottom + 1, UiTheme.ACCENT)
+    }
+
+    private fun renderTooltipLines(g: GuiGraphicsCompat, lines: List<String>, x: Int, y: Int) {
+        val components = lines.map { literalText(it) }
+        //? if >=1.21.6 {
+        g.setComponentTooltipForNextFrame(font, components, x, y)
+        //?} else
+        /*g.renderComponentTooltip(font, components, x, y)*/
     }
 
     private fun drawTab(g: GuiGraphicsCompat, label: String, r: UiRect, active: Boolean, hover: Boolean) {
@@ -738,16 +827,17 @@ class DisplayMenu private constructor(
 
     /** Queue clicks that must win over the panels underneath: tabs, card buttons, the card "+". */
     private fun handleQueueClick(mx: Int, my: Int): Boolean {
-        if (!DisplayQueues.supported || suggestionsRect == null || displayScreen.errored) return false
-        if (suggestionsTabRect?.contains(mx, my) == true && showingQueue()) {
-            queueTabOpen = false
-            playClick()
+        if (availableTabs().size < 2 || suggestionsRect == null || displayScreen.errored) return false
+        tabRects.firstOrNull { it.second.contains(mx, my) }?.let { (tab, _) ->
+            if (tab != bottomTab) {
+                bottomTab = tab
+                playClick()
+            }
             return true
         }
-        if (queueTabRect?.contains(mx, my) == true && !showingQueue()) {
-            queueTabOpen = true
-            playClick()
-            return true
+        if (showingActivity() || showingViewers()) {
+            // The hidden suggestions panel still sits under the list: keep its cards from catching the click
+            return suggestionsRect?.contains(mx, my) == true
         }
         if (showingQueue()) {
             if (queueSection.handleClick(mx, my)) return true
@@ -981,7 +1071,9 @@ class DisplayMenu private constructor(
                 audioTrackDropdown.claimScroll(mx, my) ||
                 subtitleDropdown.claimScroll(mx, my) ||
                 (::suggestions.isInitialized && suggestions.claimPopupScroll(mx, my)) ||
-                (showingQueue() && queueSection.handleScroll(mx, my, scrollX, scrollY))
+                (showingQueue() && queueSection.handleScroll(mx, my, scrollX, scrollY)) ||
+                (showingActivity() && activitySection.handleScroll(mx, my, scrollY)) ||
+                (showingViewers() && viewersSection.handleScroll(mx, my, scrollY))
     }
 
     // Open popups get first claim on every button, ahead of the widgets they cover (see claimClick).
@@ -1032,6 +1124,7 @@ class DisplayMenu private constructor(
 
     override fun onRemoved() {
         if (::preview.isInitialized) preview.close()
+        DisplayPanels.close()
     }
 
     override fun minContentSize(): Pair<Int, Int> = MIN_CONTENT_W to MIN_CONTENT_H
@@ -1096,14 +1189,16 @@ class DisplayMenu private constructor(
         private const val LOOP_BUTTON = 16
         private const val QUEUE_PLUS = 14
         private const val TAB_GAP = 10
+        private const val ICON_TAB_GAP = 4
+        private const val TAB_ICON = 10
         private const val CLEAR_CONFIRM_MS = 3_000L
         private const val QUEUE_FLASH_MS = 700L
 
         /** Most playlist videos one "+" queues; the server takes at most this many per batch as well. */
         private const val MAX_PLAYLIST_BATCH = 100
 
-        /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
-        private var queueTabOpen = false
+        /** Which tab the bottom panel shows; remembered across menu reopenings. */
+        private var bottomTab = BottomTab.SUGGESTIONS
 
         /** Playlists being listed for a display ("<display>/<list id>"); render thread only. */
         private val playlistsLoading = mutableSetOf<String>()
@@ -1136,4 +1231,12 @@ class DisplayMenu private constructor(
             MinecraftScreenUtil.setScreen(Minecraft.getInstance(), DisplayMenu(displayScreen))
         }
     }
+}
+
+/** The bottom panel's tabs; [icon] is the sprite shown when the header is too narrow for labels. */
+private enum class BottomTab(val icon: String) {
+    SUGGESTIONS("tab_suggestions"),
+    QUEUE("tab_queue"),
+    ACTIVITY("tab_activity"),
+    VIEWERS("tab_viewers"),
 }

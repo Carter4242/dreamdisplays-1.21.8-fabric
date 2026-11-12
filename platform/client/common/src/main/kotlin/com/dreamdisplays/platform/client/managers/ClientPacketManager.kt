@@ -70,6 +70,8 @@ object ClientPacketManager {
             is ClearCache -> handleClearCache(packet)
             is ServerPolicy -> com.dreamdisplays.platform.client.displays.ServerOverrides.apply(packet)
             is QueueState -> com.dreamdisplays.platform.client.displays.DisplayQueues.apply(packet)
+            is ActivityState -> com.dreamdisplays.platform.client.displays.DisplayPanels.apply(packet)
+            is ViewersState -> com.dreamdisplays.platform.client.displays.DisplayPanels.apply(packet)
             is KaraokeClockPing -> com.dreamdisplays.platform.client.karaoke.KaraokeClient.onClockPing(packet)
             is ScreenShareState -> com.dreamdisplays.platform.client.displays.ScreenShare.onState(packet)
             is ReportRequest -> com.dreamdisplays.platform.client.displays.ReportRequests.handle(packet)
@@ -88,6 +90,7 @@ object ClientPacketManager {
         Initializer.sendPacket(SetDisplaysEnabled(ClientStateManager.displaysEnabled))
         // A hello on a connection that already had one is a reloaded server, which forgot every report: send them again
         com.dreamdisplays.platform.client.displays.ReportRequests.onServerHello()
+        com.dreamdisplays.platform.client.displays.DisplayPanels.onServerHello()
         com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
     }
 
@@ -141,6 +144,7 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ViewerReporter.reset()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.reset()
         com.dreamdisplays.platform.client.displays.DisplayQueues.reset()
+        com.dreamdisplays.platform.client.displays.DisplayPanels.reset()
         com.dreamdisplays.platform.client.karaoke.KaraokeClient.reset()
         FullscreenController.reset()
         FullscreenPrepareController.reset()
