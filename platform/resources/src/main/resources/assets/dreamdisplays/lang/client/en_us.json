@@ -177,5 +177,8 @@
   "dreamdisplays.queue.playlist.failed": "Couldn't load that playlist",
   "dreamdisplays.queue.clear": "Clear Up next",
   "dreamdisplays.queue.clear.confirm": "Click again to remove every video from Up next",
-  "dreamdisplays.ui.clear_video": "Clear the video (ends it for everyone)"
+  "dreamdisplays.ui.clear_video": "Clear the video (ends it for everyone)",
+  "dreamdisplays.display.ad_break": "Twitch ad break",
+  "dreamdisplays.display.ad_break.countdown": "stream starts in %ss",
+  "dreamdisplays.display.ad_break.soon": "stream starts in a moment"
 }

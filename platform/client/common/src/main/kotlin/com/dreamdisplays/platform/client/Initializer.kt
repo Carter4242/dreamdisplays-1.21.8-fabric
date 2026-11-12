@@ -70,6 +70,10 @@ object Initializer {
         com.dreamdisplays.media.source.youtube.binary.YtDlpJsRuntime.policy = {
             com.dreamdisplays.platform.client.displays.ServerOverrides.settings.ytDlpJsRuntime.name.lowercase()
         }
+        // Twitch ad skipping on live channels, unless the server turned it off (`client.twitchAdSkip`)
+        com.dreamdisplays.media.player.adskip.TwitchAdSkip.enabled = {
+            com.dreamdisplays.platform.client.displays.ServerOverrides.settings.twitchAdSkip
+        }
         com.dreamdisplays.media.player.pipeline.AudioOutputHooks.openAlLine = { device ->
             com.dreamdisplays.platform.client.audio.OpenAlSourceLine.open(device)
         }

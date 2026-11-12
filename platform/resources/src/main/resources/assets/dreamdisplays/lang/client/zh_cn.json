@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "后台静音",
   "dreamdisplays.config.mute_unfocused.tooltip": "游戏窗口未处于焦点时将显示屏静音",
   "dreamdisplays.config.volume_normalization": "音量标准化",
-  "dreamdisplays.config.volume_normalization.tooltip": "让小声和大声的视频以相近的音量播放"
+  "dreamdisplays.config.volume_normalization.tooltip": "让小声和大声的视频以相近的音量播放",
+  "dreamdisplays.display.ad_break": "Twitch 广告时间",
+  "dreamdisplays.display.ad_break.countdown": "直播将在 %s 秒后开始",
+  "dreamdisplays.display.ad_break.soon": "直播即将开始"
 }

@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "השתקה ברקע",
   "dreamdisplays.config.mute_unfocused.tooltip": "השתקת התצוגות כל עוד חלון המשחק אינו בפוקוס",
   "dreamdisplays.config.volume_normalization": "נרמול עוצמת קול",
-  "dreamdisplays.config.volume_normalization.tooltip": "ניגון סרטונים שקטים ורועשים בעוצמה דומה"
+  "dreamdisplays.config.volume_normalization.tooltip": "ניגון סרטונים שקטים ורועשים בעוצמה דומה",
+  "dreamdisplays.display.ad_break": "הפסקת פרסומות של Twitch",
+  "dreamdisplays.display.ad_break.countdown": "השידור מתחיל בעוד %s שניות",
+  "dreamdisplays.display.ad_break.soon": "השידור יתחיל בעוד רגע"
 }

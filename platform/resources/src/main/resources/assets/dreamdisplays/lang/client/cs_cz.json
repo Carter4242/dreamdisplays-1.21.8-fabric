@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "Ztlumit na pozadí",
   "dreamdisplays.config.mute_unfocused.tooltip": "Ztlumit displeje, dokud okno hry není aktivní",
   "dreamdisplays.config.volume_normalization": "Normalizace hlasitosti",
-  "dreamdisplays.config.volume_normalization.tooltip": "Přehrávat tichá i hlasitá videa podobně hlasitě"
+  "dreamdisplays.config.volume_normalization.tooltip": "Přehrávat tichá i hlasitá videa podobně hlasitě",
+  "dreamdisplays.display.ad_break": "Reklama na Twitchi",
+  "dreamdisplays.display.ad_break.countdown": "stream začne za %s s",
+  "dreamdisplays.display.ad_break.soon": "stream za chvíli začne"
 }

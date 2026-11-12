@@ -739,6 +739,12 @@ class DisplayScreen(
     /** True while a live relay stream (`srt://` ...) is off the air and its player keeps reconnecting. */
     val isWaitingForStream: Boolean get() = mediaPlayer?.isWaitingForStream() == true
 
+    /**
+     * While a Twitch ad is skipped on this display (its card shows instead of the stream): seconds until the stream is
+     * expected back, 0 when unknown. Null otherwise.
+     */
+    val adBreakSecondsLeft: Int? get() = mediaPlayer?.adBreakSecondsLeft()
+
     /** Total duration of the current video in nanoseconds, or `0` if unknown / live. */
     val mediaPlayerDurationNanos: Long get() = mediaPlayer?.getDuration() ?: 0L
 
@@ -956,6 +962,11 @@ class DisplayScreen(
 
     internal fun subtitleOverlayTexture(): SubtitleOverlayTexture =
         subtitleOverlayCache ?: SubtitleOverlayTexture().also { subtitleOverlayCache = it }
+
+    private var adBreakCardCache: com.dreamdisplays.platform.client.render.AdBreakCardTexture? = null
+
+    internal fun adBreakCardTexture(): com.dreamdisplays.platform.client.render.AdBreakCardTexture =
+        adBreakCardCache ?: com.dreamdisplays.platform.client.render.AdBreakCardTexture().also { adBreakCardCache = it }
 
     /**
      * Updates position, dimensions, and video URL from an incoming [DisplayInfo] packet. Also the first load of a
@@ -1673,6 +1684,8 @@ class DisplayScreen(
         previewFrameCache = null
         subtitleOverlayCache?.dispose()
         subtitleOverlayCache = null
+        adBreakCardCache?.dispose()
+        adBreakCardCache = null
 
         val mc = Minecraft.getInstance()
         val screen = MinecraftScreenUtil.currentScreen(mc)

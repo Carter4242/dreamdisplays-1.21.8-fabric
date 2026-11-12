@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "Wycisz w tle",
   "dreamdisplays.config.mute_unfocused.tooltip": "Wycisz ekrany, gdy okno gry nie jest aktywne",
   "dreamdisplays.config.volume_normalization": "Normalizacja głośności",
-  "dreamdisplays.config.volume_normalization.tooltip": "Ciche i głośne wideo grają z podobną głośnością"
+  "dreamdisplays.config.volume_normalization.tooltip": "Ciche i głośne wideo grają z podobną głośnością",
+  "dreamdisplays.display.ad_break": "Przerwa reklamowa na Twitchu",
+  "dreamdisplays.display.ad_break.countdown": "transmisja zacznie się za %s s",
+  "dreamdisplays.display.ad_break.soon": "transmisja zaraz się zacznie"
 }

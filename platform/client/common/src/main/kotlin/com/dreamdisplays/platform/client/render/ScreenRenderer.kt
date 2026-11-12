@@ -100,8 +100,9 @@ object ScreenRenderer {
     ) {
         if (!replay) displayScreen.fitTexture()
 
-        // A replay's card or export frame is drawn flat, also on a display wrapped over blocks
+        // A replay's card or export frame is drawn flat, also on a display wrapped over blocks; so is a skipped Twitch ad's
         val replayCard = com.dreamdisplays.platform.client.replay.ReplayHooks.card(displayScreen.uuid)
+            ?: adBreakCard(displayScreen)
         if (displayScreen.conforming && replayCard == null) {
             val wrapped = ConformingWorldMesh.quads(displayScreen)
             if (wrapped != null) {
@@ -137,6 +138,15 @@ object ScreenRenderer {
         }
 
         renderSubtitleOverlay(displayScreen, stack, facing, w, h, lift, drawQuad)
+    }
+
+    /** The ad-break card while a Twitch ad is skipped on [displayScreen] (its countdown in its text), else null. */
+    private fun adBreakCard(displayScreen: DisplayScreen): RenderType? {
+        val left = displayScreen.adBreakSecondsLeft ?: return null
+        val title = com.dreamdisplays.platform.client.ui.ClientMessage.DISPLAY_AD_BREAK.text()
+        val line = if (left > 0) com.dreamdisplays.platform.client.ui.ClientMessage.DISPLAY_AD_BREAK_COUNTDOWN.text(left)
+        else com.dreamdisplays.platform.client.ui.ClientMessage.DISPLAY_AD_BREAK_SOON.text()
+        return displayScreen.adBreakCardTexture().renderType(title, line)
     }
 
     private const val SUBTITLE_MAX_HEIGHT_FRAC = 0.16f

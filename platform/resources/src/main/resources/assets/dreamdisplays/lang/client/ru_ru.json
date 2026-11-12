@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "Без звука в фоне",
   "dreamdisplays.config.mute_unfocused.tooltip": "Выключать звук дисплеев, пока окно игры не в фокусе",
   "dreamdisplays.config.volume_normalization": "Нормализация громкости",
-  "dreamdisplays.config.volume_normalization.tooltip": "Тихие и громкие видео будут играть с похожей громкостью"
+  "dreamdisplays.config.volume_normalization.tooltip": "Тихие и громкие видео будут играть с похожей громкостью",
+  "dreamdisplays.display.ad_break": "Реклама на Twitch",
+  "dreamdisplays.display.ad_break.countdown": "трансляция начнётся через %s с",
+  "dreamdisplays.display.ad_break.soon": "трансляция скоро начнётся"
 }

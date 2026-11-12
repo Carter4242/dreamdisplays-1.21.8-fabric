@@ -121,5 +121,8 @@
   "dreamdisplays.config.mute_unfocused": "Im Hintergrund stumm",
   "dreamdisplays.config.mute_unfocused.tooltip": "Displays stummschalten, solange das Spielfenster nicht im Fokus ist",
   "dreamdisplays.config.volume_normalization": "Lautstärke-Normalisierung",
-  "dreamdisplays.config.volume_normalization.tooltip": "Leise und laute Videos mit ähnlicher Lautstärke abspielen"
+  "dreamdisplays.config.volume_normalization.tooltip": "Leise und laute Videos mit ähnlicher Lautstärke abspielen",
+  "dreamdisplays.display.ad_break": "Twitch-Werbepause",
+  "dreamdisplays.display.ad_break.countdown": "Stream startet in %s s",
+  "dreamdisplays.display.ad_break.soon": "Stream startet gleich"
 }
