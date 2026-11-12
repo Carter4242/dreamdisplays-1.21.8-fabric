@@ -615,7 +615,8 @@ object KaraokeManager {
         val now = transport.nowMs()
         val lead = leads[display.id]?.get(playerId) ?: 0L
         val packets = LeadResync.packetsFor(
-            playerId, transport.nearbyPlayerIds(display), timeline?.toSync(display.id, display.mode, now, display.mediaGen), lead,
+            // Its audience: a singer watching it in PiP (or fullscreen) from afar gets their lead too
+            playerId, TimelineManager.audienceOf(display), timeline?.toSync(display.id, display.mode, now, display.mediaGen), lead,
         )
         for ((target, sync) in packets) TimelineManager.sendShifted(target, display.id, lead, sync)
     }

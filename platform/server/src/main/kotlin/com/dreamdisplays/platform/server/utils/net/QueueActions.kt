@@ -65,7 +65,7 @@ object QueueActions {
             }
             return
         }
-        if (!DisplayManager.isPlayerInRange(player, display)) return
+        if (!DisplayManager.isPlayerPresent(player, display)) return
         val ctx = context(display, player)
         when (action) {
             QueueActionType.ADD -> add(player, display, ctx, packet)

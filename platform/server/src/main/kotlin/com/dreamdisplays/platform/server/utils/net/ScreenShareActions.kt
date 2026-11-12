@@ -18,6 +18,7 @@ import com.dreamdisplays.platform.server.managers.StoredVideo
 import com.dreamdisplays.platform.server.meta.Scheduler
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PaperPlaybackTransport
+import com.dreamdisplays.platform.server.playback.PipPinManager
 import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
@@ -206,8 +207,8 @@ object ScreenShareActions {
         }
         if (!PlaybackPermissions.canSetVideo(ctx)) return "You may not change this display's video."
         // The lease answer is checked on Folia's global thread, which may not read entity positions: its proximity index
-        // answers range there, as in [tick]
-        val inRange = if (PlatformUtil.isFolia) {
+        // answers range there, as in [tick]. A viewer watching it in PiP shares to it from anywhere.
+        val inRange = PipPinManager.isViewing(player.uniqueId, display.id) || if (PlatformUtil.isFolia) {
             player.uniqueId in DisplayManager.getTrackedNearbyPlayerIds(display)
         } else {
             DisplayManager.isPlayerInRange(player, display)
@@ -353,7 +354,7 @@ object ScreenShareActions {
             val online = sharer != null && sharer.isOnline
             // Folia's global thread may not read entity positions: its proximity index answers range there
             val sameWorld = !online || PlatformUtil.isFolia || sharer!!.world == display.pos1.world
-            val inRange = !online || !sameWorld || if (PlatformUtil.isFolia) {
+            val inRange = !online || !sameWorld || PipPinManager.isViewing(share.sharerId, display.id) || if (PlatformUtil.isFolia) {
                 share.sharerId in DisplayManager.getTrackedNearbyPlayerIds(display)
             } else {
                 DisplayManager.isPlayerInRange(sharer!!, display)

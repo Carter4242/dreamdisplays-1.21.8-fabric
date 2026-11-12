@@ -190,6 +190,14 @@ object DisplayManager {
     @PaperOnly
     fun isPlayerInRange(player: Player, display: PaperDisplayData): Boolean = player.isInRange(display)
 
+    /**
+     * True if [player] may act on [display] as one of its viewers: in its range, or watching it in PiP from anywhere
+     * ([PipPinManager.isViewing]). Its access and the player's permissions decide what they may do, as for anyone there.
+     */
+    @PaperOnly
+    fun isPlayerPresent(player: Player, display: PaperDisplayData): Boolean =
+        PipPinManager.isViewing(player.uniqueId, display.id) || player.isInRange(display)
+
     @PaperOnly
     private fun Location.isInRange(display: PaperDisplayData): Boolean =
         isInRangeImpl(
@@ -561,6 +569,10 @@ object DisplayManager {
     /** True if [player] is currently within render range of [display] — the same predicate that decides who receives its frames. */
     fun isPlayerInRange(player: ServerPlayer, display: VanillaDisplayData): Boolean =
         RegionUtil.getPlayerLevelKey(player) == display.worldKey && player.blockPosition().isInRange(display)
+
+    /** True if [player] may act on [display] as one of its viewers: in its range, or watching it in PiP from anywhere. */
+    fun isPlayerPresent(player: ServerPlayer, display: VanillaDisplayData): Boolean =
+        PipPinManager.isViewing(player.uuid, display.id) || isPlayerInRange(player, display)
 
     private fun BlockPos.isInRange(display: VanillaDisplayData): Boolean =
         isInRangeImpl(

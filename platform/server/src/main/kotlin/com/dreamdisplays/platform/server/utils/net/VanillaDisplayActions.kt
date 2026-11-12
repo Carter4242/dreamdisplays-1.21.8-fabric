@@ -128,7 +128,7 @@ object VanillaDisplayActions {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return
         }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) {
+        if (!DisplayManager.isPlayerPresent(player, displayData)) {
             return ServerMessage.NO_DISPLAY.sendTo(player)
         }
 
@@ -156,9 +156,9 @@ object VanillaDisplayActions {
             ),
             player.uuid,
         )?.let { return MessageUtil.sendMessage(player, it) }
-        // Checked before the throttle below: an attacker who is never nearby must not be able to
-        // burn the per-display cooldown window against the display's real, present owner.
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        // Checked before the throttle below: an attacker who is never nearby (nor watching in PiP) must not
+        // be able to burn the per-display cooldown window against the display's real, present owner.
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         if (!setVideoThrottle.tryAcquire(displayId, SET_VIDEO_COOLDOWN_MS)) return
 
         val sanitizedLang = MediaUrlPolicy.sanitizeLang(lang)
@@ -189,7 +189,7 @@ object VanillaDisplayActions {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return
         }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         // Already so: nothing to save or tell everyone, only the asker (whose menu may be behind)
         if (displayData.access == access) return VanillaPacketUtil.sendDisplayInfo([player], displayData)
 
@@ -221,7 +221,7 @@ object VanillaDisplayActions {
             ServerMessage.DISPLAY_COMMAND_MISSING_PERMISSION.sendTo(player)
             return
         }
-        if (!DisplayManager.isPlayerInRange(player, displayData)) return
+        if (!DisplayManager.isPlayerPresent(player, displayData)) return
         // Already in that mode: the clock carries on as it is anyway, so only the asker is told
         if (displayData.mode == mode) return VanillaPacketUtil.sendDisplayInfo([player], displayData)
 

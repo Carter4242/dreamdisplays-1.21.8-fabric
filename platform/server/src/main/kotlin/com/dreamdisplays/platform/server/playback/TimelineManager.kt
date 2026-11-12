@@ -97,11 +97,18 @@ object TimelineManager {
      */
     var extraReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
 
-    /**
-     * Players with [displayId] pinned to PiP: they get every timeline change at any distance, but are never waited for
-     * (a pin can outlive the client's PiP, and such a client never reports readiness).
-     */
+    /** Players with [displayId] pinned to PiP: they get every timeline change at any distance. */
     var pinReceivers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
+
+    /**
+     * Pinners whose client shows [displayId] in PiP (see [PipPinManager.viewersOf]): its audience at any distance, like
+     * players in range. They may act on it ([isPresent]), starts wait for them, and they keep it watched.
+     */
+    var pinViewers: (displayId: UUID) -> Collection<UUID> = { emptyList() }
+
+    /** True when [playerId] may act on [display] as one of its viewers: in its range, or watching it in PiP. */
+    fun isPresent(display: DisplayData, playerId: UUID): Boolean =
+        DisplayFollowers.present(playerId, playerId in transport.nearbyPlayerIds(display), pinViewers(display.id))
 
     /**
      * Players who get [displayId]'s timeline ahead of everyone, by ms of wall time (karaoke singers and their lead);
@@ -209,7 +216,7 @@ object TimelineManager {
         )
         if (!PlaybackPermissions.canPlayPause(ctx)) return false
         if (!commandThrottle.tryAcquire(senderId, COMMAND_COOLDOWN_MS)) return false
-        if (senderId !in transport.nearbyPlayerIds(display)) return false
+        if (!isPresent(display, senderId)) return false
         // No video: no clock to move; a play starts the queue when something is queued
         if (!EmptyDisplays.hasVideo(display.url)) {
             return EmptyDisplays.playStartsQueue(display.url, action, QueueManager.advancesAtEnd(display)) &&
@@ -306,7 +313,7 @@ object TimelineManager {
      */
     private fun askUnreported(display: DisplayData) {
         val request = ReportRequest(display.id, ReportKind.READINESS)
-        ReadinessTracker.unreported(display.id, viewersOf(display)).forEach { transport.sendTo(it, request) }
+        ReadinessTracker.unreported(display.id, audienceOf(display)).forEach { transport.sendTo(it, request) }
     }
 
     /**
@@ -315,7 +322,7 @@ object TimelineManager {
      * to the lead once it plays.
      */
     fun waitingFor(display: DisplayData, positionMs: Long): List<UUID> {
-        val viewers = viewersOf(display)
+        val viewers = audienceOf(display)
         val leads = playerLeadsMs(display.id)
         if (leads.isEmpty()) return ReadinessTracker.waitingFor(display.id, positionMs, viewers)
         val timeline = timelines[display.id]
@@ -326,8 +333,12 @@ object TimelineManager {
         }
     }
 
-    private fun viewersOf(display: DisplayData): Collection<UUID> =
-        transport.nearbyPlayerIds(display) + extraReceivers(display.id)
+    /**
+     * Everyone watching [display]: players in range, far fullscreen followers and PiP viewers, once each. Starts wait for
+     * them and time their lead by them; the queue counts their preloads.
+     */
+    fun audienceOf(display: DisplayData): List<UUID> =
+        DisplayFollowers.audience(transport.nearbyPlayerIds(display), extraReceivers(display.id), pinViewers(display.id))
 
     /** A client reported on [displayId]: start its hold now if that was the last viewer it waited for. */
     private fun releaseIfReady(displayId: UUID) {
@@ -342,7 +353,7 @@ object TimelineManager {
     private fun release(display: DisplayData, now: Long) {
         startHolds.remove(display.id)
         val current = timelines[display.id] ?: return
-        val lead = ReadinessTracker.leadMs(display.id, viewersOf(display))
+        val lead = ReadinessTracker.leadMs(display.id, audienceOf(display))
         val playing = current.anchoredAt(now).copy(paused = false, serverTimeMs = now + lead)
         timelines[display.id] = playing
         broadcast(display, playing)
@@ -458,7 +469,7 @@ object TimelineManager {
      */
     private fun scheduledSpeedChange(display: DisplayData, current: Timeline, speed: Double, now: Long): Timeline? {
         val prep = speedChangeLeadMs()
-        val viewers = viewersOf(display) + pinReceivers(display.id)
+        val viewers = audienceOf(display) + pinReceivers(display.id)
         val capable = viewers.all { id ->
             val hello = com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(id) ?: return@all true
             hello.hasFeature(ClientFeature.SCHEDULED_SPEED)
@@ -504,13 +515,13 @@ object TimelineManager {
             timelines[display.id] = timeline
             broadcast(display, timeline)
             // No reported length: clients loaded the video before it was shared and reported nothing since; ask them
-            if (reportedMs == 0L) askNearby(display, ReportKind.DURATION)
+            if (reportedMs == 0L) askAudience(display, ReportKind.DURATION)
         }
     }
 
-    private fun askNearby(display: DisplayData, kind: Int) {
+    private fun askAudience(display: DisplayData, kind: Int) {
         val request = ReportRequest(display.id, kind)
-        transport.nearbyPlayerIds(display).forEach { transport.sendTo(it, request) }
+        audienceOf(display).forEach { transport.sendTo(it, request) }
     }
 
     /**
@@ -628,9 +639,10 @@ object TimelineManager {
         val pinners = pinReceivers(display.id)
         if (!DisplayFollowers.mayReportDuration(senderId, nearby, extra, pinners)) return
         // Report cooldowns start afresh with each video ([VideoDurations])
+        // Who watches it now decides observed ends: a pin whose client no longer shows the display is not among them
         val mediaMs = durations.report(
             display.id, display.url, senderId, durationMs, QueueManager.playingEntryDurationMs(display), transport.nowMs(),
-            observedEnd, (nearby + extra + pinners).toSet(),
+            observedEnd, audienceOf(display).toSet() + senderId,
         ) ?: return
         val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
         display.duration = scheduledMs * 1_000_000L
@@ -754,8 +766,8 @@ object TimelineManager {
 
     /**
      * Pauses (server timeline) a playing `SYNCED` display once no player has been in its range (and nobody watched it
-     * in fullscreen from afar) for [autoPauseWhenEmptyMs], so a forgotten movie does not run on with nobody watching. It
-     * is not resumed automatically; the next viewer presses play.
+     * in fullscreen or PiP from afar) for [autoPauseWhenEmptyMs], so a forgotten movie does not run on with nobody
+     * watching. It is not resumed automatically; the next viewer presses play.
      */
     private fun autoPauseEmpty(now: Long) {
         val limit = autoPauseWhenEmptyMs()
@@ -770,7 +782,7 @@ object TimelineManager {
             }
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED ||
-                DisplayFollowers.watched(transport.nearbyPlayerIds(display), extraReceivers(displayId))
+                DisplayFollowers.watched(transport.nearbyPlayerIds(display), extraReceivers(displayId), pinViewers(displayId))
             ) {
                 emptySince.remove(displayId)
                 continue
@@ -793,7 +805,7 @@ object TimelineManager {
         for ((displayId, timeline) in timelines) {
             val display = DisplayManager.getDisplayData(displayId) ?: continue
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
-            val present = (transport.nearbyPlayerIds(display) + extraReceivers(displayId) + pinReceivers(displayId)).toSet()
+            val present = audienceOf(display).toSet()
             val mediaMs = durations.recheck(displayId, display.url, QueueManager.playingEntryDurationMs(display), present) ?: continue
             val scheduledMs = QueueTiming.scheduledDurationMs(mediaMs)
             display.duration = scheduledMs * 1_000_000L

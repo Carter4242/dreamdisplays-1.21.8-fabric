@@ -6,8 +6,10 @@ import java.util.*
  * Who hears about a display beyond the players in its range. Two kinds of far followers:
  * - fullscreen followers (a broadcast's viewers, clients prepared for one): they hold the display loaded at any
  *   distance, are waited for at a start, and count as watching it;
- * - PiP pinners: they get every change too, but a pin can outlive the client's PiP (a crash, a lost unpin), so they
- *   are never waited for, and their description never makes a client load a display it does not hold.
+ * - PiP pinners: they get every change too, and their description never makes a client load a display it does not
+ *   hold. A pinner whose client shows the display ([showing]: it never said it does not play it) is its audience like
+ *   a player in range: waited for at a start, counted as watching, and may act on it from afar ([present]). A pin can
+ *   outlive the client's PiP (a crash, a lost unpin); that client reports the display absent and drops out again.
  */
 object DisplayFollowers {
     /**
@@ -36,13 +38,27 @@ object DisplayFollowers {
         playerId in nearby || playerId in fullscreen || playerId in pinners
 
     /**
-     * The players a start of a display waits for and times its lead by: everyone in range and every fullscreen follower,
-     * once each. A queue switch counts their preloads too: with nobody in range (a broadcast's far audience) theirs are
-     * the only ones. Pinners never count.
+     * The players a start of a display waits for and times its lead by: everyone in range, every fullscreen follower and
+     * every pinner [showing] it, once each. A queue switch counts their preloads too: with nobody in range (a broadcast's
+     * far audience, PiP viewers) theirs are the only ones.
      */
-    fun audience(nearby: Collection<UUID>, fullscreen: Collection<UUID>): List<UUID> =
-        (nearby.asSequence() + fullscreen.asSequence()).distinct().toList()
+    fun audience(nearby: Collection<UUID>, fullscreen: Collection<UUID>, pinViewers: Collection<UUID> = emptyList()): List<UUID> =
+        (nearby.asSequence() + fullscreen.asSequence() + pinViewers.asSequence()).distinct().toList()
 
-    /** Whether a display counts as watched for auto-pause: anyone in range, or a fullscreen follower (pins don't count). */
-    fun watched(nearby: Collection<UUID>, fullscreen: Collection<UUID>): Boolean = nearby.isNotEmpty() || fullscreen.isNotEmpty()
+    /** Whether a display counts as watched for auto-pause: anyone in range, a fullscreen follower or a PiP viewer. */
+    fun watched(nearby: Collection<UUID>, fullscreen: Collection<UUID>, pinViewers: Collection<UUID> = emptyList()): Boolean =
+        nearby.isNotEmpty() || fullscreen.isNotEmpty() || pinViewers.isNotEmpty()
+
+    /**
+     * Of [pinners] (online, with the display pinned), those whose client shows it: all but the ones it [reportedAbsent]
+     * for (their client does not play it: the PiP closed without an unpin reaching the server, or never reopened).
+     */
+    fun showing(pinners: Collection<UUID>, reportedAbsent: (UUID) -> Boolean): List<UUID> =
+        pinners.filter { !reportedAbsent(it) }
+
+    /**
+     * Whether [playerId] may act on a display as one of its viewers (playback, video, queue; the display's access and
+     * the player's permissions still decide what): in its range ([inRange]), or watching it in PiP ([pinViewers]).
+     */
+    fun present(playerId: UUID, inRange: Boolean, pinViewers: Collection<UUID>): Boolean = inRange || playerId in pinViewers
 }

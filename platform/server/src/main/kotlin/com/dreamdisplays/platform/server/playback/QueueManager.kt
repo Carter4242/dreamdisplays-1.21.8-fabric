@@ -9,7 +9,6 @@ import com.dreamdisplays.core.queue.QueueLimits
 import com.dreamdisplays.core.queue.QueueOnClear
 import com.dreamdisplays.core.queue.QueueText
 import com.dreamdisplays.core.queue.QueueTiming
-import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
@@ -484,8 +483,8 @@ object QueueManager {
     }
 
     /**
-     * The queue clients watching [display] (in range, or fullscreen from afar) that reported [next] READY: they hold it
-     * ready at 0 and need not be waited for.
+     * The queue clients watching [display] (in range, or fullscreen or in PiP from afar) that reported [next] READY: they
+     * hold it ready at 0 and need not be waited for.
      */
     private fun readyFor(display: DisplayData, next: QueueItem): List<UUID> {
         val roster = rosters[display.id]?.takeIf { it.prepareId == next.itemId } ?: return emptyList()
@@ -494,9 +493,8 @@ object QueueManager {
         }
     }
 
-    /** Everyone a switch of [display] is for: players in range and far fullscreen followers. */
-    private fun audienceOf(display: DisplayData): List<UUID> =
-        DisplayFollowers.audience(transport.nearbyPlayerIds(display), TimelineManager.extraReceivers(display.id))
+    /** Everyone a switch of [display] is for: players in range, far fullscreen followers and PiP viewers. */
+    private fun audienceOf(display: DisplayData): List<UUID> = TimelineManager.audienceOf(display)
 
     private fun changed(display: DisplayData) {
         broadcastState(display)

@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.playback
 
+import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.shared.playback.PipPinSession
+import com.dreamdisplays.shared.playback.ReadinessState
 import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
@@ -14,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Tracks which displays each player has pinned to a `Picture-in-Picture` overlay, so a pinned display's updates keep
- * reaching them out of range.
+ * reaching them out of range. A pinner whose client shows the display ([viewersOf]) is one of its viewers at any
+ * distance: it may act on it as from its range, and starts, the queue and auto-pause count it like a player there.
+ * Pins are kept across quits and restarts (the client reopens its PiP on join); only online pinners count.
  */
 object PipPinManager {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -28,10 +32,11 @@ object PipPinManager {
     private val saveLock = Any()
     private val persistScheduled = AtomicBoolean(false)
 
-    /** Wires the platform transport; pinners get a pinned display's timeline at any distance (never waited for). */
+    /** Wires the platform transport; pinners get a pinned display's timeline at any distance, PiP viewers count as its audience. */
     fun init(transport: PlaybackTransport) {
         this.transport = transport
         TimelineManager.pinReceivers = ::pinnersOf
+        TimelineManager.pinViewers = ::viewersOf
     }
 
     /**
@@ -64,6 +69,20 @@ object PipPinManager {
         val online = transport.onlinePlayerIds().toSet()
         return pinners.filter { it in online }
     }
+
+    /**
+     * Online players watching [displayId] in PiP: pinners whose client did not report it absent (a pin outliving the
+     * client's PiP, which reports the display it no longer plays as absent, drops out here).
+     */
+    fun viewersOf(displayId: UUID): List<UUID> =
+        DisplayFollowers.showing(pinnersOf(displayId)) { absent(displayId, it) }
+
+    /** True when [playerId] (online) watches [displayId] in PiP: they may act on it as from its range. */
+    fun isViewing(playerId: UUID, displayId: UUID): Boolean =
+        pins[playerId]?.contains(displayId) == true && !absent(displayId, playerId)
+
+    private fun absent(displayId: UUID, playerId: UUID): Boolean =
+        ReadinessTracker.reportOf(displayId, playerId)?.state == ReadinessState.ABSENT
 
     /**
      * Re-sends every pinned display's info to [playerId] on join, bypassing render distance; also after a world change,
