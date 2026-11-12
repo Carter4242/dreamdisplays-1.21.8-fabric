@@ -217,9 +217,22 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         // get here. Hold paused on the start frame until then, so every viewer begins on it together. A negative
         // startInMs (a switch packet replayed late, see DisplayMediaController) started that long ago.
         // A speed change scheduled ahead ([speedSwitch]) is no stop: the timeline plays on at its old speed (the
-        // estimate keeps following it) and goes on from the switch position at the new one from the start instant.
+        // estimate keeps following it) and goes on from the switch position at the new one from the instant the
+        // estimate reaches it. That instant comes from the estimate, not from when this packet was handled (late by
+        // any game stall): the drift this player has to the shared clock carries across the switch unchanged.
         val owl = oneWayLatencyMs()
-        val waitMs = startInMs.coerceAtLeast(-MAX_LATE_START_MS) - owl
+        val handledWaitMs = startInMs.coerceAtLeast(-MAX_LATE_START_MS) - owl
+        val waitMs = if (speedSwitch) {
+            synchronized(lock) {
+                val now = System.nanoTime() / NANOS_PER_MS
+                switchWaitMs(
+                    targetMs, estimator.targetMs(now), estimator.rate, estimator.hasTimeline && !estimator.paused,
+                    loop, loopPeriodMs(), handledWaitMs, startInMs,
+                )
+            }
+        } else {
+            handledWaitMs
+        }
         if (waitMs < MIN_SCHEDULE_MS) {
             // Too late to wait: play from where the start has got to by now
             applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
@@ -843,6 +856,29 @@ internal fun endedRightAfterRestart(restartFromMs: Long, endedAtMs: Long, probeM
  */
 internal fun heldForLead(driftMs: Long, toleranceMs: Long, leadMs: Long, rate: Double): Boolean =
     leadMs > 0L && driftMs > toleranceMs && driftMs <= toleranceMs + (leadMs * rate).roundToLong()
+
+/**
+ * How long (ms) until a speed change scheduled to [switchMs] (the shared position where it switches) takes effect here:
+ * until this follower's estimate of the shared clock ([estimateMs] now, advancing at [rate]) reaches it, wrapped by
+ * the shared loop of [periodMs]. Falls back to [handledWaitMs] (the packet's own wait, from when it was handled) when
+ * there is no playing estimate or it disagrees with the packet by more than a second either way (a stale estimate).
+ */
+internal fun switchWaitMs(
+    switchMs: Long, estimateMs: Double, rate: Double, estimating: Boolean, loop: Boolean, periodMs: Long,
+    handledWaitMs: Double, startInMs: Int,
+): Double {
+    if (!estimating || rate <= 0.0) return handledWaitMs
+    var deltaMs = switchMs - estimateMs
+    if (loop && periodMs > 0) {
+        val half = periodMs / 2.0
+        deltaMs = ((deltaMs % periodMs) + periodMs + half) % periodMs - half
+    }
+    val waitMs = deltaMs / rate
+    return if (waitMs < -SWITCH_ESTIMATE_SLACK_MS || waitMs > startInMs + SWITCH_ESTIMATE_SLACK_MS) handledWaitMs else waitMs
+}
+
+/** How far a scheduled speed change's instant from the estimate may stray from the packet's own before it is ignored. */
+private const val SWITCH_ESTIMATE_SLACK_MS = 1_000.0
 
 /** How late (ms, never negative) a scheduled start due at [dueNanos] runs at [nowNanos]: time the video already played. */
 internal fun startLatenessMs(dueNanos: Long, nowNanos: Long): Double = ((nowNanos - dueNanos) / 1_000_000.0).coerceAtLeast(0.0)

@@ -1072,7 +1072,8 @@ class DisplayScreen(
         // A speed change scheduled ahead, while this player plays: it plays on at the old speed, opens the new one
         // meanwhile and switches at the start instant, without a stop
         val player = mediaPlayer
-        val playing = player != null && requiresServerTimeline() && videoStarted && !paused && !isLive &&
+        val playing = packet.speedChangeFromRate > 0.0 && player != null && requiresServerTimeline() && videoStarted &&
+                !paused && !isLive &&
                 !isQueueSwitchPending && timelineFollower.followsPlayingTimeline()
         if (packet.speedChangeFromRate > 0.0) {
             logger.info(
