@@ -15,13 +15,23 @@ import java.util.concurrent.ConcurrentHashMap
  * A length a client measured where its stream actually ended (`observedEnd`) can: once every viewer still there that
  * reported this video has observed its end, the largest of those ends is the length, even below the header's. One
  * client whose stream stopped early (a cut download) never shortens it while anyone else there says otherwise.
+ *
+ * A length known before any report on the current play of a video (restored after a reload, or settled the last time
+ * the display played it) has no reporters on record: whoever stood behind it is unknown. Observed ends lower such a
+ * length only once every viewer there has reported again; otherwise the first client to report after a reload (one
+ * whose stream had stopped early) would settle the video at its own end alone.
  */
 class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOWN_MS) {
     private class Current(
         val url: String, val byPlayer: Map<UUID, Long>, val mediaMs: Long, val lastReportAtMs: Map<UUID, Long>,
         /** Players whose report is where their stream actually ended, not a header length. */
         val observed: Set<UUID> = emptySet(),
-    )
+        /** [mediaMs] was known before these reports: observed ends wait for every viewer there (see the class comment). */
+        val inherited: Boolean = false,
+    ) {
+        /** Observed ends may decide among [present]: always, unless the length was inherited and someone there is silent. */
+        fun observedMayDecide(present: Collection<UUID>): Boolean = !inherited || present.all { it in byPlayer }
+    }
 
     private val current = ConcurrentHashMap<UUID, Current>()
     private val settled = ConcurrentHashMap<UUID, Pair<String, Long>>()
@@ -29,19 +39,27 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
     /** What each display's previous video (another URL) was known to last when it changed: see [previousLengthsMs]. */
     private val previous = ConcurrentHashMap<UUID, Current>()
 
-    /** [displayId] now plays [url]: reports start afresh. Returns the media ms settled earlier for this same URL, or 0. */
-    fun onVideoChanged(displayId: UUID, url: String): Long {
+    /**
+     * [displayId] now plays [url]: reports start afresh. Returns the media ms it runs from the start: the length settled
+     * earlier for this same URL, and at least [entryMs] (the queue entry it plays, 0: none), or 0 when neither is known.
+     */
+    fun onVideoChanged(displayId: UUID, url: String, entryMs: Long = 0L): Long {
         val before = current[displayId]?.takeIf { it.url != url }
         if (before != null) previous[displayId] = before else previous.remove(displayId)
         val known = settled[displayId]?.takeIf { it.first == url }?.second ?: 0L
-        if (known > 0L) current[displayId] = Current(url, emptyMap(), known, emptyMap()) else current.remove(displayId)
-        return known
+        val startMs = maxOf(known, entryMs, 0L)
+        if (startMs > 0L) {
+            current[displayId] = Current(url, emptyMap(), startMs, emptyMap(), inherited = known > 0L)
+        } else {
+            current.remove(displayId)
+        }
+        return startMs
     }
 
     /** [displayId]'s video [url] is known to last [mediaMs] (a timeline restored after a reload). */
     fun seed(displayId: UUID, url: String, mediaMs: Long) {
         if (mediaMs <= 0L) return
-        current[displayId] = Current(url, emptyMap(), mediaMs, emptyMap())
+        current[displayId] = Current(url, emptyMap(), mediaMs, emptyMap(), inherited = true)
         settled[displayId] = url to mediaMs
     }
 
@@ -76,11 +94,12 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
             if (!observedEnd && playerId in state.observed) return@compute state
             val byPlayer = state.byPlayer + (playerId to reportedMs)
             val observed = if (observedEnd) state.observed + playerId else state.observed - playerId
+            val next = Current(url, byPlayer, state.mediaMs, state.lastReportAtMs + (playerId to nowMs), observed, state.inherited)
             // Never below the playing queue entry's own length, which whole-second metadata only rounds down
-            val mediaMs = QueueTiming.observedMediaMs(byPlayer, observed, present)?.coerceAtLeast(entryMs)
-                ?: QueueTiming.mediaDurationMs(entryMs, byPlayer.values, state.mediaMs)
+            val observedMs = if (next.observedMayDecide(present)) QueueTiming.observedMediaMs(byPlayer, observed, present) else null
+            val mediaMs = observedMs?.coerceAtLeast(entryMs) ?: QueueTiming.mediaDurationMs(entryMs, byPlayer.values, state.mediaMs)
             if (mediaMs != state.mediaMs) applied = mediaMs
-            Current(url, byPlayer, mediaMs, state.lastReportAtMs + (playerId to nowMs), observed)
+            Current(url, byPlayer, mediaMs, next.lastReportAtMs, observed, state.inherited)
         }
         applied?.let { if (it > 0L) settled[displayId] = url to it }
         return applied
@@ -94,11 +113,11 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
     fun recheck(displayId: UUID, url: String, entryMs: Long, present: Collection<UUID>): Long? {
         var applied: Long? = null
         current.computeIfPresent(displayId) { _, state ->
-            if (state.url != url || state.observed.isEmpty()) return@computeIfPresent state
+            if (state.url != url || state.observed.isEmpty() || !state.observedMayDecide(present)) return@computeIfPresent state
             val mediaMs = QueueTiming.observedMediaMs(state.byPlayer, state.observed, present)?.coerceAtLeast(entryMs)
             if (mediaMs == null || mediaMs == state.mediaMs) return@computeIfPresent state
             applied = mediaMs
-            Current(url, state.byPlayer, mediaMs, state.lastReportAtMs, state.observed)
+            Current(url, state.byPlayer, mediaMs, state.lastReportAtMs, state.observed, state.inherited)
         }
         applied?.let { settled[displayId] = url to it }
         return applied

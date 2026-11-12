@@ -531,9 +531,12 @@ object TimelineManager {
         restore: SavedPlayback? = null,
     ) {
         if (!EmptyDisplays.hasVideo(display.url)) return onVideoCleared(display)
-        // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length.
-        // Tracked in Local too, so a switch back to a shared mode starts from this video's length.
-        val knownMs = QueueTiming.scheduledDurationMs(durations.onVideoChanged(display.id, display.url))
+        // Fresh video; one this display played before (a screen share ended, a queue replays it) keeps its known length,
+        // and a queue entry starts with its own (clients report the media's later). Tracked in Local too, so a switch
+        // back to a shared mode starts from this video's length.
+        val knownMs = QueueTiming.scheduledDurationMs(
+            durations.onVideoChanged(display.id, display.url, QueueManager.playingEntryDurationMs(display)),
+        )
         display.duration = knownMs.takeIf { it > 0L }?.let { it * 1_000_000L }
         val now = transport.nowMs()
         videoChangedAt[display.id] = now
@@ -802,7 +805,8 @@ object TimelineManager {
 
     /**
      * Backstop: a timeline without a length while its display (or its playing queue entry) knows its video's gets it,
-     * so it wraps at the end, and clients wrap where the server restarts it.
+     * so it wraps at the end, and clients wrap where the server restarts it. Every path that sets a video or a length
+     * gives the timeline what is known, so this firing is a bug somewhere: it says what it found.
      */
     private fun carryKnownDurations() {
         for ((displayId, timeline) in timelines) {
@@ -815,7 +819,14 @@ object TimelineManager {
             val updated = timeline.copy(durationMs = durationMs, loop = true)
             timelines[displayId] = updated
             broadcast(display, updated)
-            logger.info("Display {}: its timeline had lost its video's length; restored it.", displayId)
+            val entry = QueueManager.playingEntry(display)
+            logger.warn(
+                "Display {}: its timeline had lost its video's length; restored it ({} ms). Timeline {}, mode {}, " +
+                    "url {}, display length {} ms, settled {} ms, queue entry {} ({} ms), video changed {} ms ago, holding {}.",
+                displayId, durationMs, timeline, display.mode, display.url, durationMsOf(display),
+                durations.mediaMsOf(displayId, display.url), entry?.itemId ?: "none", entry?.durationMs ?: 0L,
+                videoChangedAt[displayId]?.let { transport.nowMs() - it } ?: -1L, startHolds.containsKey(displayId),
+            )
         }
     }
 
