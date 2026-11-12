@@ -42,7 +42,10 @@ class Config(private val baseDir: File) {
 
     var unshadedDisplays: Boolean = true
 
-    /** 3D acoustics rendering tier applied to every display's audio (`off` / `basic` / `advanced` / `ultra`). */
+    /**
+     * Default 3D acoustics rendering tier (`off` / `basic` / `advanced` / `ultra`), for every display the player has not
+     * set its own tier on (its menu slider).
+     */
     var audioAcoustics: AcousticQuality = AcousticQuality.ADVANCED
 
     /** Output profile for spatialized audio: `true` renders binaural for headphones, `false` a plain stereo pan for speakers. */

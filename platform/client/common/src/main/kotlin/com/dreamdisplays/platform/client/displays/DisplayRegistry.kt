@@ -62,6 +62,8 @@ object DisplayRegistry {
 
         screens[displayScreen.uuid] = displayScreen
         recordScreen(displayScreen)
+        // Its own 3D audio tier before the source exists, so the source starts on it
+        displayScreen.pushAcousticsTier(force = true)
         DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.registerSource(displayScreen.uuid)
     }
 

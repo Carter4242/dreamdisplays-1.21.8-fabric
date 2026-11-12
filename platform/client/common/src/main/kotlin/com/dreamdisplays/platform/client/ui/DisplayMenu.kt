@@ -188,18 +188,13 @@ class DisplayMenu private constructor(
         audio3d = addUi(
             ModeSlider(
                 modes = AUDIO_3D_MODES,
-                initial = ClientStateManager.config.audioAcoustics,
-                current = { ClientStateManager.config.audioAcoustics },
+                initial = ds.audioAcousticsTier,
+                current = { ds.audioAcousticsTier },
                 enabledFor = { true },
                 label = { translatableText(audio3dModeLabel(it)) },
-            ) { quality ->
-                ClientStateManager.config.audioAcoustics = quality
-                ClientStateManager.config.save()
-                DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
-                    ?.setGlobalQuality(ServerOverrides.audioAcoustics)
-            })
+            ) { quality -> ds.acousticsChoice = quality }) // This display only
         audio3d.visibleWhen = notErrored
-        audio3d.enabledWhen = { !ServerOverrides.settings.acousticsForced }
+        audio3d.enabledWhen = { !ds.acousticsForced }
 
         access = addUi(
             ModeSlider(
@@ -232,13 +227,9 @@ class DisplayMenu private constructor(
         speedReset.enabledWhen = { ds.canChangeSpeedHere && ds.playbackSpeed != PlaybackSpeed.NORMAL }
         speedReset.visibleWhen = notErrored
 
-        val audio3dReset = addUi(IconButton("refresh") {
-            ClientStateManager.config.audioAcoustics = AUDIO_3D_DEFAULT
-            ClientStateManager.config.save()
-            DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)
-                ?.setGlobalQuality(ServerOverrides.audioAcoustics)
-        })
-        audio3dReset.enabledWhen = { ClientStateManager.config.audioAcoustics != AUDIO_3D_DEFAULT }
+        // Back to following the default tier
+        val audio3dReset = addUi(IconButton("refresh") { ds.acousticsChoice = null })
+        audio3dReset.enabledWhen = { !ds.acousticsForced && ds.acousticsChoice != null }
         audio3dReset.visibleWhen = notErrored
 
         val accessReset = addUi(IconButton("refresh") {
@@ -474,7 +465,9 @@ class DisplayMenu private constructor(
                     tooltipModeBullet(ClientMessage.MODE_AUDIO_ADVANCED.key, ClientMessage.BUTTON_AUDIO3D_TOOLTIP_5.key),
                     literalText(""),
                     tooltipValue(
-                        ClientMessage.BUTTON_AUDIO3D_TOOLTIP_6.key,
+                        // "(default)" while this display follows the default tier
+                        if (ds.acousticsChoice == null && !ds.acousticsForced) ClientMessage.BUTTON_AUDIO3D_TOOLTIP_7.key
+                        else ClientMessage.BUTTON_AUDIO3D_TOOLTIP_6.key,
                         translatableText(audio3dModeLabel(audio3d.mode)),
                     ),
                 ]
@@ -1147,7 +1140,6 @@ class DisplayMenu private constructor(
         private const val MIN_CONTENT_H = 410
 
         private val AUDIO_3D_MODES = [AcousticQuality.OFF, AcousticQuality.ADVANCED, AcousticQuality.ULTRA]
-        private val AUDIO_3D_DEFAULT = AcousticQuality.ADVANCED
 
         private fun audio3dModeLabel(quality: AcousticQuality): String = when (quality) {
             AcousticQuality.OFF -> ClientMessage.MODE_AUDIO_OFF.key
