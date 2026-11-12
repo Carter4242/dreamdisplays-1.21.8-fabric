@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.core.command.DisplayCommands
 import com.dreamdisplays.core.display.policy.PushedDefaults
 import com.dreamdisplays.core.display.policy.PushedSetting
@@ -7,6 +8,7 @@ import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
+import com.dreamdisplays.platform.server.playback.DisplayActivity
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.PaperPlaybackTransport
 import com.dreamdisplays.platform.server.playback.PipPinManager
@@ -50,6 +52,7 @@ object DefaultsCommand {
             ServerMessage.POLICY_BAD_VALUE.sendTo(sender, setting.wire, setting.hint)
             return
         }
+        val previous = DisplayDefaults.of(display)[setting]?.let { setting.show(it.value) }.orEmpty()
         val pushed = DisplayDefaults.push(display, setting, canonical) ?: run {
             ServerMessage.DEFAULTS_NO_ROOM.sendTo(sender, display.shortLabel)
             return
@@ -62,7 +65,8 @@ object DefaultsCommand {
             "{} pushed {} = {} on display {} ({}), revision {}: {} viewer(s) get it now, {} on older clients don't.",
             sender.name, setting.wire, shown, display.shortLabel, display.id, pushed.rev, capable, old,
         )
-        // Activity log hook (fix27): DisplayActivity.record(display, ActivityKind.POLICY, text = "defaults.${setting.wire}", text2 = shown)
+        // Activity tab + permanent journal: "set defaults.volume to 100%"
+        DisplayActivity.record(display, ActivityKind.POLICY, text = "defaults.${setting.wire}", text2 = shown, old = previous)
     }
 
     private fun clear(sender: CommandSender, display: DisplayData, raw: String?) {
@@ -72,7 +76,8 @@ object DefaultsCommand {
         else ServerMessage.DEFAULTS_CLEARED.sendTo(sender, setting.wire, display.shortLabel)
         if (changed) {
             logger.info("{} stopped pushing {} on display {} ({}).", sender.name, setting?.wire ?: "every default", display.shortLabel, display.id)
-            // Activity log hook (fix27): DisplayActivity.record(display, ActivityKind.POLICY, text = "defaults.${setting?.wire ?: "all"}", text2 = "")
+            // "reset defaults.volume" (one setting) / "reset defaults" (all)
+            DisplayActivity.record(display, ActivityKind.POLICY, text = setting?.let { "defaults.${it.wire}" } ?: "defaults")
         }
     }
 
