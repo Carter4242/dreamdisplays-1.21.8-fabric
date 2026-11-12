@@ -16,6 +16,7 @@ import com.dreamdisplays.media.source.twitch.TwitchApi
 import com.dreamdisplays.media.source.twitch.TwitchMetadata
 import com.dreamdisplays.media.source.twitch.TwitchMetadataCache
 import com.dreamdisplays.media.source.twitch.TwitchSearchItem
+import com.dreamdisplays.media.source.youtube.YouTubePlaylists
 import com.dreamdisplays.media.source.vimeo.VimeoMetadataCache
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.render.Thumbnails
@@ -164,6 +165,8 @@ class SuggestionsController {
         startLoad()
 
         val seq = requestSeq.incrementAndGet()
+        // A playlist link shows a playlist card (after its start video's card), never a generic link card
+        PlaylistCards.planFor(q)?.let { return loadPlaylistLink(seq, it) }
         val svc = DreamServices.registry.get(MediaServices.SEARCH)
         val maybeId = YouTubeUrls.extractVideoId(q)
         val source = MediaSource.from(q)
@@ -519,6 +522,29 @@ class SuggestionsController {
                 continuationToken = page.continuationToken
                 appendCards(page.results)
             }
+        }
+    }
+
+    /** Resolves the cards of a pasted playlist link: its start video's metadata and the playlist's first page, together. */
+    private fun loadPlaylistLink(seq: Int, plan: PlaylistCards.Plan) {
+        val link = plan.link
+        val svc = DreamServices.registry.get(MediaServices.SEARCH)
+        launchLoad {
+            val video = link.startVideoId?.let { id ->
+                async {
+                    runCatching { svc.metadata(id) }
+                        .onFailure { if (it is CancellationException) throw it; logger.warn("URL meta: ${it.message}") }
+                        .getOrNull() ?: fallbackResult(id)
+                }
+            }
+            val summary = runCatching { withContext(Dispatchers.IO) { YouTubePlaylists.summary(link) } }
+                .onFailure { if (it is CancellationException) throw it; logger.warn("Playlist {}: {}", link.listId, it.message) }
+                .getOrNull()
+            val playlist = PlaylistCards.card(
+                link, summary, ClientMessage.SUGGESTIONS_PLAYLIST.text(),
+            ) { ClientMessage.SUGGESTIONS_PLAYLIST_COUNT.text(it) }
+            val videoCard = video?.await()
+            publish(seq, plan.kinds.mapNotNull { if (it == PlaylistCards.Kind.VIDEO) videoCard else playlist }, null)
         }
     }
 

@@ -28,6 +28,13 @@ class YouTubePlaylistsTest {
     }
 
     @Test
+    fun `a link's canonical url reads back as the same link`() {
+        for (link in listOf(YouTubePlaylists.Link(list, null), YouTubePlaylists.Link(list, "dQw4w9WgXcQ"))) {
+            assertEquals(link, YouTubePlaylists.parseLink(link.url))
+        }
+    }
+
+    @Test
     fun `other links are not playlists`() {
         assertNull(YouTubePlaylists.parseLink("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
         assertNull(YouTubePlaylists.parseLink("https://example.com/playlist?list=$list"))

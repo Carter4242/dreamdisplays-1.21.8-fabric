@@ -40,6 +40,8 @@ dependencies {
     api(libs.kotlinxCoroutinesCore)
     scVersions.getOrNull("joml.version")?.let { api("org.joml:joml:$it") }
     compileOnly(libs.kotlinStdlib)
+    // The game supplies SLF4J at runtime; unit tests that touch a logging object need it themselves
+    testImplementation(libs.slf4jApi)
     compileOnly(
         "maven.modrinth:cloth-config:" + (scVersions.getOrNull("cloth.config.forge").takeIf { usesLegacyForge }
             ?: "${scVersion("cloth.config.version")}+${if (usesLegacyForge) "forge" else "neoforge"}")

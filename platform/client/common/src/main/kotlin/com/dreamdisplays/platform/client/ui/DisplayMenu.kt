@@ -28,6 +28,11 @@ import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ShareAudio
+import com.dreamdisplays.api.media.source.YouTubeUrls
+import com.dreamdisplays.util.DreamCoroutines
+import com.dreamdisplays.core.protocol.common.packets.QueueItemWire
+import com.dreamdisplays.media.source.youtube.YouTubePlaylists
+import kotlinx.coroutines.launch
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.popout.PopoutManager
@@ -528,6 +533,8 @@ class DisplayMenu private constructor(
     private fun onPickSuggested(info: MediaSearchResult) {
         val ds = displayScreen
         if (!ds.canSetVideoHere) return
+        // A playlist card queues its playlist; there is no single video to play
+        if (info.isPlaylist) return queuePlaylistCard(info)
         DreamServices.registry.get(DisplayServices.DISPLAY).setUrl(DisplayId(ds.uuid), info.getWatchUrl(), ds.lang)
 
         // A pasted link exists nowhere else, so remember it locally the moment it is used
@@ -673,7 +680,11 @@ class DisplayMenu private constructor(
         val r = suggestionQueueButtonRect() ?: return
         val hover = r.contains(mouseX, mouseY)
         QueueSection.drawMiniButton(g, r, "plus", hover)
-        if (hover) queueTip = queueBlockedReason() ?: ClientMessage.QUEUE_ADD.text()
+        if (hover) {
+            queueTip = queueBlockedReason()
+                ?: if (suggestions.hoveredResult?.isPlaylist == true) ClientMessage.QUEUE_PLAYLIST_ADD.text()
+                else ClientMessage.QUEUE_ADD.text()
+        }
     }
 
     private fun suggestionQueueButtonRect(): UiRect? {
@@ -760,11 +771,64 @@ class DisplayMenu private constructor(
             val result = suggestions.hoveredResult ?: return false
             playClick()
             val blocked = queueBlockedReason()
-            if (blocked == null) DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
-            else DisplayQueues.notifyLocal(literalText(blocked).withStyle(ChatFormatting.GRAY))
+            if (blocked != null) DisplayQueues.notifyLocal(literalText(blocked).withStyle(ChatFormatting.GRAY))
+            else if (result.isPlaylist) queuePlaylistCard(result)
+            else DisplayQueues.add(displayScreen.uuid, result, displayScreen.lang ?: "")
             return true
         }
         return false
+    }
+
+    /**
+     * A playlist card's click or "+": queues its playlist (all of it, or for a `watch?v=X&list=Y` link X and everything
+     * after it) when Up next runs here and has room.
+     */
+    private fun queuePlaylistCard(card: MediaSearchResult) {
+        val ds = displayScreen
+        val link = PlaylistCards.linkOf(card) ?: return
+        if (!ds.canAddToQueueHere) {
+            return DisplayQueues.notifyLocal(ClientMessage.QUEUE_NOT_RUNNING.component().withStyle(ChatFormatting.GRAY))
+        }
+        queueBlockedReason()?.let { return DisplayQueues.notifyLocal(literalText(it).withStyle(ChatFormatting.GRAY)) }
+        queuePlaylist(link, ds.lang ?: "")
+    }
+
+    /** Lists [link]'s playlist off-thread and queues as many of its videos as fit, in order, in one batch. */
+    private fun queuePlaylist(link: YouTubePlaylists.Link, lang: String) {
+        val ds = displayScreen
+        val room = DisplayQueues.room(ds.uuid, exempt = ds.owner || ds.isAdmin, atMost = MAX_PLAYLIST_BATCH)
+        if (room <= 0) return DisplayQueues.notifyLocal(ClientMessage.QUEUE_FULL.component())
+        // A second "+" while the listing loads (it takes seconds) would queue the whole playlist twice
+        val loadingKey = "${ds.uuid}/${link.listId}"
+        if (!playlistsLoading.add(loadingKey)) return
+        DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_LOADING.component().withStyle(ChatFormatting.GRAY))
+        DreamCoroutines.clientIo.launch {
+            val listing = runCatching { YouTubePlaylists.fetch(link, room) }
+                .onFailure { org.slf4j.LoggerFactory.getLogger(DisplayMenu::class.java).warn("Playlist {}: {}", link.listId, it.message) }
+                .getOrNull()
+            Minecraft.getInstance().execute {
+                playlistsLoading.remove(loadingKey)
+                if (listing == null || listing.entries.isEmpty()) {
+                    DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_FAILED.component().withStyle(ChatFormatting.RED))
+                    return@execute
+                }
+                DisplayQueues.addBatch(ds.uuid, listing.entries.map { entry ->
+                    QueueItemWire(
+                        url = YouTubeUrls.watchUrl(entry.videoId), lang = lang, title = entry.title.take(100),
+                        durationMs = entry.durationSec * 1_000L,
+                    )
+                })
+                listing.entries.forEach { VideoTitleCache.put(it.videoId, it.title) }
+                val title = listing.title.ifBlank { link.listId }
+                DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_ADDED.component(listing.entries.size, title))
+                if (listing.more) DisplayQueues.notifyLocal(ClientMessage.QUEUE_PLAYLIST_MORE.component().withStyle(ChatFormatting.GRAY))
+                if (listing.unavailable > 0) {
+                    DisplayQueues.notifyLocal(
+                        ClientMessage.QUEUE_PLAYLIST_UNAVAILABLE.component(listing.unavailable).withStyle(ChatFormatting.GRAY),
+                    )
+                }
+            }
+        }
     }
 
     private fun playClick() {
@@ -1046,8 +1110,14 @@ class DisplayMenu private constructor(
         private const val CLEAR_CONFIRM_MS = 3_000L
         private const val QUEUE_FLASH_MS = 700L
 
+        /** Most playlist videos one "+" queues; the server takes at most this many per batch as well. */
+        private const val MAX_PLAYLIST_BATCH = 100
+
         /** The bottom panel shows "Up next" instead of suggestions; remembered across menu reopenings. */
         private var queueTabOpen = false
+
+        /** Playlists being listed for a display ("<display>/<list id>"); render thread only. */
+        private val playlistsLoading = mutableSetOf<String>()
         private const val MIN_CONTENT_W = 640
         private const val MIN_CONTENT_H = 410
 

@@ -5,7 +5,7 @@ import com.dreamdisplays.api.media.search.MediaSearchResult
 import com.dreamdisplays.api.media.source.MediaPlatform
 
 /**
- * The single source of truth for the little coloured platform tag ("Twitch", "Vimeo", "Kick", "Link") drawn on search
+ * The single source of truth for the little coloured platform tag ("Twitch", "Vimeo", "Kick", "Link", "Playlist") drawn on search
  * results and thumbnails.
  */
 object PlatformBadge {
@@ -22,6 +22,7 @@ object PlatformBadge {
     private val KICK = Badge(ClientMessage.UI_KICK.key, UiTheme.ACCENT_KICK_TAG, DARK_TEXT)
     private val BILIBILI = Badge(ClientMessage.UI_BILIBILI.key, UiTheme.ACCENT_BILIBILI_TAG, DARK_TEXT)
     private val CUSTOM = Badge(ClientMessage.UI_CUSTOM.key, UiTheme.ACCENT_CUSTOM_TAG, UiTheme.TEXT_PRIMARY)
+    private val PLAYLIST = Badge(ClientMessage.SUGGESTIONS_PLAYLIST.key, UiTheme.ACCENT, UiTheme.TEXT_PRIMARY)
 
     /** The badge for [platform], or null when it needs none (a plain YouTube / long-tail result). */
     fun forPlatform(platform: MediaPlatform): Badge? = when (platform) {
@@ -35,6 +36,7 @@ object PlatformBadge {
 
     /** The badge for a search-result card, honoring the legacy `isTwitch` / `isCustom` flags too. */
     fun forResult(info: MediaSearchResult): Badge? = when {
+        info.isPlaylist -> PLAYLIST
         info.isCustom -> CUSTOM
         info.isTwitch -> TWITCH
         else -> forPlatform(info.platform)
