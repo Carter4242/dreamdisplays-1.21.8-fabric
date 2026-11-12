@@ -27,6 +27,7 @@ import net.minecraft.resources.Identifier
 import com.dreamdisplays.core.services.keys.PlatformServices
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.net.LegacyProbe
 import com.dreamdisplays.platform.client.net.V2Payload
 import com.dreamdisplays.platform.client.platform.FabricPlatformIntegrationProvider
@@ -76,7 +77,9 @@ class Client : ClientModInitializer, Mod {
         //? if >=1.20.5 {
         // Protocol v2: every packet arrives as one opaque envelope payload
         ClientPlayNetworking.registerGlobalReceiver(V2Payload.TYPE) { payload, _ ->
-            if (!ReplayHooks.dropServerPacket(payload.bytes)) Initializer.onV2Packet(payload.bytes)
+            ClientGuard.run("V2 receiver") {
+                if (!ReplayHooks.dropServerPacket(payload.bytes)) Initializer.onV2Packet(payload.bytes)
+            }
         }
 
         // Protocol v1 is unsupported; a v1 reply only tells us the server is outdated
@@ -97,14 +100,14 @@ class Client : ClientModInitializer, Mod {
         LevelRenderEvents.BEFORE_GIZMOS.register { context ->
             val mc = Minecraft.getInstance()
             if (mc.level != null && mc.player != null) {
-                renderSubmittedScreens(context, mc)
+                ClientGuard.run("world render") { renderSubmittedScreens(context, mc) }
             }
         }
 
         LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register { context ->
             val mc = Minecraft.getInstance()
             if (mc.level != null && mc.player != null) {
-                renderBufferedScreens(context, mc)
+                ClientGuard.run("world render") { renderBufferedScreens(context, mc) }
             }
         }
 
@@ -113,7 +116,7 @@ class Client : ClientModInitializer, Mod {
             if (mc.level != null && mc.player != null) {
                 // Render popout windows after all Minecraft / mod rendering is submitted,
                 // so any GL-context switch (macOS GLFW backend) does not disturb in-flight commands.
-                DisplayRegistry.getScreens().forEach { it.renderPopout() }
+                ClientGuard.run("popout render") { DisplayRegistry.getScreens().forEach { it.renderPopout() } }
             }
         }
 
@@ -121,23 +124,25 @@ class Client : ClientModInitializer, Mod {
         /*WorldRenderEvents.AFTER_ENTITIES.register { context ->
             val mc = Minecraft.getInstance()
             if (mc.level != null && mc.player != null) {
-                val stack = worldPoseStack(context)
-                val camera = mainCamera(mc)
-                UnshadedDisplayPass.capture(stack, camera)
-                ScreenRenderer.render(stack, camera)
-                DisplayRegistry.getScreens().forEach { it.renderPopout() }
+                ClientGuard.run("world render") {
+                    val stack = worldPoseStack(context)
+                    val camera = mainCamera(mc)
+                    UnshadedDisplayPass.capture(stack, camera)
+                    ScreenRenderer.render(stack, camera)
+                }
+                ClientGuard.run("popout render") { DisplayRegistry.getScreens().forEach { it.renderPopout() } }
             }
         }*/
 
         //? if >=26 {
-        LevelRenderEvents.BEFORE_BLOCK_OUTLINE.register { _, state -> !isDisplayBlock(state.pos()) }
+        LevelRenderEvents.BEFORE_BLOCK_OUTLINE.register { _, state -> !ClientGuard.call("block outline", false) { isDisplayBlock(state.pos()) } }
         //?} else
         /*
         //? if ==1.21.11 {
-        WorldRenderEvents.BEFORE_BLOCK_OUTLINE.register { _, state -> !isDisplayBlock(state.pos()) }
+        WorldRenderEvents.BEFORE_BLOCK_OUTLINE.register { _, state -> !ClientGuard.call("block outline", false) { isDisplayBlock(state.pos()) } }
         //?}
         //? if <1.21.11 {
-        WorldRenderEvents.BLOCK_OUTLINE.register { _, context -> !isDisplayBlock(context.blockPos()) }
+        WorldRenderEvents.BLOCK_OUTLINE.register { _, context -> !ClientGuard.call("block outline", false) { isDisplayBlock(context.blockPos()) } }
         //?}
         */
 
@@ -201,24 +206,28 @@ class Client : ClientModInitializer, Mod {
     private fun registerLegacyScreenOverlays() {
         net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.BEFORE_INIT.register { mc, screen, _, _ ->
             net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.beforeRender(screen).register { _, pose, _, _, tickDelta ->
-                if (FullscreenOverlayManager.isEmpty) return@register
-                FullscreenOverlayManager.onClientTick(mc)
-                if (FullscreenOverlayManager.isEmpty) return@register
-                if (MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))) return@register
-                FullscreenOverlayManager.renderAll(mc, GuiGraphics(pose), tickDelta)
+                ClientGuard.run("ScreenOverlay.head") {
+                    if (FullscreenOverlayManager.isEmpty) return@register
+                    FullscreenOverlayManager.onClientTick(mc)
+                    if (FullscreenOverlayManager.isEmpty) return@register
+                    if (MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))) return@register
+                    FullscreenOverlayManager.renderAll(mc, GuiGraphics(pose), tickDelta)
+                }
             }
             net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterRender(screen).register { _, pose, mouseX, mouseY, tickDelta ->
-                val graphics = GuiGraphics(pose)
-                if (!FullscreenOverlayManager.isEmpty &&
-                    MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))
-                ) {
-                    FullscreenOverlayManager.renderAll(mc, graphics, tickDelta)
+                ClientGuard.run("ScreenOverlay.return") {
+                    val graphics = GuiGraphics(pose)
+                    if (!FullscreenOverlayManager.isEmpty &&
+                        MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))
+                    ) {
+                        FullscreenOverlayManager.renderAll(mc, graphics, tickDelta)
+                    }
+                    val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return@register
+                    if (overlays.isEmpty) return@register
+                    overlays.renderAll(
+                        MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, tickDelta)
+                    )
                 }
-                val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return@register
-                if (overlays.isEmpty) return@register
-                overlays.renderAll(
-                    MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, tickDelta)
-                )
             }
         }
     }

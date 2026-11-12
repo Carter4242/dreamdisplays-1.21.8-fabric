@@ -6,6 +6,7 @@ import com.dreamdisplays.platform.client.core.ClientApplication
 import com.dreamdisplays.platform.client.core.ClientLifecycleEvent
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.managers.*
 import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.platform.client.overlay.OverlayManager
@@ -86,7 +87,7 @@ object Initializer {
      * Called by the platform entrypoint after joining a server: records [serverId] in the client
      * state, restores saved screens, and emits [ClientLifecycleEvent.ServerJoined].
      */
-    fun onServerJoined(serverId: String) {
+    fun onServerJoined(serverId: String) = ClientGuard.run("onServerJoined") {
         ClientStateManager.connectedServerId = serverId
         val config = ClientStateManager.config
         ClientStateManager.displaysEnabled =
@@ -102,6 +103,10 @@ object Initializer {
      * the per-server flags, and emits [ClientLifecycleEvent.ServerLeft].
      */
     fun onServerLeft() {
+        ClientGuard.run("onServerLeft") { leaveServer() }
+    }
+
+    private fun leaveServer() {
         // Fabric fires its disconnect event on the Netty IO thread
         val mc = Minecraft.getInstance()
         if (!mc.isSameThread) { // Not our problem
@@ -140,12 +145,12 @@ object Initializer {
     }
 
     /** A v1-only reply arrived: the server's `Dream Displays` is too old to use. */
-    fun onLegacyServerDetected() {
+    fun onLegacyServerDetected() = ClientGuard.run("onLegacyServerDetected") {
         ProtocolRouter.onLegacyServerDetected()
     }
 
     /** Decodes and dispatches v2 envelope [bytes] from the `dreamdisplays:v2` channel. */
-    fun onV2Packet(bytes: ByteArray) {
+    fun onV2Packet(bytes: ByteArray) = ClientGuard.run("onV2Packet") {
         ProtocolRouter.onV2Received(bytes)
     }
 
@@ -153,7 +158,7 @@ object Initializer {
      * Main client tick handler. Detects level changes, manages render-distance unloading / restoring,
      * handles the right-click shortcut, and applies focus-mode blindness.
      */
-    fun onEndTick(minecraft: Minecraft) {
+    fun onEndTick(minecraft: Minecraft) = ClientGuard.run("onEndTick") {
         DisplayYuvRenderTypes.solidColorType()
         ClientTickManager.tick(minecraft)
     }
@@ -161,8 +166,16 @@ object Initializer {
     /** Renders the fullscreen and PiP overlays on the HUD when the player is in-world and no screen is open. */
     //? if >=26 {
     fun onRenderHud(mc: Minecraft, graphics: GuiGraphicsExtractor, partialTick: Float) {
+        ClientGuard.run("onRenderHud") { renderHud(mc, graphics, partialTick) }
+    }
+
+    private fun renderHud(mc: Minecraft, graphics: GuiGraphicsExtractor, partialTick: Float) {
         //?} else
-        /*fun onRenderHud(mc: Minecraft, graphics: GuiGraphics, partialTick: Float) {*/
+        /*fun onRenderHud(mc: Minecraft, graphics: GuiGraphics, partialTick: Float) {
+        ClientGuard.run("onRenderHud") { renderHud(mc, graphics, partialTick) }
+    }
+
+    private fun renderHud(mc: Minecraft, graphics: GuiGraphics, partialTick: Float) {*/
         if (mc.level == null || mc.player == null) return
         // The "sharing your screen" badge stays up under every menu too, for as long as a capture runs
         if (MinecraftScreenUtil.currentScreen(mc) != null) {
@@ -193,7 +206,7 @@ object Initializer {
     }
 
     /** Saves screen data to disk, stops all players, and interrupts background threads on mod shutdown. */
-    fun onStop() {
+    fun onStop() = ClientGuard.run("onStop") {
         ClientShutdownManager.stop()
     }
 }

@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.input.PointerInput
 import net.minecraft.client.MouseHandler
 //? if >=1.21.11 {
@@ -20,16 +21,16 @@ open class MouseInput {
     //? if >=1.21.11 {
     @Inject(method = ["onButton"], at = [At("HEAD")], cancellable = true)
     open fun onButtonHead(window: Long, buttonInfo: MouseButtonInfo, action: Int, ci: CallbackInfo) {
-        if (PointerInput.onButton(window, buttonInfo.button(), action)) ci.cancel()
+        if (ClientGuard.call("MouseInput.onButton", false) { PointerInput.onButton(window, buttonInfo.button(), action) }) ci.cancel()
     }
     //?} else
     /*@Inject(method = ["onPress"], at = [At("HEAD")], cancellable = true)
     open fun onButtonHead(window: Long, button: Int, action: Int, modifiers: Int, ci: CallbackInfo) {
-        if (PointerInput.onButton(window, button, action)) ci.cancel()
+        if (ClientGuard.call("MouseInput.onButton", false) { PointerInput.onButton(window, button, action) }) ci.cancel()
     }*/
 
     @Inject(method = ["onScroll"], at = [At("HEAD")], cancellable = true)
     open fun onScrollHead(window: Long, xOffset: Double, yOffset: Double, ci: CallbackInfo) {
-        if (PointerInput.onScroll(window)) ci.cancel()
+        if (ClientGuard.call("MouseInput.onScroll", false) { PointerInput.onScroll(window) }) ci.cancel()
     }
 }

@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.client.mixins
 
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.ui.MinecraftOverlayRenderContext
@@ -60,12 +61,14 @@ open class ScreenOverlay {
             val graphics = GuiGraphics(pose)
         //?}
         */
-        if (FullscreenOverlayManager.isEmpty) return
-        val mc = Minecraft.getInstance()
-        FullscreenOverlayManager.onClientTick(mc)
-        if (FullscreenOverlayManager.isEmpty) return
-        if (MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))) return
-        FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
+        ClientGuard.run("ScreenOverlay.head") {
+            if (FullscreenOverlayManager.isEmpty) return
+            val mc = Minecraft.getInstance()
+            FullscreenOverlayManager.onClientTick(mc)
+            if (FullscreenOverlayManager.isEmpty) return
+            if (MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))) return
+            FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
+        }
     }
 
     // Renders all active PiP overlays on top of the current screen after the normal render pass
@@ -103,20 +106,22 @@ open class ScreenOverlay {
             val graphics = GuiGraphics(pose)
         //?}
         */
-        val mc = Minecraft.getInstance()
-        if (!FullscreenOverlayManager.isEmpty &&
-            MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))
-        ) {
+        ClientGuard.run("ScreenOverlay.return") {
+            val mc = Minecraft.getInstance()
+            if (!FullscreenOverlayManager.isEmpty &&
+                MinecraftScreenUtil.isTransientLoadingScreen(MinecraftScreenUtil.currentScreen(mc))
+            ) {
+                //? if >=1.21.6 {
+                graphics.nextStratum()
+                //?}
+                FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
+            }
+            val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return
+            if (overlays.isEmpty) return
             //? if >=1.21.6 {
             graphics.nextStratum()
             //?}
-            FullscreenOverlayManager.renderAll(mc, graphics, partialTick)
+            overlays.renderAll(MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, partialTick))
         }
-        val overlays = DreamServices.registry.getOrNull<OverlayManager>() ?: return
-        if (overlays.isEmpty) return
-        //? if >=1.21.6 {
-        graphics.nextStratum()
-        //?}
-        overlays.renderAll(MinecraftOverlayRenderContext(mc, graphics, mouseX, mouseY, partialTick))
     }
 }

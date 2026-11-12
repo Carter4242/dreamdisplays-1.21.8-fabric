@@ -2,6 +2,7 @@ package com.dreamdisplays.platform.client.mixins
 
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import com.dreamdisplays.platform.client.overlay.CrosshairPolicy
 //? if >=1.21.1 {
@@ -55,9 +56,11 @@ open class Crosshair {
             //?}
             ci: CallbackInfo
         ) {*/
-        val suppress = DreamServices.registry.getOrNull<CrosshairPolicy>()
-            ?.shouldSuppressCrosshair()
-            ?: ClientStateManager.isOnScreen
+        val suppress = ClientGuard.call("Crosshair", false) {
+            DreamServices.registry.getOrNull<CrosshairPolicy>()
+                ?.shouldSuppressCrosshair()
+                ?: ClientStateManager.isOnScreen
+        }
         if (suppress) {
             ci.cancel()
         }

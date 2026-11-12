@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.render.UnshadedDisplayPass
 //? if >=1.21.1 {
 import net.minecraft.client.DeltaTracker
@@ -26,6 +27,6 @@ open class DisplayLatePass {
     open fun onLevelRendered(deltaTracker: DeltaTracker, ci: CallbackInfo) {
     //?} else
     /*open fun onLevelRendered(ci: CallbackInfo) {*/
-        UnshadedDisplayPass.drawPending()
+        ClientGuard.run("DisplayLatePass") { UnshadedDisplayPass.drawPending() }
     }
 }
