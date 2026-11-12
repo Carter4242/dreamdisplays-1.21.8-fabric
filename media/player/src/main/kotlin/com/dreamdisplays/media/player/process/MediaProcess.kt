@@ -362,7 +362,11 @@ object MediaProcess {
         if (hwAccel.ffmpegName != null) addAll(["-hwaccel", hwAccel.ffmpegName])
         hwAccel.hwOutputFormat?.let { addAll(["-hwaccel_output_format", it]) }
         addAll(["-fflags", if (picture) "discardcorrupt" else "nobuffer+discardcorrupt", "-flags", "low_delay"])
-        addAll(["-probesize", LIVE_PROBE_SIZE, "-analyzeduration", LIVE_ANALYZE_MICROS, "-fpsprobesize", "0", "-max_delay", "0"])
+        // An outside source whose keyframe came after the short probe ran out gets the wide one ([LiveProbe])
+        val wide = picture && LiveProbe.isWide(url)
+        addAll(["-probesize", if (wide) LIVE_WIDE_PROBE_SIZE else LIVE_PROBE_SIZE])
+        addAll(["-analyzeduration", if (wide) LIVE_WIDE_ANALYZE_MICROS else LIVE_ANALYZE_MICROS])
+        addAll(["-fpsprobesize", "0", "-max_delay", "0"])
         when (LiveStreamUrls.schemeOf(url)) {
             // RTSP opens its own sockets, so the generic I/O timeout does not exist for it ("Option not found")
             "rtsp" -> addAll(["-rtsp_transport", "tcp", "-reorder_queue_size", "0", "-timeout", LIVE_RW_TIMEOUT_MICROS])
@@ -392,6 +396,13 @@ object MediaProcess {
 
     /** See [LIVE_PROBE_SIZE]: above the share's keyframe interval (1 s) with room to spare. */
     internal const val LIVE_ANALYZE_MICROS = "1500000"
+
+    /**
+     * The probe for a picture whose short probe ran out before its first keyframe ([LiveProbe]): it still ends at that
+     * keyframe, and at the latest after 4 s of stream, inside the live player's 6 s startup watchdog.
+     */
+    internal const val LIVE_WIDE_PROBE_SIZE = "5000000"
+    internal const val LIVE_WIDE_ANALYZE_MICROS = "4000000"
 
     private fun MutableList<String>.addHttpOptions(url: String) {
         addAll(headerArgs(url))

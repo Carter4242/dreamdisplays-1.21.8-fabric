@@ -31,6 +31,7 @@ import com.dreamdisplays.media.player.preparation.MediaPreparationService
 import com.dreamdisplays.media.player.preparation.PreparedMedia
 import com.dreamdisplays.media.player.process.FFmpegBinary
 import com.dreamdisplays.media.player.process.HwAccelBackend
+import com.dreamdisplays.media.player.process.LiveProbe
 import com.dreamdisplays.media.player.process.MediaProcess
 import com.dreamdisplays.media.player.readahead.ReadAhead
 import com.dreamdisplays.media.player.stream.ActiveStreams
@@ -1347,6 +1348,11 @@ class MediaPlayer(
         }
 
         if (relayStream && !relayFailedForGood(stderr)) {
+            // An outside source whose keyframe came after the short probe ran out: its next attempts probe longer
+            val pictureUrl = streams?.currentVideo?.url
+            if (!normalEos && pictureUrl != null && LiveProbe.noteFailure(pictureUrl, stderr)) {
+                logger.info("$debugLabel Live stream's first picture came after the probe ended; probing longer from now on.")
+            }
             reconnectRelay(if (normalEos) "stream ended" else stderr.ifBlank { "connection lost" })
             return@onControl
         }
