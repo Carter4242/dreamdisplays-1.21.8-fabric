@@ -115,9 +115,6 @@ class DisplayMenu private constructor(
     private lateinit var queueSection: QueueSection
     private lateinit var skipButton: IconButton
     private lateinit var clearVideoButton: IconButton
-
-    // Clearing ends the video for everyone: a second click within a few seconds confirms it
-    private val clearVideoGuard = ArmedClick(CLEAR_CONFIRM_MS)
     private lateinit var loopButton: IconButton
     private lateinit var queueAddButton: IconButton
     private lateinit var clearQueueButton: IconButton
@@ -348,7 +345,7 @@ class DisplayMenu private constructor(
         skipButton.enabledWhen = { ds.canSkipQueueHere }
 
         clearVideoButton = addUi(IconButton(icon = { IconButton.modIcon("cross") }, sprites = IconButton.RED_SPRITES) {
-            if (clearVideoGuard.press(System.currentTimeMillis())) ds.requestClearVideo()
+            ds.requestClearVideo()
         })
         // Also on the error panel and while loading: a video that fails or never starts is when clearing helps most
         clearVideoButton.visibleWhen = { ds.canClearVideoHere }
@@ -584,7 +581,6 @@ class DisplayMenu private constructor(
             suggestionsRect = null
             errorPanel.render(g, width, height)
             drawChildren(g, mouseX, mouseY, partialTick)
-            drawClearVideoArming(g)
             clearVideoTip(mouseX, mouseY)?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
             return
         }
@@ -625,7 +621,6 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
-        drawClearVideoArming(g)
         if (shareButton.visible) {
             if (ScreenShare.isSharing(ds.uuid)) {
                 val bottom = shareButton.y + shareButton.height
@@ -721,24 +716,11 @@ class DisplayMenu private constructor(
         return null
     }
 
-    /** Outlines the Clear button while a second click would confirm it; drops the arming once the button is gone. */
-    private fun drawClearVideoArming(g: GuiGraphicsCompat) {
-        if (!clearVideoButton.visible) {
-            clearVideoGuard.disarm()
-        } else if (clearVideoGuard.isArmed(System.currentTimeMillis())) {
-            g.drawOutline(
-                UiRect(clearVideoButton.x - 1, clearVideoButton.y - 1, clearVideoButton.width + 2, clearVideoButton.height + 2),
-                UiTheme.ACCENT_UPDATE,
-            )
-        }
-    }
-
     /** The Clear button's tooltip when the pointer is on it, else null. */
     private fun clearVideoTip(mouseX: Int, mouseY: Int): String? {
         val b = clearVideoButton
         if (!b.visible || mouseX < b.x || mouseX >= b.x + b.width || mouseY < b.y || mouseY >= b.y + b.height) return null
-        return if (clearVideoGuard.isArmed(System.currentTimeMillis())) ClientMessage.UI_CLEAR_VIDEO_CONFIRM.text()
-        else ClientMessage.UI_CLEAR_VIDEO.text()
+        return ClientMessage.UI_CLEAR_VIDEO.text()
     }
 
     private fun buttonTip(mouseX: Int, mouseY: Int) {
