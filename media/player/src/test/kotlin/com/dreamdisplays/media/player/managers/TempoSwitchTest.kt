@@ -34,6 +34,17 @@ class TempoSwitchTest {
     }
 
     @Test
+    fun `the new-speed sound opens a margin before where the old speed reaches at the instant, never behind the playhead`() {
+        val ms = 1_000_000L
+        // 400 ms ahead at 2x: the switch lands 800 ms on; the stream opens 150 ms before that
+        assertEquals(10_650 * ms, tempoSwitchOpenNanos(10_000 * ms, 400 * ms, fromRate = 2.0))
+        // Too close to the instant for the margin: from the playhead
+        assertEquals(10_000 * ms, tempoSwitchOpenNanos(10_000 * ms, 50 * ms, fromRate = 1.0))
+        // Already late
+        assertEquals(10_000 * ms, tempoSwitchOpenNanos(10_000 * ms, -80 * ms, fromRate = 1.0))
+    }
+
+    @Test
     fun `a late switch catches up a speed-up and never goes back for a slow-down`() {
         val ms = 1_000_000L
         // 100 ms late at 1x -> 2x: the new speed would be 100 ms of content further

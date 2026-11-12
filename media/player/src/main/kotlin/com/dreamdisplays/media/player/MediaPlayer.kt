@@ -576,7 +576,7 @@ class MediaPlayer(
         requestedSpeed = s
         // A switch scheduled for a moment ahead ([scheduleSpeedSwitch]) is replaced by this one, applied now
         speedWord.incrementAndGet()
-        sessionManager.cancelTempoSwitch()
+        if (sessionManager.cancelTempoSwitch()) logger.info("[dd-sync] {} speed {}x asked for now: the pending switch is dropped", debugLabel.take(8), s)
         safeExecute(::applySpeed)
     }
 

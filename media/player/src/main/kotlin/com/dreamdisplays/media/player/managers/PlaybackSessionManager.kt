@@ -57,6 +57,20 @@ internal fun videoKeepsPace(inProcess: Boolean, sourceFps: Double, fromTempo: Do
  * ([aheadNanos] < 0) what the new speed ([toRate]) would have played beyond the old one meanwhile, never back (the
  * picture's clock never runs backwards; a slow-down that went live late is left to the sync engine).
  */
+/**
+ * Where the new-speed audio of a switch [aheadNanos] away opens (content ns): [TEMPO_SWITCH_OPEN_MARGIN_NANOS] before
+ * where the old speed ([fromRate]) brings the heard position [heardNanos] by then, never behind [heardNanos].
+ */
+internal fun tempoSwitchOpenNanos(heardNanos: Long, aheadNanos: Long, fromRate: Double): Long =
+    (heardNanos + tempoSwitchShiftNanos(aheadNanos, fromRate, fromRate) - TEMPO_SWITCH_OPEN_MARGIN_NANOS)
+        .coerceAtLeast(heardNanos).coerceAtLeast(0L)
+
+/**
+ * How far before the predicted switch position ([tempoSwitchOpenNanos]) the new-speed audio opens: the margin the
+ * old speed's clock may run slow by (a stall) before the new sound would start past where it should.
+ */
+internal const val TEMPO_SWITCH_OPEN_MARGIN_NANOS = 150_000_000L
+
 internal fun tempoSwitchShiftNanos(aheadNanos: Long, fromRate: Double, toRate: Double): Long =
     if (aheadNanos >= 0L) kotlin.math.round(aheadNanos * fromRate).toLong()
     else kotlin.math.round(-aheadNanos * (toRate - fromRate)).toLong().coerceAtLeast(0L)
@@ -1031,11 +1045,9 @@ internal class PlaybackSessionManager(
         return true
     }
 
-    /** Drops a [beginTempoSwitch] that has not gone live yet (a newer speed was asked for). */
-    fun cancelTempoSwitch() {
-        synchronized(audioOwnerLock) {
-            if (tempoSwitchGeneration == audioSwitchGeneration.get()) audioSwitchGeneration.incrementAndGet()
-        }
+    /** Drops a [beginTempoSwitch] that has not gone live yet (a newer speed was asked for); true when there was one. */
+    fun cancelTempoSwitch(): Boolean = synchronized(audioOwnerLock) {
+        (tempoSwitchGeneration == audioSwitchGeneration.get()).also { if (it) audioSwitchGeneration.incrementAndGet() }
     }
 
     /** Takes [value] as the session's speed without reopening anything: its processes already run at it. */
@@ -1069,7 +1081,11 @@ internal class PlaybackSessionManager(
             settle(adopted, if (adopted) "switched (no sound)" else "superseded")
             return
         }
-        val seekNanos = currentPacingNanos().takeIf { it >= 0L } ?: clock.currentTime()
+        // Opened a little before where the old speed will be at the instant: the PCM it decodes meanwhile (a pipe's
+        // worth) is then the sound right after the switch, not sound the catch-up skips over, so the new stream has a
+        // head start when it goes live
+        val heardNow = currentPacingNanos().takeIf { it >= 0L } ?: clock.currentTime()
+        val seekNanos = tempoSwitchOpenNanos(heardNow, atNanos - System.nanoTime(), fromTempo * audio.playbackRate)
         val aStop = AtomicBoolean()
         val ap = try {
             buildAudioProcess(ffmpeg, streamSet, seekNanos, aStop, toTempo)
@@ -1086,7 +1102,7 @@ internal class PlaybackSessionManager(
         // for a late switch where the new speed would have got to by now (never back: the picture holds its clock)
         val target = {
             val now = System.nanoTime()
-            val heard = currentPacingNanos().coerceAtLeast(seekNanos)
+            val heard = currentPacingNanos().takeIf { it >= 0L } ?: clock.currentTime()
             heard + tempoSwitchShiftNanos(atNanos - now, fromTempo * audio.playbackRate, toTempo)
         }
         val oldAudio = audioHalf

@@ -42,7 +42,7 @@ internal class AudioSink(private val debugLabel: String) {
          * A scheduled switch ([startSwitch] `notBeforeNanos`) skips and primes this long before its instant: reading a
          * few chunks from a pipe already full of PCM and writing them to a stopped line takes a few ms.
          */
-        const val SCHEDULED_PRIME_NANOS = 60_000_000L
+        const val SCHEDULED_PRIME_NANOS = 100_000_000L
         private const val MAX_RESYNC_NANOS = 5_000_000_000L
 
         /** How long to wait for FFmpeg to exit after its PCM ended, to read its exit code. */
@@ -688,6 +688,19 @@ internal class AudioSink(private val debugLabel: String) {
         var skippedBytes = 0L
         // Content skipped so far: PCM played at catchUp.tempo carries that many times its own length of video
         fun skippedContent() = pcmToContentNanos(bytesToNanos(skippedBytes), catchUp.tempo)
+        if (catchUp.exact) {
+            // A fixed target, read once: skip to it to the frame
+            val gapNanos = catchUp.playbackClock() - catchUp.contentStartNanos
+            var toSkip = contentToPcmNanos(gapNanos, catchUp.tempo).coerceAtLeast(0L) * SAMPLE_RATE / 1_000_000_000L * BYTES_PER_FRAME
+            while (toSkip > 0 && !terminated.get() && !stopFlag.get()) {
+                val n = MediaUtil.readFull(input, scratch, minOf(CHUNK_BYTES.toLong(), toSkip).toInt())
+                if (n <= 0) break
+                skippedBytes += n
+                toSkip -= n
+            }
+            logger.debug("$debugLabel [audio] catch-up skipped ${skippedContent() / 1_000_000} ms of PCM (target ${gapNanos / 1_000_000} ms).")
+            return skippedContent()
+        }
         repeat(CATCHUP_MAX_PASSES) {
             val contentNow = catchUp.contentStartNanos + skippedContent()
             val gapNanos = catchUp.playbackClock() - contentNow

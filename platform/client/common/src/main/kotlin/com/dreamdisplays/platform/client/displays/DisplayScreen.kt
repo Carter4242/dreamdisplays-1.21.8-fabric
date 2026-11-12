@@ -1055,12 +1055,15 @@ class DisplayScreen(
         // A speed change scheduled ahead, while this player plays: it plays on at the old speed, opens the new one
         // meanwhile and switches at the start instant, without a stop
         val player = mediaPlayer
-        if (player != null && requiresServerTimeline() && SpeedChanges.followsWithoutStop(
-                packet.speedChangeFromRate, packet.isPaused, packet.startInMs,
-                playing = videoStarted && !paused && !isLive && isClockRunning() && !isQueueSwitchPending &&
-                        timelineFollower.followsPlayingTimeline(),
+        val playing = player != null && requiresServerTimeline() && videoStarted && !paused && !isLive &&
+                !isQueueSwitchPending && timelineFollower.followsPlayingTimeline()
+        if (packet.speedChangeFromRate > 0.0) {
+            logger.info(
+                "[dd-sync] {} speed {}x -> {}x in {} ms: {}", uuid.toString().take(8), packet.speedChangeFromRate,
+                serverSpeed, packet.startInMs, if (playing) "switching while it plays" else "held until then",
             )
-        ) {
+        }
+        if (player != null && SpeedChanges.followsWithoutStop(packet.speedChangeFromRate, packet.isPaused, packet.startInMs, playing)) {
             val atNanos = timelineFollower.apply(
                 packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs,
                 packet.karaokeLeadMs, packet.durationMs, speedSwitch = true,
