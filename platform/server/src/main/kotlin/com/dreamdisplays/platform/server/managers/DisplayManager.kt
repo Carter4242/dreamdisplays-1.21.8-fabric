@@ -134,6 +134,7 @@ object DisplayManager {
 
     private fun removeDisplays(toRemove: List<DisplayData>, delete: (DisplayData) -> Unit): List<UUID> {
         return toRemove.map { display ->
+            com.dreamdisplays.platform.server.playback.DisplayActivity.record(display, com.dreamdisplays.core.activity.ActivityKind.DELETED, text = "base material gone")
             displays.remove(display.id)
             proximityIndex.forgetDisplay(display.id)
             lastReceivers.remove(display.id)
@@ -141,6 +142,7 @@ object DisplayManager {
             FullscreenBroadcastManager.onDisplayRemoved(display.id)
             PipPinManager.onDisplayRemoved(display.id)
             QueueManager.onDisplayRemoved(display.id)
+            com.dreamdisplays.platform.server.playback.DisplayActivity.forget(display.id)
             ScheduledPlaybackManager.onDisplayRemoved(display.id)
             delete(display)
             ServerApiHost.current?.removed(display)
@@ -178,6 +180,7 @@ object DisplayManager {
         displays[data.id] = data
         runAsync { getInstance().storage.saveDisplay(data) }
         broadcastUpdate(data)
+        com.dreamdisplays.platform.server.playback.DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.CREATED)
         ServerApiHost.current?.created(data)
     }
 
@@ -424,6 +427,7 @@ object DisplayManager {
     /** Removes [displayData] from storage and the registry and notifies nearby clients. */
     @PaperOnly
     fun delete(displayData: PaperDisplayData) {
+        com.dreamdisplays.platform.server.playback.DisplayActivity.record(displayData, com.dreamdisplays.core.activity.ActivityKind.DELETED)
         runAsync { getInstance().storage.deleteDisplay(displayData) }
         broadcastDelete(displayData)
         TimelineManager.remove(displayData.id)
@@ -431,6 +435,7 @@ object DisplayManager {
         PipPinManager.onDisplayRemoved(displayData.id)
         QueueManager.onDisplayRemoved(displayData.id)
         com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onDisplayRemoved(displayData.id)
+        com.dreamdisplays.platform.server.utils.net.MenuPanels.onDisplayRemoved(displayData.id)
         displays.remove(displayData.id)
         proximityIndex.forgetDisplay(displayData.id)
         lastReceivers.remove(displayData.id)
@@ -603,6 +608,7 @@ object DisplayManager {
         FullscreenBroadcastManager.onDisplayRemoved(data.id)
         PipPinManager.onDisplayRemoved(data.id)
         QueueManager.onDisplayRemoved(data.id)
+        com.dreamdisplays.platform.server.playback.DisplayActivity.forget(data.id)
         ServerCoroutines.io.launch { VanillaServerState.storage?.deleteDisplay(data) }
         if (receivers.isNotEmpty()) VanillaPacketUtil.sendDelete(receivers, data.id)
         ServerApiHost.current?.removed(data)

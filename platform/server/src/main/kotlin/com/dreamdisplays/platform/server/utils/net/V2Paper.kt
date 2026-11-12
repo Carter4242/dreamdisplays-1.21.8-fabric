@@ -59,7 +59,7 @@ object PaperV2Networking : PluginMessageListener {
             if (ScreenShareActions.mayShare(player)) {
                 wires + listOf(ServerFeature.SCREEN_SHARE.wire, ServerFeature.SCREEN_SHARE_HEARTBEAT.wire)
             } else wires
-        },
+        } + MenuPanels.helloFeatures(player),
         defaultVolume = PaperServer.config.settings.defaultVolume,
         maxDisplays = maxDisplaysFor(player.hasPermission(PaperServer.config.permissions.createBypass)),
     )
@@ -128,6 +128,8 @@ object PaperV2Networking : PluginMessageListener {
             .onFailure { logDecodeFailure(player, it) }
             .getOrNull() ?: return
 
+        // A display action that records no Activity row was refused: the permanent journal gets it with a reason
+        val attempt = ActivityAttempts.begin(player, packet)
         when (packet) {
             is ClientHello -> handleHello(player, packet)
             is RequestSync -> DisplayActions.requestSync(player, packet.id, packet.knownMediaGen)
@@ -137,6 +139,7 @@ object PaperV2Networking : PluginMessageListener {
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
             is QueueAction -> QueueActions.onAction(player, packet)
             is QueuePreload -> QueueActions.onPreload(player, packet)
+            is MenuPanelRequest -> MenuPanels.onRequest(player, packet)
             is ClientErrorReport -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onReport(player, packet)
             is ClientEnvironment -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onEnvironment(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)
@@ -196,6 +199,7 @@ object PaperV2Networking : PluginMessageListener {
 
             else -> logger.debug("Ignoring non-serverbound v2 packet {}.", packet::class.simpleName)
         }
+        ActivityAttempts.end(attempt)
     }
 
     /** When each player's undecodable packet was last logged in full; one a minute each, the rest at debug. */

@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.api.media.source.MediaSource
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.shared.playback.FullscreenAckAction
 import com.dreamdisplays.shared.playback.FullscreenMode
 import com.dreamdisplays.api.playback.model.PlaybackMode
@@ -141,7 +142,8 @@ object FullscreenBroadcastManager {
      * rejoin would show it again).
      */
     fun endNonLoopingSessions(displayId: UUID) {
-        sessions.values.filter { !it.virtual && !it.loop && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it) }
+        sessions.values.filter { !it.virtual && !it.loop && it.display.id == displayId }.map { it.sessionId }
+            .forEach { stop(it, ActivityKind.FULLSCREEN_ENDED) }
     }
 
     /**
@@ -150,7 +152,8 @@ object FullscreenBroadcastManager {
      * empty description went out, so far viewers drop the video before the overlay closes.
      */
     fun endSessionsOf(displayId: UUID) {
-        sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it) }
+        // The clear that ends them has its own Activity row
+        sessions.values.filter { !it.virtual && it.display.id == displayId }.map { it.sessionId }.forEach { stop(it, null) }
     }
 
     /** True if a session with [sessionId] is currently live. */
@@ -264,6 +267,7 @@ object FullscreenBroadcastManager {
         )
         sessions[sessionId] = session
         deliverToAll(session)
+        if (!virtual) DisplayActivity.record(display, ActivityKind.FULLSCREEN_START, count = session.shownTo.size)
         if (preparation != null) {
             // Prepared players the broadcast does not reach let go of the display
             for (playerId in preparation.roster.delivered) {
@@ -328,7 +332,7 @@ object FullscreenBroadcastManager {
             if (!session.loop) {
                 if (QueueTiming.loopRestartAtMs(timeline.copy(loop = false), now, 0L, timeline.durationMs) != null) {
                     logger.info("Fullscreen session ${session.sessionId} reached the end of its video.")
-                    stop(session.sessionId)
+                    stop(session.sessionId, ActivityKind.FULLSCREEN_ENDED)
                 }
                 continue
             }
@@ -342,9 +346,13 @@ object FullscreenBroadcastManager {
     private fun preparedLead(display: DisplayData, preparation: Preparation?): Long =
         if (preparation == null) 0L else ReadinessTracker.leadMs(display.id, preparation.roster.delivered)
 
-    /** Stops [sessionId], notifying every player it was shown to. Returns false if it doesn't exist. */
-    fun stop(sessionId: String): Boolean {
+    /**
+     * Stops [sessionId], notifying every player it was shown to; [activity] is the row its display's Activity list
+     * gets (null: none). Returns false if it doesn't exist.
+     */
+    fun stop(sessionId: String, activity: ActivityKind? = ActivityKind.FULLSCREEN_END): Boolean {
         val session = sessions.remove(sessionId) ?: return false
+        if (!session.virtual && activity != null) DisplayActivity.record(session.display, activity)
         forgetVirtualLength(session.display)
         teardown(session)
         persist()
@@ -380,7 +388,7 @@ object FullscreenBroadcastManager {
             FullscreenAckAction.DISMISSED -> if (!session.forced && session.shownTo.remove(playerId)) {
                 viewing.remove(playerId, sessionId)
                 session.dismissedBy.add(playerId)
-                if (session.shownTo.isEmpty()) stop(sessionId)
+                if (session.shownTo.isEmpty()) stop(sessionId, null)
             }
 
             FullscreenAckAction.MINIMIZED -> {
@@ -558,6 +566,7 @@ object FullscreenBroadcastManager {
         reconcilePreparation(preparation, now)
         previous?.roster?.delivered?.forEach { if (!preparation.roster.isDelivered(it)) withdrawPrepare(previous, it) }
         logger.info("Preparing display ${display.id} for a fullscreen broadcast (${preparation.prepareId}).")
+        if (!virtual) DisplayActivity.record(display, ActivityKind.PREPARE)
         return infoOf(preparation, now)
     }
 

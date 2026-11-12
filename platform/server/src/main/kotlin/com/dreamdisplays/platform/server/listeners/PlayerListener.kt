@@ -103,6 +103,7 @@ class PlayerListener : Listener {
         quitStep("diagnostics") { com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(id) }
         quitStep("error reports") { com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(id, event.player.name) }
         quitStep("queue limits") { com.dreamdisplays.platform.server.utils.net.QueueActions.onQuit(id) }
+        quitStep("menu panels") { com.dreamdisplays.platform.server.utils.net.MenuPanels.onQuit(id) }
         quitStep("karaoke") { com.dreamdisplays.platform.server.karaoke.KaraokeManager.onQuit(id) }
         quitStep("scheduler") { Scheduler.untrackPlayer(event.player) }
     }

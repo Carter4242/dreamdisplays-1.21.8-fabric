@@ -59,6 +59,10 @@ object ConfigCommand {
         Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
         Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
         Key("queue.gap_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.queue.gap_ms },
+        Key("activity.max_entries", PolicyPaths.Kind.Whole(0, 1_000)) { it.activity.max_entries },
+        Key("activity.visible_to", PolicyPaths.Kind.Choice(PANEL_VISIBILITY)) { it.activity.visible_to },
+        Key("activity.viewers_visible_to", PolicyPaths.Kind.Choice(PANEL_VISIBILITY)) { it.activity.viewers_visible_to },
+        Key("activity.log_days", PolicyPaths.Kind.Whole(0, 36_500)) { it.activity.log_days },
         Key("karaoke.default_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.default_lead_ms },
         Key("karaoke.lead_margin_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.lead_margin_ms },
         Key("karaoke.min_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.min_lead_ms },
@@ -95,6 +99,8 @@ object ConfigCommand {
     ) +PolicyPaths.all.filter { !it.displayOnly }.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
+
+    private val PANEL_VISIBILITY get() = listOf("everyone", "admins", "nobody")
 
     /**
      * A publish URL template: a scheme the client can publish to (no RTSP: the client has no RTSP muxer) and an `{id}`.

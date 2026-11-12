@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.api.media.source.LiveStreamUrls
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.core.queue.DurationReports
 import com.dreamdisplays.core.protocol.common.packets.ReportKind
 import com.dreamdisplays.core.protocol.common.packets.ReportRequest
@@ -195,6 +196,7 @@ object TimelineManager {
             if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) continue
             if (display.url != record.url || !EmptyDisplays.hasVideo(display.url)) continue
             timelines[displayId] = TimelineRecords.restore(record, now)
+            if (!timelines.getValue(displayId).paused) DisplayActivity.record(display, ActivityKind.RESTORED)
             durations.seed(displayId, display.url, record.mediaMs)
             restored++
         }
@@ -686,6 +688,7 @@ object TimelineManager {
             timelines[displayId] = restarted
             loopRestarts[displayId] = restarted
             broadcast(display, restarted)
+            DisplayActivity.record(display, ActivityKind.LOOPED)
             logger.info("Display {}: reached the end of its video; restarted from 0 for everyone.", displayId)
         }
     }
@@ -713,6 +716,7 @@ object TimelineManager {
         val reanchored = LoopWraps.reanchored(timeline, now)
         timelines[display.id] = reanchored
         broadcast(display, reanchored)
+        DisplayActivity.record(display, ActivityKind.LOOPED)
         logger.info("Display {}: its video ended during a server stall; sent where it stands after the wrap.", display.id)
         return true
     }
@@ -793,6 +797,7 @@ object TimelineManager {
             val paused = timeline.withPaused(true, now)
             timelines[displayId] = paused
             broadcast(display, paused)
+            DisplayActivity.record(display, ActivityKind.AUTO_PAUSED)
             logger.info("Paused display {}: nobody has been near it for {} s.", displayId, limit / 1_000)
         }
     }

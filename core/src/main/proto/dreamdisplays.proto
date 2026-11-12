@@ -704,6 +704,38 @@ message ScreenShareState {
   optional bool noSound = 10;
 }
 
+// serial name 'com.dreamdisplays.core.protocol.common.packets.MenuPanelRequest'
+message MenuPanelRequest {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  optional bool activity = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool viewers = 3;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ActivityState'
+message ActivityState {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  repeated ActivityEntryWire entries = 2;
+  // WARNING: a default value decoded when value is missing
+  optional bool replace = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int64 serverTimeMs = 4;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ViewersState'
+message ViewersState {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid id = 1;
+  // WARNING: a default value decoded when value is missing
+  repeated ViewerEntryWire viewers = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 total = 3;
+}
+
 message Uuid {
   // WARNING: a default value decoded when value is missing
   optional fixed64 msb = 1;
@@ -767,6 +799,52 @@ message ResolveAttemptReport {
   optional int32 elapsedMs = 5;
   // WARNING: a default value decoded when value is missing
   optional int32 agoMs = 6;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ActivityEntryWire'
+message ActivityEntryWire {
+  // WARNING: a default value decoded when value is missing
+  optional int64 seq = 1;
+  // WARNING: a default value decoded when value is missing
+  optional int64 atMs = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 kind = 3;
+  // WARNING: a default value decoded when value is missing
+  optional Uuid actorId = 4;
+  // WARNING: a default value decoded when value is missing
+  optional string actorName = 5;
+  // WARNING: a default value decoded when value is missing
+  optional string title = 6;
+  // WARNING: a default value decoded when value is missing
+  optional string url = 7;
+  // WARNING: a default value decoded when value is missing
+  optional int64 fromMs = 8;
+  // WARNING: a default value decoded when value is missing
+  optional int64 toMs = 9;
+  // WARNING: a default value decoded when value is missing
+  optional double rate = 10;
+  // WARNING: a default value decoded when value is missing
+  optional int32 count = 11;
+  // WARNING: a default value decoded when value is missing
+  optional bool flag = 12;
+  // WARNING: a default value decoded when value is missing
+  optional string text = 13;
+  // WARNING: a default value decoded when value is missing
+  optional string text2 = 14;
+  // WARNING: a default value decoded when value is missing
+  optional bool console = 15;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.ViewerEntryWire'
+message ViewerEntryWire {
+  // WARNING: a default value decoded when value is missing
+  optional Uuid playerId = 1;
+  // WARNING: a default value decoded when value is missing
+  optional string name = 2;
+  // WARNING: a default value decoded when value is missing
+  optional int32 via = 3;
+  // WARNING: a default value decoded when value is missing
+  optional int32 status = 4;
 }
 
 // Retired packet: Envelope.type 14. Never reuse the type id, the message name or its fields.

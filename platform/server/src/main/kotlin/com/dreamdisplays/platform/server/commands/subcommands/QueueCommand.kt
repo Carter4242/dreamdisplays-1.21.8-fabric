@@ -47,7 +47,7 @@ object QueueCommand {
             }
 
             "skip" -> report(sender, display, QueueManager.skip(display, ctx, actorOf(sender, display)), "queueSkipped")
-            "clear" -> report(sender, display, QueueManager.clear(display, ctx), "queueCleared")
+            "clear" -> report(sender, display, QueueManager.clear(display, ctx, actorOf(sender, display)), "queueCleared")
             "loop" -> {
                 val on = when (args.firstOrNull()?.lowercase()) {
                     "on", "true" -> true

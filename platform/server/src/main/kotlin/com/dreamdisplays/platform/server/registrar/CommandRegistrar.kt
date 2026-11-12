@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.registrar
 
 import com.dreamdisplays.core.command.Call
+import com.dreamdisplays.platform.server.playback.DisplayActivity
 import com.dreamdisplays.core.command.ChatLine
 import com.dreamdisplays.core.command.CommandPlatform
 import com.dreamdisplays.core.command.DisplayCommandTree
@@ -66,7 +67,10 @@ object CommandRegistrar {
     }
 
     private fun h(block: (CommandSender, Call<CommandSourceStack>) -> Unit) =
-        Handler<CommandSourceStack> { call -> block(call.source.sender, call) }
+        Handler<CommandSourceStack> { call ->
+            // Rows in a display's Activity list name whoever ran the command (or the console)
+            DisplayActivity.asCommandSender((call.source.sender as? Player)?.uniqueId) { block(call.source.sender, call) }
+        }
 
     private val handlers: Map<String, Handler<CommandSourceStack>> = mapOf(
         "on" to h { s, c -> OnCommand().execute(s, (listOf<String?>("on") + listOfNotNull(c["player"])).toTypedArray()) },

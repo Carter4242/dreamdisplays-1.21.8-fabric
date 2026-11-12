@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.core.command.Perm
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.core.display.policy.PlayerPolicies
 import com.dreamdisplays.core.display.policy.PolicyPaths
 import com.dreamdisplays.core.display.region.RegionVisibility
@@ -36,6 +38,7 @@ object PolicyCommand {
             key == null -> show(sender, display)
             key.equals(RESET, ignoreCase = true) && value == null -> {
                 DisplayPolicies.clearOverride(display)
+                DisplayActivity.record(display, ActivityKind.POLICY)
                 ServerMessage.POLICY_RESET_ALL.sendTo(sender, display.shortLabel)
             }
 
@@ -56,6 +59,7 @@ object PolicyCommand {
                 if (path.field == REGION_FIELD && raw != null && !regionUsable(sender, display, raw.trim())) return
                 val updated = PolicyPaths.apply(DisplayPolicies.override(display), path, raw)
                 val applied = updated != null && DisplayPolicies.setOverride(display, updated)
+                if (applied) DisplayActivity.record(display, ActivityKind.POLICY, text = path.name, text2 = raw?.let { PolicyPaths.format(path.get(updated!!)) }.orEmpty())
                 when {
                     !applied -> ServerMessage.POLICY_BAD_VALUE.sendTo(sender, path.name, path.hint)
                     raw == null -> ServerMessage.POLICY_RESET.sendTo(sender, path.name, display.shortLabel)

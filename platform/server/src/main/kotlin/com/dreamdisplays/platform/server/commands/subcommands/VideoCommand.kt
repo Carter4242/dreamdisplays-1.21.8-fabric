@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.platform.client.utils.literalText
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.platform.server.ModLoaderOnly
 import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.shared.playback.PlaybackPermissions
@@ -88,6 +90,7 @@ class VideoCommand : SubCommand {
             return
         }
 
+        DisplayActivity.record(data, ActivityKind.VIDEO_SET, player.uniqueId, url = requestedUrl, title = DisplayActivity.titleFor(data, requestedUrl), old = data.url)
         data.apply {
             url = requestedUrl
             lang = canonicalLang

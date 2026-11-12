@@ -14,6 +14,7 @@ import com.dreamdisplays.platform.server.managers.ActionThrottle
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.meta.ServerCoroutines
 import com.dreamdisplays.platform.server.storage.DisplayQueueStore
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.platform.server.utils.net.V2PlayerTracker
 import com.dreamdisplays.shared.playback.FullscreenPrepareRoster
 import com.dreamdisplays.shared.playback.FullscreenPrepareState
@@ -204,6 +205,7 @@ object QueueManager {
             }
         }
         if (added == 0) return AddOutcome(stoppedBy ?: Result.REFUSED, 0)
+        DisplayActivity.recordAdd(display, actorId, name, valid, added)
         changed(display)
         // Only a display with no video at all starts the entry now; one that plays something keeps playing it and
         // the entry waits for the end of the video (tick) or a skip
@@ -211,7 +213,7 @@ object QueueManager {
             advance(display)
         } else if (wasEmpty) {
             // Added just after the video was restarted at its end (it had nothing queued then): that end is this one
-            TimelineManager.pendingLoopRestartAt(display.id)?.let { advance(display, it) }
+            TimelineManager.pendingLoopRestartAt(display.id)?.let { advance(display, it)?.let(DisplayActivity.movedOn(display)) }
         }
         return AddOutcome(Result.OK, added)
     }
@@ -248,6 +250,7 @@ object QueueManager {
         if (!PlaybackPermissions.canRemoveFromQueue(ctx, isAdder = item.addedBy == actorId)) return Result.NOT_ALLOWED
         if (!editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
         if (synchronized(queue) { queue.remove(itemId) } == null) return Result.NOT_FOUND
+        DisplayActivity.record(display, ActivityKind.QUEUE_REMOVE, actorId, title = item.title, url = item.url)
         changed(display)
         return Result.OK
     }
@@ -265,16 +268,20 @@ object QueueManager {
         if (!PlaybackPermissions.canManageQueue(ctx)) return Result.NOT_ALLOWED
         val queue = queues[display.id] ?: return Result.NOT_FOUND
         if (!editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
+        val from = synchronized(queue) { queue.items.indexOfFirst { it.itemId == itemId } }
         if (!synchronized(queue) { queue.move(itemId, toIndex) }) return Result.NOT_FOUND
+        DisplayActivity.recordMove(display, actorId, synchronized(queue) { queue.items }, itemId, from)
         changed(display)
         return Result.OK
     }
 
-    /** Empties the queue; owner or admin. */
-    fun clear(display: DisplayData, ctx: PlaybackContext): Result {
+    /** Empties the queue; owner or admin ([actorId], for the Activity list). */
+    fun clear(display: DisplayData, ctx: PlaybackContext, actorId: UUID? = null): Result {
         if (!PlaybackPermissions.canManageQueue(ctx)) return Result.NOT_ALLOWED
         val queue = queues[display.id] ?: return Result.EMPTY
-        if (synchronized(queue) { queue.clear() } == 0) return Result.EMPTY
+        val dropped = synchronized(queue) { queue.clear() }
+        if (dropped == 0) return Result.EMPTY
+        DisplayActivity.record(display, ActivityKind.QUEUE_CLEAR, actorId, count = dropped)
         changed(display)
         return Result.OK
     }
@@ -289,7 +296,10 @@ object QueueManager {
         val queue = queues.computeIfAbsent(display.id) { DisplayQueue() }
         if (synchronized(queue) { queue.loop == enabled }) return Result.OK
         if (actorId != null && !editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
-        if (synchronized(queue) { queue.setLoop(enabled) }) changed(display)
+        if (synchronized(queue) { queue.setLoop(enabled) }) {
+            DisplayActivity.record(display, ActivityKind.QUEUE_LOOP, actorId, flag = enabled)
+            changed(display)
+        }
         return Result.OK
     }
 
@@ -301,7 +311,10 @@ object QueueManager {
         val queue = queues[display.id] ?: return Result.EMPTY
         if (synchronized(queue) { queue.isEmpty() }) return Result.EMPTY
         if (!editThrottle.tryAcquire(actorId, EDIT_COOLDOWN_MS)) return Result.THROTTLED
-        return if (advance(display) != null) Result.OK else Result.REFUSED
+        val skipped = playingEntry(display)?.title.orEmpty() to display.url
+        if (advance(display) == null) return Result.REFUSED
+        DisplayActivity.record(display, ActivityKind.QUEUE_SKIP, actorId, title = skipped.first, url = skipped.second)
+        return Result.OK
     }
 
     /**
@@ -323,7 +336,7 @@ object QueueManager {
     fun startFromEmpty(display: DisplayData): Boolean {
         if (!settings().enabled || display.virtual || !PlaybackPermissions.queueRuns(display.mode)) return false
         if (display.url.isNotBlank()) return false
-        return advance(display) != null
+        return advance(display)?.also(DisplayActivity.movedOn(display)) != null
     }
 
     /** A client's preload progress for the head entry of [display]. */
@@ -425,7 +438,7 @@ object QueueManager {
             FullscreenBroadcastManager.endNonLoopingSessions(displayId)
             // Sent before the end as ever (clients must have the switch before their clock wraps the video), but
             // started gap_ms after it
-            advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs, settings().gapMs))
+            advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs, settings().gapMs))?.let(DisplayActivity.movedOn(display))
         }
     }
 
@@ -446,7 +459,7 @@ object QueueManager {
             timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs, settings().gapMs,
         ) ?: return
         FullscreenBroadcastManager.endNonLoopingSessions(display.id)
-        advance(display, startAt)
+        advance(display, startAt)?.let(DisplayActivity.movedOn(display))
     }
 
     /**

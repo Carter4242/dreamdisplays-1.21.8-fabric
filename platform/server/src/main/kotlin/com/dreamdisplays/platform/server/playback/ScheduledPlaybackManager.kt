@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.api.playback.model.PlaybackAction
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
@@ -113,5 +114,6 @@ object ScheduledPlaybackManager {
             PlaybackMode.LOCAL ->
                 transport.broadcast(display, RemotePlaybackToggle(displayId, action == PlaybackAction.PAUSE))
         }
+        DisplayActivity.record(display, ActivityKind.SCHEDULE_FIRED, text = action.name.lowercase())
     }
 }

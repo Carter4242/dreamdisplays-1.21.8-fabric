@@ -51,7 +51,19 @@ enum class ServerFeature(override val wire: String) : WireEnum {
      * The server clears a display's video on `SetVideo(clear = true)` from anyone allowed to set one: it sends an
      * empty URL (with a new media generation) and stops the display's timeline. Clients offer "Clear" only then.
      */
-    CLEAR_VIDEO("clear_video");
+    CLEAR_VIDEO("clear_video"),
+
+    /**
+     * This player may see displays' Activity lists (`MenuPanelRequest.activity` / `ActivityState`). Sent per player
+     * (`[activity] visible_to`); clients show the Activity tab only then.
+     */
+    ACTIVITY_LOG("activity_log"),
+
+    /**
+     * This player may see who watches a display (`MenuPanelRequest.viewers` / `ViewersState`). Sent per player
+     * (`[activity] viewers_visible_to`); clients show the Viewers tab only then.
+     */
+    VIEWER_LIST("viewer_list");
 
     companion object {
         /** Playback-related features every server implementation supports unconditionally. */
