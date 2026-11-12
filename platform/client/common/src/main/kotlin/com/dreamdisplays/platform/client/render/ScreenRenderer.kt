@@ -14,6 +14,7 @@ import com.dreamdisplays.api.display.model.property.DisplayRotation
 import com.dreamdisplays.api.display.model.property.DisplayFacing
 import com.dreamdisplays.platform.client.displays.DisplayFace
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.PlacedDisplays
 import org.joml.Quaternionf
@@ -65,24 +66,28 @@ object ScreenRenderer {
                 continue
             }
 
+            // One display that fails to draw must neither stop the others nor leave the level's pose stack pushed
             stack.pushPose()
+            try {
+                ClientGuard.run("ScreenRenderer.render") {
+                    val placement = PlacedDisplays.placementOf(displayScreen.uuid)
+                    if (placement != null) {
+                        val t = placement.transform(PlacedDisplays.partialTick())
+                        stack.translate(t.originX - cameraPos.x, t.originY - cameraPos.y, t.originZ - cameraPos.z)
+                        DisplayPoseStack.rotate(
+                            stack, Quaternionf(t.rotationX.toFloat(), t.rotationY.toFloat(), t.rotationZ.toFloat(), t.rotationW.toFloat()),
+                        )
+                        stack.scale(t.scaleX.toFloat(), t.scaleY.toFloat(), t.scaleZ.toFloat())
+                    } else {
+                        val pos = displayScreen.pos
+                        stack.translate(pos.x - cameraPos.x, pos.y - cameraPos.y, pos.z - cameraPos.z)
+                    }
 
-            val placement = PlacedDisplays.placementOf(displayScreen.uuid)
-            if (placement != null) {
-                val t = placement.transform(PlacedDisplays.partialTick())
-                stack.translate(t.originX - cameraPos.x, t.originY - cameraPos.y, t.originZ - cameraPos.z)
-                DisplayPoseStack.rotate(
-                    stack, Quaternionf(t.rotationX.toFloat(), t.rotationY.toFloat(), t.rotationZ.toFloat(), t.rotationW.toFloat()),
-                )
-                stack.scale(t.scaleX.toFloat(), t.scaleY.toFloat(), t.scaleZ.toFloat())
-            } else {
-                val pos = displayScreen.pos
-                stack.translate(pos.x - cameraPos.x, pos.y - cameraPos.y, pos.z - cameraPos.z)
+                    renderScreenTexture(displayScreen, stack, replay, drawQuad)
+                }
+            } finally {
+                stack.popPose()
             }
-
-            renderScreenTexture(displayScreen, stack, replay, drawQuad)
-
-            stack.popPose()
         }
 
         ImmediateRenderCompat.flushBatch()

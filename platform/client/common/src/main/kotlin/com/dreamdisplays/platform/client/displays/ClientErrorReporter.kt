@@ -284,6 +284,29 @@ object ClientErrorReporter {
         )
     }
 
+    /**
+     * A callback of this mod (screen, HUD, world render, tick, packet) threw and was contained at [site]. Queued as an
+     * error report (stage `client`, kind `BUG`) with the top of the trace; the usual dedupe and rate limits apply,
+     * so a failure that repeats every frame is sent once. Any thread.
+     */
+    fun reportContained(site: String, error: Throwable, displayId: UUID? = null) {
+        if (!enabled || queue.size >= MAX_QUEUED) return
+        queue.add(
+            PlaybackFailure(
+                displayId = displayId ?: NO_DISPLAY,
+                url = "",
+                kind = "BUG",
+                message = "$site: $error",
+                stage = STAGE_CONTAINED,
+                stderr = com.dreamdisplays.platform.client.guard.FailureGuard.compactTrace(error),
+                final = true,
+            )
+        )
+    }
+
+    private const val STAGE_CONTAINED = "client"
+    private val NO_DISPLAY = UUID(0L, 0L)
+
     private fun startEnvBuild(now: Long) {
         envBuilding = true
         envBuiltAtMs = now

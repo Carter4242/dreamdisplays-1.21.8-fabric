@@ -79,3 +79,18 @@ class MediaUrlPolicyLiveTest {
         assertFalse(MediaUrlPolicy.isAllowed("srt://h:1?x=" + "a".repeat(MediaUrlPolicy.MAX_URL_LENGTH)))
     }
 }
+
+class MediaUrlPolicyPastedLinkTest {
+    @Test
+    fun pastedSiteLinksAreAllowed() {
+        // A link pasted into the menu search and queued as-is (watch URL = the link)
+        for (url in [
+            "https://www.instagram.com/reel/Dfku6yHuW2R",
+            "https://www.tiktok.com/@someone/video/7300000000000000000",
+            "https://cdn.example.com/v.mp4",
+        ]) {
+            assertTrue(MediaUrlPolicy.isAllowed(url), url)
+            assertEquals(CustomMediaPolicy.Verdict.ALLOWED, CustomMediaPolicy.evaluate(url, CustomMediaPolicy.Settings.DEFAULT), url)
+        }
+    }
+}

@@ -6,6 +6,7 @@ import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
+import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.platform.client.net.V2Payload
 import com.dreamdisplays.platform.client.replay.ReplayBridge
@@ -85,9 +86,11 @@ object FlashbackCompat : ReplayBridge {
             logger.warn("Flashback {} is installed but its API is not the one this version knows: no displays in replays ({}).", version, t.toString())
             return
         }
-        ClientTickEvents.END_CLIENT_TICK.register { tick() }
+        ClientTickEvents.END_CLIENT_TICK.register { ClientGuard.run("Flashback tick") { tick() } }
         // Before the sound engine's tick, which moves the game's sound back off the export device once an export ends
-        ClientTickEvents.START_CLIENT_TICK.register { if (export != null && (failed || !api.isExporting())) endExport() }
+        ClientTickEvents.START_CLIENT_TICK.register {
+            ClientGuard.run("Flashback export end") { if (export != null && (failed || !api.isExporting())) endExport() }
+        }
         ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> Minecraft.getInstance().execute(cache::clear) }
         ReplayHooks.bridge = this
         logger.info("Flashback {} found: displays are recorded into replays and play back in them.", version)

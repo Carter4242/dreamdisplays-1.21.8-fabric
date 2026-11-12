@@ -67,7 +67,7 @@ sealed interface MediaSource {
 
     /** Returns the HTTP(S) URL a resolver can feed to `yt-dlp` / `NewPipeExtractor`. */
     fun toResolvableUrl(): String? = when (this) {
-        is YouTube -> YouTubeUrls.watchUrl(videoId)
+        is YouTube -> YouTubeUrls.extractVideoId(videoId)?.let(YouTubeUrls::watchUrl)
         is Remote -> url
         is DirectStream -> streamUrl
         is Twitch -> url

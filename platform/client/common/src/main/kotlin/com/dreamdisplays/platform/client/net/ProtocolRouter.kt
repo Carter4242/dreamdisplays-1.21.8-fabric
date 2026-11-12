@@ -65,6 +65,7 @@ object ProtocolRouter {
         }
         dispatchGuarded({ ClientPacketManager.handle(packet) }) { e ->
             logger.error("Failed to handle server packet {}; ignoring it.", packet::class.simpleName, e)
+            com.dreamdisplays.platform.client.displays.ClientErrorReporter.reportContained("packet ${packet::class.simpleName}", e)
         }
         if (answer) {
             logger.info("Server greeted this client (plugin enabled or reloaded?); answering with a hello.")

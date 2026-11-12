@@ -60,18 +60,27 @@ data class MediaSearchResult(
     /** True when this card stands for a whole YouTube playlist ([getWatchUrl] is its link), not one video. */
     val isPlaylist: Boolean = false,
 ) {
-    /** True when thumbnail can be derived from [id] as YouTube image (real YouTube video results only). */
-    val isYouTubeResult: Boolean get() = !isCustom && !isTwitch && !isPlaylist && platform == MediaPlatform.YOUTUBE
+    /** True for a real YouTube video result: [id] is a YouTube video id, so watch and thumbnail URLs can be derived from it. */
+    val isYouTubeResult: Boolean
+        get() = !isCustom && !isTwitch && !isPlaylist && platform == MediaPlatform.YOUTUBE && YouTubeVideoId.isValid(id)
 
     /** Returns true if the video was published within the last [daysWindow] days. */
     fun isRecent(daysWindow: Int): Boolean =
         publishedDaysAgo != null && publishedDaysAgo >= 0 && publishedDaysAgo <= daysWindow
 
-    /** Returns [watchUrlOverride] if set, else the YouTube watch URL for this video. */
-    fun getWatchUrl(): String = watchUrlOverride ?: YouTubeUrls.watchUrl(id)
+    /**
+     * Returns [watchUrlOverride] if set, else the YouTube watch URL for a YouTube result, else [id] itself (a pasted
+     * link's id is its URL). Never throws.
+     */
+    fun getWatchUrl(): String =
+        watchUrlOverride ?: (if (isYouTubeResult) YouTubeUrls.watchUrl(id) else null) ?: id
 
-    /** Returns [thumbnailUrlOverride] if set, else the YouTube thumbnail URL for this video. */
-    fun getThumbnailUrl(): String? = thumbnailUrlOverride ?: YouTubeUrls.thumbnailUrl(id)
+    /**
+     * Returns [thumbnailUrlOverride] if set, else the YouTube thumbnail URL for a YouTube result, else null (a pasted
+     * link or a platform card without metadata has none). Never throws.
+     */
+    fun getThumbnailUrl(): String? =
+        thumbnailUrlOverride ?: if (isYouTubeResult) YouTubeUrls.thumbnailUrl(id) else null
 
     /** Returns a formatted HH:MM:SS duration string, or empty if unavailable. */
     fun formatDuration(): String {
