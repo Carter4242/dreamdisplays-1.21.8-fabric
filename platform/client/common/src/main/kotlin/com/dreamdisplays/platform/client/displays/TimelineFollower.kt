@@ -925,10 +925,12 @@ internal fun heldForLead(driftMs: Long, toleranceMs: Long, leadMs: Long, rate: D
     leadMs > 0L && driftMs > toleranceMs && driftMs <= toleranceMs + (leadMs * rate).roundToLong()
 
 /**
- * How long (ms) until a speed change scheduled to [switchMs] (the shared position where it switches) takes effect here:
- * until this follower's estimate of the shared clock ([estimateMs] now, advancing at [rate]) reaches it, wrapped by
- * the shared loop of [periodMs]. Falls back to [handledWaitMs] (the packet's own wait, from when it was handled) when
- * there is no playing estimate or it disagrees with the packet by more than a second either way (a stale estimate).
+ * How long (ms) until a speed change scheduled to [switchMs] (the shared position where it switches) takes effect here.
+ * Two readings of the instant: when this follower's estimate of the shared clock ([estimateMs] now, advancing at
+ * [rate]) reaches it, wrapped by the shared loop of [periodMs]; and the packet's own wait from when it was handled
+ * ([handledWaitMs]). Handling delay (a game stall) only ever makes a reading late, so the earlier one counts, as the
+ * estimate takes the furthest-along of its packets. Only [handledWaitMs] without a playing estimate, or when the
+ * estimate's reading is more than a second off it (a stale estimate).
  */
 internal fun switchWaitMs(
     switchMs: Long, estimateMs: Double, rate: Double, estimating: Boolean, loop: Boolean, periodMs: Long,
@@ -941,7 +943,8 @@ internal fun switchWaitMs(
         deltaMs = ((deltaMs % periodMs) + periodMs + half) % periodMs - half
     }
     val waitMs = deltaMs / rate
-    return if (waitMs < -SWITCH_ESTIMATE_SLACK_MS || waitMs > startInMs + SWITCH_ESTIMATE_SLACK_MS) handledWaitMs else waitMs
+    return if (waitMs < -SWITCH_ESTIMATE_SLACK_MS || waitMs > startInMs + SWITCH_ESTIMATE_SLACK_MS) handledWaitMs
+    else minOf(waitMs, handledWaitMs)
 }
 
 /** How far a scheduled speed change's instant from the estimate may stray from the packet's own before it is ignored. */

@@ -5,23 +5,24 @@ import kotlin.test.assertEquals
 
 class SpeedSwitchWaitTest {
     @Test
-    fun `the switch takes effect when the estimate reaches the switch position`() {
-        // The estimate is 400 ms of content short of the switch at 1x: 400 ms from now, whatever the packet's own wait
-        assertEquals(400.0, switchWaitMs(12_400, 12_000.0, 1.0, true, false, 0, handledWaitMs = 120.0, startInMs = 400))
-        // At 2x it gets there in half the time
-        assertEquals(200.0, switchWaitMs(12_400, 12_000.0, 2.0, true, false, 0, handledWaitMs = 120.0, startInMs = 400))
+    fun `a packet handled late by a game stall switches when the estimate reaches the switch position`() {
+        // The estimate is 400 ms of content short of the switch at 1x; the packet, handled late, says 700 ms
+        assertEquals(400.0, switchWaitMs(12_400, 12_000.0, 1.0, true, false, 0, handledWaitMs = 700.0, startInMs = 400))
+        // At 2x the estimate gets there in half the time
+        assertEquals(200.0, switchWaitMs(12_400, 12_000.0, 2.0, true, false, 0, handledWaitMs = 500.0, startInMs = 400))
+        // Its own wait already passed: the estimate says the switch was 300 ms ago
+        assertEquals(-300.0, switchWaitMs(12_400, 12_700.0, 1.0, true, false, 0, handledWaitMs = 100.0, startInMs = 400))
     }
 
     @Test
-    fun `a packet handled late by a game stall still switches on the shared clock`() {
-        // Handled 700 ms after it arrived: its own wait already passed; the estimate says the switch was 300 ms ago
-        assertEquals(-300.0, switchWaitMs(12_400, 12_700.0, 1.0, true, false, 0, handledWaitMs = -300.0, startInMs = 400))
+    fun `an estimate that has fallen behind takes the packet's earlier instant, as it would any fresher packet`() {
+        assertEquals(120.0, switchWaitMs(12_400, 12_000.0, 1.0, true, false, 0, handledWaitMs = 120.0, startInMs = 400))
     }
 
     @Test
     fun `positions across the loop are measured the short way round`() {
         // 60 s loop: the estimate is unwrapped one play-through on
-        assertEquals(400.0, switchWaitMs(12_400, 72_000.0, 1.0, true, true, 60_000, handledWaitMs = 0.0, startInMs = 400))
+        assertEquals(400.0, switchWaitMs(12_400, 72_000.0, 1.0, true, true, 60_000, handledWaitMs = 900.0, startInMs = 400))
     }
 
     @Test
