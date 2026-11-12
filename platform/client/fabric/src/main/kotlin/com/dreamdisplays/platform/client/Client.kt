@@ -99,21 +99,21 @@ class Client : ClientModInitializer, Mod {
         //? if >=26 {
         LevelRenderEvents.BEFORE_GIZMOS.register { context ->
             val mc = Minecraft.getInstance()
-            if (mc.level != null && mc.player != null) {
+            if (MasterSwitch.on && mc.level != null && mc.player != null) {
                 ClientGuard.run("world render") { renderSubmittedScreens(context, mc) }
             }
         }
 
         LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register { context ->
             val mc = Minecraft.getInstance()
-            if (mc.level != null && mc.player != null) {
+            if (MasterSwitch.on && mc.level != null && mc.player != null) {
                 ClientGuard.run("world render") { renderBufferedScreens(context, mc) }
             }
         }
 
         LevelRenderEvents.END_MAIN.register { _ ->
             val mc = Minecraft.getInstance()
-            if (mc.level != null && mc.player != null) {
+            if (MasterSwitch.on && mc.level != null && mc.player != null) {
                 // Render popout windows after all Minecraft / mod rendering is submitted,
                 // so any GL-context switch (macOS GLFW backend) does not disturb in-flight commands.
                 ClientGuard.run("popout render") { DisplayRegistry.getScreens().forEach { it.renderPopout() } }
@@ -123,7 +123,7 @@ class Client : ClientModInitializer, Mod {
         //?} else
         /*WorldRenderEvents.AFTER_ENTITIES.register { context ->
             val mc = Minecraft.getInstance()
-            if (mc.level != null && mc.player != null) {
+            if (MasterSwitch.on && mc.level != null && mc.player != null) {
                 ClientGuard.run("world render") {
                     val stack = worldPoseStack(context)
                     val camera = mainCamera(mc)
@@ -234,7 +234,7 @@ class Client : ClientModInitializer, Mod {
     //?}
 
     private fun isDisplayBlock(pos: BlockPos): Boolean =
-        DisplayRegistry.getScreens().any { it.isInScreen(pos) }
+        MasterSwitch.on && DisplayRegistry.getScreens().any { it.isInScreen(pos) }
 
     //? if >=26 {
     private val customGeometryRendererClass: Class<*> by lazy {

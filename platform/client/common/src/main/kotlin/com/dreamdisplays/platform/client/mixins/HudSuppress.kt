@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 //? if >=1.21.1 {
 import net.minecraft.client.DeltaTracker
@@ -170,6 +171,6 @@ open class HudSuppress {
     */
 
     private fun suppress(ci: CallbackInfo) {
-        if (FullscreenOverlayManager.shouldHideVanillaHud) ci.cancel()
+        if (MasterSwitch.on && FullscreenOverlayManager.shouldHideVanillaHud) ci.cancel()
     }
 }

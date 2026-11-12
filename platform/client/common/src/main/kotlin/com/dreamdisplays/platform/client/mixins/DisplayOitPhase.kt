@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.render.DisplaySolidPhase
 import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.Pseudo
@@ -19,6 +20,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable
 open class DisplayOitPhase {
     @Inject(method = ["hasBlending"], at = [At("HEAD")], cancellable = true, require = 0)
     open fun keepDisplaysOutOfOit(cir: CallbackInfoReturnable<Boolean>) {
-        if (DisplaySolidPhase.drawsSolid(this)) cir.returnValue = false
+        if (MasterSwitch.on && DisplaySolidPhase.drawsSolid(this)) cir.returnValue = false
     }
 }

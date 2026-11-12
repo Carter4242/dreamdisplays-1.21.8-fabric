@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.input
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
@@ -56,6 +57,7 @@ class DisplayMenuInputHandler : InputHandler {
          * click through the [InputHandler] chain; returns true when it was consumed (cancel the use).
          */
         fun onUseItem(): Boolean {
+            if (!MasterSwitch.on) return false
             val fresh = useArmed
             useArmed = false
             if (!fresh) return false

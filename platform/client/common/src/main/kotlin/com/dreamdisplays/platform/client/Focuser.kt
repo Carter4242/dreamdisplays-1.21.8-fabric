@@ -14,7 +14,7 @@ class Focuser : Thread() {
 
     override fun run() {
         while (true) {
-            if (ClientStateManager.config.muteOnAltTab) {
+            if (MasterSwitch.on && ClientStateManager.config.muteOnAltTab) {
                 val mc: Minecraft? = runCatching { Minecraft.getInstance() }.getOrNull()
                 if (mc != null) {
                     val focused = mc.isWindowActive

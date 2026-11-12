@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.render
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.displays.ServerOverrides
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.PoseStack
@@ -27,7 +28,7 @@ object UnshadedDisplayPass {
     val active: Boolean get() = tailHookAlive && enabled && ShaderPackCompat.isShaderPackActive
 
     fun capture(stack: PoseStack, camera: Camera) {
-        if (!active) {
+        if (!active || !MasterSwitch.on) {
             pending = false
             return
         }
