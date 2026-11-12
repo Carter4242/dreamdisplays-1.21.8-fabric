@@ -26,8 +26,13 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
     private val current = ConcurrentHashMap<UUID, Current>()
     private val settled = ConcurrentHashMap<UUID, Pair<String, Long>>()
 
+    /** What each display's previous video (another URL) was known to last when it changed: see [previousLengthsMs]. */
+    private val previous = ConcurrentHashMap<UUID, Current>()
+
     /** [displayId] now plays [url]: reports start afresh. Returns the media ms settled earlier for this same URL, or 0. */
     fun onVideoChanged(displayId: UUID, url: String): Long {
+        val before = current[displayId]?.takeIf { it.url != url }
+        if (before != null) previous[displayId] = before else previous.remove(displayId)
         val known = settled[displayId]?.takeIf { it.first == url }?.second ?: 0L
         if (known > 0L) current[displayId] = Current(url, emptyMap(), known, emptyMap()) else current.remove(displayId)
         return known
@@ -39,6 +44,13 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
         current[displayId] = Current(url, emptyMap(), mediaMs, emptyMap())
         settled[displayId] = url to mediaMs
     }
+
+    /**
+     * The lengths (ms) known for the video [displayId] played before its current one, which had another URL: the one
+     * settled and each viewer's report. Empty when that video's length was never known (or the display had none).
+     */
+    fun previousLengthsMs(displayId: UUID): List<Long> =
+        previous[displayId]?.let { listOf(it.mediaMs) + it.byPlayer.values }?.filter { it > 0L }.orEmpty()
 
     /** The media ms settled for [displayId]'s video [url], or 0. */
     fun mediaMsOf(displayId: UUID, url: String): Long = current[displayId]?.takeIf { it.url == url }?.mediaMs ?: 0L
@@ -96,12 +108,14 @@ class VideoDurations(private val reportCooldownMs: Long = DEFAULT_REPORT_COOLDOW
     fun clear() {
         current.clear()
         settled.clear()
+        previous.clear()
     }
 
     /** Forgets a removed display. */
     fun forget(displayId: UUID) {
         current.remove(displayId)
         settled.remove(displayId)
+        previous.remove(displayId)
     }
 
     companion object {

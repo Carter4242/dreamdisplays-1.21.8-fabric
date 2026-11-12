@@ -579,7 +579,10 @@ object TimelineManager {
         val shared = display.mode == PlaybackMode.SYNCED || display.mode == PlaybackMode.BROADCAST
         if (!shared && display.mode != PlaybackMode.LOCAL) return
         val sinceChange = videoChangedAt[display.id]?.let { transport.nowMs() - it } ?: Long.MAX_VALUE
-        if (!DurationReports.accepts(durationMs, url, mediaGen, display.url, display.mediaGen, sinceChange)) return
+        if (!DurationReports.accepts(
+                durationMs, url, mediaGen, display.url, display.mediaGen, sinceChange, durations.previousLengthsMs(display.id),
+            )
+        ) return
         val nearby = transport.nearbyPlayerIds(display)
         val extra = extraReceivers(display.id)
         val pinners = pinReceivers(display.id)

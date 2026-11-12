@@ -141,4 +141,28 @@ class VideoDurationsTest {
         assertNull(queued.report(display, video, player, 200_000, 240_000, 5_000, observedEnd = true, present = listOf(player)))
         assertEquals(240_000L, queued.mediaMsOf(display, video))
     }
+
+    @Test
+    fun `the previous video's lengths are known right after a change to another video only`() {
+        val durations = VideoDurations()
+        val other = UUID.fromString("00000000-0000-0000-0000-00000000bbbb")
+        val next = "https://youtu.be/next"
+        // A fresh display: no previous video
+        durations.onVideoChanged(display, video)
+        assertEquals(emptyList(), durations.previousLengthsMs(display))
+        durations.report(display, video, player, 15_000, 0, 1_000)
+        durations.report(display, video, other, 14_900, 0, 1_000)
+        durations.onVideoChanged(display, next)
+        assertEquals(setOf(15_000L, 14_900L), durations.previousLengthsMs(display).toSet())
+        // Nobody reported the next one: the video after it has no previous length to be confused with
+        durations.onVideoChanged(display, video)
+        assertEquals(emptyList(), durations.previousLengthsMs(display))
+        // The same video set again is no previous video
+        durations.report(display, video, player, 15_000, 0, 9_000)
+        durations.onVideoChanged(display, video)
+        assertEquals(emptyList(), durations.previousLengthsMs(display))
+        durations.onVideoChanged(display, next)
+        durations.forget(display)
+        assertEquals(emptyList(), durations.previousLengthsMs(display))
+    }
 }
