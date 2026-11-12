@@ -1432,8 +1432,11 @@ class DisplayScreen(
     /** User intent to pause / resume: applied locally for instant feedback and emitted upstream per mode. */
     fun setPaused(paused: Boolean) {
         if (!canControlPlayback) return
+        // A seek made while paused and still waiting is carried out by the resume: the play starts (and is announced) there
+        val waiting = pausedSeekPreview.pendingTarget(mediaGeneration)
         applyPausedLocal(paused)
-        emitPlaybackIntent(if (paused) PlaybackAction.PAUSE else PlaybackAction.PLAY)
+        val positionNanos = if (!paused && waiting != null) waiting else currentTimeNanos
+        emitPlaybackIntent(if (paused) PlaybackAction.PAUSE else PlaybackAction.PLAY, positionMs = positionNanos / 1_000_000L)
     }
 
     /** Applies the server's pause state without emitting any upstream intent (timeline-follower path). */
@@ -1448,6 +1451,14 @@ class DisplayScreen(
     }
 
     private fun applyPausedLocal(paused: Boolean) {
+        if (paused) return applyPausedState(true)
+        // A seek made while paused and still waiting goes to the player before the play does, so it opens there
+        pausedSeekPreview.resume(mediaGeneration, seek = { mediaPlayer?.seekTo(it.targetNanos, it.fire) }) {
+            applyPausedState(false)
+        }
+    }
+
+    private fun applyPausedState(paused: Boolean) {
         if (!videoStarted) {
             this.paused = paused
             DisplayRegistry.recordScreen(this)
@@ -1497,7 +1508,9 @@ class DisplayScreen(
             return
         }
         val max = (mediaPlayerDurationNanos - 1).coerceAtLeast(0L)
-        pausedSeekPreview.request((currentTimeNanos + (seconds * 1e9).toLong()).coerceIn(0L, max), true, System.nanoTime())
+        pausedSeekPreview.request(
+            (seekBaseNanos + (seconds * 1e9).toLong()).coerceIn(0L, max), true, System.nanoTime(), mediaGeneration,
+        )
     }
 
     /** Seeks to an absolute position [nanos] without firing the sync event (used for incoming sync packets). */
@@ -1506,7 +1519,7 @@ class DisplayScreen(
         if (mp.canSeek()) seekPlayer(mp, nanos, fire = false)
     }
 
-    /** Seeks to [ms] and fires the seek event so [afterSeek] emits the intent upstream (Synced / WP host). */
+    /** Seeks to [ms] and fires the seek event so [afterSeek] emits the intent upstream (Synced). */
     fun seekToMillis(ms: Long) {
         if (!canSeekHere) return
         val mp = mediaPlayer ?: return
@@ -1516,11 +1529,34 @@ class DisplayScreen(
     /** A seek while paused waits for the next tick, coalesced with any that follow, and then shows its frame. */
     private fun seekPlayer(mp: MediaPlayer, nanos: Long, fire: Boolean) {
         if (mayPreviewPausedSeek()) {
-            pausedSeekPreview.request(nanos, fire, System.nanoTime())
+            pausedSeekPreview.request(nanos, fire, System.nanoTime(), mediaGeneration)
         } else {
             pausedSeekPreview.cancel()
             mp.seekTo(nanos, fire)
         }
+    }
+
+    /** Where the display stands for the next seek: a paused seek still waiting counts as done (arrow keys, the seek bar). */
+    val seekBaseNanos: Long get() = pausedSeekPreview.pendingTarget(mediaGeneration) ?: currentTimeNanos
+
+    /** When this display's stream was last held open to show a paused seek's frame (0 = not held by one). */
+    private var previewHeldSinceNanos = 0L
+
+    /**
+     * A stream held open only to show a paused seek's frame is let go after [PREVIEW_HOLD_MAX_NANOS]: its picture
+     * stays, the next play opens the stream again. A connection idle for that long is no warm start anyway, and the
+     * player's own warm-up rules (DisplayWarmup) hold the displays they want held.
+     */
+    private fun releaseStalePreviewHold() {
+        if (previewHeldSinceNanos == 0L) return
+        val mp = mediaPlayer
+        if (mp == null || !paused || !isHeldReady) {
+            if (!isWarmingUp) previewHeldSinceNanos = 0L
+            return
+        }
+        if (System.nanoTime() - previewHeldSinceNanos < PREVIEW_HOLD_MAX_NANOS) return
+        previewHeldSinceNanos = 0L
+        mp.seekTo(currentTimeNanos, false) // a seek on a held paused stream closes it where it stands
     }
 
     /** Whether a paused seek may open the stream to show its frame here. Never for a live or private (relay) stream. */
@@ -1538,16 +1574,18 @@ class DisplayScreen(
             previewMuted = false
             applyEffectiveVolume()
         }
+        releaseStalePreviewHold()
         if (!pausedSeekPreview.pending) return
         val mp = mediaPlayer ?: return pausedSeekPreview.cancel()
         val seek = pausedSeekPreview.poll(
             System.nanoTime(), eligible = mayPreviewPausedSeek(), busy = isWarmingUp,
-            showingNanos = if (isHeldReady) currentTimeNanos else null,
+            showingNanos = if (isHeldReady) currentTimeNanos else null, generation = mediaGeneration,
         ) ?: return
         if (seek.open) {
             previewMuted = true
             applyEffectiveVolume() // before the stream opens: the volume applies at once, the opening runs later
             timelineFollower.onHeldReady()
+            previewHeldSinceNanos = System.nanoTime()
         }
         mp.seekTo(seek.targetNanos, seek.fire)
         if (seek.open) mp.warmUpPaused(seek.targetNanos)
@@ -1817,6 +1855,9 @@ class DisplayScreen(
     }
 
     companion object {
+        /** How long a stream stays open only to show a paused seek's frame (see releaseStalePreviewHold). */
+        private const val PREVIEW_HOLD_MAX_NANOS = 3 * 60_000_000_000L
+
         private val logger = LoggerFactory.getLogger(javaClass)
         private const val ENV_PROBE_INTERVAL_TICKS = 2
         private const val REVERB_PROBE_INTERVAL_TICKS = 40

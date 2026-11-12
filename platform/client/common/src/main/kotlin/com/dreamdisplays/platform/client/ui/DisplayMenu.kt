@@ -285,7 +285,7 @@ class DisplayMenu private constructor(
 
         progress = addUi(
             SeekBar(
-                current = { ds.currentTimeNanos },
+                current = { ds.seekBaseNanos },
                 duration = { ds.mediaPlayerDurationNanos },
                 previewFrame = { nanos ->
                     if (ds.isLive) null else {
@@ -948,8 +948,8 @@ class DisplayMenu private constructor(
                 if (!ds.canControlPlayback) return false
                 if (ds.isPaused) playback.play(displayId) else playback.pause(displayId)
             }
-            KEY_LEFT -> if (canSeek) seekTo(ds.currentTimeNanos - seekStep) else return false
-            KEY_RIGHT -> if (canSeek) seekTo(ds.currentTimeNanos + seekStep) else return false
+            KEY_LEFT -> if (canSeek) seekTo(ds.seekBaseNanos - seekStep) else return false
+            KEY_RIGHT -> if (canSeek) seekTo(ds.seekBaseNanos + seekStep) else return false
             KEY_UP -> nudgeVolume(volumeStep)
             KEY_DOWN -> nudgeVolume(-volumeStep)
             KEY_M -> playback.mute(displayId, !ds.muted)
