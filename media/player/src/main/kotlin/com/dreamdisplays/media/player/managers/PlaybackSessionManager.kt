@@ -586,7 +586,7 @@ internal class PlaybackSessionManager(
 
         val ffmpeg = FFmpegBinary.getPath() ?: run {
             logger.error("$debugLabel FFmpeg binary not available.")
-            events.onError(DreamMediaException.Decode("FFmpeg binary not available", isFatal = true)); return
+            events.onError(DreamMediaException.Decode(FFmpegBinary.missingMessage(), isFatal = true)); return
         }
         clock.reset(offsetNanos)
 

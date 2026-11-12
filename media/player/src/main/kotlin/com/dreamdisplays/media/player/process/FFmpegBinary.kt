@@ -199,6 +199,9 @@ object FFmpegBinary {
         // A second pass only after a checksum mismatch: the rolling `latest` can swap a file between list and download
         for (pass in 0..1) {
             for (candidate in p.candidates()) {
+                // A pinned archive whose file changed is the same changed file on every retry (every 10 s while
+                // anything plays): not downloaded again this session
+                if (p.pinned && candidate.url in rejectedPinned) continue
                 val dir = File("$CACHE_ROOT/${p.key}-${candidate.branch}")
                 val binary = File(dir, p.binaryName)
                 try {
@@ -213,10 +216,11 @@ object FFmpegBinary {
                     return bundled(binary, dir)
                 } catch (e: IOException) {
                     logger.warn("FFmpeg from ${candidate.url} failed: ${e.message}")
+                    if (p.pinned && e is SourceLoader.ChecksumMismatchException) rejectedPinned += candidate.url
                     lastError = e
                 }
             }
-            if (lastError !is SourceLoader.ChecksumMismatchException) break
+            if (p.pinned || lastError !is SourceLoader.ChecksumMismatchException) break
         }
         throw lastError ?: IOException("No FFmpeg build found for ${p.key}.")
     }
@@ -259,8 +263,25 @@ object FFmpegBinary {
             }
     }
 
+    /** Pinned archives (macOS) refused for a changed checksum this session; see [provision]. */
+    private val rejectedPinned = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Where an installed `FFmpeg` is looked for: `PATH` (often trimmed by a game launcher), then Homebrew (Apple
+     * Silicon, Intel), MacPorts and the system folder.
+     */
+    internal val SYSTEM_CANDIDATES = ["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+
+    /**
+     * What a display says when there is no `FFmpeg` at all. macOS builds come from two outside hosts only; when neither
+     * has a file matching its pinned checksum, an installed one is the way out, so it says how.
+     */
+    fun missingMessage(mac: Boolean = OsInfo.isMac): String =
+        if (mac) "FFmpeg could not be downloaded. Install it with Homebrew (brew install ffmpeg), then play again."
+        else "FFmpeg could not be downloaded, and none is installed. Check the connection, then play again."
+
     private fun findSystemFfmpeg(quiet: Boolean = false): String? {
-        val candidates = ["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        val candidates = SYSTEM_CANDIDATES
         for (candidate in candidates) {
             runCatching {
                 val p = ProcessBuilder(candidate, "-version").redirectErrorStream(true).start()
@@ -276,7 +297,10 @@ object FFmpegBinary {
             }
         }
         if (quiet) return null
-        logger.error("FFmpeg not found (no download succeeded, no system binary).")
+        logger.error(
+            "FFmpeg not found (no download succeeded, no system binary){}.",
+            if (OsInfo.isMac) "; install it with Homebrew (brew install ffmpeg) and it is picked up on the next playback" else "",
+        )
         source = "missing"
         branch = ""
         return null
@@ -314,6 +338,8 @@ object FFmpegBinary {
         val key: String,
         val binaryName: String,
         val entrySuffix: String,
+        /** A fixed list of archives with checksums pinned here (macOS), rather than a rolling release list. */
+        val pinned: Boolean = false,
         val candidates: () -> List<Candidate>,
     ) {
         companion object {
@@ -327,7 +353,7 @@ object FFmpegBinary {
                     )
                 }
 
-            fun mac(key: String, pinned: List<Candidate>) = Platform(key, "ffmpeg", "ffmpeg") { pinned }
+            fun mac(key: String, pinned: List<Candidate>) = Platform(key, "ffmpeg", "ffmpeg", pinned = true) { pinned }
         }
     }
 }
