@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.client.displays
 
 import com.dreamdisplays.core.sync.DriftController
+import com.dreamdisplays.core.display.policy.SyncSettings
 import com.dreamdisplays.core.sync.SeekLeadLearner
 import com.dreamdisplays.core.sync.TimelineEstimator
 import net.minecraft.client.Minecraft
@@ -158,6 +159,8 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             serverDurationMs = 0L
             warmAdopted = false
             jumpToLead = false
+            speedSwitchDueNanos = 0L
+            correctAfterSwitchSinceNanos = 0L
             // The new player starts at rate 1; only our bookkeeping needs to follow
             appliedRatio = 1.0
             intervalAction = Action.NONE
@@ -199,6 +202,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         scheduledStart = null
         val word = applyWord.incrementAndGet()
         val leadChanged = synchronized(lock) {
+            // Any other word from the server ends a speed switch's special handling
+            if (!speedSwitch) {
+                speedSwitchDueNanos = 0L
+                correctAfterSwitchSinceNanos = 0L
+            }
             // A singer's lead changed (they started or stopped singing): a jump of that size is not drift to close
             // slowly at a percent of speed, so the next evaluation seeks there in place at once (one seek, no pause)
             val changed = leadMs != karaokeLeadMs
@@ -235,12 +243,14 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         }
         if (waitMs < MIN_SCHEDULE_MS) {
             // Too late to wait: play from where the start has got to by now
+            if (speedSwitch) synchronized(lock) { speedSwitchDueNanos = System.nanoTime() }
             applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
             return System.nanoTime()
         }
         if (!speedSwitch) applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
         val waitNanos = (waitMs * 1_000_000.0).toLong()
         val dueNanos = System.nanoTime() + waitNanos
+        if (speedSwitch) synchronized(lock) { speedSwitchDueNanos = dueNanos }
         scheduledStart = START_SCHEDULER.schedule({
             // The player is told on the client thread like every other packet: at most a frame later. It keeps the
             // packet's own stamp: a pause or seek the server stamped before the start instant, arriving after this
@@ -254,6 +264,21 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         }, waitNanos / 1_000L, java.util.concurrent.TimeUnit.MICROSECONDS)
         return dueNanos
     }
+
+    /**
+     * A speed change switched without a stop is due at this instant (0 = none pending). From it until the player plays
+     * at the timeline's new speed (its new sound goes live a little later, or restarts), drift is not acted on: it is
+     * the switch still going on, not the player being off.
+     */
+    private var speedSwitchDueNanos = 0L
+
+    /**
+     * When the player took up the new speed (0 = not just now). Once its drift has settled, a player off by more than a
+     * cheap seek's threshold is seeked onto the shared clock at once, as the hold every speed change once was lined
+     * everyone up: an offset that was in tolerance at the old speed may not be at the new one (it is judged in real
+     * time), and the 1 % rate nudge would take a minute to close it.
+     */
+    private var correctAfterSwitchSinceNanos = 0L
 
     /** True while this display follows a playing server timeline (a scheduled speed change can switch without a stop). */
     fun followsPlayingTimeline(): Boolean = synchronized(lock) { estimator.hasTimeline && !estimator.paused }
@@ -481,6 +506,7 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             landingRunningSinceNanos = 0L
             return
         }
+        if (speedSwitchSettling(now, drift, target, settings)) return
         lastPlayingLocalMs = localMs
         // Played well past what was taken for the media's real end: it was not
         if (confirmedEndMs > 0L && localMs > confirmedEndMs + END_HOLD_MS) confirmedEndMs = 0L
@@ -614,6 +640,32 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         correctAfterLanding = true
         controller.resetMeasurement()
         screen.applyServerPaused(false)
+    }
+
+    /**
+     * The part of a tick a speed change switched without a stop takes (see [speedSwitchDueNanos]); true when it took
+     * the whole tick.
+     */
+    private fun speedSwitchSettling(now: Long, drift: Long, target: Long, settings: SyncSettings): Boolean {
+        if (speedSwitchDueNanos != 0L && now >= speedSwitchDueNanos) {
+            val live = abs(screen.playerSpeed - estimator.rate) < 1e-6
+            if (!live && now - speedSwitchDueNanos < SWITCH_GRACE_NANOS) {
+                controller.resetMeasurement()
+                return true
+            }
+            speedSwitchDueNanos = 0L
+            correctAfterSwitchSinceNanos = now
+            controller.resetMeasurement()
+        }
+        if (correctAfterSwitchSinceNanos == 0L || landing != null) return false
+        val filtered = controller.observe(drift.toDouble(), now / NANOS_PER_MS)
+        if (now - correctAfterSwitchSinceNanos < QUICK_SETTLE_NANOS) return true
+        correctAfterSwitchSinceNanos = 0L
+        if (switchNeedsSeek(filtered, settings.correctiveSeeks, settings.seekThresholdMs.toDouble())) {
+            logger.info("[dd-sync] {} {}ms off after the speed switch: seeking onto the shared clock", shortId(), signed(filtered))
+            seekPlaying(target, now)
+        }
+        return true
     }
 
     private fun seekPlaying(targetMs: Long, now: Long, aimLeadMs: Long? = null) {
@@ -792,6 +844,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
         /** A warm resume or an in-place seek settles fast: it measures after this long. */
         private const val QUICK_SETTLE_NANOS = 700_000_000L
 
+        /** Longest a speed change may take to go live in the player before its drift is acted on as usual. */
+        private const val SWITCH_GRACE_NANOS = 3_000_000_000L
+
         /** Off by more than this after a start or resume: correct it with one seek at once. */
         private const val POST_START_SEEK_MS = 100.0
 
@@ -879,6 +934,13 @@ internal fun switchWaitMs(
 
 /** How far a scheduled speed change's instant from the estimate may stray from the packet's own before it is ignored. */
 private const val SWITCH_ESTIMATE_SLACK_MS = 1_000.0
+
+/**
+ * Whether a player [driftMs] (real ms, settled) off the shared clock just after a speed change is seeked onto it at
+ * once: corrective seeks allowed, and further off than a cheap seek's threshold (or the configured one, if lower).
+ */
+internal fun switchNeedsSeek(driftMs: Double, correctiveSeeks: Boolean, seekThresholdMs: Double): Boolean =
+    correctiveSeeks && abs(driftMs) > minOf(seekThresholdMs, com.dreamdisplays.core.sync.DriftController.CHEAP_SEEK_THRESHOLD_MS)
 
 /** How late (ms, never negative) a scheduled start due at [dueNanos] runs at [nowNanos]: time the video already played. */
 internal fun startLatenessMs(dueNanos: Long, nowNanos: Long): Double = ((nowNanos - dueNanos) / 1_000_000.0).coerceAtLeast(0.0)

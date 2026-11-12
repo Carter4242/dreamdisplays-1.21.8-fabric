@@ -1142,6 +1142,9 @@ class DisplayScreen(
     /** The stream ended ahead of the server timeline and holds its last frame until that timeline moves on. */
     internal val isHeldAtEnd: Boolean get() = mediaPlayer?.isHeldAtEnd() == true
 
+    /** The speed the player plays at now (a scheduled speed change takes it up at its instant). */
+    internal val playerSpeed: Double get() = mediaPlayer?.getPlaybackSpeed() ?: PlaybackSpeed.NORMAL
+
     /** Plays a stream held at its end again from its beginning (one that cannot seek has no other way back). */
     internal fun restartHeldEndFromStart() {
         mediaPlayer?.takeIf { it.isHeldAtEnd() }?.play()

@@ -31,3 +31,16 @@ class SpeedSwitchWaitTest {
         assertEquals(250.0, switchWaitMs(12_400, 14_000.0, 1.0, true, false, 0, handledWaitMs = 250.0, startInMs = 400))
     }
 }
+
+class SpeedSwitchCorrectionTest {
+    @Test
+    fun `a player further off than a cheap seek after a speed switch is seeked onto the shared clock`() {
+        kotlin.test.assertTrue(switchNeedsSeek(713.0, correctiveSeeks = true, seekThresholdMs = 1_500.0))
+        kotlin.test.assertTrue(switchNeedsSeek(-350.0, correctiveSeeks = true, seekThresholdMs = 1_500.0))
+        kotlin.test.assertFalse(switchNeedsSeek(250.0, correctiveSeeks = true, seekThresholdMs = 1_500.0))
+        // Corrective seeks off by policy: never
+        kotlin.test.assertFalse(switchNeedsSeek(2_000.0, correctiveSeeks = false, seekThresholdMs = 1_500.0))
+        // A lower configured threshold counts
+        kotlin.test.assertTrue(switchNeedsSeek(250.0, correctiveSeeks = true, seekThresholdMs = 200.0))
+    }
+}
