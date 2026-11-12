@@ -119,6 +119,17 @@ internal class ReadAheadServer(
 
     internal fun session(token: String): ReadAheadSession? = synchronized(byKey) { byToken[token] }
 
+    /** Ends every session for good (nothing plays any more): buffers dropped, streamers and fetches stop. */
+    fun closeSessions() {
+        val all = synchronized(byKey) {
+            byKey.values.toList().also {
+                byKey.clear()
+                byToken.clear()
+            }
+        }
+        all.forEach(ReadAheadSession::close)
+    }
+
     override fun close() {
         server?.close()
         server = null

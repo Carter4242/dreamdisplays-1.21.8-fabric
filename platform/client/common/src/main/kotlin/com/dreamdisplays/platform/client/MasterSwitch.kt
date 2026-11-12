@@ -99,6 +99,8 @@ object MasterSwitch {
             }.onFailure { logger.warn("Could not unload display {} cleanly.", screen.uuid, it) }
         }
         DisplayRegistry.unloadAll()
+        // A decoder that was still connected when its player stopped kept its read-ahead buffer and streamer alive
+        runCatching { com.dreamdisplays.media.player.readahead.ReadAhead.closeAll() }
         DisplayLifecycleManager.clearInfo()
         runCatching { com.dreamdisplays.platform.client.displays.DisplayReplayCache.clear() }
         com.dreamdisplays.platform.client.displays.RecentTimelines.reset()

@@ -101,6 +101,11 @@ object ReadAhead {
         if (serverHolder.isInitialized()) server.release(displayId)
     }
 
+    /** Ends every read-ahead session now (the mod was switched off); displays that play again open new ones. */
+    fun closeAll() {
+        if (serverHolder.isInitialized()) server.closeSessions()
+    }
+
     /** A fresh URL for [originalUrl]: walks its redirects again, so an expired signed target is replaced. */
     private fun refresh(originalUrl: String): String {
         MediaHostGuard.invalidate(originalUrl)
