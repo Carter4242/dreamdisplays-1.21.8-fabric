@@ -50,7 +50,9 @@ internal object ConformingScreenDraw {
     ) {
         if (quads.isEmpty()) return
         val clearance = DisplayPoseStack.surfaceClearance() + lift
-        when (val face = screen.face) {
+        val face = screen.face
+        val clock = PlaceholderClock.of(screen, face, System.nanoTime())
+        when (face) {
             DisplayFace.PLAYING -> {
                 val appear = screen.appearProgress()
                 val base = if (screen.isYuvTexture) screen.brightness.coerceIn(0f, 1f) * 255f else 255f
@@ -58,7 +60,7 @@ internal object ConformingScreenDraw {
                 draw(drawQuad, screen.renderType!!, quads, clearance, color, color, color)
                 drawSubtitle(screen, quads, clearance, drawQuad)
             }
-            DisplayFace.IDLE, DisplayFace.LOADING, DisplayFace.ERROR -> drawPlaceholder(screen, quads, clearance, face, drawQuad)
+            DisplayFace.IDLE, DisplayFace.LOADING, DisplayFace.ERROR -> drawPlaceholder(screen, quads, clearance, face, clock, drawQuad)
         }
     }
 
@@ -97,16 +99,16 @@ internal object ConformingScreenDraw {
         quads: List<ConformQuad>,
         clearance: Float,
         face: DisplayFace,
+        clock: PlaceholderClock,
         drawQuad: (RenderType, (PoseStack.Pose, VertexConsumer) -> Unit) -> Unit,
     ) {
-        // Animated while loading, frozen for a display without a video (see PlaceholderLook)
+        // Animated while loading, at rest for a display without a video (see PlaceholderLook, PlaceholderClock)
         val error = face == DisplayFace.ERROR
-        val now = System.nanoTime()
         val type = DisplayYuvRenderTypes.solidColorType()
         val (r, g, b) = if (error) {
             Triple(28, 6, 6)
         } else {
-            val v = PlaceholderLook.backdropShade(face, now)
+            val v = PlaceholderLook.backdropShade(clock.breatheNanos)
             Triple(v, v, v)
         }
         draw(drawQuad, type, quads.map { it.mapUv { _, _ -> 0f to 0f } }, clearance, r, g, b)
@@ -119,7 +121,7 @@ internal object ConformingScreenDraw {
         val (tr, tg, tb) = Triple(22, 24, 34)
         draw(drawQuad, type, track, clearance + OVERLAY_LIFT, tr, tg, tb)
 
-        val segment = PlaceholderLook.segment(face, now) ?: return
+        val segment = PlaceholderLook.segment(clock.sweepNanos) ?: return
         val sx0 = segment[0]
         val sx1 = segment[1]
         val accent = band.flatMap { clipToUvRect(it, sx0, trackV0, sx1, trackV1) }
