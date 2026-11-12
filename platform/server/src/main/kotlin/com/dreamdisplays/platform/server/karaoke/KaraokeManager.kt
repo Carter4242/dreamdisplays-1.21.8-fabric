@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.karaoke
 
 import com.dreamdisplays.api.playback.model.PlaybackMode
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.core.karaoke.KaraokeLatency
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.karaoke.KaraokeCoSinger
@@ -221,6 +223,7 @@ object KaraokeManager {
         val unchanged = previous != null && abs(wanted - previous.leadMs) < KaraokeTiming.LEAD_DEADBAND_MS
         val lead = if (unchanged) previous!!.leadMs else wanted
         state.singers[playerId] = Singer(playerId, name, lead, previous?.trimMs ?: 0L, itemId, autoLead = leadMs == null)
+        if (previous == null) DisplayActivity.record(display, ActivityKind.KARAOKE_STAGE, playerId, name, flag = true)
         singerDisplay[playerId] = display.id
         refresh()
         if (resend && !unchanged) resendTimeline(display, playerId)
@@ -230,7 +233,8 @@ object KaraokeManager {
     /** Stops [playerId] singing on [display]; [resend] sends them the normal timeline again. False if they weren't. */
     fun removeSinger(display: DisplayData, playerId: UUID, resend: Boolean = true): Boolean {
         val state = states[display.id] ?: return false
-        state.singers.remove(playerId) ?: return false
+        val singer = state.singers.remove(playerId) ?: return false
+        DisplayActivity.record(display, ActivityKind.KARAOKE_STAGE, playerId, singer.name, flag = false)
         singerDisplay.remove(playerId, display.id)
         // Off the stage first, so no new voice frame of theirs makes fresh codecs after the old ones are closed
         refresh()
@@ -337,6 +341,7 @@ object KaraokeManager {
             return JoinOutcome(LineResult.OK, position = 0)
         }
         state.line[item.itemId] = LineEntry(playerId, name, item.itemId)
+        DisplayActivity.record(display, ActivityKind.KARAOKE_JOIN, playerId, name)
         return JoinOutcome(LineResult.OK, position = lineOf(display).indexOfFirst { it.second.playerId == playerId } + 1)
     }
 
@@ -348,6 +353,7 @@ object KaraokeManager {
         if (entries.isEmpty() && singing == null) return LineResult.NOT_IN_LINE
         entries.forEach { dropEntry(display, state, it) }
         if (singing != null) removeSinger(display, playerId)
+        DisplayActivity.record(display, ActivityKind.KARAOKE_LEAVE, playerId)
         return LineResult.OK
     }
 

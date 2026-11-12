@@ -81,7 +81,7 @@ object QueueActions {
                     )
                 }
             }
-            QueueActionType.CLEAR -> QueueManager.clear(display, ctx)
+            QueueActionType.CLEAR -> QueueManager.clear(display, ctx, player.uniqueId)
             QueueActionType.LOOP -> QueueManager.setLoop(display, ctx, packet.flag, player.uniqueId)
             QueueActionType.ADD_BATCH -> addBatch(player, display, ctx, packet)
         }

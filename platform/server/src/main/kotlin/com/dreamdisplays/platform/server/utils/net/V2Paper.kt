@@ -59,7 +59,7 @@ object PaperV2Networking : PluginMessageListener {
             if (ScreenShareActions.mayShare(player)) {
                 wires + listOf(ServerFeature.SCREEN_SHARE.wire, ServerFeature.SCREEN_SHARE_HEARTBEAT.wire)
             } else wires
-        },
+        } + MenuPanels.helloFeatures(player),
         defaultVolume = PaperServer.config.settings.defaultVolume,
         maxDisplays = maxDisplaysFor(player.hasPermission(PaperServer.config.permissions.createBypass)),
     )
@@ -137,6 +137,7 @@ object PaperV2Networking : PluginMessageListener {
             is ViewerReport -> com.dreamdisplays.platform.server.policy.ClientDiagnostics.onReport(player, packet)
             is QueueAction -> QueueActions.onAction(player, packet)
             is QueuePreload -> QueueActions.onPreload(player, packet)
+            is MenuPanelRequest -> MenuPanels.onRequest(player, packet)
             is ClientErrorReport -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onReport(player, packet)
             is ClientEnvironment -> com.dreamdisplays.platform.server.policy.ClientErrorReports.onEnvironment(player, packet)
             is DisplayDelete -> DisplayActions.delete(player, packet.id)

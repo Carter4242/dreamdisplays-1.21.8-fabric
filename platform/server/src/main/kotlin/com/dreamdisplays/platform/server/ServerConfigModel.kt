@@ -32,6 +32,7 @@ data class SettingsSection(
     val fullscreen: FullscreenConfig = FullscreenConfig(),
     val customMedia: CustomMediaConfig = CustomMediaConfig(),
     val queue: QueueConfig = QueueConfig(),
+    val activity: ActivityConfig = ActivityConfig(),
     val karaoke: KaraokeConfig = KaraokeConfig(),
     val live: LiveConfig = LiveConfig(),
     /** Server-wide display policy defaults (`[policy.*]`); a display's own override is merged over these. */
@@ -113,6 +114,17 @@ data class SettingsSection(
         val max_items: Int = 50,
         val max_per_player: Int = 10,
         val gap_ms: Int = 200,
+    )
+
+    /**
+     * `[activity]` section: the display menu's Activity tab (the last [max_entries] things done on each display; 0 =
+     * off) and Viewers tab. [visible_to] / [viewers_visible_to]: `everyone` (anyone who can open the display's menu),
+     * `admins` or `nobody`.
+     */
+    data class ActivityConfig(
+        val max_entries: Int = 100,
+        val visible_to: String = "everyone",
+        val viewers_visible_to: String = "everyone",
     )
 
     /**
@@ -379,6 +391,11 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_items = t.numberOrNull("queue.max_items")?.toInt()?.coerceIn(0, 500) ?: 50,
             max_per_player = t.numberOrNull("queue.max_per_player")?.toInt()?.coerceIn(0, 500) ?: 10,
             gap_ms = t.numberOrNull("queue.gap_ms")?.toInt()?.coerceIn(0, 5_000) ?: 200,
+        ),
+        activity = SettingsSection.ActivityConfig(
+            max_entries = t.numberOrNull("activity.max_entries")?.toInt()?.coerceIn(0, 1_000) ?: 100,
+            visible_to = (t?.get("activity.visible_to") as? String)?.trim()?.lowercase() ?: "everyone",
+            viewers_visible_to = (t?.get("activity.viewers_visible_to") as? String)?.trim()?.lowercase() ?: "everyone",
         ),
         karaoke = SettingsSection.KaraokeConfig(
             default_lead_ms = t.numberOrNull("karaoke.default_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 0,

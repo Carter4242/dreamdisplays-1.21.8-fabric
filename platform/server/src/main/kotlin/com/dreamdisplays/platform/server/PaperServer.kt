@@ -103,6 +103,10 @@ class PaperServer : JavaPlugin() {
             }
         }
 
+        // Before the timelines: restoring them records "carried on" rows
+        com.dreamdisplays.platform.server.utils.net.MenuPanels.init()
+        DisplayActivity.init(PaperPlaybackTransport)
+        DisplayActivity.restore()
         TimelineManager.init(
             PaperPlaybackTransport,
             runCatching { TimelineStore.take() }
@@ -178,6 +182,7 @@ class PaperServer : JavaPlugin() {
         disableStep("save timelines") { TimelineStore.save(TimelineManager.snapshot()) }
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
+        disableStep("save activity") { DisplayActivity.flush() }
         disableStep("save PiP pins") { PipPinManager.flush() }
         disableStep("stop the client error log") { com.dreamdisplays.platform.server.policy.ClientErrorReports.shutdown() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }

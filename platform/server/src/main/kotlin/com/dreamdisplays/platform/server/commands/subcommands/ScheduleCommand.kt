@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.platform.client.utils.literalText
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.platform.server.ModLoaderOnly
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.platform.server.PaperServer
@@ -107,7 +109,7 @@ private fun showCurrent(data: DisplayData, viewerId: UUID, localize: (String, Li
 }
 
 private fun cancel(data: DisplayData, localize: (String, List<String>) -> String): String =
-    if (ScheduledPlaybackManager.cancel(data.id)) localize("scheduleCancelled", [])
+    if (ScheduledPlaybackManager.cancel(data.id)) localize("scheduleCancelled", []).also { DisplayActivity.record(data, ActivityKind.SCHEDULE_CANCEL) }
     else localize("scheduleNoneSet", [])
 
 private fun onAction(
@@ -132,6 +134,7 @@ private fun onAction(
     val target = ScheduleTimeUtil.resolveNextOccurrence(targetSecond, offset, now)
 
     ScheduledPlaybackManager.schedule(data, target, action)
+    DisplayActivity.record(data, ActivityKind.SCHEDULE_SET, text = action.name.lowercase(), toMs = target.toEpochMilliseconds())
 
     val countdown = when {
         secondsAhead >= 3600 -> localize(

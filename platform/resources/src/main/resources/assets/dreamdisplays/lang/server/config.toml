@@ -207,6 +207,20 @@ max_per_player = 10
 # away. 0..5000, 0 = no pause. Live: /display config queue.gap_ms <ms>
 gap_ms = 200
 
+[activity]
+# The display menu's Activity tab: the last things players did on each display (played, seeked, set the video,
+# queued, ...) and what happened by itself (the queue moved on, the video looped). Kept across restarts in
+# display-activity.json and dropped with the display. 0 = off. Live: /display config activity.max_entries <n>
+max_entries = 100
+
+# Who sees the Activity tab: "everyone" (anyone who can open the display's menu), "admins" or "nobody".
+# Live: /display config activity.visible_to <everyone|admins|nobody>
+visible_to = "everyone"
+
+# Who sees the Viewers tab (who watches the display right now, nearby, in picture-in-picture or fullscreen; players a
+# viewer can't see, e.g. vanished ones, are left out). Live: /display config activity.viewers_visible_to <...>
+viewers_visible_to = "everyone"
+
 [karaoke]
 # Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). A display is in karaoke while
 # someone sings on it (/display karaoke ... singer add, or their turn in the line); when the last singer stops it is

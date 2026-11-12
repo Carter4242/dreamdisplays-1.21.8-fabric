@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.utils.net
 
 import com.dreamdisplays.core.protocol.common.packets.RemotePlaybackToggle
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.core.protocol.common.packets.ScreenShareState
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
@@ -182,6 +184,7 @@ object ScreenShareActions {
         byDisplay[displayId] = share
         if (pending != null) starting.remove(displayId, pending)
         DisplayActions.applyVideo(display, ScreenShareRelayTemplates.playUrl(live.relay_play_url, streamId), "", player, persist = false)
+        DisplayActivity.record(display, ActivityKind.SHARE_START, player.uniqueId)
         if (pending == null) {
             logger.info("{} started sharing their screen to display {}.", player.name, display.id)
         } else {
@@ -439,6 +442,7 @@ object ScreenShareActions {
             // Entries queued while the share ran on an empty display waited for an end the live stream never had
             if (reason != EndReason.PLUGIN_DISABLE && share.previousUrl.isBlank()) QueueManager.startFromEmpty(display)
         }
+        DisplayActivity.record(display, ActivityKind.SHARE_STOP, share.sharerId, nameOf(share.sharerId))
         logger.info("Screen share to display {} ended ({}).", share.displayId, reason.name.lowercase(Locale.ROOT))
     }
 

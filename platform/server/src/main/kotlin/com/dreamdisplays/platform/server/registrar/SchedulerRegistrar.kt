@@ -45,6 +45,8 @@ object SchedulerRegistrar {
             step("diagnostics tick") { ClientDiagnostics.tick() }
             // Screen shares end within a second of their sharer leaving range or going silent
             step("screen share tick") { com.dreamdisplays.platform.server.utils.net.ScreenShareActions.tick() }
+            // Open Viewers tabs follow who comes and goes
+            step("viewers tick") { com.dreamdisplays.platform.server.utils.net.MenuPanels.tick() }
         }
         // Queue advances land within a tenth of a second of a video's end; a no-op while nothing is queued
         runRepeatingSync(plugin, QUEUE_TICK_INTERVAL_TICKS, QUEUE_TICK_INTERVAL_TICKS) {

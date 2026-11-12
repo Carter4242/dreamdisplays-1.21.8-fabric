@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.api
 
 import com.dreamdisplays.api.CommandResult
+import com.dreamdisplays.platform.server.playback.DisplayActivity
 import com.dreamdisplays.api.addon.AddonSide
 import com.dreamdisplays.api.display.data.DisplayCustomDataLimits
 import com.dreamdisplays.api.display.data.MutableDisplayCustomData
@@ -161,6 +162,7 @@ abstract class ServerDisplayBase internal constructor(
         if (backend.askSetUrl(data, url, sanitizedLang, null) != null) return CommandResult.REFUSED
         data.url = url
         data.lang = sanitizedLang
+        DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.VIDEO_SET, url = url, title = DisplayActivity.titleFor(data, url))
         save()
         broadcast()
         TimelineManager.onVideoChanged(data)
@@ -172,6 +174,7 @@ abstract class ServerDisplayBase internal constructor(
     override fun setAccess(access: DisplayAccess): CommandResult {
         if (!isAlive) return CommandResult.STALE
         data.access = access
+        DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.ACCESS, text = access.name.lowercase())
         save()
         broadcast()
         return CommandResult.OK
@@ -188,8 +191,10 @@ abstract class ServerDisplayBase internal constructor(
         world: String, x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int, facing: DisplayFacing,
     ): CommandResult {
         if (!isAlive) return CommandResult.STALE
+        val size = data.width to data.height
         val result = doMove(world, x1, y1, z1, x2, y2, z2, facing)
         if (result == CommandResult.OK) backend.moved(data)
+        if (result == CommandResult.OK) DisplayActivity.recordMoved(data, size)
         return result
     }
 

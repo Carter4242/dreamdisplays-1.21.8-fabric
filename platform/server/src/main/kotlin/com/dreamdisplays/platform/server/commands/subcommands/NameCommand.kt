@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.core.command.DisplayCommands
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.platform.client.utils.literalText
 import com.dreamdisplays.platform.server.ModLoaderOnly
 import com.dreamdisplays.platform.server.PaperServer
@@ -57,6 +59,7 @@ class NameCommand : SubCommand {
 
         if (requestedName.equals(RESET_NAME, ignoreCase = true)) {
             data.name = null
+            DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId)
             runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
             MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.name.cleared"))
             return
@@ -73,6 +76,7 @@ class NameCommand : SubCommand {
         }
 
         data.name = normalized
+        DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId, text = normalized)
         runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
         ServerMessage.SETTED_NAME.sendTo(player)
     }

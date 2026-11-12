@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.commands.subcommands
 
 import com.dreamdisplays.core.command.Perm
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
@@ -44,6 +46,7 @@ object SpeedCommand {
             ServerMessage.SPEED_NOT_SHARED.sendTo(sender, display.shortLabel)
             return
         }
+        DisplayActivity.record(display, ActivityKind.SPEED, rate = TimelineManager.speedOf(display))
         ServerMessage.SPEED_SET.sendTo(sender, display.shortLabel, label(TimelineManager.speedOf(display)))
     }
 

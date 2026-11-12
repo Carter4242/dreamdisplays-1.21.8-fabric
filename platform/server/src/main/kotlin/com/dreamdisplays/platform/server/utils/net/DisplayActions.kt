@@ -26,6 +26,8 @@ import com.dreamdisplays.platform.server.playback.PlaybackContexts
 import com.dreamdisplays.platform.server.playback.FullscreenBroadcastManager
 import com.dreamdisplays.platform.server.playback.QueueManager
 import com.dreamdisplays.platform.server.playback.TimelineManager
+import com.dreamdisplays.platform.server.playback.DisplayActivity
+import com.dreamdisplays.core.activity.ActivityKind
 import com.dreamdisplays.platform.server.utils.MessageUtil
 import com.dreamdisplays.platform.server.utils.ServerMessage
 import com.dreamdisplays.platform.server.utils.sendTo
@@ -154,6 +156,7 @@ object DisplayActions {
                 actor, displayData.id, "clear", null,
                 mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl, "next" to displayData.url),
             )
+            DisplayActivity.record(displayData, ActivityKind.VIDEO_CLEAR, actor?.uniqueId, url = previousUrl)
             return true
         }
         KaraokeManager.endSinging(displayData)
@@ -163,6 +166,7 @@ object DisplayActions {
             actor, displayData.id, "clear", null,
             mapOf("mode" to displayData.mode.name.lowercase(), "previousUrl" to previousUrl),
         )
+        DisplayActivity.record(displayData, ActivityKind.VIDEO_CLEAR, actor?.uniqueId, url = previousUrl)
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         TimelineManager.onVideoCleared(displayData)
         // Older clients ignore the empty URL below and would play the cleared video on: they drop the display first
@@ -190,6 +194,8 @@ object DisplayActions {
             actor, displayData.id, "video", null,
             mapOf("mode" to displayData.mode.name.lowercase(), "url" to url, "previousUrl" to previousUrl),
         )
+        // A screen share's relay URL and the video coming back after it (persist false) are the share's own rows
+        if (persist) DisplayActivity.record(displayData, ActivityKind.VIDEO_SET, actor?.uniqueId, url = url, title = DisplayActivity.titleFor(displayData, url))
 
         if (persist) runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         // Back to no video (a screen share ended on a display that had none): the same as a clear for viewers
@@ -212,6 +218,7 @@ object DisplayActions {
         if (displayData.access == access) return DisplayManager.sendUpdate(displayData, [player])
 
         displayData.access = access
+        DisplayActivity.record(displayData, ActivityKind.ACCESS, player.uniqueId, text = access.name.lowercase())
 
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
@@ -257,6 +264,7 @@ object DisplayActions {
                 mapOf("mode" to mode.name.lowercase(), "previousMode" to previousMode.name.lowercase()),
             )
         }
+        DisplayActivity.record(displayData, ActivityKind.MODE, by?.uniqueId, text = mode.name.lowercase())
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onModeChanged(displayData, positionMs)
@@ -294,6 +302,10 @@ object DisplayActions {
             if (action == PlaybackAction.SPEED) put("rate", rate.toString())
         }
         ClientErrorReports.logCommand(player, displayId, name, before?.positionAt(atMs) ?: positionMs, details)
+        DisplayActivity.record(
+            displayData, ActivityKind.ofPlayback(action), player.uniqueId, fromMs = before?.positionAt(atMs) ?: 0L,
+            toMs = TimelineManager.clampSeek(positionMs, displayData), rate = TimelineManager.speedOf(displayData),
+        )
     }
 
     /** Replies to a client's catch-up request with the current timeline and any live session. */
