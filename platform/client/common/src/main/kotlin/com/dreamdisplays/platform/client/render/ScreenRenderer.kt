@@ -12,6 +12,7 @@ import net.minecraft.client.renderer.rendertype.RenderType
 /*import net.minecraft.client.renderer.RenderType*/
 import com.dreamdisplays.api.display.model.property.DisplayRotation
 import com.dreamdisplays.api.display.model.property.DisplayFacing
+import com.dreamdisplays.platform.client.displays.DisplayFace
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.displays.PlacedDisplays
@@ -23,7 +24,6 @@ import com.mojang.blaze3d.vertex.VertexConsumer
 import com.mojang.blaze3d.vertex.VertexFormat
 //?}
 import net.minecraft.client.Camera
-import kotlin.math.sin
 
 /** Renders screens in the world. Better not to touch this shit. */
 object ScreenRenderer {
@@ -114,19 +114,18 @@ object ScreenRenderer {
             drawLayer(stack, facing, w, h, lift) {
                 drawQuad(replayCard) { pose, builder -> appendQuad(pose, builder, 255, 255, 255, displayScreen.rotation) }
             }
-        } else if (displayScreen.isVideoStarted && displayScreen.hasTexture && displayScreen.renderType != null) {
-            drawLayer(stack, facing, w, h, lift) {
+        } else when (val face = displayScreen.face) {
+            DisplayFace.PLAYING -> drawLayer(stack, facing, w, h, lift) {
                 renderGpuTexture(drawQuad, displayScreen)
             }
-        } else {
-            renderPlaceholder(
+            DisplayFace.IDLE, DisplayFace.LOADING, DisplayFace.ERROR -> renderPlaceholder(
                 stack,
                 drawQuad,
                 DisplayYuvRenderTypes.solidColorType(),
                 facing,
                 w,
                 h,
-                displayScreen.errored,
+                face,
                 lift,
                 displayScreen.rotation,
             )
@@ -184,15 +183,17 @@ object ScreenRenderer {
 
     private fun renderPlaceholder(
         stack: PoseStack, drawQuad: QuadRenderer, type: RenderType,
-        facing: DisplayFacing, w: Int, h: Int, error: Boolean, lift: Float, rotation: DisplayRotation,
+        facing: DisplayFacing, w: Int, h: Int, face: DisplayFace, lift: Float, rotation: DisplayRotation,
     ) {
+        // Animated while loading, frozen for a display without a video (see PlaceholderLook)
+        val error = face == DisplayFace.ERROR
+        val now = System.nanoTime()
         // Backdrop on the screen plane
         drawLayer(stack, facing, w, h, lift) {
             val (r, g, b) = if (error) {
                 Triple(28, 6, 6)
             } else {
-                val breathe = (sin(System.nanoTime() / 2_000_000_000.0 * 2.0 * Math.PI).toFloat() + 1f) * 0.5f
-                val v = (8 + breathe * 6f).toInt()
+                val v = PlaceholderLook.backdropShade(face, now)
                 Triple(v, v, v)
             }
             drawQuad(type) { pose, vb -> appendRect(pose, vb, 0f, 0f, 1f, 1f, r, g, b) }
@@ -200,26 +201,20 @@ object ScreenRenderer {
 
         val y0 = 0.045f
         val y1 = 0.075f
-        val x0 = 0.06f
-        val x1 = 0.94f
+        val x0 = PlaceholderLook.TRACK_X0
+        val x1 = PlaceholderLook.TRACK_X1
 
         // Bar track, lifted off the backdrop.
         drawLayer(stack, facing, w, h, lift + OVERLAY_LIFT) {
             val (r, g, b) = if (error) Triple(120, 30, 30) else Triple(22, 24, 34)
             drawQuad(type) { pose, vb -> appendRect(pose, vb, x0, y0, x1, y1, r, g, b, rotation) }
         }
-        if (error) return
-
-        // Accent segment sweeping across the track, clipped at the ends so it grows in and shrinks out,
-        // lifted again so it never fights the track.
-        val period = 1_300_000_000L
-        val phase = (System.nanoTime() % period).toFloat() / period
-        val segW = 0.28f
-        val travel = (x1 - x0) + segW
-        val segStart = x0 - segW + travel * phase
-        val sx0 = segStart.coerceIn(x0, x1)
-        val sx1 = (segStart + segW).coerceIn(x0, x1)
-        if (sx1 > sx0) drawLayer(stack, facing, w, h, lift + OVERLAY_LIFT * 2f) {
+        // Accent segment (sweeping while loading, clipped at the ends so it grows in and shrinks out), lifted again so
+        // it never fights the track.
+        val segment = PlaceholderLook.segment(face, now) ?: return
+        val sx0 = segment[0]
+        val sx1 = segment[1]
+        drawLayer(stack, facing, w, h, lift + OVERLAY_LIFT * 2f) {
             drawQuad(type) { pose, vb -> appendRect(pose, vb, sx0, y0, sx1, y1, 40, 110, 255, rotation) }
         }
     }

@@ -580,6 +580,10 @@ class DisplayScreen(
         get() = !stillWaitingForInitialTimeline() && !privatePictureHidden() &&
                 (hasEverRendered || mediaPlayer?.textureFilled() == true)
 
+    /** What the screen shows in the world: the picture, the idle (no video) or loading bar, or the error look. */
+    internal val face: DisplayFace
+        get() = DisplayFace.of(videoUrl, isVideoStarted && hasTexture && renderType != null, errored)
+
     /**
      * True while this display plays a private (screen share / relay) stream whose picture must not be drawn: off the
      * air, reconnecting or stalled. The "no video" look shows instead, never the held last frame.

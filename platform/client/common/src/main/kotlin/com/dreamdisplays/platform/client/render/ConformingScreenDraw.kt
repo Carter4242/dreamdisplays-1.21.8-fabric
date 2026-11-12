@@ -3,6 +3,7 @@ package com.dreamdisplays.platform.client.render
 import com.dreamdisplays.shared.geometry.ConformQuad
 import com.dreamdisplays.shared.geometry.ConformVertex
 import com.dreamdisplays.shared.geometry.clipToUvRect
+import com.dreamdisplays.platform.client.displays.DisplayFace
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.mojang.blaze3d.vertex.PoseStack
 import com.mojang.blaze3d.vertex.VertexConsumer
@@ -11,7 +12,6 @@ import net.minecraft.client.renderer.rendertype.RenderType
 //?} else
 /*import net.minecraft.client.renderer.RenderType*/
 import java.util.WeakHashMap
-import kotlin.math.sin
 
 /**
  * Draws a wrapped screen: the same picture as the flat quad, cut to the slab and stair faces.
@@ -50,14 +50,15 @@ internal object ConformingScreenDraw {
     ) {
         if (quads.isEmpty()) return
         val clearance = DisplayPoseStack.surfaceClearance() + lift
-        if (screen.isVideoStarted && screen.hasTexture && screen.renderType != null) {
-            val appear = screen.appearProgress()
-            val base = if (screen.isYuvTexture) screen.brightness.coerceIn(0f, 1f) * 255f else 255f
-            val color = (base * appear).toInt().coerceIn(0, 255)
-            draw(drawQuad, screen.renderType!!, quads, clearance, color, color, color)
-            drawSubtitle(screen, quads, clearance, drawQuad)
-        } else {
-            drawPlaceholder(screen, quads, clearance, drawQuad)
+        when (val face = screen.face) {
+            DisplayFace.PLAYING -> {
+                val appear = screen.appearProgress()
+                val base = if (screen.isYuvTexture) screen.brightness.coerceIn(0f, 1f) * 255f else 255f
+                val color = (base * appear).toInt().coerceIn(0, 255)
+                draw(drawQuad, screen.renderType!!, quads, clearance, color, color, color)
+                drawSubtitle(screen, quads, clearance, drawQuad)
+            }
+            DisplayFace.IDLE, DisplayFace.LOADING, DisplayFace.ERROR -> drawPlaceholder(screen, quads, clearance, face, drawQuad)
         }
     }
 
@@ -95,36 +96,32 @@ internal object ConformingScreenDraw {
         screen: DisplayScreen,
         quads: List<ConformQuad>,
         clearance: Float,
+        face: DisplayFace,
         drawQuad: (RenderType, (PoseStack.Pose, VertexConsumer) -> Unit) -> Unit,
     ) {
+        // Animated while loading, frozen for a display without a video (see PlaceholderLook)
+        val error = face == DisplayFace.ERROR
+        val now = System.nanoTime()
         val type = DisplayYuvRenderTypes.solidColorType()
-        val (r, g, b) = if (screen.errored) {
+        val (r, g, b) = if (error) {
             Triple(28, 6, 6)
         } else {
-            val breathe = (sin(System.nanoTime() / 2_000_000_000.0 * 2.0 * Math.PI).toFloat() + 1f) * 0.5f
-            val v = (8 + breathe * 6f).toInt()
+            val v = PlaceholderLook.backdropShade(face, now)
             Triple(v, v, v)
         }
         draw(drawQuad, type, quads.map { it.mapUv { _, _ -> 0f to 0f } }, clearance, r, g, b)
-        if (screen.errored) return
+        if (error) return
 
         val trackV0 = 1f - 0.075f
         val trackV1 = 1f - 0.045f
-        val band = clipped(screen, SLOT_TRACK, quads, 0.06f, trackV0, 0.94f, trackV1)
+        val band = clipped(screen, SLOT_TRACK, quads, PlaceholderLook.TRACK_X0, trackV0, PlaceholderLook.TRACK_X1, trackV1)
         val track = band.map { it.mapUv { _, _ -> 0f to 0f } }
         val (tr, tg, tb) = Triple(22, 24, 34)
         draw(drawQuad, type, track, clearance + OVERLAY_LIFT, tr, tg, tb)
 
-        val period = 1_300_000_000L
-        val phase = (System.nanoTime() % period).toFloat() / period
-        val segW = 0.28f
-        val x0 = 0.06f
-        val x1 = 0.94f
-        val travel = (x1 - x0) + segW
-        val segStart = x0 - segW + travel * phase
-        val sx0 = segStart.coerceIn(x0, x1)
-        val sx1 = (segStart + segW).coerceIn(x0, x1)
-        if (sx1 <= sx0) return
+        val segment = PlaceholderLook.segment(face, now) ?: return
+        val sx0 = segment[0]
+        val sx1 = segment[1]
         val accent = band.flatMap { clipToUvRect(it, sx0, trackV0, sx1, trackV1) }
             .map { it.mapUv { _, _ -> 0f to 0f } }
         draw(drawQuad, type, accent, clearance + OVERLAY_LIFT * 2f, 40, 110, 255)
