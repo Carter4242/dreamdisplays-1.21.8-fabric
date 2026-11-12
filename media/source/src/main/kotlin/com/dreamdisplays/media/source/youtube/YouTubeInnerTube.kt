@@ -113,16 +113,48 @@ object YouTubeInnerTube {
         return extractRelatedContinuationPage(root, limit)
     }
 
-    /** Fetches title, uploader, and view / like counts for a single [videoId]; returns null if the video is unavailable. */
+    /**
+     * Fetches title, uploader, length and view / like counts for a single [videoId]; returns null if the video is
+     * unavailable. The `next` response carries no length for the video itself, so a second, short `player` request
+     * reads it; when that fails the result just has no length.
+     */
     @Throws(IOException::class)
     fun metadata(videoId: String): MediaSearchResult? {
         val root = post("next", InnerTubeRequest(videoId = videoId))
         val meta = extractWatchMetadata(root) ?: return null
+        val title = meta.title ?: return null
         return MediaSearchResult(
-            videoId, meta.title ?: return null, meta.uploader, null,
+            videoId, title, meta.uploader, lengthSeconds(videoId),
             meta.viewCountRaw, meta.likeCountRaw, meta.publishedText, meta.daysAgo,
             channelAvatarUrl = meta.channelAvatarUrl, isVerified = meta.isVerified,
         )
+    }
+
+    /**
+     * The length of [videoId] in seconds from the `player` endpoint, or null when it has none (live, upcoming) or the
+     * request fails. Never throws; bounded to a few seconds so a slow reply does not hold up whoever is waiting.
+     */
+    fun lengthSeconds(videoId: String): Long? = runCatching {
+        extractLengthSeconds(post("player", InnerTubeRequest(videoId = videoId), callTimeoutMs = 6_000))
+    }.onFailure { e ->
+        logger.debug("Length lookup for {} failed: {}", videoId, e.message)
+    }.getOrNull()
+
+    /**
+     * Reads the video length from a `player` response's `videoDetails.lengthSeconds`. Null for a stream that is live
+     * or upcoming (its "length" is only how long it has been running), and for a missing or non-positive value. The
+     * details are present even when the response calls the video unplayable for this client, so that is not checked.
+     */
+    internal fun extractLengthSeconds(root: JsonObject): Long? {
+        val details = root.obj("videoDetails") ?: return null
+        if (details.optBoolean("isLive") || details.optBoolean("isUpcoming")) return null
+        val broadcast = root.obj("microformat")?.obj("playerMicroformatRenderer")?.obj("liveBroadcastDetails")
+        if (broadcast?.optBoolean("isLiveNow") == true) return null
+        // A live stream that has not ended yet, as some clients see it: no live flag, but no end either
+        if (details.optBoolean("isLiveContent") && broadcast != null && broadcast.optString("endTimestamp") == null) {
+            return null
+        }
+        return details.optLong("lengthSeconds")?.takeIf { it > 0L }
     }
 
     /** Fetches the chapter markers for [videoId]; empty when the video has none. */
@@ -150,7 +182,7 @@ object YouTubeInnerTube {
     )
 
     @Throws(IOException::class)
-    private fun post(endpoint: String, body: InnerTubeRequest): JsonObject {
+    private fun post(endpoint: String, body: InnerTubeRequest, callTimeoutMs: Long = 0L): JsonObject {
         val url = "$BASE_URL/$endpoint?prettyPrint=false"
         val cookies = YtDlp.getPublicCookieHeader()
         val response = DreamHttpClient.execute(
@@ -166,6 +198,7 @@ object YouTubeInnerTube {
                 ),
                 connectTimeoutMs = 8_000,
                 readTimeoutMs = 15_000,
+                callTimeoutMs = callTimeoutMs,
                 proxyUrl = ResolverConfig.ytdlpProxy,
             ),
         )
