@@ -80,6 +80,30 @@ class ClientErrorLog(val path: Path, private val maxBytes: Long = DEFAULT_MAX_BY
             if (env != null) put("env", envJson(env))
         }.toString()
 
+        /**
+         * One log line saying [reports] lines ([bytes] bytes) from a player were not written between [sinceMs] and
+         * [untilMs]: they used up their share of the log ([ReportByteBudget]).
+         */
+        fun suppressedLine(
+            atMs: Long,
+            playerName: String,
+            playerId: UUID,
+            reports: Int,
+            bytes: Long,
+            sinceMs: Long,
+            untilMs: Long,
+            zone: ZoneId = ZoneId.systemDefault(),
+        ): String = buildJsonObject {
+            put("type", "suppressed")
+            put("time", time(atMs, zone))
+            put("player", playerName)
+            put("uuid", playerId.toString())
+            put("reports", reports)
+            put("bytes", bytes)
+            put("since", time(sinceMs, zone))
+            put("until", time(untilMs, zone))
+        }.toString()
+
         /** One log line for a display command [action] by a player (pause, resume, seek, video, mode ...). */
         fun commandLine(
             atMs: Long,
