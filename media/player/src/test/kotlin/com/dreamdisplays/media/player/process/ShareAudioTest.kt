@@ -11,7 +11,6 @@ import kotlin.test.assertTrue
 class ShareAudioTest {
     private val self = 4242L
     private val chrome = Choice.App(100, "Google Chrome")
-    private val zuluJavaw = "C:\\Users\\me\\.jdks\\zulu-21\\bin\\javaw.exe"
 
     @Test
     fun `except minecraft excludes the game's own process tree and never widens to the whole device`() {
@@ -80,13 +79,13 @@ class ShareAudioTest {
     }
 
     @Test
-    fun `a shared window goes silent, and says why, when its app cannot be captured on its own`() {
+    fun `a shared window goes silent, and says why, when its app cannot be captured`() {
         assertEquals(
             ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.NO_PROCESS_LOOPBACK),
             ShareAudio.windowSound(Os.WINDOWS, processLoopback = false, app = chrome),
         )
         assertEquals(
-            ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.NOT_CAPTURABLE),
+            ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.APP_NOT_FOUND),
             ShareAudio.windowSound(Os.WINDOWS, processLoopback = true, app = null),
         )
         // Never widened to everything but the game or the whole PC
@@ -99,33 +98,42 @@ class ShareAudioTest {
     }
 
     @Test
-    fun `an app the game runs under is never just this app`() {
-        // Prism -> java (the game): Prism's process tree includes the game, its sound and its voice chat
-        assertTrue(ShareAudio.includesGame(root = 50, selfPid = self, selfAncestors = listOf(50, 4)))
-        assertTrue(ShareAudio.includesGame(root = self, selfPid = self, selfAncestors = listOf(50)))
-        assertFalse(ShareAudio.includesGame(root = 100, selfPid = self, selfAncestors = listOf(50, 4)))
-        assertFalse(
-            ShareAudio.includesGame(100, self, listOf(50), "C:\\Program Files\\Google\\chrome.exe", zuluJavaw),
+    fun `the game's own window shares the game's process tree sound like any other window`() {
+        val game = ShareAudio.windowApp(root = self, name = "OpenJDK Platform binary", frameHost = false)
+        assertEquals(Choice.App(self, "OpenJDK Platform binary"), game)
+        val sound = ShareAudio.windowSound(Os.WINDOWS, processLoopback = true, app = game)
+        // No silence note: the game's sound and the voice chat it plays are captured
+        assertEquals(ShareAudio.WindowSound(game!!), sound)
+        assertEquals(listOf(Plan.ProcessLoopback(self, include = true)), ShareAudio.plans(sound.choice, Os.WINDOWS, self))
+    }
+
+    @Test
+    fun `a launcher or java app is its own process tree, even when the game runs under it`() {
+        // Prism (the game's parent), a Java launcher, another Minecraft: the picked window's program tree is captured
+        for (root in listOf(50L, 300L)) {
+            val app = ShareAudio.windowApp(root, "Zulu Platform x64 Architecture", frameHost = false)
+            assertEquals(Choice.App(root, "Zulu Platform x64 Architecture"), app)
+            assertEquals(listOf(Plan.ProcessLoopback(root, include = true)), ShareAudio.plans(app!!, Os.WINDOWS, self))
+        }
+    }
+
+    @Test
+    fun `a store app whose app was not found goes silent and says so`() {
+        val app = ShareAudio.windowApp(root = 77, name = "Media Player", frameHost = true)
+        assertEquals(null, app)
+        assertEquals(
+            ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.APP_NOT_FOUND),
+            ShareAudio.windowSound(Os.WINDOWS, processLoopback = true, app = app),
         )
     }
 
     @Test
-    fun `a jvm is never just this app, whatever its pid`() {
-        // "Zulu Platform x64 Architecture": another Minecraft, a Java launcher, or the game under a pid not seen as it
-        assertTrue(ShareAudio.includesGame(300, self, listOf(50), zuluJavaw, zuluJavaw))
-        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "C:\\Program Files\\Java\\bin\\java.exe", null))
-        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "/usr/lib/jvm/bin/java", null))
-        // The game's own executable, whatever it is called
-        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "C:\\Games\\mc\\Runtime.EXE", "c:\\games\\mc\\runtime.exe"))
-        assertTrue(ShareAudio.isJvm("JAVAW.EXE"))
-        assertFalse(ShareAudio.isJvm("C:\\Program Files\\JavaScript\\node.exe"))
-        assertFalse(ShareAudio.isJvm("javascript.exe"))
-    }
-
-    @Test
-    fun `the game itself is never captured as one app`() {
-        // Even if one were asked for, the game's own pid as "just this app" is no sound
-        assertTrue(ShareAudio.plans(Choice.App(self, "Minecraft"), Os.WINDOWS, self).isEmpty())
+    fun `everything except minecraft still leaves the game's tree out, the game's window takes it in`() {
+        assertEquals(listOf(Plan.ProcessLoopback(self, include = false)), ShareAudio.plans(Choice.ExceptGame, Os.WINDOWS, self))
+        assertEquals(
+            listOf(Plan.ProcessLoopback(self, include = true)),
+            ShareAudio.plans(Choice.App(self, "Minecraft"), Os.WINDOWS, self),
+        )
     }
 
     @Test
@@ -219,23 +227,30 @@ class ShareWindowsTest {
 
     @Test
     fun `ordinary app windows are offered`() {
-        assertTrue(ShareWindows.offer(facts(), selfPid = 1))
-        assertTrue(ShareWindows.offer(facts(minimized = true, w = 160, h = 28), selfPid = 1))
+        assertTrue(ShareWindows.offer(facts()))
+        assertTrue(ShareWindows.offer(facts(minimized = true, w = 160, h = 28)))
         // A tool window that asks for a taskbar button still counts
-        assertTrue(ShareWindows.offer(facts(exStyle = 0x40080), selfPid = 1))
+        assertTrue(ShareWindows.offer(facts(exStyle = 0x40080)))
     }
 
     @Test
-    fun `tool, cloaked, owned, untitled, tiny and own windows are not`() {
-        assertTrue(!ShareWindows.offer(facts(exStyle = 0x80), 1))
-        assertTrue(!ShareWindows.offer(facts(exStyle = 0x080800A0), 1))
-        assertTrue(!ShareWindows.offer(facts(cloaked = true), 1))
-        assertTrue(!ShareWindows.offer(facts(owned = true), 1))
-        assertTrue(!ShareWindows.offer(facts(title = "  "), 1))
-        assertTrue(!ShareWindows.offer(facts(w = 30, h = 600), 1))
-        assertTrue(!ShareWindows.offer(facts(pid = 1), 1))
-        assertTrue(!ShareWindows.offer(facts(visible = false), 1))
-        assertTrue(!ShareWindows.offer(facts(title = "Program Manager"), 1))
+    fun `the game's own window is offered like any other`() {
+        // GLFW's window: a normal app window, whatever the game's pid
+        val game = facts(title = "Minecraft 1.21.8 - Multiplayer (3rd-party Server)", exStyle = 0x40100, pid = 4242, w = 1920, h = 1080)
+        assertTrue(ShareWindows.offer(game))
+        assertTrue(ShareWindows.offer(game.copy(minimized = true, width = 160, height = 28)))
+    }
+
+    @Test
+    fun `tool, cloaked, owned, untitled and tiny windows are not`() {
+        assertTrue(!ShareWindows.offer(facts(exStyle = 0x80)))
+        assertTrue(!ShareWindows.offer(facts(exStyle = 0x080800A0)))
+        assertTrue(!ShareWindows.offer(facts(cloaked = true)))
+        assertTrue(!ShareWindows.offer(facts(owned = true)))
+        assertTrue(!ShareWindows.offer(facts(title = "  ")))
+        assertTrue(!ShareWindows.offer(facts(w = 30, h = 600)))
+        assertTrue(!ShareWindows.offer(facts(visible = false)))
+        assertTrue(!ShareWindows.offer(facts(title = "Program Manager")))
     }
 
     @Test

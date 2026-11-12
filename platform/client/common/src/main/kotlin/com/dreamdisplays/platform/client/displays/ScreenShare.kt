@@ -153,25 +153,21 @@ object ScreenShare {
     /** Windows that can be shared (Windows only), frontmost first. Fast enough for the render thread. */
     fun windows(): List<ScreenCapture.Window> {
         if (audioOs != ShareAudio.Os.WINDOWS) return emptyList()
-        return runCatching { WinWindows.list(selfPid) }.getOrElse {
+        return runCatching { WinWindows.list() }.getOrElse {
             logger.debug("Share: listing windows failed: {}", it.toString())
             emptyList()
         }
     }
 
     /**
-     * The app owning [window], whose sound a window share carries (its program's topmost process); null for a Store
-     * app whose process could not be found (its frame host plays nothing, so "this app" would be silence), and for
-     * the game, an app it runs under (its launcher, Steam) or any JVM: its process tree would (or may) carry the
-     * game's sound and voice chat.
+     * The app owning [window], whose sound a window share carries (its program's topmost process and the processes
+     * under it, the game's own window included, see [ShareAudio.windowApp]); null for a Store app whose process could
+     * not be found (its frame host plays nothing, so "this app" would be silence).
      */
     fun windowApp(window: ScreenCapture.Window): ShareAudio.Choice.App? {
-        if (runCatching { WinWindows.isFrameHost(window.pid) }.getOrDefault(false)) return null
-        val root = runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid)
-        if (listOf(window.pid, root).distinct().any { runCatching { WinAudio.includesGame(it, selfPid) }.getOrDefault(true) }) {
-            return null
-        }
-        return ShareAudio.Choice.App(root, window.app)
+        val frameHost = runCatching { WinWindows.isFrameHost(window.pid) }.getOrDefault(false)
+        val root = if (frameHost) window.pid else runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid)
+        return ShareAudio.windowApp(root, window.app, frameHost)
     }
 
     /** A shared [window]'s sound: its own app's, or none (and why), with no step to pick it. */
@@ -815,7 +811,7 @@ object ScreenShare {
             notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
             when (r.windowSilence) {
                 ShareAudio.WindowSilence.NO_PROCESS_LOOPBACK -> ClientMessage.SHARE_WINDOW_SILENT_WINDOWS
-                ShareAudio.WindowSilence.NOT_CAPTURABLE -> ClientMessage.SHARE_WINDOW_SILENT_APP
+                ShareAudio.WindowSilence.APP_NOT_FOUND -> ClientMessage.SHARE_WINDOW_SILENT_APP
                 null -> null
             }?.let { notify(it.component().withStyle(ChatFormatting.YELLOW)) }
         }

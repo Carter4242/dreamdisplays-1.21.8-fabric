@@ -19,7 +19,7 @@ object ShareAudio {
 
         /**
          * One app, a shared window's own: process [pid] and the processes it started (a browser's audio runs in a
-         * child process).
+         * child process). The game's own window is one too: the game's sound and the voice chat it plays.
          */
         data class App(val pid: Long, val name: String) : Choice
 
@@ -45,8 +45,9 @@ object ShareAudio {
     /**
      * What to try for [choice] on [os], in order, given this game's [selfPid]; empty = no sound. Neither "Except
      * Minecraft" nor a window's own app ever widens to the whole PC on its own: that would stream the game, its voice
-     * chat (with this share's own playback, an echo) or a call the sharer did not mean to share. Older Windows (no
-     * process loopback) is never offered either; it gets "Whole PC" instead.
+     * chat or a call the sharer did not mean to share. Older Windows (no process loopback) is never offered either; it
+     * gets "Whole PC" instead. A window's app is captured with its whole process tree whatever it is, the game
+     * included: the sharer's own client keeps its playback of the share silent, so nothing loops.
      */
     fun plans(choice: Choice, os: Os, selfPid: Long): List<Plan> = when (os) {
         Os.MAC -> emptyList()
@@ -55,8 +56,7 @@ object ShareAudio {
             Choice.Off -> emptyList()
             Choice.WholePc -> listOf(Plan.DeviceLoopback)
             Choice.ExceptGame -> listOf(Plan.ProcessLoopback(selfPid, include = false))
-            // The game itself as "one app" would be its own sound and voice chat: none
-            is Choice.App -> if (choice.pid == selfPid) emptyList() else listOf(Plan.ProcessLoopback(choice.pid, include = true))
+            is Choice.App -> listOf(Plan.ProcessLoopback(choice.pid, include = true))
         }
     }
 
@@ -83,40 +83,32 @@ object ShareAudio {
         /** This Windows cannot capture one app's sound (before build 20348). */
         NO_PROCESS_LOOPBACK,
 
-        /** Its app cannot be captured on its own: the game, a launcher or JVM it runs under, or not found. */
-        NOT_CAPTURABLE,
+        /** Its app was not found: a Store app's frame whose app process could not be found (minimized). */
+        APP_NOT_FOUND,
     }
 
     /** What a shared window sounds like: [choice], and when that is no sound on Windows, [silence] says why. */
     data class WindowSound(val choice: Choice, val silence: WindowSilence? = null)
 
     /**
-     * A shared window's sound, picked without asking: its own app's ([app], null when it cannot be captured on its own,
-     * see [includesGame]), never anything wider. Only Windows shares windows.
+     * A shared window's sound, picked without asking: its own app's ([app], null when it was not found, see
+     * [windowApp]), never anything wider. Only Windows shares windows.
      */
     fun windowSound(os: Os, processLoopback: Boolean, app: Choice.App?): WindowSound = when {
         os != Os.WINDOWS -> WindowSound(Choice.Off)
         !processLoopback -> WindowSound(Choice.Off, WindowSilence.NO_PROCESS_LOOPBACK)
-        app == null -> WindowSound(Choice.Off, WindowSilence.NOT_CAPTURABLE)
+        app == null -> WindowSound(Choice.Off, WindowSilence.APP_NOT_FOUND)
         else -> WindowSound(app)
     }
 
     /**
-     * True when app [root]'s sound (its whole process tree) includes this game's, or may be the game: [root] is the
-     * game ([selfPid]) or one of its [selfAncestors] (the launcher that started it, Steam), or runs a JVM ([rootExe]
-     * is `java`/`javaw`, or the game's own [selfExe]): another Minecraft, or a Java launcher. "Just this app" there
-     * would stream the game and the voice chat it plays.
+     * The app whose sound a shared window carries: its program's topmost process [root] (see `WinAudio.programRoot`)
+     * and every process under it, whatever the program is: the game's own window, a launcher the game runs under (the
+     * game is in its tree) or any other Java app alike. Null for a Store app's frame ([frameHost]: the app inside it
+     * was not found, and the frame itself plays nothing).
      */
-    fun includesGame(
-        root: Long, selfPid: Long, selfAncestors: List<Long>, rootExe: String? = null, selfExe: String? = null,
-    ): Boolean = root == selfPid || root in selfAncestors ||
-            (rootExe != null && (isJvm(rootExe) || (selfExe != null && rootExe.equals(selfExe, ignoreCase = true))))
-
-    /** True when executable [path] is a Java runtime's launcher (`java`, `javaw`, any vendor). */
-    fun isJvm(path: String): Boolean =
-        path.substringAfterLast('\\').substringAfterLast('/').lowercase().removeSuffix(".exe") in JVM_EXES
-
-    private val JVM_EXES = setOf("java", "javaw")
+    fun windowApp(root: Long, name: String, frameHost: Boolean): Choice.App? =
+        if (frameHost) null else Choice.App(root, name)
 
     /** PCM layout of a pipe input. */
     data class Format(val sampleRate: Int, val channels: Int, val float: Boolean) {

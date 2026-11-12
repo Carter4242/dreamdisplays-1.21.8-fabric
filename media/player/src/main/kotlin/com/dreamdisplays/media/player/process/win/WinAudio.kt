@@ -354,22 +354,6 @@ object WinAudio {
         return current.pid()
     }
 
-    /**
-     * True when capturing app [root] with its process tree would capture this game ([selfPid]) too, or may be a game:
-     * it is the game, the game runs under it (a launcher, Steam), or it runs a JVM (see [ShareAudio.includesGame]).
-     */
-    fun includesGame(root: Long, selfPid: Long): Boolean =
-        ShareAudio.includesGame(root, selfPid, ancestors(selfPid), exeOf(root), exeOf(selfPid))
-
-    /** [pid]'s parent, its parent, and so on (at most 32). */
-    private fun ancestors(pid: Long): List<Long> = buildList {
-        var current = ProcessHandle.of(pid).orElse(null) ?: return@buildList
-        repeat(32) {
-            current = current.parent().orElse(null) ?: return@buildList
-            add(current.pid())
-        }
-    }
-
     private val names = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** [pid]'s program name: its file description ("Google Chrome"), else the executable's name. */

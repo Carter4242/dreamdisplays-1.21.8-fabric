@@ -14,8 +14,8 @@ object WinWindows {
     private const val DWMWA_CLOAKED = 14
     private const val SW_SHOWNOACTIVATE = 4
 
-    /** Windows a person would call "a window" (see [ShareWindows.offer]), excluding this game's ([selfPid]). */
-    fun list(selfPid: Long): List<ScreenCapture.Window> {
+    /** Windows a person would call "a window" (see [ShareWindows.offer]), this game's own included. */
+    fun list(): List<ScreenCapture.Window> {
         val user32 = WinApi.user32
         val found = ArrayList<ScreenCapture.Window>()
         val rect = Memory(16)
@@ -47,7 +47,7 @@ object WinWindows {
                         height = rect.getInt(12) - rect.getInt(4),
                         minimized = user32.IsIconic(hwnd),
                     )
-                    if (ShareWindows.offer(facts, selfPid)) {
+                    if (ShareWindows.offer(facts)) {
                         found += ScreenCapture.Window(Pointer.nativeValue(hwnd), facts.pid, "", title)
                     }
                 }

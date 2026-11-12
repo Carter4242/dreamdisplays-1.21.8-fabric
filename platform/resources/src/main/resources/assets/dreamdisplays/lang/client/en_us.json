@@ -80,7 +80,7 @@
   "dreamdisplays.share.refused": "Screen share not started: %s",
   "dreamdisplays.share.screens": "Screens",
   "dreamdisplays.share.windows": "Windows",
-  "dreamdisplays.share.window.silent.app": "This window is shared without sound: its app's sound can't be captured apart from Minecraft's.",
+  "dreamdisplays.share.window.silent.app": "This window is shared without sound: its app could not be found. Restore the window and share it again.",
   "dreamdisplays.share.window.silent.windows": "This window is shared without sound: this version of Windows can't capture one app's sound. Share a screen to choose its sound.",
   "dreamdisplays.share.audio": "Sound",
   "dreamdisplays.share.audio.except_game": "Everything except Minecraft",

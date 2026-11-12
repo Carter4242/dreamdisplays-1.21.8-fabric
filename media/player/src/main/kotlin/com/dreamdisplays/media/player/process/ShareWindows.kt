@@ -25,10 +25,10 @@ object ShareWindows {
     /**
      * True for a window worth offering: shown and titled, not cloaked (another virtual desktop, a suspended UWP app),
      * not owned by another window (dialogs, popups) and not a tool window or palette (unless it asks for a taskbar
-     * button), not tiny, and not this game's own.
+     * button), and not tiny. The game's own window is offered like any other.
      */
-    fun offer(w: Facts, selfPid: Long): Boolean {
-        if (!w.visible || w.cloaked || w.owned || w.pid == selfPid || w.title.isBlank()) return false
+    fun offer(w: Facts): Boolean {
+        if (!w.visible || w.cloaked || w.owned || w.title.isBlank()) return false
         val appWindow = w.exStyle and WS_EX_APPWINDOW != 0
         if (!appWindow && (w.exStyle and WS_EX_TOOLWINDOW != 0 || w.exStyle and WS_EX_NOACTIVATE != 0)) return false
         if (!w.minimized && (w.width < MIN_SIDE || w.height < MIN_SIDE)) return false
