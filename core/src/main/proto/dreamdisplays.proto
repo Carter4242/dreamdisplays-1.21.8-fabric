@@ -158,6 +158,8 @@ message DisplayInfo {
   optional int64 mediaGen = 26;
   // WARNING: a default value decoded when value is missing
   optional string world = 27;
+  // WARNING: a default value decoded when value is missing
+  optional DisplayRegionShape region = 28;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.DisplayDelete'
@@ -596,7 +598,9 @@ message ClientEnvironment {
   optional string ytDlpPath = 25;
   // WARNING: a default value decoded when value is missing
   optional string ffmpegPath = 26;
+  // WARNING: a default value decoded when value is missing
   optional string ytDlpJsRuntime = 27;
+  // WARNING: a default value decoded when value is missing
   optional string ytDlpJsRuntimeSource = 28;
 }
 
@@ -705,6 +709,28 @@ message Uuid {
   optional fixed64 msb = 1;
   // WARNING: a default value decoded when value is missing
   optional fixed64 lsb = 2;
+}
+
+// serial name 'com.dreamdisplays.core.protocol.common.packets.DisplayRegionShape?'
+message DisplayRegionShape {
+  // WARNING: a default value decoded when value is missing
+  optional int32 kind = 1;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 minX = 2;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 minY = 3;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 minZ = 4;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 maxX = 5;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 maxY = 6;
+  // WARNING: a default value decoded when value is missing
+  optional sint32 maxZ = 7;
+  // WARNING: a default value decoded when value is missing
+  repeated sint32 xs = 8;
+  // WARNING: a default value decoded when value is missing
+  repeated sint32 zs = 9;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.QueueItemWire'

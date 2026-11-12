@@ -26,7 +26,7 @@ class BundledConfigEditTest {
 
     @Test
     fun `every policy key lands as one active line in its table`() {
-        for (path in PolicyPaths.all) {
+        for (path in PolicyPaths.all.filter { !it.displayOnly }) {
             val table = "policy." + path.name.substringBefore('.')
             val key = path.name.substringAfter('.')
             val out = TomlLineEditor.set(template, table, key, "7")

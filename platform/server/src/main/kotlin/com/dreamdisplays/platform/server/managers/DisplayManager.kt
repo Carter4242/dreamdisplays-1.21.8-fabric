@@ -2,6 +2,9 @@ package com.dreamdisplays.platform.server.managers
 
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.core.command.TargetMatch
+import com.dreamdisplays.core.display.region.RegionVisibility
+import com.dreamdisplays.core.protocol.common.hasFeature
+import com.dreamdisplays.shared.capability.ClientFeature
 import com.dreamdisplays.core.protocol.common.packets.DisplayDelete
 import com.dreamdisplays.core.protocol.common.packets.DreamPacket
 import com.dreamdisplays.core.sync.DisplayFollowers
@@ -68,6 +71,12 @@ object DisplayManager {
     private val reportThrottle = ReportThrottle()
     private val proximityIndex = DisplayProximityIndex()
 
+    /**
+     * Who got each display at the last display update (`Paper`; `Folia` keeps this in [proximityIndex]): a released
+     * client walking out of a region display's region is told to drop it, and keeps it for a block of slack meanwhile.
+     */
+    private val lastReceivers: MutableMap<UUID, Set<UUID>> = ConcurrentHashMap()
+
     /** Returns the display registered under [id], or null if none exists. */
     @JvmStatic
     fun getDisplayData(id: UUID?): DisplayData? = displays[id]
@@ -127,6 +136,7 @@ object DisplayManager {
         return toRemove.map { display ->
             displays.remove(display.id)
             proximityIndex.forgetDisplay(display.id)
+            lastReceivers.remove(display.id)
             TimelineManager.remove(display.id)
             FullscreenBroadcastManager.onDisplayRemoved(display.id)
             PipPinManager.onDisplayRemoved(display.id)
@@ -192,9 +202,60 @@ object DisplayManager {
             ) * 16).toDouble(),
         )
 
+    /**
+     * In range of [display] (its world, the view / simulation distance) and, for a display tied to a region, admitted by
+     * it ([admitsByRegion]): everything that asks who gets a display (descriptions, timelines, start holds, queue
+     * readiness, the `Folia` proximity index) goes through here.
+     */
     @PaperOnly
     private fun Player.isInRange(display: PaperDisplayData): Boolean {
-        return display.pos1.world == world && location.isInRange(display)
+        if (display.pos1.world != world) return false
+        val at = location
+        return at.isInRange(display) && admitsByRegion(this, at, display)
+    }
+
+    /**
+     * Whether [display]'s region (`visibility.region`) lets [player], standing at [at], have it: always without one;
+     * never while it cannot be resolved; else near it for a client with `region_fade`, inside it for a released one
+     * ([RegionVisibility.admits]). A karaoke singer on the display keeps it wherever they stand.
+     */
+    @PaperOnly
+    private fun admitsByRegion(player: Player, at: Location, display: PaperDisplayData): Boolean {
+        val state = DisplayRegions.stateOf(display)
+        if (state === RegionVisibility.State.None) return true
+        if (com.dreamdisplays.platform.server.karaoke.KaraokeManager.isSinging(display.id, player.uniqueId)) return true
+        return RegionVisibility.admits(
+            state, isRegionCapable(player.uniqueId), at.x, at.y, at.z, wasReceiving(display.id, player.uniqueId),
+        )
+    }
+
+    /** Whether [playerId]'s client follows a display's region itself (fade, load distance): `ClientFeature.REGION_FADE`. */
+    fun isRegionCapable(playerId: UUID): Boolean =
+        V2PlayerTracker.helloOf(playerId)?.hasFeature(ClientFeature.REGION_FADE) == true
+
+    /** Whether [player] can hear [display] at all where they stand: always without a region, else see [RegionVisibility.hears]. */
+    @PaperOnly
+    fun hearsDisplay(player: Player, display: PaperDisplayData): Boolean {
+        val state = DisplayRegions.stateOf(display)
+        if (state === RegionVisibility.State.None) return true
+        val at = player.location
+        return RegionVisibility.hears(state, isRegionCapable(player.uniqueId), at.x, at.y, at.z)
+    }
+
+    private fun wasReceiving(displayId: UUID, playerId: UUID): Boolean =
+        if (PlatformUtil.isFolia) proximityIndex.isTracked(displayId, playerId)
+        else lastReceivers[displayId]?.contains(playerId) == true
+
+    /**
+     * After a display update: the players who stopped getting a display tied to a region ([left]: walked out of it, or
+     * of its load range) are told to drop it, so a released client loses it at the region's edge and none keeps a copy
+     * it could bring back on its own. Not those following it from afar (fullscreen, preparation, PiP pin).
+     */
+    @PaperOnly
+    private fun dropForLeavers(display: PaperDisplayData, left: Collection<UUID>, send: (UUID) -> Unit) {
+        if (left.isEmpty()) return
+        val far = FullscreenBroadcastManager.timelineFollowers(display.id).toSet() + farPinners(display.id)
+        for (playerId in left) if (playerId !in far) send(playerId)
     }
 
     /** Removes [playerId] from the cached `Folia` proximity index. */
@@ -225,6 +286,7 @@ object DisplayManager {
             mediaGen = display.mediaGen,
             // Virtual (URL-only broadcast) displays stand nowhere
             world = if (display.virtual) "" else display.pos1.world?.key?.toString().orEmpty(),
+            region = DisplayRegions.wireShape(display),
             // An empty display goes to clients before protocol 12 sparingly ([EmptyDisplayDescriptions])
             sendsTo = { player, info -> EmptyDisplayDescriptions.sendsTo(player.uniqueId, info) },
         )
@@ -298,11 +360,20 @@ object DisplayManager {
     /** Refreshes all displays visible to every tracked player through each player's entity scheduler. */
     @PaperOnly
     fun updateAllDisplaysForTrackedPlayers() {
+        val papers = displays.values.filterIsInstance<PaperDisplayData>()
+        DisplayRegions.refreshStale(papers)
         Scheduler.forEachTrackedPlayer { player ->
-            val visible = displays.values.filterIsInstance<PaperDisplayData>()
-                .filter { player.isInRange(it) }
-            proximityIndex.update(player.uniqueId, visible.mapTo(mutableSetOf()) { it.id })
+            val visible = papers.filter { player.isInRange(it) }
+            val ids = visible.mapTo(mutableSetOf()) { it.id }
+            val previous = proximityIndex.update(player.uniqueId, ids)
+                // First update since a (re)load: anything in plain range may still be on the client
+                ?: papers.filter { it.pos1.world == player.world && player.location.isInRange(it) }.mapTo(HashSet()) { it.id }
             visible.forEach { display -> sendUpdate(display, [player]) }
+            for (id in previous - ids) {
+                val display = displays[id] as? PaperDisplayData ?: continue
+                if (DisplayRegions.stateOf(display) === RegionVisibility.State.None) continue
+                dropForLeavers(display, [player.uniqueId]) { PacketUtil.sendDelete([player], id) }
+            }
         }
     }
 
@@ -320,14 +391,25 @@ object DisplayManager {
     @PaperOnly
     fun updateAllDisplays() {
         val papers = displays.values.filterIsInstance<PaperDisplayData>()
+        DisplayRegions.refreshStale(papers)
         val playersByWorld = papers.mapNotNull { it.pos1.world }.distinct()
             .associateWith { it.players.toMutableList() }
 
         papers.forEach { display ->
             val world = display.pos1.world ?: return@forEach
             val worldPlayers = playersByWorld[world] ?: mutableListOf()
-            val receivers = worldPlayers.filter { it.location.isInRange(display) }
+            val receivers = worldPlayers.filter { it.isInRange(display) }
             sendUpdate(display, receivers)
+            val now = receivers.mapTo(HashSet()) { it.uniqueId }
+            val regional = DisplayRegions.stateOf(display) !== RegionVisibility.State.None
+            val before = lastReceivers.put(display.id, now)
+                // First update since a (re)load: anyone in plain range may still have it
+                ?: if (regional) worldPlayers.filter { it.location.isInRange(display) }.mapTo(HashSet()) { it.uniqueId } else emptySet()
+            if (regional) {
+                dropForLeavers(display, before - now) { id ->
+                    Bukkit.getPlayer(id)?.let { PacketUtil.sendDelete([it], display.id) }
+                }
+            }
         }
     }
 
@@ -343,6 +425,8 @@ object DisplayManager {
         com.dreamdisplays.platform.server.utils.net.ScreenShareActions.onDisplayRemoved(displayData.id)
         displays.remove(displayData.id)
         proximityIndex.forgetDisplay(displayData.id)
+        lastReceivers.remove(displayData.id)
+        DisplayRegions.forget(displayData.id)
         ServerApiHost.current?.removed(displayData)
     }
 
@@ -457,6 +541,7 @@ object DisplayManager {
     fun clearAll() {
         displays.clear()
         proximityIndex.clear()
+        lastReceivers.clear()
     }
 
     /** Registers a new display. Caller is responsible for broadcasting. */

@@ -1301,9 +1301,30 @@ class DisplayScreen(
         mediaPlayer?.setVolume(playVolume(volume))
     }
 
-    /** [capVolume] times the server's (ramped) `audio.gain`. */
+    /** [capVolume] times the server's (ramped) `audio.gain` and the region fade ([regionFade]). */
     private fun playVolume(volume: Float): Float =
-        (capVolume(volume) * policyGain.value(System.nanoTime())).toFloat().coerceIn(0f, 2f)
+        (capVolume(volume) * policyGain.value(System.nanoTime()) * regionFade().also { appliedRegionFade = it })
+            .toFloat().coerceIn(0f, 2f)
+
+    /** The region fade last put into the volume, so [tickRegionFade] re-applies it only when it moves. */
+    private var appliedRegionFade = 1.0
+
+    /**
+     * How much of the sound reaches the player from a display tied to a region (`visibility.region`): 1 inside, fading
+     * to 0 at `visibility.regionFadeBlocks` outside, from their exact position. Not for a display shown in a popout,
+     * PiP or fullscreen, nor a virtual one (none stands anywhere), nor while the player sings karaoke on it (they need
+     * the track to sing to). On top of the distance attenuation and acoustics, which work as usual.
+     */
+    private fun regionFade(): Double {
+        if (isPopoutActive || virtual || com.dreamdisplays.platform.client.karaoke.KaraokeClient.isSinging(uuid)) return 1.0
+        val player = Minecraft.getInstance().player ?: return 1.0
+        return DisplayRegions.fade(uuid, policy, player.x, player.y, player.z)
+    }
+
+    /** Re-applies the volume when the region fade moved (the player walked across the fade band); every tick. */
+    private fun tickRegionFade() {
+        if (kotlin.math.abs(regionFade() - appliedRegionFade) > REGION_FADE_EPSILON) applyEffectiveVolume()
+    }
 
     /** Moves the gain ramp toward this display's target and re-applies the volume while it moves; every tick. */
     private fun tickPolicyGain() {
@@ -1803,6 +1824,7 @@ class DisplayScreen(
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
         tickPolicyGain()
+        tickRegionFade()
         tickPausedSeekPreview()
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         syncPlaybackSpeed() // Follows mode changes
@@ -1939,6 +1961,9 @@ class DisplayScreen(
         private const val APPEAR_FADE_NANOS = 260_000_000L
         private const val WAITING_FOR_TIMELINE_TIMEOUT_NANOS = 5_000_000_000L
         private const val MAX_SERVER_DEFAULT_VOLUME = 1.0f
+
+        /** A region fade change smaller than this is not worth re-applying the volume for. */
+        private const val REGION_FADE_EPSILON = 1e-3
 
         /**
          * How far displays stay alive, in blocks: the client's chunk render distance, capped by the

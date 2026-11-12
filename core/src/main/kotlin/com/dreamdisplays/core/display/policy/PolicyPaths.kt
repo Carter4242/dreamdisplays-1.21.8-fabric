@@ -1,5 +1,6 @@
 package com.dreamdisplays.core.display.policy
 
+import com.dreamdisplays.core.display.region.RegionVisibility
 import java.util.Locale
 
 /**
@@ -58,6 +59,9 @@ object PolicyPaths {
         /** Only settable server-wide (`/display config`), not as one display's override. */
         val serverWideOnly: Boolean get() = this.field in DisplayPolicy.GLOBAL_ONLY
 
+        /** Only settable as one display's override (`/display policy`), not server-wide. */
+        val displayOnly: Boolean get() = this.field in DisplayPolicy.DISPLAY_ONLY
+
         /** Range or choices, for help / error text. */
         val hint: String
             get() = when (kind) {
@@ -69,6 +73,9 @@ object PolicyPaths {
                 is Kind.Text -> kind.description
             }
     }
+
+    /** A `WorldGuard` region id (its own allowed characters), up to 64 long. */
+    private val REGION_ID = Regex("""[A-Za-z0-9_,'+/-]{1,64}""")
 
     val all: List<Path> = listOf(
         Path("sync.enabled", "sync.enabled", Kind.Bool) { it.sync?.enabled },
@@ -90,6 +97,17 @@ object PolicyPaths {
         Path("visibility.max_distance_blocks", "visibility.maxDistanceBlocks", Kind.Decimal(0.0, 4_096.0)) {
             it.visibility?.maxDistanceBlocks
         },
+        Path("visibility.region", "visibility.region", Kind.Text(REGION_ID, "<WorldGuard region id>")) {
+            it.visibility?.region
+        },
+        Path(
+            "visibility.region_fade_blocks", "visibility.regionFadeBlocks",
+            Kind.Decimal(0.0, RegionVisibility.MAX_FADE_BLOCKS),
+        ) { it.visibility?.regionFadeBlocks },
+        Path(
+            "visibility.region_load_blocks", "visibility.regionLoadBlocks",
+            Kind.Decimal(0.0, RegionVisibility.MAX_LOAD_BLOCKS),
+        ) { it.visibility?.regionLoadBlocks },
         Path("quality.max_height", "quality.maxHeight", Kind.Whole(144, 4_320)) { it.quality?.maxHeight },
         Path("client.enabled", "client.enabled", Kind.Bool) { it.client?.enabled },
         Path("client.max_active_displays", "client.maxActiveDisplays", Kind.Whole(0, 16)) {

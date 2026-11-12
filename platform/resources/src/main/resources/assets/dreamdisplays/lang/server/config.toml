@@ -89,6 +89,10 @@ auto_pause_when_empty_seconds = 0
 
 [policy.visibility]
 # max_distance_blocks = 96  # displays further away are not loaded or played (players' render distance still applies)
+# A display can be tied to a WorldGuard region (per display only: /display policy <id> visibility.region <region id>):
+# only players in or near the region get it, and its sound fades out at the region's edge.
+# region_fade_blocks = 3    # the sound fades to silence over this many blocks outside the region (0 to 16)
+# region_load_blocks = 8    # clients load the display from this far outside the region (at least region_fade_blocks)
 
 [policy.quality]
 # max_height = 1080         # highest resolution clients stream (e.g. 720, 1080)

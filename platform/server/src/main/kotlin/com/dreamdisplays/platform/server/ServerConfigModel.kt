@@ -481,7 +481,12 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         startVolume = t.numberOrNull("policy.audio.start_volume")?.toDouble(),
         maxVolume = t.numberOrNull("policy.audio.max_volume")?.toDouble(),
     )
-    val visibility = DisplayPolicy.Visibility(t.numberOrNull("policy.visibility.max_distance_blocks")?.toDouble())
+    // visibility.region is one display's own setting only (DisplayPolicy.DISPLAY_ONLY): never read from here
+    val visibility = DisplayPolicy.Visibility(
+        maxDistanceBlocks = t.numberOrNull("policy.visibility.max_distance_blocks")?.toDouble(),
+        regionFadeBlocks = t.numberOrNull("policy.visibility.region_fade_blocks")?.toDouble(),
+        regionLoadBlocks = t.numberOrNull("policy.visibility.region_load_blocks")?.toDouble(),
+    )
     val quality = DisplayPolicy.Quality(t.numberOrNull("policy.quality.max_height")?.toInt())
     val client = DisplayPolicy.Client(
         enabled = t.boolOrNull("policy.client.enabled"),

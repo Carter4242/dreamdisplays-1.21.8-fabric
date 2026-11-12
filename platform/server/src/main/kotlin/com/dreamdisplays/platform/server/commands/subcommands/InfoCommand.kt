@@ -85,6 +85,7 @@ class InfoCommand : SubCommand {
                 displayUrl
             )
         )
+        RegionStatus.send(player, data)
         data.scheduledStart?.let { at ->
             val localSecond = ScheduleTimeUtil.localSecondOfDay(at, ScheduleTimeUtil.offsetMinutesOf(player.uniqueId))
             val actionKey =

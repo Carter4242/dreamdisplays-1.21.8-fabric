@@ -65,7 +65,15 @@ enum class ClientFeature(override val wire: String) : WireEnum {
      * Follows `DisplaySync.speedChangeFromRate`: a speed change scheduled ahead plays on at the old speed and switches
      * at the start instant, without stopping. Without it a speed change holds every viewer paused while they restart.
      */
-    SCHEDULED_SPEED("scheduled_speed");
+    SCHEDULED_SPEED("scheduled_speed"),
+
+    /**
+     * Follows `DisplayInfo.region` for a display tied to a `WorldGuard` region (`visibility.region`): loads it only
+     * within `visibility.regionLoadBlocks` of the region and fades its sound out over `visibility.regionFadeBlocks`
+     * outside it. Without it the server sends such a display only to players inside the region (hard edge: it is
+     * deleted for them when they walk out).
+     */
+    REGION_FADE("region_fade");
 
     companion object {
         /** Decodes a feature token, or returns `null` when unknown. */
