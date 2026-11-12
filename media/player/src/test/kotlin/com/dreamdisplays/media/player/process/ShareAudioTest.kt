@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class ShareAudioTest {
     private val self = 4242L
     private val chrome = Choice.App(100, "Google Chrome")
-    private val spotify = Choice.App(200, "Spotify")
+    private val zuluJavaw = "C:\\Users\\me\\.jdks\\zulu-21\\bin\\javaw.exe"
 
     @Test
     fun `except minecraft excludes the game's own process tree and never widens to the whole device`() {
@@ -37,19 +37,65 @@ class ShareAudioTest {
     }
 
     @Test
-    fun `the picker offers except minecraft first, then whole pc, the playing apps and no audio`() {
+    fun `a screen offers exactly except minecraft, whole pc and no audio, except minecraft preselected`() {
         assertEquals(
-            listOf(Choice.ExceptGame, Choice.WholePc, chrome, spotify, Choice.Off),
-            ShareAudio.options(Os.WINDOWS, processLoopback = true, apps = listOf(chrome, spotify)),
+            listOf(Choice.ExceptGame, Choice.WholePc, Choice.Off),
+            ShareAudio.options(Os.WINDOWS, processLoopback = true),
         )
         assertEquals(Choice.ExceptGame, ShareAudio.defaultChoice(Os.WINDOWS, processLoopback = true))
+        // No per-app choices for screens
+        assertTrue(ShareAudio.options(Os.WINDOWS, true).none { it is Choice.App })
     }
 
     @Test
-    fun `a picked window offers and defaults to its own app, listed once`() {
-        val options = ShareAudio.options(Os.WINDOWS, true, listOf(chrome, spotify), window = chrome)
-        assertEquals(listOf(chrome, Choice.ExceptGame, Choice.WholePc, spotify, Choice.Off), options)
-        assertEquals(chrome, ShareAudio.defaultChoice(Os.WINDOWS, true, window = chrome))
+    fun `without process loopback only the whole pc or nothing is offered, nothing preselected`() {
+        assertEquals(listOf(Choice.WholePc, Choice.Off), ShareAudio.options(Os.WINDOWS, processLoopback = false))
+        // Whole PC carries the game and voice chat (an echo at the display): offered, never preselected
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.WINDOWS, false))
+        assertEquals(listOf(Choice.WholePc, Choice.Off), ShareAudio.options(Os.LINUX, false))
+        assertEquals(listOf(Choice.WholePc, Choice.Off), ShareAudio.options(Os.LINUX, true))
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.LINUX, false))
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.LINUX, true))
+        // macOS: no sound step
+        assertTrue(ShareAudio.options(Os.MAC, false).isEmpty())
+        assertTrue(ShareAudio.options(Os.MAC, true).isEmpty())
+        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.MAC, false))
+    }
+
+    @Test
+    fun `every default is one of the options shown`() {
+        for (os in Os.entries) for (loopback in listOf(true, false)) {
+            val options = ShareAudio.options(os, loopback)
+            if (options.isNotEmpty()) assertTrue(ShareAudio.defaultChoice(os, loopback) in options, "$os $loopback")
+        }
+    }
+
+    @Test
+    fun `a shared window takes its own app's sound, without a step`() {
+        assertEquals(ShareAudio.WindowSound(chrome), ShareAudio.windowSound(Os.WINDOWS, processLoopback = true, app = chrome))
+        assertEquals(
+            listOf(Plan.ProcessLoopback(100, include = true)),
+            ShareAudio.plans(ShareAudio.windowSound(Os.WINDOWS, true, chrome).choice, Os.WINDOWS, self),
+        )
+    }
+
+    @Test
+    fun `a shared window goes silent, and says why, when its app cannot be captured on its own`() {
+        assertEquals(
+            ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.NO_PROCESS_LOOPBACK),
+            ShareAudio.windowSound(Os.WINDOWS, processLoopback = false, app = chrome),
+        )
+        assertEquals(
+            ShareAudio.WindowSound(Choice.Off, ShareAudio.WindowSilence.NOT_CAPTURABLE),
+            ShareAudio.windowSound(Os.WINDOWS, processLoopback = true, app = null),
+        )
+        // Never widened to everything but the game or the whole PC
+        for (loopback in listOf(true, false)) for (app in listOf(chrome, null)) {
+            val choice = ShareAudio.windowSound(Os.WINDOWS, loopback, app).choice
+            assertTrue(choice == Choice.Off || choice is Choice.App)
+        }
+        assertEquals(ShareAudio.WindowSound(Choice.Off), ShareAudio.windowSound(Os.LINUX, true, chrome))
+        assertEquals(ShareAudio.WindowSound(Choice.Off), ShareAudio.windowSound(Os.MAC, true, chrome))
     }
 
     @Test
@@ -58,21 +104,28 @@ class ShareAudioTest {
         assertTrue(ShareAudio.includesGame(root = 50, selfPid = self, selfAncestors = listOf(50, 4)))
         assertTrue(ShareAudio.includesGame(root = self, selfPid = self, selfAncestors = listOf(50)))
         assertFalse(ShareAudio.includesGame(root = 100, selfPid = self, selfAncestors = listOf(50, 4)))
+        assertFalse(
+            ShareAudio.includesGame(100, self, listOf(50), "C:\\Program Files\\Google\\chrome.exe", zuluJavaw),
+        )
     }
 
     @Test
-    fun `without process loopback only the whole pc or nothing is offered`() {
-        assertEquals(
-            listOf(Choice.WholePc, Choice.Off),
-            ShareAudio.options(Os.WINDOWS, processLoopback = false, apps = listOf(chrome), window = chrome),
-        )
-        // Whole PC carries the game and voice chat (an echo at the display): offered, never preselected
-        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.WINDOWS, false, window = chrome))
-        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.WINDOWS, false))
-        assertEquals(listOf(Choice.WholePc, Choice.Off), ShareAudio.options(Os.LINUX, false, emptyList()))
-        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.LINUX, false))
-        assertTrue(ShareAudio.options(Os.MAC, false, emptyList()).isEmpty())
-        assertEquals(Choice.Off, ShareAudio.defaultChoice(Os.MAC, false))
+    fun `a jvm is never just this app, whatever its pid`() {
+        // "Zulu Platform x64 Architecture": another Minecraft, a Java launcher, or the game under a pid not seen as it
+        assertTrue(ShareAudio.includesGame(300, self, listOf(50), zuluJavaw, zuluJavaw))
+        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "C:\\Program Files\\Java\\bin\\java.exe", null))
+        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "/usr/lib/jvm/bin/java", null))
+        // The game's own executable, whatever it is called
+        assertTrue(ShareAudio.includesGame(300, self, listOf(50), "C:\\Games\\mc\\Runtime.EXE", "c:\\games\\mc\\runtime.exe"))
+        assertTrue(ShareAudio.isJvm("JAVAW.EXE"))
+        assertFalse(ShareAudio.isJvm("C:\\Program Files\\JavaScript\\node.exe"))
+        assertFalse(ShareAudio.isJvm("javascript.exe"))
+    }
+
+    @Test
+    fun `the game itself is never captured as one app`() {
+        // Even if one were asked for, the game's own pid as "just this app" is no sound
+        assertTrue(ShareAudio.plans(Choice.App(self, "Minecraft"), Os.WINDOWS, self).isEmpty())
     }
 
     @Test

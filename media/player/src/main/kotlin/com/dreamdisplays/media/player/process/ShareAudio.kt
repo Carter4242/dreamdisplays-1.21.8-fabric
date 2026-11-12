@@ -17,7 +17,10 @@ object ShareAudio {
         /** Everything this PC plays, Minecraft and the voice chat it plays included. */
         data object WholePc : Choice
 
-        /** One app: process [pid] and the processes it started (a browser's audio runs in a child process). */
+        /**
+         * One app, a shared window's own: process [pid] and the processes it started (a browser's audio runs in a
+         * child process).
+         */
         data class App(val pid: Long, val name: String) : Choice
 
         /** Video only. */
@@ -41,9 +44,9 @@ object ShareAudio {
 
     /**
      * What to try for [choice] on [os], in order, given this game's [selfPid]; empty = no sound. Neither "Except
-     * Minecraft" nor "Just one app" ever widens to the whole PC on its own: that would stream the game, its voice chat
-     * (with this share's own playback, an echo) or a call the sharer did not mean to share. Older Windows (no process
-     * loopback) is never offered either; it gets "Whole PC" instead.
+     * Minecraft" nor a window's own app ever widens to the whole PC on its own: that would stream the game, its voice
+     * chat (with this share's own playback, an echo) or a call the sharer did not mean to share. Older Windows (no
+     * process loopback) is never offered either; it gets "Whole PC" instead.
      */
     fun plans(choice: Choice, os: Os, selfPid: Long): List<Plan> = when (os) {
         Os.MAC -> emptyList()
@@ -52,47 +55,68 @@ object ShareAudio {
             Choice.Off -> emptyList()
             Choice.WholePc -> listOf(Plan.DeviceLoopback)
             Choice.ExceptGame -> listOf(Plan.ProcessLoopback(selfPid, include = false))
-            is Choice.App -> listOf(Plan.ProcessLoopback(choice.pid, include = true))
+            // The game itself as "one app" would be its own sound and voice chat: none
+            is Choice.App -> if (choice.pid == selfPid) emptyList() else listOf(Plan.ProcessLoopback(choice.pid, include = true))
         }
     }
 
     /**
-     * The choices the picker offers on [os], in order: per-app ones only where process loopback exists, and [apps]
-     * (processes playing sound now) each as "Just <app>". [window] is the app owning a picked window, offered first.
+     * The sound choices for a shared screen on [os], in order. Windows with process loopback: everything but the
+     * game, the whole PC, or none; Windows without it and Linux: the whole PC or none; macOS: no sound step.
      */
-    fun options(os: Os, processLoopback: Boolean, apps: List<Choice.App>, window: Choice.App? = null): List<Choice> =
-        when (os) {
-            Os.MAC -> emptyList()
-            Os.LINUX -> listOf(Choice.WholePc, Choice.Off)
-            Os.WINDOWS -> buildList {
-                val perApp = processLoopback
-                if (perApp && window != null) add(window)
-                add(if (perApp) Choice.ExceptGame else Choice.WholePc)
-                if (perApp) add(Choice.WholePc)
-                if (perApp) apps.filter { a -> window == null || a.pid != window.pid }.forEach(::add)
-                add(Choice.Off)
-            }
-        }
-
-    /**
-     * True when app [root]'s sound (its whole process tree) includes this game's: [root] is the game ([selfPid]) or
-     * one of its [selfAncestors] (the launcher that started it, Steam). "Just this app" there would stream the game
-     * and the voice chat it plays.
-     */
-    fun includesGame(root: Long, selfPid: Long, selfAncestors: List<Long>): Boolean = root == selfPid || root in selfAncestors
-
-    /**
-     * The choice selected when the audio step opens: a picked window's own app, else everything but the game. Where
-     * only the whole PC can be captured (Linux, Windows before process loopback) no sound: the whole PC carries the
-     * game and the voice chat it plays, which the people at the display would hear again as an echo.
-     */
-    fun defaultChoice(os: Os, processLoopback: Boolean, window: Choice.App? = null): Choice = when {
-        os == Os.MAC -> Choice.Off
-        os == Os.LINUX -> Choice.Off
-        !processLoopback -> Choice.Off
-        window != null -> window
-        else -> Choice.ExceptGame
+    fun options(os: Os, processLoopback: Boolean): List<Choice> = when (os) {
+        Os.MAC -> emptyList()
+        Os.LINUX -> listOf(Choice.WholePc, Choice.Off)
+        Os.WINDOWS -> if (processLoopback) listOf(Choice.ExceptGame, Choice.WholePc, Choice.Off) else listOf(Choice.WholePc, Choice.Off)
     }
+
+    /**
+     * The screen sound selected when the sound step opens: everything but the game. Where only the whole PC can be
+     * captured (Linux, Windows before process loopback) no sound: the whole PC carries the game and the voice chat it
+     * plays, which the people at the display would hear again as an echo.
+     */
+    fun defaultChoice(os: Os, processLoopback: Boolean): Choice =
+        if (os == Os.WINDOWS && processLoopback) Choice.ExceptGame else Choice.Off
+
+    /** Why a shared window goes without sound. */
+    enum class WindowSilence {
+        /** This Windows cannot capture one app's sound (before build 20348). */
+        NO_PROCESS_LOOPBACK,
+
+        /** Its app cannot be captured on its own: the game, a launcher or JVM it runs under, or not found. */
+        NOT_CAPTURABLE,
+    }
+
+    /** What a shared window sounds like: [choice], and when that is no sound on Windows, [silence] says why. */
+    data class WindowSound(val choice: Choice, val silence: WindowSilence? = null)
+
+    /**
+     * A shared window's sound, picked without asking: its own app's ([app], null when it cannot be captured on its own,
+     * see [includesGame]), never anything wider. Only Windows shares windows.
+     */
+    fun windowSound(os: Os, processLoopback: Boolean, app: Choice.App?): WindowSound = when {
+        os != Os.WINDOWS -> WindowSound(Choice.Off)
+        !processLoopback -> WindowSound(Choice.Off, WindowSilence.NO_PROCESS_LOOPBACK)
+        app == null -> WindowSound(Choice.Off, WindowSilence.NOT_CAPTURABLE)
+        else -> WindowSound(app)
+    }
+
+    /**
+     * True when app [root]'s sound (its whole process tree) includes this game's, or may be the game: [root] is the
+     * game ([selfPid]) or one of its [selfAncestors] (the launcher that started it, Steam), or runs a JVM ([rootExe]
+     * is `java`/`javaw`, or the game's own [selfExe]): another Minecraft, or a Java launcher. "Just this app" there
+     * would stream the game and the voice chat it plays.
+     */
+    fun includesGame(
+        root: Long, selfPid: Long, selfAncestors: List<Long>, rootExe: String? = null, selfExe: String? = null,
+    ): Boolean = root == selfPid || root in selfAncestors ||
+            (rootExe != null && (isJvm(rootExe) || (selfExe != null && rootExe.equals(selfExe, ignoreCase = true))))
+
+    /** True when executable [path] is a Java runtime's launcher (`java`, `javaw`, any vendor). */
+    fun isJvm(path: String): Boolean =
+        path.substringAfterLast('\\').substringAfterLast('/').lowercase().removeSuffix(".exe") in JVM_EXES
+
+    private val JVM_EXES = setOf("java", "javaw")
 
     /** PCM layout of a pipe input. */
     data class Format(val sampleRate: Int, val channels: Int, val float: Boolean) {

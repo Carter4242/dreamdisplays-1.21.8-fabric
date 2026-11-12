@@ -405,7 +405,6 @@ class DisplayMenu private constructor(
                 ScreenShare.stop()
                 shareDropdown.hide()
             } else {
-                if (!shareDropdown.visible) ScreenShare.refreshAudioApps()
                 shareDropdown.toggle()
             }
         })
@@ -632,7 +631,7 @@ class DisplayMenu private constructor(
                 val bottom = shareButton.y + shareButton.height
                 g.fill(shareButton.x + 2, bottom + 1, shareButton.x + shareButton.width - 2, bottom + 3, 0xFFFF5050.toInt())
             }
-            shareDropdown.draw(g, shareButton.x + shareButton.width / 2, shareButton.y, mouseX, mouseY)
+            shareDropdown.draw(g, shareButton.x + shareButton.width / 2, shareButton.y, mouseX, mouseY, width)
         } else {
             shareDropdown.hide()
         }
@@ -990,18 +989,24 @@ class DisplayMenu private constructor(
     }
 
     /**
-     * Share picker, second page: the sound for [target], its default marked (a window's own app, else everything
-     * but the game). macOS has no sound to pick, so a pick there starts at once.
+     * Share picker, second page: the sound for a screen [target], its default marked (everything but the game, or no
+     * sound where only the whole PC can be captured). A window takes its own app's sound without a step, and macOS
+     * has no sound to pick, so a pick there starts at once.
      */
     private fun shareAudioRows(target: ScreenCapture.Target): List<ShareRow>? {
         val os = ScreenShare.audioOs
         val start = { choice: ShareAudio.Choice -> ScreenShare.start(displayScreen.uuid, target, choice); null }
         // Nothing to pick: macOS has no share sound, and a server may share screens without it
         if (os == ShareAudio.Os.MAC || ScreenShare.soundOffByServer) return start(ShareAudio.Choice.Off)
+        if (target is ScreenCapture.Window) {
+            val sound = ScreenShare.windowSound(target)
+            ScreenShare.start(displayScreen.uuid, target, sound.choice, sound.silence)
+            return null
+        }
         val perApp = ScreenShare.processLoopback
-        val windowApp = (target as? ScreenCapture.Window)?.let(ScreenShare::windowApp)
-        val default = ShareAudio.defaultChoice(os, perApp, windowApp)
-        val options = ShareAudio.options(os, perApp, ScreenShare.audioApps(), windowApp)
+        val default = ShareAudio.defaultChoice(os, perApp)
+        val options = ShareAudio.options(os, perApp)
+        if (options.isEmpty()) return start(ShareAudio.Choice.Off)
         return buildList {
             add(ShareRow.Header(ClientMessage.SHARE_AUDIO.text()))
             options.forEach { choice ->
@@ -1009,9 +1014,8 @@ class DisplayMenu private constructor(
                     ShareAudio.Choice.ExceptGame -> ClientMessage.SHARE_AUDIO_EXCEPT_GAME.text()
                     ShareAudio.Choice.WholePc -> ClientMessage.SHARE_AUDIO_WHOLE_PC.text()
                     ShareAudio.Choice.Off -> ClientMessage.SHARE_AUDIO_NONE.text()
-                    is ShareAudio.Choice.App ->
-                        if (choice == windowApp) ClientMessage.SHARE_AUDIO_THIS_APP.text(choice.name)
-                        else ClientMessage.SHARE_AUDIO_APP.text(choice.name)
+                    // Screens never offer one app (a window's own sound is picked with the window)
+                    is ShareAudio.Choice.App -> return@forEach
                 }
                 add(ShareRow.Item(label, selected = choice == default) { start(choice) })
             }

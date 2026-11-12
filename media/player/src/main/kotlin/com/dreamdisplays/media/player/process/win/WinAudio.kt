@@ -339,63 +339,6 @@ object WinAudio {
         }
     }
 
-    /**
-     * Processes with an active (playing) audio session on the default output, as share choices: one per program,
-     * each named by its file description and pointing at the topmost process of its own program (so "this app"
-     * includes the helper processes a browser plays through). Excludes [selfPid] and system sounds.
-     */
-    fun playingApps(selfPid: Long): List<ShareAudio.Choice.App> {
-        val pids = LinkedHashSet<Long>()
-        val com = WinApi.comInit()
-        try {
-            val manager = activateDefaultRender(WinApi.IID_IAUDIO_SESSION_MANAGER2)
-            try {
-                val out = PointerByReference()
-                check(call(manager, 5, out), "GetSessionEnumerator")
-                val sessions = out.value
-                try {
-                    val count = IntByReference()
-                    check(call(sessions, 3, count), "IAudioSessionEnumerator.GetCount")
-                    for (i in 0 until count.value) {
-                        if (call(sessions, 4, i, out) < 0) continue
-                        val control = out.value
-                        try {
-                            if (call(control, 0, WinApi.IID_IAUDIO_SESSION_CONTROL2, out) < 0) continue
-                            val control2 = out.value
-                            try {
-                                val state = IntByReference()
-                                val pid = IntByReference()
-                                val active = call(control2, 3, state) >= 0 && state.value == 1
-                                // IsSystemSoundsSession: S_OK (0) for the system sounds session
-                                val system = call(control2, 15) == WinApi.S_OK
-                                if (active && !system && call(control2, 14, pid) >= 0 && pid.value != 0) {
-                                    pids += pid.value.toLong() and 0xFFFFFFFFL
-                                }
-                            } finally {
-                                release(control2)
-                            }
-                        } finally {
-                            release(control)
-                        }
-                    }
-                } finally {
-                    release(sessions)
-                }
-            } finally {
-                release(manager)
-            }
-        } finally {
-            if (com) runCatching { Native.load("ole32", CoUninit::class.java).CoUninitialize() }
-        }
-        val apps = LinkedHashMap<Long, ShareAudio.Choice.App>()
-        for (pid in pids) {
-            val root = programRoot(pid)
-            if (includesGame(root, selfPid)) continue
-            apps.getOrPut(root) { ShareAudio.Choice.App(root, appName(root)) }
-        }
-        return apps.values.sortedBy { it.name.lowercase() }
-    }
-
     private fun exeOf(pid: Long): String? =
         ProcessHandle.of(pid).flatMap { it.info().command() }.orElse(null)
 
@@ -412,10 +355,11 @@ object WinAudio {
     }
 
     /**
-     * True when capturing app [root] with its process tree would capture this game ([selfPid]) too: it is the game,
-     * or the game runs under it (a launcher, Steam).
+     * True when capturing app [root] with its process tree would capture this game ([selfPid]) too, or may be a game:
+     * it is the game, the game runs under it (a launcher, Steam), or it runs a JVM (see [ShareAudio.includesGame]).
      */
-    fun includesGame(root: Long, selfPid: Long): Boolean = ShareAudio.includesGame(root, selfPid, ancestors(selfPid))
+    fun includesGame(root: Long, selfPid: Long): Boolean =
+        ShareAudio.includesGame(root, selfPid, ancestors(selfPid), exeOf(root), exeOf(selfPid))
 
     /** [pid]'s parent, its parent, and so on (at most 32). */
     private fun ancestors(pid: Long): List<Long> = buildList {

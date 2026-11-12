@@ -58,6 +58,8 @@ object ScreenShare {
         val softwareOnly: Boolean = false,
         settings: ScreenCapture.Settings = ScreenCapture.Settings(),
         val audioChoice: ShareAudio.Choice = ShareAudio.Choice.Off,
+        /** A shared window goes without sound for this reason (told once it starts), or null. */
+        val windowSilence: ShareAudio.WindowSilence? = null,
         /** The server's caps for this share (0: none) and its bitrate (0: the client's default). */
         val serverMaxFps: Int = 0,
         val serverMaxHeight: Int = 0,
@@ -116,6 +118,7 @@ object ScreenShare {
     /** What was asked for per display, until the server answers; [nonce] names that start. */
     private data class Pick(
         val target: ScreenCapture.Target, val audio: ShareAudio.Choice, val urlBefore: String?, val nonce: Long,
+        val windowSilence: ShareAudio.WindowSilence? = null,
     )
 
     /** A fresh non-zero share nonce. */
@@ -147,22 +150,6 @@ object ScreenShare {
 
     private val selfPid: Long = ProcessHandle.current().pid()
 
-    @Volatile
-    private var playingApps: List<ShareAudio.Choice.App> = emptyList()
-
-    /** Apps playing sound as of the last [refreshAudioApps] (Windows), for "Just <app>". */
-    fun audioApps(): List<ShareAudio.Choice.App> = playingApps
-
-    /** Re-reads which apps play sound, in the background (COM lives off the render thread). */
-    fun refreshAudioApps() {
-        if (!processLoopback) return
-        thread("DreamDisplays-share-apps") {
-            runCatching { WinAudio.playingApps(selfPid) }
-                .onSuccess { playingApps = it }
-                .onFailure { logger.debug("Share: listing apps playing sound failed: {}", it.toString()) }
-        }
-    }
-
     /** Windows that can be shared (Windows only), frontmost first. Fast enough for the render thread. */
     fun windows(): List<ScreenCapture.Window> {
         if (audioOs != ShareAudio.Os.WINDOWS) return emptyList()
@@ -173,16 +160,23 @@ object ScreenShare {
     }
 
     /**
-     * The app owning [window], as a "Just this app" choice (its program's topmost process); null for a Store app whose
-     * process could not be found (its frame host plays nothing, so "this app" would be silence), and for an app this
-     * game runs under (its launcher, Steam): its process tree would carry the game's sound and voice chat.
+     * The app owning [window], whose sound a window share carries (its program's topmost process); null for a Store
+     * app whose process could not be found (its frame host plays nothing, so "this app" would be silence), and for
+     * the game, an app it runs under (its launcher, Steam) or any JVM: its process tree would (or may) carry the
+     * game's sound and voice chat.
      */
     fun windowApp(window: ScreenCapture.Window): ShareAudio.Choice.App? {
         if (runCatching { WinWindows.isFrameHost(window.pid) }.getOrDefault(false)) return null
         val root = runCatching { WinAudio.programRoot(window.pid) }.getOrDefault(window.pid)
-        if (runCatching { WinAudio.includesGame(root, selfPid) }.getOrDefault(true)) return null
+        if (listOf(window.pid, root).distinct().any { runCatching { WinAudio.includesGame(it, selfPid) }.getOrDefault(true) }) {
+            return null
+        }
         return ShareAudio.Choice.App(root, window.app)
     }
+
+    /** A shared [window]'s sound: its own app's, or none (and why), with no step to pick it. */
+    fun windowSound(window: ScreenCapture.Window): ShareAudio.WindowSound =
+        ShareAudio.windowSound(audioOs, processLoopback, if (processLoopback) windowApp(window) else null)
 
     /** True when this server lets this player share, and this OS has a capture source. */
     val available: Boolean
@@ -294,12 +288,18 @@ object ScreenShare {
         }
     }
 
-    /** Asks the server to let this client share [target] with [audio] to [displayId]; capture starts once it agrees. */
-    fun start(displayId: UUID, target: ScreenCapture.Target, audio: ShareAudio.Choice) {
+    /**
+     * Asks the server to let this client share [target] with [audio] to [displayId]; capture starts once it agrees.
+     * [windowSilence]: why a window goes without sound, told to the sharer when it starts.
+     */
+    fun start(
+        displayId: UUID, target: ScreenCapture.Target, audio: ShareAudio.Choice,
+        windowSilence: ShareAudio.WindowSilence? = null,
+    ) {
         if (!available) return
         refreshGlfwScreens()
         val nonce = newNonce()
-        pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl, nonce)
+        pending[displayId] = Pick(target, audio, DisplayRegistry.screens[displayId]?.videoUrl, nonce, windowSilence)
         ShareTiming.mark("share.request", displayId.toString().take(8))
         Initializer.sendPacket(ScreenShareRequest(displayId, start = true, nonce = nonce))
     }
@@ -342,7 +342,8 @@ object ScreenShare {
             launch(
                 Running(
                     state.id, asked.target, asked.urlBefore, state.encoder == ScreenShareState.ENCODER_SOFTWARE, settings,
-                    audio, state.maxFps, state.maxHeight, state.bitrateKbps,
+                    audio, if (state.noSound) null else asked.windowSilence, state.maxFps, state.maxHeight,
+                    state.bitrateKbps,
                 ).also { it.nonce = asked.nonce },
                 state.publishUrl,
             )
@@ -810,7 +811,14 @@ object ScreenShare {
         }
         r.pipe?.start()
         val started = System.currentTimeMillis()
-        if (announce) notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
+        if (announce) {
+            notify(ClientMessage.SHARE_STARTED.component().withStyle(ChatFormatting.GREEN))
+            when (r.windowSilence) {
+                ShareAudio.WindowSilence.NO_PROCESS_LOOPBACK -> ClientMessage.SHARE_WINDOW_SILENT_WINDOWS
+                ShareAudio.WindowSilence.NOT_CAPTURABLE -> ClientMessage.SHARE_WINDOW_SILENT_APP
+                null -> null
+            }?.let { notify(it.component().withStyle(ChatFormatting.YELLOW)) }
+        }
         logger.info("Sharing {} with {} at {} fps, up to {}p, sound: {}.", describe(target), plan, r.settings.fps,
             r.settings.maxHeight, r.audio ?: "none")
         val changed = java.util.concurrent.atomic.AtomicBoolean()
