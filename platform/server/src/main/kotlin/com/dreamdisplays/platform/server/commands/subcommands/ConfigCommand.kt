@@ -92,7 +92,7 @@ object ConfigCommand {
             "live.relay_control_token", PolicyPaths.Kind.Text(Regex("""[^\s"]{16,}"""), "<token, 16+ characters>"),
             secret = true, redact = { SecretLogFilter.REDACTED },
         ) { it.live.relay_control_token.ifEmpty { null }?.let { SecretLogFilter.REDACTED } },
-    ) +PolicyPaths.all.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
+    ) +PolicyPaths.all.filter { !it.displayOnly }.map { path -> Key("policy.${path.name}", path.kind) { path.get(it.policy) } }
 
     private val byName = keys.associateBy { it.name }
 

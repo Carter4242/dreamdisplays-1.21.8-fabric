@@ -159,6 +159,13 @@ object KaraokeManager {
     /** True while someone sings on [display] (it is in karaoke). */
     fun isActive(display: DisplayData): Boolean = states[display.id]?.singers?.isNotEmpty() == true
 
+    /**
+     * Whether [playerId] sings on display [displayId] now. A singer keeps a display tied to a region wherever they stand
+     * (and hears its track unfaded): they sing to it.
+     */
+    fun isSinging(displayId: UUID, playerId: UUID): Boolean =
+        states[displayId]?.singers?.containsKey(playerId) == true
+
     /** Waiting line entries of [display]. */
     fun lineSize(display: DisplayData): Int = states[display.id]?.line?.size ?: 0
 
@@ -577,7 +584,9 @@ object KaraokeManager {
         val radius = audioRadius(display)
         return world.players.mapNotNull {
             if (it.uniqueId in singers) return@mapNotNull null
-            val inRange = distanceToBox(it.location.x, it.location.y, it.location.z, display.box) <= radius
+            // A display tied to a region: its singers are heard where the display is (in the region or its fade band)
+            val inRange = distanceToBox(it.location.x, it.location.y, it.location.z, display.box) <= radius &&
+                    DisplayManager.hearsDisplay(it, display)
             if (inRange || everyone) {
                 StageListener(it.uniqueId, it.ping.toLong(), inRange, KaraokeMeasurements.listenerLatency(it.uniqueId))
             } else null

@@ -9,6 +9,8 @@ import com.dreamdisplays.platform.client.capabilities.CapabilityNegotiationServi
 import com.dreamdisplays.platform.client.core.ClientApplication
 import com.dreamdisplays.platform.client.core.ClientLifecycleEvent
 import com.dreamdisplays.platform.client.core.DreamServices
+import com.dreamdisplays.core.display.region.RegionVisibility
+import com.dreamdisplays.platform.client.displays.DisplayRegions
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.platform.client.displays.DisplayScreen
@@ -146,9 +148,12 @@ object ClientTickManager {
             } else {
                 displayScreen.renderDistance + DORMANT_HYSTERESIS_BLOCKS
             }
-            // A display in another world is out of range whatever its coordinates
+            // A display in another world is out of range whatever its coordinates; one tied to a region past its load
+            // distance of the region too (a loaded one a little further, so the load edge does not flap)
+            val regionSlack = if (displayScreen.isDormant) 0.0 else RegionVisibility.UNLOAD_SLACK_BLOCKS
             val outOfRange = !displayScreen.isInWorldHere ||
-                    threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget
+                    threshold < displayScreen.getDistanceToScreen(playerPos) || displayScreen in overBudget ||
+                    !DisplayRegions.mayLoad(displayScreen.uuid, displayScreen.policy, player.x, player.y, player.z, regionSlack)
             // Switched off by the server or by the player (`/display off`): everything goes, popouts, virtual and
             // prepared displays included (while off no description reaches a loaded display, so one kept would play on
             // an old video)

@@ -47,7 +47,56 @@ data class DisplayInfo(
     @ProtoNumber(26) val mediaGen: Long = 0,
     /** Dimension key of the display's world (`minecraft:overworld`); empty from older servers and for virtual displays. */
     @ProtoNumber(27) val world: String = "",
+    /**
+     * The `WorldGuard` region the display is tied to (its policy's `visibility.region`), when the server could resolve
+     * it; absent otherwise (also from older servers). Clients without `ClientFeature.REGION_FADE` ignore it.
+     */
+    @ProtoNumber(28) val region: DisplayRegionShape? = null,
 ) : DreamPacket
+
+/**
+ * A region's shape on the wire ([com.dreamdisplays.core.display.region.RegionShape]): [kind] 1 = cuboid ([minX]..[maxX],
+ * [minY]..[maxY], [minZ]..[maxZ]), 2 = polygon (corners [xs] / [zs], layers [minY]..[maxY]). Block coordinates,
+ * inclusive. Any other kind is one this client does not know: the display is treated as having no usable region.
+ */
+@Serializable
+data class DisplayRegionShape(
+    @ProtoNumber(1) val kind: Int = 0,
+    @ProtoNumber(2) @ProtoType(ProtoIntegerType.SIGNED) val minX: Int = 0,
+    @ProtoNumber(3) @ProtoType(ProtoIntegerType.SIGNED) val minY: Int = 0,
+    @ProtoNumber(4) @ProtoType(ProtoIntegerType.SIGNED) val minZ: Int = 0,
+    @ProtoNumber(5) @ProtoType(ProtoIntegerType.SIGNED) val maxX: Int = 0,
+    @ProtoNumber(6) @ProtoType(ProtoIntegerType.SIGNED) val maxY: Int = 0,
+    @ProtoNumber(7) @ProtoType(ProtoIntegerType.SIGNED) val maxZ: Int = 0,
+    @ProtoNumber(8) @ProtoType(ProtoIntegerType.SIGNED) val xs: List<Int> = emptyList(),
+    @ProtoNumber(9) @ProtoType(ProtoIntegerType.SIGNED) val zs: List<Int> = emptyList(),
+) {
+    /** The shape, or null for an unknown [kind] or one that does not make sense (no area, too many corners). */
+    fun toShape(): com.dreamdisplays.core.display.region.RegionShape? = runCatching {
+        when (kind) {
+            CUBOID -> com.dreamdisplays.core.display.region.RegionShape.Cuboid(minX, minY, minZ, maxX, maxY, maxZ)
+            POLYGON -> if (xs.size > MAX_CORNERS) null else com.dreamdisplays.core.display.region.RegionShape.Polygon(xs, zs, minY, maxY)
+            else -> null
+        }
+    }.getOrNull()
+
+    companion object {
+        const val CUBOID = 1
+        const val POLYGON = 2
+
+        /** Corners a polygon may have on the wire; a larger one is not sent (nobody gets its display). */
+        const val MAX_CORNERS = 4_096
+
+        /** The wire form of [shape], or null when it cannot be sent (more than [MAX_CORNERS] corners). */
+        fun of(shape: com.dreamdisplays.core.display.region.RegionShape): DisplayRegionShape? = when (shape) {
+            is com.dreamdisplays.core.display.region.RegionShape.Cuboid ->
+                DisplayRegionShape(CUBOID, shape.minX, shape.minY, shape.minZ, shape.maxX, shape.maxY, shape.maxZ)
+            is com.dreamdisplays.core.display.region.RegionShape.Polygon ->
+                if (shape.xs.size > MAX_CORNERS) null
+                else DisplayRegionShape(POLYGON, minY = shape.minY, maxY = shape.maxY, xs = shape.xs, zs = shape.zs)
+        }
+    }
+}
 
 /** Removes a display (server broadcast) or requests its deletion (client action). */
 @Serializable

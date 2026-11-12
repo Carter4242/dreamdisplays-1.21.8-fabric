@@ -121,9 +121,24 @@ data class DisplayPolicy(
 
     /** How far away a display is still loaded and played; the player's own render distance still applies. */
     @Serializable
-    data class Visibility(val maxDistanceBlocks: Double? = null) {
-        fun mergedOver(base: Visibility?): Visibility =
-            Visibility(maxDistanceBlocks = maxDistanceBlocks ?: base?.maxDistanceBlocks)
+    data class Visibility(
+        val maxDistanceBlocks: Double? = null,
+        /**
+         * Id of a `WorldGuard` region in the display's world: only players in or near it get the display, and its sound
+         * fades out at the region's edge (see `RegionVisibility`). One display's own setting only ([DISPLAY_ONLY]).
+         */
+        val region: String? = null,
+        /** With [region]: over how many blocks outside the region the sound fades to silence. */
+        val regionFadeBlocks: Double? = null,
+        /** With [region]: how far outside the region a client starts loading the display (at least [regionFadeBlocks]). */
+        val regionLoadBlocks: Double? = null,
+    ) {
+        fun mergedOver(base: Visibility?): Visibility = Visibility(
+            maxDistanceBlocks = maxDistanceBlocks ?: base?.maxDistanceBlocks,
+            region = region ?: base?.region,
+            regionFadeBlocks = regionFadeBlocks ?: base?.regionFadeBlocks,
+            regionLoadBlocks = regionLoadBlocks ?: base?.regionLoadBlocks,
+        )
     }
 
     /** Stream quality limits: the highest resolution (video height) clients pick for this display. */
@@ -396,6 +411,9 @@ data class DisplayPolicy(
             "client.queuePreload", "client.autoWarm",
             "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds", "debug.logLevel",
         )
+
+        /** Field paths that only work as one display's override, never as a server-wide `[policy.*]` default. */
+        val DISPLAY_ONLY: Set<String> = setOf("visibility.region")
 
         /** No overrides at all. */
         val EMPTY = DisplayPolicy()

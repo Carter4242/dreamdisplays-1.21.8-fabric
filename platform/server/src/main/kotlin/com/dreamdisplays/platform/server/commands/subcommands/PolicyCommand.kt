@@ -3,14 +3,18 @@ package com.dreamdisplays.platform.server.commands.subcommands
 import com.dreamdisplays.core.command.Perm
 import com.dreamdisplays.core.display.policy.PlayerPolicies
 import com.dreamdisplays.core.display.policy.PolicyPaths
+import com.dreamdisplays.core.display.region.RegionVisibility
 import com.dreamdisplays.platform.server.PaperServer
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
+import com.dreamdisplays.platform.server.datatypes.display.PaperDisplayData
 import com.dreamdisplays.platform.server.datatypes.display.shortLabel
 import com.dreamdisplays.platform.server.managers.DisplayManager
+import com.dreamdisplays.platform.server.managers.DisplayRegions
 import com.dreamdisplays.platform.server.policy.ClientErrorReports
 import com.dreamdisplays.platform.server.policy.DisplayPolicies
 import com.dreamdisplays.platform.server.policy.PlayerPolicyOverrides
 import com.dreamdisplays.platform.server.utils.ServerMessage
+import com.dreamdisplays.platform.server.utils.WorldGuardRegions
 import com.dreamdisplays.platform.server.utils.sendTo
 import io.github.arnodoelinger.platformweaver.PaperOnly
 import org.bukkit.Bukkit
@@ -49,6 +53,7 @@ object PolicyCommand {
                     return
                 }
                 val raw = if (value.equals(RESET, ignoreCase = true)) null else value
+                if (path.field == REGION_FIELD && raw != null && !regionUsable(sender, display, raw.trim())) return
                 val updated = PolicyPaths.apply(DisplayPolicies.override(display), path, raw)
                 val applied = updated != null && DisplayPolicies.setOverride(display, updated)
                 when {
@@ -57,6 +62,10 @@ object PolicyCommand {
                     else -> ServerMessage.POLICY_SET.sendTo(
                         sender, path.name, PolicyPaths.format(path.get(updated)), display.shortLabel,
                     )
+                }
+                // What the region now does (or why nobody sees the display)
+                if (applied && path.field.startsWith(REGION_FIELD)) {
+                    (display as? PaperDisplayData)?.let { RegionStatus.send(sender, it) }
                 }
             }
         }
@@ -116,12 +125,40 @@ object PolicyCommand {
         }
     }
 
+    private const val REGION_FIELD = "visibility.region"
+
+    /**
+     * Whether [display] may be tied to `WorldGuard` region [regionId]; says why not when it may not. Refused: no
+     * `WorldGuard`, a virtual display, a region that is neither a cuboid nor a polygon. A region that does not exist
+     * (yet) is accepted: the display is then visible to nobody until it does, which the status line after it says.
+     */
+    private fun regionUsable(sender: CommandSender, display: DisplayData, regionId: String): Boolean {
+        if (!WorldGuardRegions.isAvailable()) {
+            ServerMessage.POLICY_REGION_NO_WORLDGUARD.sendTo(sender)
+            return false
+        }
+        val paper = display as? PaperDisplayData ?: return false
+        val preview = DisplayRegions.preview(paper, regionId)
+        if (preview is RegionVisibility.State.Unavailable && preview.reason in REFUSED) {
+            ServerMessage.POLICY_REGION_REFUSED.sendTo(
+                sender, display.shortLabel, regionId, RegionStatus.reasonText(sender, preview.reason, paper),
+            )
+            return false
+        }
+        return true
+    }
+
+    private val REFUSED = setOf(
+        RegionVisibility.Reason.NO_WORLDGUARD, RegionVisibility.Reason.UNSUPPORTED_SHAPE, RegionVisibility.Reason.VIRTUAL,
+    )
+
     /** Suggestions for the key slot of `policy player`: the keys one player may have, plus `reset`. */
     fun playerKeySuggestions(): List<String> = PlayerPolicies.keys.map { it.name } + RESET
 
     private fun show(sender: CommandSender, display: DisplayData) {
         ServerMessage.POLICY_HEADER.sendTo(sender, display.shortLabel)
         perDisplay.forEach { showOne(sender, display, it, header = false) }
+        (display as? PaperDisplayData)?.let { RegionStatus.send(sender, it) }
     }
 
     private fun showOne(sender: CommandSender, display: DisplayData, path: PolicyPaths.Path, header: Boolean = true) {
@@ -131,6 +168,7 @@ object PolicyCommand {
         ServerMessage.POLICY_LINE.sendTo(
             sender, path.name, PolicyPaths.format(effective), PolicyPaths.format(override),
         )
+        if (header && path.field.startsWith(REGION_FIELD)) (display as? PaperDisplayData)?.let { RegionStatus.send(sender, it) }
     }
 
     private fun resolve(sender: CommandSender, token: String): DisplayData? = resolvePaperDisplay(sender, token)

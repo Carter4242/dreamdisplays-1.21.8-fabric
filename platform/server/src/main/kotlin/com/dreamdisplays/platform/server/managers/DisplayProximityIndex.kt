@@ -35,9 +35,16 @@ internal class DisplayProximityIndex {
     fun trackedNearbyPlayerIds(displayId: UUID): List<UUID> =
         nearbyPlayersByDisplay[displayId]?.toList() ?: []
 
-    /** Updates the cached index after [playerId]'s entity task computed their nearby displays. */
-    fun update(playerId: UUID, nearbyDisplayIds: Set<UUID>) {
-        val previous = nearbyDisplaysByPlayer.put(playerId, nearbyDisplayIds) ?: emptySet()
+    /** Whether [playerId] was near [displayId] at their last update. */
+    fun isTracked(displayId: UUID, playerId: UUID): Boolean = nearbyDisplaysByPlayer[playerId]?.contains(displayId) == true
+
+    /**
+     * Updates the cached index after [playerId]'s entity task computed their nearby displays. Returns the displays they
+     * were near before, or null when the index knew nothing of them yet.
+     */
+    fun update(playerId: UUID, nearbyDisplayIds: Set<UUID>): Set<UUID>? {
+        val known = nearbyDisplaysByPlayer.put(playerId, nearbyDisplayIds)
+        val previous = known ?: emptySet()
 
         (previous - nearbyDisplayIds).forEach { displayId ->
             nearbyPlayersByDisplay[displayId]?.remove(playerId)
@@ -45,5 +52,6 @@ internal class DisplayProximityIndex {
         (nearbyDisplayIds - previous).forEach { displayId ->
             nearbyPlayersByDisplay.computeIfAbsent(displayId) { ConcurrentHashMap.newKeySet() }.add(playerId)
         }
+        return known
     }
 }

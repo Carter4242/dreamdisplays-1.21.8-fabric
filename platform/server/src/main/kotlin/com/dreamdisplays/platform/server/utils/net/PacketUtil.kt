@@ -81,6 +81,7 @@ object PacketUtil {
         customData: Map<String, ByteArray> = emptyMap(),
         mediaGen: Long = 0L,
         world: String = "",
+        region: com.dreamdisplays.core.protocol.common.packets.DisplayRegionShape? = null,
         sendsTo: (Player, DisplayInfo) -> Boolean = { _, _ -> true },
     ) {
         val isVertical = facing == BlockFace.UP || facing == BlockFace.DOWN
@@ -100,6 +101,7 @@ object PacketUtil {
             customData = customData,
             mediaGen = mediaGen,
             world = world,
+            region = region,
         )
         if (access == DisplayAccess.REGION && isRegionMember != null) {
             recipients.forEach { player ->

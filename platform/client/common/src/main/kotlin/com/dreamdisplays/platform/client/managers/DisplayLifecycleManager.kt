@@ -14,6 +14,7 @@ import com.dreamdisplays.core.services.DisplayStorage
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayDimensions
 import com.dreamdisplays.platform.client.displays.DisplayPolicyCache
+import com.dreamdisplays.platform.client.displays.DisplayRegions
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.displays.DisplayScreen
 import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager.MAX_DISPLAY_BLOCKS
@@ -60,6 +61,7 @@ object DisplayLifecycleManager {
         if (!ClientStateManager.displaysEnabled) return
 
         val policy = DisplayPolicyCache.update(packet.id, acceptedCustomData(packet))
+        DisplayRegions.update(packet)
         lastInfo[packet.id] = packet
         // First sight of a display seeds the player's volume for it from the server's audio.startVolume
         ClientSettingsStore.getSettings(packet.id, DisplayScreen.defaultVolume(policy))
@@ -107,7 +109,10 @@ object DisplayLifecycleManager {
                     packet.width, packet.height, facing.toDisplayFacing(),
                     player.blockPosition(), packet.depth,
                 )
-                if (dist > renderDistance || !fitsBudget(dist, player.blockPosition())) {
+                // A display tied to a region loads only within its load distance of the region
+                if (dist > renderDistance || !fitsBudget(dist, player.blockPosition()) ||
+                    !DisplayRegions.mayLoad(packet.id, policy, player.x, player.y, player.z)
+                ) {
                     cacheUnloadedDisplay(packet, facing, mode, worldOf(packet))
                     return
                 }
@@ -196,7 +201,10 @@ object DisplayLifecycleManager {
             .filter {
                 sameDimension(it.dimensionKey, dimensionKey) &&
                         ServerOverrides.displayEnabled(DisplayPolicyCache.get(it.uuid)) &&
-                        distanceToData(it, playerPos) <= DisplayPolicyCache.renderDistanceFor(DisplayPolicyCache.get(it.uuid))
+                        distanceToData(it, playerPos) <= DisplayPolicyCache.renderDistanceFor(DisplayPolicyCache.get(it.uuid)) &&
+                        DisplayRegions.mayLoad(
+                            it.uuid, DisplayPolicyCache.get(it.uuid), playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5,
+                        )
             }
             .sortedBy { distanceToData(it, playerPos) }
             .forEach { data ->
