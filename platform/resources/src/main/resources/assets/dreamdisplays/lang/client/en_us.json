@@ -155,7 +155,7 @@
   "dreamdisplays.config.volume_normalization.tooltip": "Play quiet and loud videos at a similar volume",
   "dreamdisplays.queue.tab": "Up next (%s)",
   "dreamdisplays.queue.next": "Up next: %s",
-  "dreamdisplays.queue.empty": "Nothing queued yet. Hover a suggestion and press + to add it, or paste a link and press +.",
+  "dreamdisplays.queue.empty": "Nothing queued yet. Hover a suggestion and press + to add it; for a link, paste it and press Enter first.",
   "dreamdisplays.queue.not_running": "Up next only plays on Synced or Broadcast displays.",
   "dreamdisplays.queue.add": "Add to Up next",
   "dreamdisplays.queue.full": "Up next is full",

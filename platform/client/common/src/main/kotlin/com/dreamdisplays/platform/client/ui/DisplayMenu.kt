@@ -116,7 +116,6 @@ class DisplayMenu private constructor(
     private lateinit var skipButton: IconButton
     private lateinit var clearVideoButton: IconButton
     private lateinit var loopButton: IconButton
-    private lateinit var queueAddButton: IconButton
     private lateinit var clearQueueButton: IconButton
     private var clearArmedUntilMs = 0L
     private var lastQueueCount = -1
@@ -358,16 +357,8 @@ class DisplayMenu private constructor(
         // A press on a card's "+" queues it; the card under it must never also play it
         suggestions.cardPressBlocked = { mx, my -> suggestionQueueButtonRect()?.contains(mx, my) == true }
 
-        // "Up next": the bottom panel's second tab, the search row's "+" and the loop toggle in the tab header
+        // "Up next": the bottom panel's second tab and the loop toggle in the tab header
         queueSection = QueueSection(ds)
-        queueAddButton = addUi(IconButton(icon = { IconButton.modIcon("plus") }, margin = 4) { queueFromSearch() })
-        queueAddButton.visibleWhen = {
-            !showingQueue() && suggestions.visible && DisplayQueues.supported && suggestions.available()
-        }
-        queueAddButton.enabledWhen = {
-            ds.canAddToQueueHere && queueBlockedReason() == null &&
-                (linkOf(suggestions.searchText) != null || YouTubePlaylists.parseLink(suggestions.searchText) != null)
-        }
         loopButton = addUi(IconButton("loop") {
             DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
         })
@@ -600,11 +591,9 @@ class DisplayMenu private constructor(
         if (suggestionsArea != null) {
             suggestions.visible = !showingQueue()
             suggestions.showTitle = !tabs
-            suggestions.extraSearchActions = if (tabs) 1 else 0
             suggestions.setVertical(layout.suggestionsVertical)
             suggestions.setCompactCards(false)
             suggestions.place(suggestionsArea)
-            queueAddButton.place(suggestions.extraActionRect(0))
             loopButton.place(UiRect(suggestionsArea.right - 10 - LOOP_BUTTON, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON))
             clearQueueButton.place(
                 UiRect(suggestionsArea.right - 10 - LOOP_BUTTON * 2 - 4, suggestionsArea.y + 5, LOOP_BUTTON, LOOP_BUTTON),
@@ -729,9 +718,6 @@ class DisplayMenu private constructor(
         when {
             over(skipButton) -> queueTip = ClientMessage.QUEUE_SKIP.text()
             over(clearVideoButton) -> queueTip = clearVideoTip(mouseX, mouseY)
-            over(queueAddButton) -> queueTip = queueBlockedReason()
-                ?: if (YouTubePlaylists.parseLink(suggestions.searchText) != null) ClientMessage.QUEUE_PLAYLIST_ADD.text()
-                else ClientMessage.QUEUE_ADD.text()
             over(clearQueueButton) -> queueTip = if (System.currentTimeMillis() < clearArmedUntilMs) {
                 ClientMessage.QUEUE_CLEAR_CONFIRM.text()
             } else {
