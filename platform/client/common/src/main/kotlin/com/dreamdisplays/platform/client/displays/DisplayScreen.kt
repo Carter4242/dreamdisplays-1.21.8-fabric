@@ -463,8 +463,14 @@ class DisplayScreen(
      */
     private var ownShareMuted: Boolean = false
 
-    /** No sound from this display: muted by the user, focus, preparation, or [ownShareMuted]. */
-    private val silenced: Boolean get() = muted || focusMuted || prepareMuted || ownShareMuted
+    /** No sound from this display: muted by the user, focus, preparation, [ownShareMuted] or [previewMuted]. */
+    private val silenced: Boolean get() = muted || focusMuted || prepareMuted || ownShareMuted || previewMuted
+
+    /** Opens the paused stream where a paused display was seeked, so it shows that frame (see [PausedSeekPreview]). */
+    private val pausedSeekPreview = PausedSeekPreview()
+
+    /** Silent while [pausedSeekPreview] opens the stream: decoding the one frame must not release any sound. */
+    private var previewMuted = false
 
     /** True while a fullscreen preparation keeps this display loaded for a broadcast that has not started yet. */
     val isPrepared: Boolean get() = FullscreenPrepareController.isPrepared(uuid)
@@ -813,6 +819,7 @@ class DisplayScreen(
     }
 
     private fun loadVideoInternal(videoUrl: String, lang: String, preservePausedState: Boolean) {
+        pausedSeekPreview.cancel()
         media.load(videoUrl, lang, preservePausedState)
     }
 
@@ -1483,20 +1490,67 @@ class DisplayScreen(
     fun seekVideoRelative(seconds: Double) {
         if (!canSeekHere) return
         val mp = mediaPlayer ?: return
-        if (mp.canSeek()) mp.seekRelative(seconds)
+        if (!mp.canSeek()) return
+        if (!mayPreviewPausedSeek()) {
+            pausedSeekPreview.cancel()
+            mp.seekRelative(seconds)
+            return
+        }
+        val max = (mediaPlayerDurationNanos - 1).coerceAtLeast(0L)
+        pausedSeekPreview.request((currentTimeNanos + (seconds * 1e9).toLong()).coerceIn(0L, max), true, System.nanoTime())
     }
 
     /** Seeks to an absolute position [nanos] without firing the sync event (used for incoming sync packets). */
     internal fun seekVideoTo(nanos: Long) {
         val mp = mediaPlayer ?: return
-        if (mp.canSeek()) mp.seekTo(nanos, false)
+        if (mp.canSeek()) seekPlayer(mp, nanos, fire = false)
     }
 
     /** Seeks to [ms] and fires the seek event so [afterSeek] emits the intent upstream (Synced / WP host). */
     fun seekToMillis(ms: Long) {
         if (!canSeekHere) return
         val mp = mediaPlayer ?: return
-        if (mp.canSeek()) mp.seekTo(ms * 1_000_000L, true)
+        if (mp.canSeek()) seekPlayer(mp, ms * 1_000_000L, fire = true)
+    }
+
+    /** A seek while paused waits for the next tick, coalesced with any that follow, and then shows its frame. */
+    private fun seekPlayer(mp: MediaPlayer, nanos: Long, fire: Boolean) {
+        if (mayPreviewPausedSeek()) {
+            pausedSeekPreview.request(nanos, fire, System.nanoTime())
+        } else {
+            pausedSeekPreview.cancel()
+            mp.seekTo(nanos, fire)
+        }
+    }
+
+    /** Whether a paused seek may open the stream to show its frame here. Never for a live or private (relay) stream. */
+    private fun mayPreviewPausedSeek(): Boolean {
+        val mp = mediaPlayer ?: return false
+        return paused && !isDormant && !isPrepared && !isLive && mp.canSeek() && !ScreenSharePrivacy.isPrivateStream(videoUrl)
+    }
+
+    /**
+     * Every tick: carries out the latest paused seek and opens the paused stream there, muted until it holds its first
+     * frame (see [PausedSeekPreview]).
+     */
+    private fun tickPausedSeekPreview() {
+        if (previewMuted && !isWarmingUp) {
+            previewMuted = false
+            applyEffectiveVolume()
+        }
+        if (!pausedSeekPreview.pending) return
+        val mp = mediaPlayer ?: return pausedSeekPreview.cancel()
+        val seek = pausedSeekPreview.poll(
+            System.nanoTime(), eligible = mayPreviewPausedSeek(), busy = isWarmingUp,
+            showingNanos = if (isHeldReady) currentTimeNanos else null,
+        ) ?: return
+        if (seek.open) {
+            previewMuted = true
+            applyEffectiveVolume() // before the stream opens: the volume applies at once, the opening runs later
+            timelineFollower.onHeldReady()
+        }
+        mp.seekTo(seek.targetNanos, seek.fire)
+        if (seek.open) mp.warmUpPaused(seek.targetNanos)
     }
 
     /** Stops the media player, releases GPU texture, closes any popout, and closes the display menu if open. */
@@ -1666,6 +1720,7 @@ class DisplayScreen(
         val distance = getDistanceToScreen(pos)
         refreshPrepareState(distance)
         tickPolicyGain()
+        tickPausedSeekPreview()
         mediaPlayer?.tick(distance, audioRadius(), audioFullVolumeRadius(), audioSquaredFalloff())
         syncPlaybackSpeed() // Follows mode changes
         timelineFollower.tick()
