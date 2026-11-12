@@ -173,8 +173,8 @@ abstract class ServerDisplayBase internal constructor(
 
     override fun setAccess(access: DisplayAccess): CommandResult {
         if (!isAlive) return CommandResult.STALE
+        if (data.access != access) DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.ACCESS, text = access.name.lowercase())
         data.access = access
-        DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.ACCESS, text = access.name.lowercase())
         save()
         broadcast()
         return CommandResult.OK
