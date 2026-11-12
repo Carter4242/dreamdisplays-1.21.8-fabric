@@ -160,7 +160,7 @@ class QueueSection(private val ds: DisplayScreen) {
         g.fill(thumbX + 2, r.y + 2, thumbX + 2 + bw, r.y + 2 + f.lineHeight + 4, UiTheme.ACCENT)
         g.drawText(f, badge, thumbX + 5, r.y + 4, UiTheme.TEXT_PRIMARY, false)
 
-        val dur = formatDuration(item.durationMs)
+        val dur = formatDuration(QueueLengths.durationMs(item))
         if (dur.isNotEmpty()) {
             val scrimH = (thumbH * 2) / 5
             g.fillVGradient(thumbX, r.y + thumbH - scrimH, thumbX + thumbW, r.y + thumbH, 0x00000000, 0xB0000000.toInt())
