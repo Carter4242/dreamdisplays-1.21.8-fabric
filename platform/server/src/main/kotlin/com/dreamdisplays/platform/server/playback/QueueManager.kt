@@ -44,6 +44,8 @@ object QueueManager {
         val enabled: Boolean = true,
         val maxItems: Int = 50,
         val maxPerPlayer: Int = 10,
+        /** Pause between a video ending by itself and the next entry starting ([QueueTiming.switchAtMs]). */
+        val gapMs: Long = QueueTiming.DEFAULT_GAP_MS,
     )
 
     /** Outcome of a queue edit, for command / chat feedback. */
@@ -53,7 +55,9 @@ object QueueManager {
 
     /**
      * Send the switch to the next entry at least this long (wall time) before the end; it is scheduled to start at the
-     * end instant itself, so this only has to cover the slowest viewer's one-way latency plus a [tick] period.
+     * end instant plus [Settings.gapMs], so this only has to cover the slowest viewer's one-way latency plus a [tick]
+     * period. The gap never moves the send later: a client whose clock wrapped the finished video before the switch
+     * arrived would replay its start.
      */
     private const val ADVANCE_EARLY_MS = 300L
     private const val TICK_MARGIN_MS = 150L
@@ -265,7 +269,7 @@ object QueueManager {
         return Result.OK
     }
 
-    /** Jumps to the next entry now; whoever may change the video. */
+    /** Jumps to the next entry now, with no [Settings.gapMs] (a viewer asked for it); whoever may change the video. */
     fun skip(display: DisplayData, ctx: PlaybackContext, actorId: UUID): Result {
         if (!settings().enabled) return Result.DISABLED
         if (display.virtual || !PlaybackPermissions.queueRuns(ctx.mode)) return Result.NOT_RUNNING
@@ -278,7 +282,7 @@ object QueueManager {
 
     /**
      * [display]'s video is being cleared ([QueueOnClear]): with an entry waiting it moves on to it exactly like a [skip]
-     * (no permission or throttle here: the clear checked its own) and returns true. False when nothing waits, the queue
+     * (no [Settings.gapMs] either; no permission or throttle here: the clear checked its own) and returns true. False when nothing waits, the queue
      * does not run there, or every waiting entry was refused: the display goes blank instead.
      */
     fun advanceOnClear(display: DisplayData): Boolean {
@@ -395,7 +399,9 @@ object QueueManager {
             if (!QueueTiming.advanceDue(timeline, now, earlyMs, armed, durationMs)) continue
             // The video's end: a fullscreen session of it that does not loop is over, as on a display with no queue
             FullscreenBroadcastManager.endNonLoopingSessions(displayId)
-            advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs))
+            // Sent before the end as ever (clients must have the switch before their clock wraps the video), but
+            // started gap_ms after it
+            advance(display, QueueTiming.switchAtMs(timeline, now, earlyMs, durationMs, settings().gapMs))
         }
     }
 
@@ -412,8 +418,9 @@ object QueueManager {
         val timeline = TimelineManager.timelineOf(display.id) ?: return
         val durationMs = timeline.durationMs.takeIf { it > 0L }
             ?: QueueTiming.scheduledDurationMs(current?.takeIf { it.url == display.url }?.durationMs ?: 0L)
-        val startAt = QueueTiming.switchAtMs(timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs)
-            ?: return
+        val startAt = QueueTiming.switchAtMs(
+            timeline, transport.nowMs(), QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs, settings().gapMs,
+        ) ?: return
         FullscreenBroadcastManager.endNonLoopingSessions(display.id)
         advance(display, startAt)
     }

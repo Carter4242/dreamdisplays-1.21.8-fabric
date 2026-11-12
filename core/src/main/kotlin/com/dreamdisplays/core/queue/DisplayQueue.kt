@@ -284,16 +284,32 @@ object QueueTiming {
      * Wall time at which the play-through of [timeline] that is ending ends: its anchor plus the content left divided
      * by the speed, when that is at most [earlyMs] after [nowMs]. [nowMs] when that end is already past (a late tick
      * just after a loop wrap counts as past). Null when unknown (paused, no duration). The next queue entry is
-     * scheduled to start at exactly this instant, so preloaded clients cut from the last frame straight to it.
+     * scheduled to start at this instant, so preloaded clients hold the last frame (in silence) and then cut to it.
+     *
+     * [gapMs] (`[queue] gap_ms`) pushes a start at an end still ahead that much later: viewers holding the next entry
+     * preloaded keep the finished video's last frame up, silent, until then. An end already past starts at once, with
+     * no gap: clients have wrapped the finished video by then (it plays from its start again), so waiting longer would
+     * only show more of that.
      */
-    fun switchAtMs(timeline: Timeline, nowMs: Long, earlyMs: Long, durationMs: Long = timeline.durationMs): Long? {
+    fun switchAtMs(
+        timeline: Timeline, nowMs: Long, earlyMs: Long, durationMs: Long = timeline.durationMs, gapMs: Long = 0L,
+    ): Long? {
         if (timeline.paused || durationMs <= 0L) return null
         val rate = timeline.rate.coerceAtLeast(PlaybackSpeed.MIN)
         val raw = rawPosition(timeline, nowMs)
         val endPosition = if (timeline.loop) (raw / durationMs + 1) * durationMs else durationMs
         val endAt = timeline.serverTimeMs + ((endPosition - timeline.positionMs.coerceAtLeast(0L)) / rate).roundToLong()
-        return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt
+        return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt + clampGapMs(gapMs)
     }
+
+    /** Default `[queue] gap_ms`: the pause between a queued video ending by itself and the next one starting. */
+    const val DEFAULT_GAP_MS = 200L
+
+    /** Largest `[queue] gap_ms`. */
+    const val MAX_GAP_MS = 5_000L
+
+    /** [gapMs] kept within 0..[MAX_GAP_MS]. */
+    fun clampGapMs(gapMs: Long): Long = gapMs.coerceIn(0L, MAX_GAP_MS)
 
     /**
      * Wall time at which a playing [timeline] with nothing queued should restart its video from 0 for everyone, or null

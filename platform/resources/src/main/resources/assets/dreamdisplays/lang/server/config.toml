@@ -193,6 +193,11 @@ enabled = true
 max_items = 50
 max_per_player = 10
 
+# Pause (ms) between a queued video ending by itself and the next one starting: the finished video's last frame stays
+# up, silent, then the next starts for everyone at once. A skip, or a Clear that moves on, starts the next one right
+# away. 0..5000, 0 = no pause. Live: /display config queue.gap_ms <ms>
+gap_ms = 200
+
 [karaoke]
 # Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). A display is in karaoke while
 # someone sings on it (/display karaoke ... singer add, or their turn in the line); when the last singer stops it is

@@ -102,12 +102,14 @@ data class SettingsSection(
 
     /**
      * `[queue]` section: per-display "Up next" lists on synced / broadcast displays. Caps of 0 or less mean none;
-     * the owner of a display is exempt from [max_per_player] on it.
+     * the owner of a display is exempt from [max_per_player] on it. [gap_ms]: pause between a video ending by itself
+     * and the next entry starting (0..5000, 0 = none).
      */
     data class QueueConfig(
         val enabled: Boolean = true,
         val max_items: Int = 50,
         val max_per_player: Int = 10,
+        val gap_ms: Int = 200,
     )
 
     /**
@@ -371,6 +373,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             enabled = t?.getBoolean("queue.enabled") ?: true,
             max_items = t.numberOrNull("queue.max_items")?.toInt()?.coerceIn(0, 500) ?: 50,
             max_per_player = t.numberOrNull("queue.max_per_player")?.toInt()?.coerceIn(0, 500) ?: 10,
+            gap_ms = t.numberOrNull("queue.gap_ms")?.toInt()?.coerceIn(0, 5_000) ?: 200,
         ),
         karaoke = SettingsSection.KaraokeConfig(
             default_lead_ms = t.numberOrNull("karaoke.default_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 0,

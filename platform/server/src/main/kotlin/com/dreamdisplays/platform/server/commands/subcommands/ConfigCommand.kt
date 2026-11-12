@@ -19,7 +19,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, the `[karaoke]` keys, the `[live]` relay URLs and
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, `[queue] gap_ms`, the `[karaoke]` keys, the `[live]` relay URLs and
  * every `[policy.*]` default), then reloads the config the way `/display reload` does. The relay publish URL carries
  * credentials: it is only ever shown, replied and logged with them redacted.
  *
@@ -57,6 +57,7 @@ object ConfigCommand {
         },
         Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
         Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
+        Key("queue.gap_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.queue.gap_ms },
         Key("karaoke.default_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.default_lead_ms },
         Key("karaoke.lead_margin_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.lead_margin_ms },
         Key("karaoke.min_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.min_lead_ms },

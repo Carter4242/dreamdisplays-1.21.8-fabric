@@ -58,4 +58,15 @@ class BundledConfigEditTest {
         assertEquals(listOf("latest_build = \"1a2b3c4d\""), tableLines(out, "clients").filter { it.startsWith("latest_build") })
         assertEquals(lines(template).size, lines(out).size)
     }
+
+    @Test
+    fun `queue gap_ms is replaced in place under queue`() {
+        val out = TomlLineEditor.set(template, "queue", "gap_ms", "750")
+        assertEquals(listOf("gap_ms = 750"), tableLines(out, "queue").filter { it.startsWith("gap_ms") })
+        assertEquals(lines(template).size, lines(out).size)
+        // A config written before the key existed gets it added to its [queue] table
+        val old = template.replace(Regex("""(?m)^gap_ms = .*\R"""), "")
+        val added = TomlLineEditor.set(old, "queue", "gap_ms", "0")
+        assertEquals(listOf("gap_ms = 0"), tableLines(added, "queue").filter { it.startsWith("gap_ms") })
+    }
 }
