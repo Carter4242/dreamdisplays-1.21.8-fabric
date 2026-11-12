@@ -6,6 +6,7 @@ import com.dreamdisplays.platform.client.utils.identifier
 import net.minecraft.resources.Identifier
 //?} else
 /*import net.minecraft.resources.ResourceLocation as Identifier*/
+import com.dreamdisplays.api.media.search.YouTubeVideoId
 import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.util.AsyncMemo
@@ -122,6 +123,11 @@ object Thumbnails {
     fun request(videoId: String, quality: Quality = Quality.HIGH) {
         val k = key(videoId, quality)
         if (READY.getIfPresent(k) != null || FAILED.getIfPresent(k) != null) return
+        // Only a YouTube id derives a thumbnail URL; anything else (a pasted link) has none to fetch
+        if (!YouTubeVideoId.isValid(videoId)) {
+            FAILED.put(k, true)
+            return
+        }
         if (IN_FLIGHT.asMap().putIfAbsent(k, true) != null) return
         DreamCoroutines.clientIo.launch {
             download(videoId, k, loadBytesAsync(k) { fetchForQuality(videoId, quality) })
