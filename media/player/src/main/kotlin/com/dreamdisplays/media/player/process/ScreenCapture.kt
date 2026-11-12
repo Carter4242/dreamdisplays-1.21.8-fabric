@@ -683,7 +683,7 @@ object ScreenCapture {
         // Keyframes by time too: four a second while the share starts (every viewer connects then, and waits for one),
         // then one a second (a window sends frames only as it draws). Forced ones must be IDR frames: the relay only
         // starts a viewer on those
-        addAll(["-force_key_frames", keyframes(settings.fps)])
+        addAll(["-force_key_frames", keyframes()])
         forcedIdr?.let { addAll([it, "1"]) }
         val dest = LiveStreamUrls.publishUrl(publishUrl, settings.latencyMs)
         val muxer = publishMuxer(dest)
@@ -843,14 +843,19 @@ object ScreenCapture {
     const val UNCLOCKED_START_MICROS = 2_500_000L
 
     /**
-     * `-force_key_frames`: the first frame, then one every [EARLY_KEYFRAME_SECONDS] for the first [EARLY_SECONDS] of
-     * frames at [fps], then one a second after the last forced one (any clock origin: t is the capture clock).
+     * `-force_key_frames`: the first frame, then one every [EARLY_KEYFRAME_SECONDS] until [EARLY_KEYFRAMES] more were
+     * forced ([EARLY_SECONDS] of a steady stream), then one a second after the last forced one (any clock origin: t is the
+     * capture clock). Counted in forced keyframes, not frames: a window that draws rarely (no frame duplication) sends
+     * few frames, and a frame count would keep the dense keyframes, each a soft picture, going for minutes.
      */
-    internal fun keyframes(fps: Int): String =
-        "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,if(lt(n,${EARLY_SECONDS * fps.coerceAtLeast(1)}),$EARLY_KEYFRAME_SECONDS,1)))"
+    internal fun keyframes(): String =
+        "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,if(lt(n_forced,${EARLY_KEYFRAMES + 1}),$EARLY_KEYFRAME_SECONDS,1)))"
 
     internal const val EARLY_SECONDS = 3
     internal const val EARLY_KEYFRAME_SECONDS = "0.25"
+
+    /** Keyframes forced [EARLY_KEYFRAME_SECONDS] apart after the first one: [EARLY_SECONDS] of them. */
+    internal const val EARLY_KEYFRAMES = 12
 
     /** Reads ahead of the first share whether [ffmpeg]'s [encoder] can force IDR frames (one short `FFmpeg` run). */
     fun prepareEncoder(ffmpeg: String, encoder: Encoder) {

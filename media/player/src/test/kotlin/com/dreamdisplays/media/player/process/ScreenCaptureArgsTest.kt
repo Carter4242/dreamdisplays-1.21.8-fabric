@@ -288,16 +288,17 @@ class ScreenCaptureArgsTest {
         assertEquals("[v]", a.valueOf("-map"))
         // The picture is no -i input (it lives in the filter graph); the one input is the silent track
         assertEquals(1, a.count { it == "-i" })
-        assertEquals(ScreenCapture.keyframes(30), a.valueOf("-force_key_frames"))
+        assertEquals(ScreenCapture.keyframes(), a.valueOf("-force_key_frames"))
         assertFalse("-an" in a)
         val older = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x")
         assertFalse("dup_frames" in older.valueOf("-filter_complex")!!)
         // A screen gets the same keyframes: dense while the share starts, then one a second
         assertEquals(
-            ScreenCapture.keyframes(30),
+            ScreenCapture.keyframes(),
             ScreenCapture.args("FFMPEG", Source.DDAGRAB, monitor, Encoder.NVENC, "rtmp://h/a").valueOf("-force_key_frames"),
         )
-        assertEquals("expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,if(lt(n,180),0.25,1)))", ScreenCapture.keyframes(60))
+        // Dense for the first 12 forced after the first (3 s of a steady stream), however few frames a still window sends
+        assertEquals("expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,if(lt(n_forced,13),0.25,1)))", ScreenCapture.keyframes())
     }
 
     @Test
