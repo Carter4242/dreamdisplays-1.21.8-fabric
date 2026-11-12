@@ -44,7 +44,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** Scrollable search / related-videos panel: a search row (edit box + clear + sort buttons) above a strip of result cards. */
+/** Scrollable search / related-videos panel: a search row (edit box + sort button) above a strip of result cards. */
 class SuggestionsPanel(
     private val onPick: (MediaSearchResult) -> Unit,
     private val controller: SuggestionsController,
@@ -55,7 +55,6 @@ class SuggestionsPanel(
     }
 
     private val searchBox: EditBox
-    private val clearButton: IconButton
     private val sortButton: IconButton
     private val sortDropdown: SortDropdown = SortDropdown(
         current = { controller.sortOption },
@@ -106,15 +105,6 @@ class SuggestionsPanel(
         //?}
         // A pasted link is kept whole up to the length the server accepts (signed CDN links run past 200)
         searchBox.setMaxLength(MediaUrlPolicy.MAX_URL_LENGTH)
-        clearButton = IconButton(icon = { IconButton.modIcon("cross") }, margin = 4) {
-            searchBox.value = ""
-            //? if >=1.19.4 {
-            searchBox.isFocused = true
-            //?}
-            //? if <1.19.4 {
-            searchBox.setFocus(true)
-            //?}
-        }
         sortButton = IconButton(icon = { IconButton.modIcon("filter") }, margin = 4) {
             sortDropdown.toggle()
         }
@@ -147,7 +137,6 @@ class SuggestionsPanel(
         searchBox.x = row.box.x
         searchBox.y = row.box.y
         searchBox.width = row.box.w
-        clearButton.place(row.clear)
         sortButton.place(row.sort)
     }
 
@@ -221,7 +210,6 @@ class SuggestionsPanel(
         // Newer vanilla EditBoxes request the text cursor themselves; the search box is always editable.
         if (searchBox.isHovered()) LegacyCursor.IBEAM.request()
         //?}
-        clearButton.renderChild(g, mouseX, mouseY, partialTick)
         sortButton.renderChild(g, mouseX, mouseY, partialTick)
 
         val stripTop = stripTop()
@@ -634,7 +622,6 @@ class SuggestionsPanel(
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
         if (claimPopupClick(mx, my, event.button())) return true
-        if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(event, dbl)
         if (onSortButton) return sortButton.mouseClicked(event, dbl)
         if (searchBox.isMouseOver(mouseX, mouseY)) {
             val handled = searchBox.mouseClicked(event, dbl)
@@ -692,7 +679,6 @@ class SuggestionsPanel(
         val my = mouseY.toInt()
         val onSortButton = sortButton.isMouseOver(mouseX, mouseY)
         if (claimPopupClick(mx, my, button)) return true
-        if (clearButton.isMouseOver(mouseX, mouseY)) return clearButton.mouseClicked(mouseX, mouseY, button)
         if (onSortButton) return sortButton.mouseClicked(mouseX, mouseY, button)
         if (searchBox.isMouseOver(mouseX, mouseY)) {
             val handled = searchBox.mouseClicked(mouseX, mouseY, button)
@@ -854,8 +840,8 @@ class SuggestionsPanel(
     }
 }
 
-/** Where the search row's parts sit: the edit box takes all the width the clear and sort buttons leave it. */
-internal data class SearchRowLayout(val box: UiRect, val clear: UiRect, val sort: UiRect)
+/** Where the search row's parts sit: the edit box takes all the width the sort button leaves it. */
+internal data class SearchRowLayout(val box: UiRect, val sort: UiRect)
 
 /** The search row of a panel at [panelX] that is [panelW] wide, at row top [rowY]: 10 px insets, [SuggestionsPanel.ACTION_GAP] between parts. */
 internal fun searchRowLayout(panelX: Int, rowY: Int, panelW: Int): SearchRowLayout {
@@ -864,7 +850,6 @@ internal fun searchRowLayout(panelX: Int, rowY: Int, panelW: Int): SearchRowLayo
     val gap = SuggestionsPanel.ACTION_GAP
     val right = panelX + panelW - 10
     val sort = UiRect(right - w, rowY, w, h)
-    val clear = UiRect(sort.x - gap - w, rowY, w, h)
-    val box = UiRect(panelX + 10, rowY, clear.x - gap - (panelX + 10), h)
-    return SearchRowLayout(box, clear, sort)
+    val box = UiRect(panelX + 10, rowY, sort.x - gap - (panelX + 10), h)
+    return SearchRowLayout(box, sort)
 }
