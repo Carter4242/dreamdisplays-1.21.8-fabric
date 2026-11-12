@@ -90,11 +90,11 @@ class VideoCommand : SubCommand {
             return
         }
 
+        DisplayActivity.record(data, ActivityKind.VIDEO_SET, player.uniqueId, url = requestedUrl, title = DisplayActivity.titleFor(data, requestedUrl), old = data.url)
         data.apply {
             url = requestedUrl
             lang = canonicalLang
         }
-        DisplayActivity.record(data, ActivityKind.VIDEO_SET, player.uniqueId, url = requestedUrl, title = DisplayActivity.titleFor(data, requestedUrl))
 
         runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
         DisplayManager.broadcastUpdate(data)

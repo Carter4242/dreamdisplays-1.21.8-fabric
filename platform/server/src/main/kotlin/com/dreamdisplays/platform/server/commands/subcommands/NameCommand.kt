@@ -58,8 +58,8 @@ class NameCommand : SubCommand {
         }
 
         if (requestedName.equals(RESET_NAME, ignoreCase = true)) {
+            DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId, old = data.name.orEmpty())
             data.name = null
-            DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId)
             runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
             MessageUtil.sendColoredMessage(player, MessageUtil.formatIndexed(player, "cmd.name.cleared"))
             return
@@ -75,8 +75,8 @@ class NameCommand : SubCommand {
             return
         }
 
+        DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId, text = normalized, old = data.name.orEmpty())
         data.name = normalized
-        DisplayActivity.record(data, ActivityKind.RENAME, player.uniqueId, text = normalized)
         runAsync { PaperServer.getInstance().storage.saveDisplay(data) }
         ServerMessage.SETTED_NAME.sendTo(player)
     }

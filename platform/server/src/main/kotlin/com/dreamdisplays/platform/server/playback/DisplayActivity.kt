@@ -1,6 +1,8 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.core.activity.ActivityKind
+import com.dreamdisplays.core.activity.ActivityJournalFormat
+import com.dreamdisplays.core.activity.ActivityLimits
 import com.dreamdisplays.core.activity.ActivityLog
 import com.dreamdisplays.core.protocol.common.ZERO_UUID
 import com.dreamdisplays.core.protocol.common.packets.ActivityEntryWire
@@ -34,6 +36,18 @@ object DisplayActivity {
     var mayView: (playerId: UUID, displayId: UUID) -> Boolean = { _, _ -> false }
 
     private val log = ActivityLog { maxEntries() }
+
+    /** Rows recorded on each thread so far (a packet that recorded none was refused: see `ActivityAttempts`). */
+    private val recordedHere = ThreadLocal.withInitial { 0L }
+
+    fun recordedOnThisThread(): Long = recordedHere.get()
+
+    /** The player whose packet this thread handles (null: none); the actor of a row recorded without one. */
+    private val packetSender = ThreadLocal<UUID?>()
+
+    fun handlingPacketFrom(playerId: UUID?) {
+        if (playerId == null) packetSender.remove() else packetSender.set(playerId)
+    }
     private var transport: PlaybackTransport? = null
 
     /** Player -> the display whose Activity tab they have open. */
@@ -81,36 +95,86 @@ object DisplayActivity {
     /**
      * Records that [kind] happened on [display] (by [actor], or by itself when null; [console]: by the server console).
      * Inside a command ([asCommandSender]) its sender is the actor instead, except for [ActivityKind.automatic] rows
-     * and rows [about][ActivityKind.aboutActor] a given player. [actorName] defaults to the actor's current name.
+     * and rows [about][ActivityKind.aboutActor] a given player. [actorName] defaults to the actor's current name; [old]
+     * is the value the action replaced, for the permanent journal ([ActivityJournal]), which gets every row.
      * Never throws: a broken row must not break the action itself.
      */
     fun record(
         display: DisplayData?, kind: ActivityKind, actor: UUID? = null, actorName: String? = null,
         title: String = "", url: String = "", fromMs: Long = 0, toMs: Long = 0, rate: Double = 0.0, count: Int = 0,
-        flag: Boolean = false, text: String = "", text2: String = "", console: Boolean = false,
+        flag: Boolean = false, text: String = "", text2: String = "", console: Boolean = false, old: String = "",
     ) {
         display ?: return
         runCatching {
             // Only a platform that serves the tab (Paper) records: the others never call init
-            if (transport == null || maxEntries() <= 0) return
-            val sender = commandSender.get()?.takeIf { !kind.automatic && !(kind.aboutActor && actor != null) }
-            val byConsole = console || sender == CONSOLE
-            val who = if (kind.automatic || byConsole) null else sender ?: actor
-            val name = if (who == actor && actorName != null) actorName else who?.let { transport?.playerName(it) }.orEmpty()
-            val entry = ActivityEntryWire(
-                kind = kind.wire, actorId = who ?: ZERO_UUID, actorName = name, title = title, url = url,
-                fromMs = fromMs, toMs = toMs, rate = rate, count = count, flag = flag, text = text, text2 = text2,
-                console = byConsole,
+            if (transport == null) return
+            recordedHere.set(recordedHere.get() + 1)
+            val entry = entryOf(kind, actor, actorName, console).copy(
+                title = title, url = url, fromMs = fromMs, toMs = toMs, rate = rate, count = count, flag = flag,
+                text = text, text2 = text2,
             )
-            val row = log.record(display.id, entry, System.currentTimeMillis()) ?: return
+            val now = System.currentTimeMillis()
+            journal(display, ActivityLimits.clean(entry).copy(atMs = now), old)
+            if (maxEntries() <= 0) return
+            val row = log.record(display.id, entry, now) ?: return
             schedulePersist()
             push(display.id, row)
         }.onFailure { logger.warn("Could not record {} on display {}.", kind, display.id, it) }
     }
 
-    /** Records [kind] on the display with id [displayId], if it exists. */
-    fun record(displayId: UUID, kind: ActivityKind, actor: UUID? = null, text: String = "", count: Int = 0, flag: Boolean = false) =
-        record(DisplayManager.getDisplayData(displayId), kind, actor, text = text, count = count, flag = flag)
+    /**
+     * [actor] tried [kind] on [displayId] and was turned down ([reason]): journal only, never in the list. The same
+     * refusal from the same player on the same display is written at most once a second, with how many it stands for.
+     */
+    fun refused(displayId: UUID, kind: ActivityKind, actor: UUID, actorName: String, reason: String, url: String = "", toMs: Long = 0) {
+        runCatching {
+            if (transport == null) return
+            val now = System.currentTimeMillis()
+            val key = Triple(actor, displayId, kind)
+            var repeats = 0
+            val write = synchronized(refusals) {
+                val last = refusals[key]
+                if (last != null && now - last.first < REFUSAL_EVERY_MS) {
+                    refusals[key] = last.first to last.second + 1
+                    false
+                } else {
+                    repeats = last?.second ?: 0
+                    refusals[key] = now to 0
+                    if (refusals.size > MAX_REFUSAL_KEYS) refusals.clear()
+                    true
+                }
+            }
+            if (!write) return
+            val entry = ActivityLimits.clean(
+                ActivityEntryWire(atMs = now, kind = kind.wire, actorId = actor, actorName = actorName, url = url, toMs = toMs),
+            )
+            val display = DisplayManager.getDisplayData(displayId)
+            ActivityJournal.write(
+                ActivityJournalFormat.line(entry, displayId, display?.name, display?.let(placeOf), refused = reason, repeats = repeats),
+            )
+        }.onFailure { logger.warn("Could not journal a refused {} on display {}.", kind, displayId, it) }
+    }
+
+    private const val REFUSAL_EVERY_MS = 1_000L
+    private const val MAX_REFUSAL_KEYS = 10_000
+    private val refusals = HashMap<Triple<UUID, UUID, ActivityKind>, Pair<Long, Int>>()
+
+    /** Where a display stands, for the journal (the platform sets it). */
+    var placeOf: (DisplayData) -> ActivityJournalFormat.Place? = { null }
+
+    /** The row skeleton for [kind] by [actor]: inside a command its sender acts instead (see [record]). */
+    private fun entryOf(kind: ActivityKind, actor: UUID?, actorName: String?, console: Boolean): ActivityEntryWire {
+        val sender = commandSender.get()?.takeIf { !kind.automatic && !(kind.aboutActor && actor != null) }
+        val byConsole = console || sender == CONSOLE
+        val who = if (kind.automatic || byConsole) null else sender ?: actor ?: packetSender.get()
+        val name = if (who == actor && actorName != null) actorName else who?.let { transport?.playerName(it) }.orEmpty()
+        return ActivityEntryWire(kind = kind.wire, actorId = who ?: ZERO_UUID, actorName = name, console = byConsole)
+    }
+
+    private fun journal(display: DisplayData, row: ActivityEntryWire, old: String) {
+        val cleanOld = old.filter { !it.isISOControl() }.take(ActivityLimits.MAX_URL)
+        ActivityJournal.write(ActivityJournalFormat.line(row, display.id, display.name, placeOf(display), cleanOld))
+    }
 
     /** [added] of [entries] went into [display]'s queue for [actorId]: one video, or a playlist. */
     fun recordAdd(display: DisplayData, actorId: UUID, actorName: String, entries: List<QueueManager.NewEntry>, added: Int) {

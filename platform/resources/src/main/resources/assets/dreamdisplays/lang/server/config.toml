@@ -221,6 +221,11 @@ visible_to = "everyone"
 # viewer can't see, e.g. vanished ones, are left out). Live: /display config activity.viewers_visible_to <...>
 viewers_visible_to = "everyone"
 
+# Every Activity row, automatic ones included, and every refused attempt (with why) are also appended to a permanent
+# log, plugins/DreamDisplays/activity/activity-YYYY-MM-DD.log (one JSON line each), whatever visible_to says. Read it with
+# /display diag errors <display|player> commands [count|24h|7d]. Files older than this many days are deleted; 0 = keep forever.
+log_days = 90
+
 [karaoke]
 # Karaoke on a synced display (needs Simple Voice Chat on the server; /display karaoke). A display is in karaoke while
 # someone sings on it (/display karaoke ... singer add, or their turn in the line); when the last singer stops it is

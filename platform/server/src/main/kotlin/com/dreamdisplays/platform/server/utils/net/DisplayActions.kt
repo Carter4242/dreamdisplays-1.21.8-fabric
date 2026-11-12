@@ -195,7 +195,7 @@ object DisplayActions {
             mapOf("mode" to displayData.mode.name.lowercase(), "url" to url, "previousUrl" to previousUrl),
         )
         // A screen share's relay URL and the video coming back after it (persist false) are the share's own rows
-        if (persist) DisplayActivity.record(displayData, ActivityKind.VIDEO_SET, actor?.uniqueId, url = url, title = DisplayActivity.titleFor(displayData, url))
+        if (persist) DisplayActivity.record(displayData, ActivityKind.VIDEO_SET, actor?.uniqueId, url = url, title = DisplayActivity.titleFor(displayData, url), old = previousUrl)
 
         if (persist) runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         // Back to no video (a screen share ended on a display that had none): the same as a clear for viewers
@@ -217,8 +217,8 @@ object DisplayActions {
         // Already so: nothing to save or tell everyone, only the asker (whose menu may be behind)
         if (displayData.access == access) return DisplayManager.sendUpdate(displayData, [player])
 
+        DisplayActivity.record(displayData, ActivityKind.ACCESS, player.uniqueId, text = access.name.lowercase(), old = displayData.access.name.lowercase())
         displayData.access = access
-        DisplayActivity.record(displayData, ActivityKind.ACCESS, player.uniqueId, text = access.name.lowercase())
 
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
@@ -264,7 +264,7 @@ object DisplayActions {
                 mapOf("mode" to mode.name.lowercase(), "previousMode" to previousMode.name.lowercase()),
             )
         }
-        DisplayActivity.record(displayData, ActivityKind.MODE, by?.uniqueId, text = mode.name.lowercase())
+        DisplayActivity.record(displayData, ActivityKind.MODE, by?.uniqueId, text = mode.name.lowercase(), old = previousMode.name.lowercase())
         runAsync { PaperServer.getInstance().storage.saveDisplay(displayData) }
         DisplayManager.broadcastUpdate(displayData)
         TimelineManager.onModeChanged(displayData, positionMs)
@@ -305,6 +305,7 @@ object DisplayActions {
         DisplayActivity.record(
             displayData, ActivityKind.ofPlayback(action), player.uniqueId, fromMs = before?.positionAt(atMs) ?: 0L,
             toMs = TimelineManager.clampSeek(positionMs, displayData), rate = TimelineManager.speedOf(displayData),
+            old = before?.let { "${if (it.paused) "paused" else "playing"} ${it.rate}x" }.orEmpty(),
         )
     }
 

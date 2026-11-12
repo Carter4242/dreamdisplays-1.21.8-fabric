@@ -418,6 +418,7 @@ object DisplayManager {
     /** Removes [displayData] from storage and the registry and notifies nearby clients. */
     @PaperOnly
     fun delete(displayData: PaperDisplayData) {
+        com.dreamdisplays.platform.server.playback.DisplayActivity.record(displayData, com.dreamdisplays.core.activity.ActivityKind.DELETED)
         runAsync { getInstance().storage.deleteDisplay(displayData) }
         broadcastDelete(displayData)
         TimelineManager.remove(displayData.id)

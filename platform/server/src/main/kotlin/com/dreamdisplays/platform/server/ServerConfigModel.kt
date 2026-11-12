@@ -119,12 +119,14 @@ data class SettingsSection(
     /**
      * `[activity]` section: the display menu's Activity tab (the last [max_entries] things done on each display; 0 =
      * off) and Viewers tab. [visible_to] / [viewers_visible_to]: `everyone` (anyone who can open the display's menu),
-     * `admins` or `nobody`.
+     * `admins` or `nobody`. Every row, and every refused attempt, also goes to the permanent journal
+     * `activity/activity-YYYY-MM-DD.log`, kept [log_days] days (0 = forever).
      */
     data class ActivityConfig(
         val max_entries: Int = 100,
         val visible_to: String = "everyone",
         val viewers_visible_to: String = "everyone",
+        val log_days: Int = 90,
     )
 
     /**
@@ -396,6 +398,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             max_entries = t.numberOrNull("activity.max_entries")?.toInt()?.coerceIn(0, 1_000) ?: 100,
             visible_to = (t?.get("activity.visible_to") as? String)?.trim()?.lowercase() ?: "everyone",
             viewers_visible_to = (t?.get("activity.viewers_visible_to") as? String)?.trim()?.lowercase() ?: "everyone",
+            log_days = t.numberOrNull("activity.log_days")?.toInt()?.coerceIn(0, 36_500) ?: 90,
         ),
         karaoke = SettingsSection.KaraokeConfig(
             default_lead_ms = t.numberOrNull("karaoke.default_lead_ms")?.toInt()?.coerceIn(0, 3_000) ?: 0,

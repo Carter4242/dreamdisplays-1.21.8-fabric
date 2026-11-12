@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "стварыў(-ла) дысплей",
   "dreamdisplays.activity.resized": "змяніў(-ла) памер дысплея на %s×%s",
   "dreamdisplays.activity.moved": "перамясціў(-ла) дысплей",
+  "dreamdisplays.activity.deleted": "выдаліў(-ла) экран",
   "dreamdisplays.activity.auto.next": "Наступныя: пераход да \"%s\"",
   "dreamdisplays.activity.auto.loop": "Відэа пачалося нанава",
   "dreamdisplays.activity.auto.pause": "Паўза: паблізу нікога не было",

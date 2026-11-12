@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "יצר את התצוגה",
   "dreamdisplays.activity.resized": "שינה את גודל התצוגה ל-%s×%s",
   "dreamdisplays.activity.moved": "הזיז את התצוגה",
+  "dreamdisplays.activity.deleted": "מחק את המסך",
   "dreamdisplays.activity.auto.next": "הבא בתור עבר אל \"%s\"",
   "dreamdisplays.activity.auto.loop": "הסרטון התחיל מחדש",
   "dreamdisplays.activity.auto.pause": "מושהה: אף אחד לא היה בסביבה",

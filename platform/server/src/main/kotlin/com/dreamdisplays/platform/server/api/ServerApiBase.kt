@@ -160,9 +160,9 @@ abstract class ServerDisplayBase internal constructor(
         }
         val sanitizedLang = MediaUrlPolicy.sanitizeLang(lang)
         if (backend.askSetUrl(data, url, sanitizedLang, null) != null) return CommandResult.REFUSED
+        DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.VIDEO_SET, url = url, title = DisplayActivity.titleFor(data, url), old = data.url)
         data.url = url
         data.lang = sanitizedLang
-        DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.VIDEO_SET, url = url, title = DisplayActivity.titleFor(data, url))
         save()
         broadcast()
         TimelineManager.onVideoChanged(data)
@@ -173,7 +173,7 @@ abstract class ServerDisplayBase internal constructor(
 
     override fun setAccess(access: DisplayAccess): CommandResult {
         if (!isAlive) return CommandResult.STALE
-        if (data.access != access) DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.ACCESS, text = access.name.lowercase())
+        if (data.access != access) DisplayActivity.record(data, com.dreamdisplays.core.activity.ActivityKind.ACCESS, text = access.name.lowercase(), old = data.access.name.lowercase())
         data.access = access
         save()
         broadcast()

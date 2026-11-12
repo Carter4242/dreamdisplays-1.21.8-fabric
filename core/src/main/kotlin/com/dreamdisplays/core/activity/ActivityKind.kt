@@ -82,6 +82,9 @@ enum class ActivityKind(val wire: Int, val automatic: Boolean = false, val about
     RESIZED(81),
     MOVED(82),
 
+    /** The display was deleted (the permanent journal keeps it; the list goes with the display). */
+    DELETED(83),
+
     /** title / url of the entry that started. */
     QUEUE_NEXT(100, automatic = true),
     LOOPED(101, automatic = true),

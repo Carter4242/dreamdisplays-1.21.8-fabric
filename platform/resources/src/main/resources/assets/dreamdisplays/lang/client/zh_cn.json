@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "创建了显示屏",
   "dreamdisplays.activity.resized": "将显示屏大小调整为 %s×%s",
   "dreamdisplays.activity.moved": "移动了显示屏",
+  "dreamdisplays.activity.deleted": "删除了屏幕",
   "dreamdisplays.activity.auto.next": "接下来已切换到\"%s\"",
   "dreamdisplays.activity.auto.loop": "视频已重新开始",
   "dreamdisplays.activity.auto.pause": "已暂停：附近没有人",

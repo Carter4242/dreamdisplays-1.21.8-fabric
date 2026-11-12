@@ -49,6 +49,14 @@ object MenuPanels {
     /** Points [DisplayActivity] at this platform's rules; call at enable. */
     fun init() {
         DisplayActivity.maxEntries = { settings.max_entries }
+        com.dreamdisplays.platform.server.playback.ActivityJournal.dir =
+            { java.io.File(com.dreamdisplays.platform.server.PaperServer.getInstance().dataFolder, "activity") }
+        com.dreamdisplays.platform.server.playback.ActivityJournal.keepDays = { settings.log_days }
+        DisplayActivity.placeOf = { display ->
+            (display as? PaperDisplayData)?.takeIf { !it.virtual }?.pos1?.let { loc ->
+                com.dreamdisplays.core.activity.ActivityJournalFormat.Place(loc.world?.name ?: "?", loc.blockX, loc.blockY, loc.blockZ)
+            }
+        }
         DisplayActivity.mayView = { playerId, displayId ->
             val player = Bukkit.getPlayer(playerId)
             val display = DisplayManager.getDisplayData(displayId) as? PaperDisplayData
@@ -157,7 +165,7 @@ object MenuPanels {
     }
 
     /** True when [player] could open [display]'s menu: in its range, or following it from afar (fullscreen, PiP). */
-    private fun isPresent(player: Player, display: PaperDisplayData): Boolean =
+    fun isPresent(player: Player, display: PaperDisplayData): Boolean =
         DisplayManager.isPlayerInRange(player, display) ||
             player.uniqueId in TimelineManager.extraReceivers(display.id) ||
             player.uniqueId in TimelineManager.pinReceivers(display.id)

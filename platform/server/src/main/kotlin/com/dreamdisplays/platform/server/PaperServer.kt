@@ -183,6 +183,7 @@ class PaperServer : JavaPlugin() {
         disableStep("save displays") { DisplayManager.save { data: PaperDisplayData -> storage.saveDisplay(data) } }
         disableStep("save queues") { QueueManager.flush() }
         disableStep("save activity") { DisplayActivity.flush() }
+        disableStep("stop the activity log") { com.dreamdisplays.platform.server.playback.ActivityJournal.shutdown() }
         disableStep("save PiP pins") { PipPinManager.flush() }
         disableStep("stop the client error log") { com.dreamdisplays.platform.server.policy.ClientErrorReports.shutdown() }
         disableStep("stop background IO") { ServerCoroutines.shutdown() }

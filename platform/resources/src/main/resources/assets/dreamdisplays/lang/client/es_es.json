@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "creó la pantalla",
   "dreamdisplays.activity.resized": "cambió el tamaño de la pantalla a %s×%s",
   "dreamdisplays.activity.moved": "movió la pantalla",
+  "dreamdisplays.activity.deleted": "eliminó la pantalla",
   "dreamdisplays.activity.auto.next": "A continuación pasó a \"%s\"",
   "dreamdisplays.activity.auto.loop": "El video volvió a empezar",
   "dreamdisplays.activity.auto.pause": "En pausa: no había nadie cerca",

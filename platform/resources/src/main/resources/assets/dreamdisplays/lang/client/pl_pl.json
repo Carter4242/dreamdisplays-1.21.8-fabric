@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "utworzył(a) wyświetlacz",
   "dreamdisplays.activity.resized": "zmienił(a) rozmiar wyświetlacza na %s×%s",
   "dreamdisplays.activity.moved": "przesunął(-ęła) wyświetlacz",
+  "dreamdisplays.activity.deleted": "usunął(-ęła) ekran",
   "dreamdisplays.activity.auto.next": "Następne: przejście do \"%s\"",
   "dreamdisplays.activity.auto.loop": "Film zaczął się od nowa",
   "dreamdisplays.activity.auto.pause": "Wstrzymano: nikogo nie było w pobliżu",

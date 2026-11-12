@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "a créé l'affichage",
   "dreamdisplays.activity.resized": "a redimensionné l'affichage en %s×%s",
   "dreamdisplays.activity.moved": "a déplacé l'affichage",
+  "dreamdisplays.activity.deleted": "a supprimé l'écran",
   "dreamdisplays.activity.auto.next": "À suivre est passé à \"%s\"",
   "dreamdisplays.activity.auto.loop": "La vidéo a recommencé",
   "dreamdisplays.activity.auto.pause": "En pause : personne n'était à proximité",

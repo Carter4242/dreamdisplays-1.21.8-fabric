@@ -66,6 +66,7 @@ object ActivityText {
             ActivityKind.CREATED -> Line(PREFIX + "created")
             ActivityKind.RESIZED -> Line(PREFIX + "resized", [e.count.toString(), e.toMs.toString()])
             ActivityKind.MOVED -> Line(PREFIX + "moved")
+            ActivityKind.DELETED -> Line(PREFIX + "deleted")
             ActivityKind.QUEUE_NEXT -> Line(PREFIX + "auto.next", [video])
             ActivityKind.LOOPED -> Line(PREFIX + "auto.loop")
             ActivityKind.AUTO_PAUSED -> Line(PREFIX + "auto.pause")
@@ -136,7 +137,7 @@ object ActivityText {
         "queue.loop.off", "mode", "access", "rename", "rename.clear", "share.start", "share.stop", "karaoke.join",
         "karaoke.leave", "karaoke.sing", "karaoke.stop", "fullscreen.start", "fullscreen.end", "prepare", "schedule.play",
         "schedule.pause", "schedule.cancel", "schedule.fired.play", "schedule.fired.pause", "policy", "policy.reset", "policy.reset_all",
-        "created", "resized", "moved", "auto.next", "auto.loop", "auto.pause", "auto.restored", "auto.fullscreen_end",
+        "created", "resized", "moved", "deleted", "auto.next", "auto.loop", "auto.pause", "auto.restored", "auto.fullscreen_end",
         "ago.now", "ago.seconds", "ago.minutes", "ago.hours", "ago.days",
     ].map { PREFIX + it } + TOKENS.map { PREFIX + "value." + it }
 }

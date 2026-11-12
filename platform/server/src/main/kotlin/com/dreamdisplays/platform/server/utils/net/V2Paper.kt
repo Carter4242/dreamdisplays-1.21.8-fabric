@@ -128,6 +128,8 @@ object PaperV2Networking : PluginMessageListener {
             .onFailure { logDecodeFailure(player, it) }
             .getOrNull() ?: return
 
+        // A display action that records no Activity row was refused: the permanent journal gets it with a reason
+        val attempt = ActivityAttempts.begin(player, packet)
         when (packet) {
             is ClientHello -> handleHello(player, packet)
             is RequestSync -> DisplayActions.requestSync(player, packet.id, packet.knownMediaGen)
@@ -197,6 +199,7 @@ object PaperV2Networking : PluginMessageListener {
 
             else -> logger.debug("Ignoring non-serverbound v2 packet {}.", packet::class.simpleName)
         }
+        ActivityAttempts.end(attempt)
     }
 
     /** When each player's undecodable packet was last logged in full; one a minute each, the rest at debug. */

@@ -226,6 +226,7 @@
   "dreamdisplays.activity.created": "created the display",
   "dreamdisplays.activity.resized": "resized the display to %s×%s",
   "dreamdisplays.activity.moved": "moved the display",
+  "dreamdisplays.activity.deleted": "deleted the display",
   "dreamdisplays.activity.auto.next": "Up next moved on to \"%s\"",
   "dreamdisplays.activity.auto.loop": "The video started over",
   "dreamdisplays.activity.auto.pause": "Paused: nobody was nearby",

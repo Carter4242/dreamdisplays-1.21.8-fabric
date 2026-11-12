@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "ha creato il display",
   "dreamdisplays.activity.resized": "ha ridimensionato il display a %s×%s",
   "dreamdisplays.activity.moved": "ha spostato il display",
+  "dreamdisplays.activity.deleted": "ha eliminato lo schermo",
   "dreamdisplays.activity.auto.next": "In coda è passato a \"%s\"",
   "dreamdisplays.activity.auto.loop": "Il video è ricominciato",
   "dreamdisplays.activity.auto.pause": "In pausa: nessuno nelle vicinanze",

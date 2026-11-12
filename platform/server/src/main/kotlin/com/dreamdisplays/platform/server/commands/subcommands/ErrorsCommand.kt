@@ -24,7 +24,8 @@ import java.util.*
 /**
  * `/display diag errors [player|display|#n] [errors|hitches|shares|commands] [count]`: the latest client error reports, playback
  * hitches and display commands (newest first), each with its detail on hover; clicking one (or `#n`) prints all of
- * it. `/display diag env <player>`: that player's client environment summary. Permission `dreamdisplays.diag`;
+ * it. `commands` reads the permanent Activity journal instead ([ActivityJournalReader]): everything done on a display
+ * or by a player, refused attempts included, over the last day (or `<n>h` / `<n>d` in place of the count). `/display diag env <player>`: that player's client environment summary. Permission `dreamdisplays.diag`;
  * output only goes to the sender. Client-supplied text is printed as plain text, never parsed for formatting.
  */
 @PaperOnly
@@ -48,13 +49,17 @@ object ErrorsCommand {
 
     fun execute(sender: CommandSender, args: List<String>) {
         var count = DEFAULT_COUNT
+        var hours: Int? = null
+        var countGiven = false
+        var targetToken: String? = null
         var type: String? = null
         var filterLabel = "all"
         var filter: (Entry) -> Boolean = { true }
         for ((index, raw) in args.withIndex()) {
             val token = raw.trim()
             if (token.isEmpty()) continue
-            token.toIntOrNull()?.let { count = it.coerceIn(1, MAX_COUNT); continue }
+            token.toIntOrNull()?.let { count = it.coerceIn(1, MAX_COUNT); countGiven = true; continue }
+            ActivityJournalReader.hoursOf(token)?.let { hours = it; continue }
             if (token.lowercase() in TYPES) {
                 type = TYPES[token.lowercase()]
                 continue
@@ -67,6 +72,9 @@ object ErrorsCommand {
                 sender.sendMessage(text("Unknown option '${ReportLimits.forChat(token, 32)}'. Use errors, hitches, shares, commands, all or a count.", NamedTextColor.RED))
                 return
             }
+            targetToken = token
+            // Display commands come from the journal, which knows players and displays the reports never saw
+            if (args.any { TYPES[it.trim().lowercase()] == "command" }) continue
             val target = resolveTarget(token) ?: run {
                 sender.sendMessage(text("No player or display '${ReportLimits.forChat(token, 40)}' with reports.", NamedTextColor.RED))
                 return
@@ -75,6 +83,12 @@ object ErrorsCommand {
             filter = target.second
         }
         val wanted = type
+        if (wanted == "command") {
+            // A time window without a count shows as much of it as fits
+            val lines = if (hours != null && !countGiven) MAX_COUNT else count
+            ActivityJournalReader.show(sender, targetToken, lines, hours ?: ActivityJournalReader.DEFAULT_HOURS)
+            return
+        }
         val entries = ClientErrorReports.recent(count) { filter(it) && (wanted == null || it.type == wanted) }
         val what = when (wanted) {
             ClientErrorReport.TYPE_ERROR -> "errors"

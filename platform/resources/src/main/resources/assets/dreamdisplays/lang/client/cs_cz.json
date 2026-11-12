@@ -170,6 +170,7 @@
   "dreamdisplays.activity.created": "vytvořil(a) displej",
   "dreamdisplays.activity.resized": "změnil(a) velikost displeje na %s×%s",
   "dreamdisplays.activity.moved": "přesunul(a) displej",
+  "dreamdisplays.activity.deleted": "smazal(a) obrazovku",
   "dreamdisplays.activity.auto.next": "Další na řadě: přechod na \"%s\"",
   "dreamdisplays.activity.auto.loop": "Video začalo znovu",
   "dreamdisplays.activity.auto.pause": "Pozastaveno: nikdo nebyl poblíž",

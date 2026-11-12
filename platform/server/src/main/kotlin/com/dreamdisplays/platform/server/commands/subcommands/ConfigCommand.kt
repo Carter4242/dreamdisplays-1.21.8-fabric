@@ -62,6 +62,7 @@ object ConfigCommand {
         Key("activity.max_entries", PolicyPaths.Kind.Whole(0, 1_000)) { it.activity.max_entries },
         Key("activity.visible_to", PolicyPaths.Kind.Choice(PANEL_VISIBILITY)) { it.activity.visible_to },
         Key("activity.viewers_visible_to", PolicyPaths.Kind.Choice(PANEL_VISIBILITY)) { it.activity.viewers_visible_to },
+        Key("activity.log_days", PolicyPaths.Kind.Whole(0, 36_500)) { it.activity.log_days },
         Key("karaoke.default_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.default_lead_ms },
         Key("karaoke.lead_margin_ms", PolicyPaths.Kind.Whole(0, 1_000)) { it.karaoke.lead_margin_ms },
         Key("karaoke.min_lead_ms", PolicyPaths.Kind.Whole(0, 3_000)) { it.karaoke.min_lead_ms },
