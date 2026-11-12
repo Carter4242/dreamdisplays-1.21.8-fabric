@@ -102,6 +102,7 @@ class PlayerListener : Listener {
         quitStep("nearby") { DisplayManager.forgetNearbyPlayer(id) }
         quitStep("diagnostics") { com.dreamdisplays.platform.server.policy.ClientDiagnostics.onQuit(id) }
         quitStep("error reports") { com.dreamdisplays.platform.server.policy.ClientErrorReports.onQuit(id) }
+        quitStep("queue limits") { com.dreamdisplays.platform.server.utils.net.QueueActions.onQuit(id) }
         quitStep("karaoke") { com.dreamdisplays.platform.server.karaoke.KaraokeManager.onQuit(id) }
         quitStep("scheduler") { Scheduler.untrackPlayer(event.player) }
     }
