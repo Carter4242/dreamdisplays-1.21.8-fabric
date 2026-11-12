@@ -3,6 +3,7 @@
 package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.protocol.PacketDirection
+import com.dreamdisplays.core.protocol.common.packets.ActivityState
 import com.dreamdisplays.core.protocol.common.packets.ClearCache
 import com.dreamdisplays.core.protocol.common.packets.ClientEnvironment
 import com.dreamdisplays.core.protocol.common.packets.ClientErrorReport
@@ -21,6 +22,7 @@ import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong
 import com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport
 import com.dreamdisplays.core.protocol.common.packets.KaraokeMicMarkers
 import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
+import com.dreamdisplays.core.protocol.common.packets.MenuPanelRequest
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
 import com.dreamdisplays.core.protocol.common.packets.QueueAction
@@ -37,6 +39,7 @@ import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
 import com.dreamdisplays.core.protocol.common.packets.ViewerReport
+import com.dreamdisplays.core.protocol.common.packets.ViewersState
 import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
@@ -117,6 +120,9 @@ object PacketRegistry {
         Entry(PacketType.KARAOKE_MIC_MARKERS, KaraokeMicMarkers::class, KaraokeMicMarkers.serializer()),
         Entry(PacketType.SCREEN_SHARE_REQUEST, ScreenShareRequest::class, ScreenShareRequest.serializer()),
         Entry(PacketType.SCREEN_SHARE_STATE, ScreenShareState::class, ScreenShareState.serializer()),
+        Entry(PacketType.MENU_PANEL_REQUEST, MenuPanelRequest::class, MenuPanelRequest.serializer()),
+        Entry(PacketType.ACTIVITY_STATE, ActivityState::class, ActivityState.serializer()),
+        Entry(PacketType.VIEWERS_STATE, ViewersState::class, ViewersState.serializer()),
     ]
 
     private val byId = entries.associateBy { it.id }

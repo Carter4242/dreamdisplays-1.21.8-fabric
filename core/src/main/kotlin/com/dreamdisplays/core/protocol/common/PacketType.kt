@@ -1,6 +1,7 @@
 package com.dreamdisplays.core.protocol.common
 
 import com.dreamdisplays.shared.protocol.PacketDirection
+import com.dreamdisplays.core.protocol.common.packets.ActivityState
 import com.dreamdisplays.core.protocol.common.packets.ClearCache
 import com.dreamdisplays.core.protocol.common.packets.ClientEnvironment
 import com.dreamdisplays.core.protocol.common.packets.ClientErrorReport
@@ -19,6 +20,7 @@ import com.dreamdisplays.core.protocol.common.packets.KaraokeClockPong
 import com.dreamdisplays.core.protocol.common.packets.KaraokeLatencyReport
 import com.dreamdisplays.core.protocol.common.packets.KaraokeMicMarkers
 import com.dreamdisplays.core.protocol.common.packets.KaraokeOffsetReport
+import com.dreamdisplays.core.protocol.common.packets.MenuPanelRequest
 import com.dreamdisplays.core.protocol.common.packets.PipPin
 import com.dreamdisplays.core.protocol.common.packets.PlaybackCommand
 import com.dreamdisplays.core.protocol.common.packets.QueueAction
@@ -35,6 +37,7 @@ import com.dreamdisplays.core.protocol.common.packets.RequestSync
 import com.dreamdisplays.core.protocol.common.packets.ServerHello
 import com.dreamdisplays.core.protocol.common.packets.ServerPolicy
 import com.dreamdisplays.core.protocol.common.packets.ViewerReport
+import com.dreamdisplays.core.protocol.common.packets.ViewersState
 import com.dreamdisplays.core.protocol.common.packets.SetDisplaysEnabled
 import com.dreamdisplays.core.protocol.common.packets.SetLocked
 import com.dreamdisplays.core.protocol.common.packets.SetMode
@@ -103,7 +106,13 @@ enum class PacketType(
     // Built-in screen sharing to a live relay; only exchanged with servers that advertise ServerFeature.SCREEN_SHARE.
     // Ids start at 80 so packets added elsewhere in the 60s/70s cannot collide.
     SCREEN_SHARE_REQUEST(80, ScreenShareRequest::class, PacketDirection.CLIENT_TO_SERVER),
-    SCREEN_SHARE_STATE(81, ScreenShareState::class, PacketDirection.SERVER_TO_CLIENT);
+    SCREEN_SHARE_STATE(81, ScreenShareState::class, PacketDirection.SERVER_TO_CLIENT),
+
+    // Display menu panels (Activity, Viewers); only exchanged with servers that advertise ServerFeature.ACTIVITY_LOG /
+    // VIEWER_LIST, and sent to clients that advertise ClientFeature.ACTIVITY_LOG / VIEWER_LIST. Ids start at 90.
+    MENU_PANEL_REQUEST(90, MenuPanelRequest::class, PacketDirection.CLIENT_TO_SERVER),
+    ACTIVITY_STATE(91, ActivityState::class, PacketDirection.SERVER_TO_CLIENT),
+    VIEWERS_STATE(92, ViewersState::class, PacketDirection.SERVER_TO_CLIENT);
 
     companion object {
         private val byId = entries.associateBy { it.id }

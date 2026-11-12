@@ -73,7 +73,13 @@ enum class ClientFeature(override val wire: String) : WireEnum {
      * outside it. Without it the server sends such a display only to players inside the region (hard edge: it is
      * deleted for them when they walk out).
      */
-    REGION_FADE("region_fade");
+    REGION_FADE("region_fade"),
+
+    /** Shows a display's Activity tab: asks with `MenuPanelRequest.activity` and reads `ActivityState`. Without it none is sent. */
+    ACTIVITY_LOG("activity_log"),
+
+    /** Shows a display's Viewers tab: asks with `MenuPanelRequest.viewers` and reads `ViewersState`. Without it none is sent. */
+    VIEWER_LIST("viewer_list");
 
     companion object {
         /** Decodes a feature token, or returns `null` when unknown. */
