@@ -56,10 +56,12 @@ internal class LiveAdFilter(
     private var source = MAIN
 
     /**
-     * Just after an ad break: only the [JOIN_SEGMENTS] segments after the cut are served, so the session opened now
-     * starts exactly at the cut (its sound and picture both), however late it reads. Lifted [PIN_READ_GRACE_NANOS] after
-     * the first read, or [PIN_MAX_NANOS] after the release if nothing reads.
+     * At the first open and just after an ad break: only the [JOIN_SEGMENTS] segments from [pinFromVseq] on are served
+     * (the newest ones, or those right after the cut), so the session opened now starts there with its sound and its
+     * picture both, however each of them picks its live join and however late it reads. Lifted [PIN_READ_GRACE_NANOS]
+     * after the first read, or [PIN_MAX_NANOS] after the pin if nothing reads.
      */
+    private var pinFromVseq = Long.MIN_VALUE
     private var pinSinceNanos: Long? = null
     private var pinFirstReadNanos: Long? = null
 
@@ -158,7 +160,9 @@ internal class LiveAdFilter(
                 logger.debug("{} [ad-skip] segments now come from {} (was {}).", label, name, source)
                 source = name
             }
+            val first = rendered == null
             ingest(use, if (name == MAIN) MAIN else BACKUP)
+            if (first && hold == null) entries.takeLast(JOIN_SEGMENTS).firstOrNull()?.let { pin(it.vseq, nanoTime()) }
             rendered = render()
         }
     }
@@ -268,8 +272,7 @@ internal class LiveAdFilter(
                 label, "%.1f".format(Locale.ROOT, h.adSeconds), JOIN_SEGMENTS,
             )
             hold = null
-            pinSinceNanos = now
-            pinFirstReadNanos = null
+            pin(cutVseq, now)
             return
         }
         if (now - h.sinceNanos > MAX_HOLD_NANOS) {
@@ -280,11 +283,17 @@ internal class LiveAdFilter(
         h.resumeAtNanos = resumeAt(now, if (p.adAtEdge) p.adSecondsAfterEdge() else 0.0, h.postAdCount, segmentSec)
     }
 
+    private fun pin(fromVseq: Long, now: Long) {
+        pinFromVseq = fromVseq
+        pinSinceNanos = now
+        pinFirstReadNanos = null
+    }
+
     private fun render(): String {
         val held = hold != null
         val visible = when {
             held -> entries.filter { it.vseq < cutVseq }.takeLast(windowSize)
-            pinSinceNanos != null -> entries.filter { it.vseq >= cutVseq }.take(JOIN_SEGMENTS)
+            pinSinceNanos != null -> entries.filter { it.vseq >= pinFromVseq }.take(JOIN_SEGMENTS)
             else -> entries.filter { it.vseq >= cutVseq }.takeLast(windowSize)
         }
         val sb = StringBuilder(256 + visible.size * 160)

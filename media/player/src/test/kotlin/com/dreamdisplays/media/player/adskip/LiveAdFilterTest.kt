@@ -30,6 +30,10 @@ class LiveAdFilterTest {
         val sim = TwitchSim().live(6)
         val f = filter(sim)
         f.refresh()
+        // The first open sees only the newest three, so its sound and picture start on the same segment...
+        assertEquals((9003L..9005L).map { "https://0123456789ab.j.cloudfront.hls.ttvnw.net/v1/segment/live-$it.ts" }, uris(f.playlist()))
+        // ...then the whole window
+        now += 5_000_000_000L
         assertEquals((9000L..9005L).map { "https://0123456789ab.j.cloudfront.hls.ttvnw.net/v1/segment/live-$it.ts" }, uris(f.playlist()))
         val first = mediaSequence(f.playlist())!!
         val next = f.step(sim) { live() }
@@ -158,6 +162,8 @@ class LiveAdFilterTest {
         assertEquals(now + 4_000_000_000L, held.resumeAtNanos)
         val plain = LiveAdFilter(mainUrl, "test", { clean }, null) { now }.also { it.refresh() }
         assertFalse(plain.holding)
+        assertEquals(3, uris(plain.playlist()).size)
+        now += 5_000_000_000L
         assertEquals(15, uris(plain.playlist()).size)
     }
 
@@ -263,8 +269,9 @@ class LiveAdFilterTest {
         val f = LiveAdFilter(mainUrl, "test", fetch, BackupChooser(rendition, FakeSource(mapOf(embed to backupUrl)), fetch, memory, "t")) { now }
         f.refresh()
         assertFalse(f.holding)
-        assertEquals(15, uris(f.playlist()).size)
+        assertEquals(3, uris(f.playlist()).size)
         // The ad playlist's own stream segment (live sequence 9408) follows the backup's last one (9407)
+        now += 5_000_000_000L
         f.refresh()
         assertFalse(f.holding)
         assertEquals(0, f.breaks)
