@@ -111,6 +111,7 @@ class PaperServer : JavaPlugin() {
         )
         TimelineManager.resumeHoldMs = { Companion.config.settings.resumeHoldMs }
         TimelineManager.seekHoldMs = { Companion.config.settings.seekHoldMs }
+        TimelineManager.speedChangeLeadMs = { Companion.config.settings.speedChangeLeadMs }
         ReadinessTracker.startLeadMaxMs = { Companion.config.settings.startLeadMaxMs }
         TimelineManager.autoPauseWhenEmptyMs = { Companion.config.settings.autoPauseWhenEmptyMs }
         FullscreenBroadcastManager.init(PaperPlaybackTransport)

@@ -44,6 +44,7 @@ object VanillaBootstrap {
         FullscreenBroadcastManager.init(VanillaPlaybackTransport)
         FullscreenBroadcastManager.prepareTimeoutMs = { VanillaServerState.config.settings.fullscreenPrepareTimeoutMs }
         ReadinessTracker.startLeadMaxMs = { VanillaServerState.config.settings.startLeadMaxMs }
+        TimelineManager.speedChangeLeadMs = { VanillaServerState.config.settings.speedChangeLeadMs }
         FullscreenBroadcastManager.restore()
         PipPinManager.init(VanillaPlaybackTransport)
         PipPinManager.restore()

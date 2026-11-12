@@ -87,6 +87,12 @@ data class DisplaySync(
      * the display again ([RequestSync.knownMediaGen]).
      */
     @ProtoNumber(12) val mediaGen: Long = 0,
+    /**
+     * A speed change scheduled ahead ([startInMs] > 0, sent only to clients with `ClientFeature.SCHEDULED_SPEED`): the
+     * timeline plays on at this speed until the start, where it is at [currentTimeMs] and goes on at [rate]. 0 = the
+     * start of a stopped timeline (the client holds paused until then).
+     */
+    @ProtoNumber(13) val speedChangeFromRate: Double = 0.0,
 ) : DreamPacket
 
 /**

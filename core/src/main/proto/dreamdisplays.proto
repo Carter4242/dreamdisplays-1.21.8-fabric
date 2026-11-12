@@ -192,6 +192,8 @@ message DisplaySync {
   optional int32 karaokeLeadMs = 11;
   // WARNING: a default value decoded when value is missing
   optional int64 mediaGen = 12;
+  // WARNING: a default value decoded when value is missing
+  optional double speedChangeFromRate = 13;
 }
 
 // serial name 'com.dreamdisplays.core.protocol.common.packets.RequestSync'

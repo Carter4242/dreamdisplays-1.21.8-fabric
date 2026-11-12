@@ -36,6 +36,7 @@ import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.platform.client.net.ProtocolRouter
+import com.dreamdisplays.core.sync.SpeedChanges
 import com.dreamdisplays.core.share.ScreenSharePrivacy
 import com.dreamdisplays.core.share.ScreenShareViewerRules
 import com.dreamdisplays.media.player.MediaPlayer
@@ -1068,7 +1069,26 @@ class DisplayScreen(
         if (media.onTimelineWhileSwitching(packet)) return
         serverSpeed = PlaybackSpeed.clamp(packet.rate)
         com.dreamdisplays.platform.client.karaoke.KaraokeClient.onSync(uuid, packet.karaokeLeadMs)
-        // A speed change normally comes as a hold (paused): pause first, so the player is only retimed while it is
+        // A speed change scheduled ahead, while this player plays: it plays on at the old speed, opens the new one
+        // meanwhile and switches at the start instant, without a stop
+        val player = mediaPlayer
+        val playing = player != null && requiresServerTimeline() && videoStarted && !paused && !isLive &&
+                !isQueueSwitchPending && timelineFollower.followsPlayingTimeline()
+        if (packet.speedChangeFromRate > 0.0) {
+            logger.info(
+                "[dd-sync] {} speed {}x -> {}x in {} ms: {}", uuid.toString().take(8), packet.speedChangeFromRate,
+                serverSpeed, packet.startInMs, if (playing) "switching while it plays" else "held until then",
+            )
+        }
+        if (player != null && SpeedChanges.followsWithoutStop(packet.speedChangeFromRate, packet.isPaused, packet.startInMs, playing)) {
+            val atNanos = timelineFollower.apply(
+                packet.currentTimeMs, packet.serverTimeMs, false, packet.loop, serverSpeed, packet.startInMs,
+                packet.karaokeLeadMs, packet.durationMs, speedSwitch = true,
+            )
+            player.scheduleSpeedSwitch(playbackSpeed, atNanos)
+            return
+        }
+        // A speed change otherwise comes as a hold (paused): pause first, so the player is only retimed while it is
         // stopped. A playing packet retimes first, so the resume or seek the follower triggers runs at the new speed.
         if (packet.isPaused) {
             timelineFollower.apply(

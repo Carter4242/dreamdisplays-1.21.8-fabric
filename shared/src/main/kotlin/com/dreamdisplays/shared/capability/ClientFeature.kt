@@ -59,7 +59,13 @@ enum class ClientFeature(override val wire: String) : WireEnum {
      * `sync.cheapSeeks`; and reads
      * a policy section with one unreadable field as the rest of that section. Without it those fields are ignored.
      */
-    POLICY_LEVERS("policy_levers");
+    POLICY_LEVERS("policy_levers"),
+
+    /**
+     * Follows `DisplaySync.speedChangeFromRate`: a speed change scheduled ahead plays on at the old speed and switches
+     * at the start instant, without stopping. Without it a speed change holds every viewer paused while they restart.
+     */
+    SCHEDULED_SPEED("scheduled_speed");
 
     companion object {
         /** Decodes a feature token, or returns `null` when unknown. */

@@ -7,10 +7,12 @@ import com.dreamdisplays.core.protocol.common.packets.ReportRequest
 import com.dreamdisplays.api.playback.model.PlaybackAction
 import com.dreamdisplays.api.playback.model.PlaybackMode
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
+import com.dreamdisplays.shared.capability.ClientFeature
 import com.dreamdisplays.shared.playback.PlaybackPermissions
 import com.dreamdisplays.api.playback.model.Timeline
 import com.dreamdisplays.core.karaoke.KaraokeTiming
 import com.dreamdisplays.core.protocol.common.packets.DisplaySync
+import com.dreamdisplays.core.protocol.common.hasFeature
 import com.dreamdisplays.core.protocol.common.toSync
 import com.dreamdisplays.core.queue.EndOfStreamGuard
 import com.dreamdisplays.core.queue.LoopWraps
@@ -19,6 +21,7 @@ import com.dreamdisplays.core.sync.DisplayFollowers
 import com.dreamdisplays.core.sync.EmptyDisplays
 import com.dreamdisplays.core.sync.ModeChanges
 import com.dreamdisplays.core.sync.SavedPlayback
+import com.dreamdisplays.core.sync.SpeedChanges
 import com.dreamdisplays.core.sync.TimelineRecords
 import com.dreamdisplays.platform.server.datatypes.display.DisplayData
 import com.dreamdisplays.platform.server.managers.ActionThrottle
@@ -161,6 +164,7 @@ object TimelineManager {
         videoChangedAt.clear()
         sentLeads.clear()
         endOfStream.clear()
+        speedSwitches.clear()
     }
 
     /** Every shared timeline as it stands now, to hand to the next plugin instance ([init]). */
@@ -409,9 +413,11 @@ object TimelineManager {
     /**
      * Sets the playback speed of a `SYNCED` / `BROADCAST` display's timeline to [rate] (clamped to
      * [PlaybackSpeed.MIN]..[PlaybackSpeed.MAX]) without moving its position; permission checks are the caller's.
-     * A playing timeline is held at the current position like a seek: every viewer restarts its player at the new
-     * speed there, and all start together once they are ready ([startWhenReady]), after [seekHoldMs] at the latest. Returns false when the display has no
-     * shared timeline.
+     * A playing timeline switches a short lead ahead ([speedChangeLeadMs]) and plays on at the old speed until then, so
+     * viewers open the new-speed stream meanwhile and switch without stopping. When a viewer cannot follow that (see
+     * [SpeedChanges.schedules]) it is held at the current position like a seek: every viewer restarts its player at
+     * the new speed there, and all start together once they are ready ([startWhenReady]), after [seekHoldMs] at the
+     * latest. Returns false when the display has no shared timeline.
      */
     fun setSpeed(display: DisplayData, rate: Double): Boolean {
         if (display.mode != PlaybackMode.SYNCED && display.mode != PlaybackMode.BROADCAST) return false
@@ -429,8 +435,39 @@ object TimelineManager {
             return true
         }
         startHolds.remove(display.id)
+        // Viewers that can, switch at an instant a moment ahead while the timeline plays on: no stop for anyone
+        scheduledSpeedChange(display, current, speed, now)?.let { switching ->
+            timelines[display.id] = switching
+            speedSwitches[display.id] = switching to current.rate
+            broadcast(display, switching)
+            return true
+        }
         holdThenRelease(display, updated, now, playAfter = true, holdMs = seekHoldMs())
         return true
+    }
+
+    /** Lead (ms) a playing display's speed change is scheduled ahead by (0 = hold everyone instead); `display.speed_change_lead_ms`. */
+    var speedChangeLeadMs: () -> Long = { SpeedChanges.DEFAULT_LEAD_MS }
+
+    /** A scheduled speed change per display: the timeline that switches, and the speed it switches from. */
+    private val speedSwitches = ConcurrentHashMap<UUID, Pair<Timeline, Double>>()
+
+    /**
+     * [current] (playing) switching to [speed] a lead ahead of [now], or null when the change is held instead (see
+     * [SpeedChanges.schedules]). Only viewers that run the mod count: one without it never sees the display.
+     */
+    private fun scheduledSpeedChange(display: DisplayData, current: Timeline, speed: Double, now: Long): Timeline? {
+        val prep = speedChangeLeadMs()
+        val viewers = viewersOf(display) + pinReceivers(display.id)
+        val capable = viewers.all { id ->
+            val hello = com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(id) ?: return@all true
+            hello.hasFeature(ClientFeature.SCHEDULED_SPEED)
+        }
+        if (!SpeedChanges.schedules(prep, capable, playerLeadsMs(display.id).isNotEmpty(), LiveStreamUrls.isLive(display.url))) {
+            return null
+        }
+        val lead = SpeedChanges.leadMs(prep, ReadinessTracker.leadMs(display.id, viewers))
+        return SpeedChanges.scheduled(current, speed, now, lead)
     }
 
     /** The playback speed of [display]'s shared timeline (1 when it has none). */
@@ -690,6 +727,7 @@ object TimelineManager {
         durations.forget(displayId)
         lastBroadcast.remove(displayId)
         startHolds.remove(displayId)
+        speedSwitches.remove(displayId)
     }
 
     /**
@@ -833,7 +871,16 @@ object TimelineManager {
      * The one place a display's wire timeline is built (scheduled starts included: see `Timeline.toSync`); per-player
      * sends move it by their lead through [shiftedFor].
      */
-    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long) = timeline.toSync(display.id, display.mode, now, display.mediaGen)
+    private fun syncPacket(display: DisplayData, timeline: Timeline, now: Long): DisplaySync {
+        val sync = timeline.toSync(display.id, display.mode, now, display.mediaGen)
+        // Still the scheduled speed change (any later change replaces the timeline): say so until its instant
+        val switch = speedSwitches[display.id] ?: return sync
+        if (switch.first !== timeline || now >= timeline.serverTimeMs) {
+            speedSwitches.remove(display.id, switch)
+            return sync
+        }
+        return SpeedChanges.mark(sync, switch.second)
+    }
 
     private fun broadcast(display: DisplayData, timeline: Timeline) {
         val now = transport.nowMs()
