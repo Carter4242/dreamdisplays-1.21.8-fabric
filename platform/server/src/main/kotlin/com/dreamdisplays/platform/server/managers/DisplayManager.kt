@@ -134,6 +134,7 @@ object DisplayManager {
 
     private fun removeDisplays(toRemove: List<DisplayData>, delete: (DisplayData) -> Unit): List<UUID> {
         return toRemove.map { display ->
+            com.dreamdisplays.platform.server.playback.DisplayActivity.record(display, com.dreamdisplays.core.activity.ActivityKind.DELETED, text = "base material gone")
             displays.remove(display.id)
             proximityIndex.forgetDisplay(display.id)
             lastReceivers.remove(display.id)
