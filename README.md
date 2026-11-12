@@ -13,7 +13,7 @@ for watching videos together on a server.
 - Each display has a queue of videos that play one after another. The next video loads in the background, so it starts
   as soon as the current one ends.
 - Playback speed goes from 0.1× to 10×.
-- A clear button removes the video from a display.
+- You can see who is watching a display, and who added, skipped or seeked each video.
 
 ### How syncing works
 
@@ -58,6 +58,11 @@ at full volume.
 - Server staff can push a video fullscreen to a group of players for events. Players' games can load it ahead of time,
   so it starts the moment staff run the command.
 
+### Replays
+
+Displays work in [Flashback](https://modrinth.com/mod/flashback) replays and exported videos, in sync with everything else.
+Screen shares aren't saved in replays.
+
 ### Sound and picture
 - Display audio comes from the display's position in the world, gets quieter with distance, and follows your volume
   settings.
@@ -68,6 +73,7 @@ at full volume.
 - YouTube videos that fail to load are retried with other methods.
 - When a video can't play, the display shows the reason.
 - Players' errors are sent to the server, so server owners can see what went wrong.
+- A switch in the mod's settings turns it off completely, to check whether it's causing lag.
 
 ## Install
 
@@ -81,8 +87,13 @@ Download both jars from the [latest release](https://github.com/Carter4242/dream
 - Run `/display help` to see every command.
 - All commands are op-only by default. Permissions start with `dreamdisplays.` and work with LuckPerms.
 - You can change settings in `plugins/DreamDisplays/config.toml` or with `/display config`.
+- A display can be limited to a WorldGuard region. Players outside it never load the video, and its sound fades in as
+  they walk in.
+- `/display defaults` sets everyone's volume, brightness, quality or 3D audio for one display. Players can still change it
+  afterwards.
 - Screen sharing needs a [MediaMTX](https://github.com/bluenviron/mediamtx) relay, which you set up under `[live]` in the config.
 - Errors from players' clients are saved to `plugins/DreamDisplays/client-errors.log`, and `/display diag errors` shows them.
+- Everything done on a display is logged in `plugins/DreamDisplays/activity/`.
 
 ## Credits
 
