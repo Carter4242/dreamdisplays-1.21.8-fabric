@@ -15,9 +15,11 @@ import kotlin.math.roundToLong
  * Recording side: what the server last said about each display (description and timeline), kept from the packets as
  * they arrive so a recording can start with the full picture. Client thread only. Times are wall ms (monotonic).
  *
- * A timeline is kept as the position this client was meant to show and the moment that position applies (when the
- * packet arrived, less the one-way latency the player adds when it follows it; later for a start scheduled ahead), so a
- * replay can put it on its own clock.
+ * A timeline is kept as a position and the moment it applies on this client's clock, so a replay can put it on its own
+ * clock. That moment comes from the server's own stamp, mapped to this clock by the smallest gap ever seen between a
+ * stamp and its arrival (clock skew plus the fastest delivery): a packet held up on the way does not move the timeline,
+ * as the player's latency estimate would (it swings by hundreds of ms under load). Packets without a stamp fall back to
+ * the arrival less the one-way latency. A start scheduled ahead applies that much later.
  */
 class ReplayRecordCache {
     private class Known(var info: DisplayInfo? = null, var timeline: Timeline? = null)
@@ -26,8 +28,11 @@ class ReplayRecordCache {
 
     private val known = LinkedHashMap<UUID, Known>()
 
+    /** Smallest (arrival epoch ms - server stamp) seen on this connection, or null before the first stamp. */
+    private var clockOffsetMs: Long? = null
+
     /** Takes a packet from the server; returns the update to record, or null when it changes nothing replays show. */
-    fun onPacket(packet: DreamPacket, nowMs: Long, oneWayLatencyMs: Double): ReplayFrame? = when (packet) {
+    fun onPacket(packet: DreamPacket, nowMs: Long, nowEpochMs: Long, oneWayLatencyMs: Double): ReplayFrame? = when (packet) {
         is DisplayInfo -> {
             if (packet.virtual) {
                 null
@@ -39,7 +44,7 @@ class ReplayRecordCache {
 
         is DisplaySync -> {
             val anchor = nowMs + (if (!packet.isPaused && packet.startInMs > 0) packet.startInMs else 0) -
-                oneWayLatencyMs.roundToLong()
+                arrivalDelayMs(packet.serverTimeMs, nowEpochMs, oneWayLatencyMs)
             val timeline = Timeline(packet, anchor)
             known.getOrPut(packet.id) { Known() }.timeline = timeline
             ReplayFrame(false, listOf(ReplayEntry(packet.id, sample = sampleOf(timeline, nowMs))))
@@ -60,7 +65,19 @@ class ReplayRecordCache {
         return ReplayFrame(true, entries)
     }
 
-    fun clear() = known.clear()
+    fun clear() {
+        known.clear()
+        clockOffsetMs = null
+    }
+
+    /** How long after its stamp this packet arrived, beyond the fastest delivery seen (see the class comment). */
+    private fun arrivalDelayMs(serverTimeMs: Long, nowEpochMs: Long, oneWayLatencyMs: Double): Long {
+        if (serverTimeMs <= 0L) return oneWayLatencyMs.roundToLong()
+        val gap = nowEpochMs - serverTimeMs
+        val offset = clockOffsetMs?.let { minOf(it, gap) } ?: gap
+        clockOffsetMs = offset
+        return gap - offset
+    }
 
     private fun remove(ids: List<UUID>): ReplayFrame? {
         val gone = ids.filter { known.remove(it) != null }

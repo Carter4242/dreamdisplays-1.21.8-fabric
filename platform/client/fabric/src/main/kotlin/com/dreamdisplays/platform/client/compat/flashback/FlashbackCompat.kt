@@ -88,7 +88,7 @@ object FlashbackCompat : ReplayBridge {
         guarded("recording") {
             val packet = PacketRegistry.decode(bytes, PacketDirection.SERVER_TO_CLIENT) ?: return@guarded
             val now = nowMs()
-            val frame = cache.onPacket(packet, now, oneWayLatencyMs()) ?: return@guarded
+            val frame = cache.onPacket(packet, now, System.currentTimeMillis(), oneWayLatencyMs()) ?: return@guarded
             // Written from the tick, never from here: Flashback runs queued client tasks (this handler among them)
             // while it starts a replay chunk, where an action would land before the chunk's snapshot
             if (api.recorder() != null) pending += frame to now

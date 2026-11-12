@@ -44,6 +44,17 @@ class ReplayPlaybackTest {
     }
 
     @Test
+    fun `a full frame repeating the timeline keeps its place, a new timeline moves it`() {
+        val m = ReplayModel()
+        m.apply(10, ReplayFrame(false, listOf(ReplayEntry(id, info, sample = sample(1_000, anchor = 0)))))
+        // 5 s of wall time later the recorder had run only 90 ticks: the repeat would place it 500 ms later
+        m.apply(100, ReplayFrame(true, listOf(ReplayEntry(id, info, sample = sample(1_000, anchor = -4_500)))))
+        assertEquals(1_000 + 6_000 - 500, m.at(6_000)[id]!!.sample!!.positionAt(6_000))
+        m.apply(120, ReplayFrame(false, listOf(ReplayEntry(id, sample = sample(20_000, anchor = 0)))))
+        assertEquals(20_000 + 100, m.at(6_100)[id]!!.sample!!.positionAt(6_100))
+    }
+
+    @Test
     fun `a full frame removes what it does not list, an update only what it says`() {
         val m = ReplayModel()
         val other = UUID.randomUUID()

@@ -31,7 +31,15 @@ class ReplayModel {
                 e.removed -> infos.getOrPut(e.id) { TreeMap() }[tick] = Optional.empty()
                 e.info != null -> infos.getOrPut(e.id) { TreeMap() }[tick] = Optional.of(Described(e.info, e.card))
             }
-            e.sample?.let { samples.getOrPut(e.id) { TreeMap() }[tick] = it.copy(anchorMs = anchorBase + it.anchorMs) }
+            e.sample?.let { sample ->
+                val history = samples.getOrPut(e.id) { TreeMap() }
+                // A full frame repeats the timeline the client last got: it keeps the place it already has. Placed again
+                // from this tick, it would move by however far the recorder's ticks drifted from its clock meanwhile
+                // (a lagging client runs fewer ticks, then catches up), and the video would jump in the replay.
+                val held = history.floorEntry(tick)?.value
+                if (frame.full && held != null && held.sameTimelineAs(sample) && history.floorKey(tick) != tick) return@let
+                history[tick] = sample.copy(anchorMs = anchorBase + sample.anchorMs)
+            }
         }
         if (frame.full) {
             for ((id, history) in infos) if (id !in listed) history[tick] = Optional.empty()

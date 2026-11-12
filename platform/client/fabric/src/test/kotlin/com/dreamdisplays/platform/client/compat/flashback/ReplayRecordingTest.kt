@@ -59,7 +59,7 @@ class ReplayRecordingTest {
     fun `a screen share is recorded without its address, as a card`() {
         val cache = ReplayRecordCache()
         val share = video.copy(url = "rtmps://relay.example.org:1935/live/abc?user=dd&pass=secret")
-        val entry = cache.onPacket(share, nowMs = 0, oneWayLatencyMs = 0.0)!!.entries.single()
+        val entry = cache.onPacket(share, nowMs = 0, 0, oneWayLatencyMs = 0.0)!!.entries.single()
         assertEquals(ReplayCard.SHARE, entry.card)
         assertEquals("", entry.info!!.url)
         val full = cache.fullFrame(0) { true }.entries.single()
@@ -77,41 +77,55 @@ class ReplayRecordingTest {
     @Test
     fun `a timeline applies from its arrival less the latency the follower adds, written relative to the frame`() {
         val cache = ReplayRecordCache()
-        cache.onPacket(video, 0, 0.0)
+        cache.onPacket(video, 0, 0, 0.0)
         val sync = DisplaySync(id = id, currentTimeMs = 3_000, rate = 1.0, mediaGen = 7)
-        val update = cache.onPacket(sync, nowMs = 10_000, oneWayLatencyMs = 40.0)!!.entries.single()
+        val update = cache.onPacket(sync, nowMs = 10_000, 0, oneWayLatencyMs = 40.0)!!.entries.single()
         assertNull(update.info)
         assertEquals(-40, update.sample!!.anchorMs)
         // Written 5 s later, the same timeline is anchored 5 s further back
         assertEquals(-5_040, cache.fullFrame(15_000) { true }.entries.single().sample!!.anchorMs)
         // A start scheduled 800 ms ahead applies from then
-        val scheduled = cache.onPacket(sync.copy(startInMs = 800), nowMs = 20_000, oneWayLatencyMs = 40.0)!!
+        val scheduled = cache.onPacket(sync.copy(startInMs = 800), nowMs = 20_000, 0, oneWayLatencyMs = 40.0)!!
         assertEquals(760, scheduled.entries.single().sample!!.anchorMs)
     }
 
     @Test
     fun `an update written later keeps its timeline where it was`() {
         val cache = ReplayRecordCache()
-        val frame = cache.onPacket(DisplaySync(id = id, currentTimeMs = 3_000, mediaGen = 7), nowMs = 0, oneWayLatencyMs = 0.0)!!
+        val frame = cache.onPacket(DisplaySync(id = id, currentTimeMs = 3_000, mediaGen = 7), nowMs = 0, nowEpochMs = 0, oneWayLatencyMs = 0.0)!!
         assertEquals(-50, frame.writtenLater(50).entries.single().sample!!.anchorMs)
         assertEquals(frame, frame.writtenLater(0))
     }
 
     @Test
+    fun `stamped timelines apply from their server stamp, a late packet does not move them`() {
+        val cache = ReplayRecordCache()
+        // Arrived 30 ms after its stamp: the fastest seen, so it applies on arrival
+        val a = cache.onPacket(DisplaySync(id = id, currentTimeMs = 1_000, serverTimeMs = 500_000), 10_000, 500_030, 400.0)!!
+        assertEquals(0, a.entries.single().sample!!.anchorMs)
+        // Arrived 250 ms after its stamp, held up on the way: it applied 220 ms before it arrived
+        val b = cache.onPacket(DisplaySync(id = id, currentTimeMs = 2_000, serverTimeMs = 501_000), 11_250, 501_250, 400.0)!!
+        assertEquals(-220, b.entries.single().sample!!.anchorMs)
+        // A faster one lowers the bar
+        val c = cache.onPacket(DisplaySync(id = id, currentTimeMs = 3_000, serverTimeMs = 502_000), 12_010, 502_010, 400.0)!!
+        assertEquals(0, c.entries.single().sample!!.anchorMs)
+    }
+
+    @Test
     fun `deletions are recorded once and other packets not at all`() {
         val cache = ReplayRecordCache()
-        cache.onPacket(video, 0, 0.0)
-        assertTrue(cache.onPacket(DisplayDelete(id), 0, 0.0)!!.entries.single().removed)
-        assertNull(cache.onPacket(DisplayDelete(id), 0, 0.0))
-        assertNull(cache.onPacket(SetVideo(id, "x"), 0, 0.0))
+        cache.onPacket(video, 0, 0, 0.0)
+        assertTrue(cache.onPacket(DisplayDelete(id), 0, 0, 0.0)!!.entries.single().removed)
+        assertNull(cache.onPacket(DisplayDelete(id), 0, 0, 0.0))
+        assertNull(cache.onPacket(SetVideo(id, "x"), 0, 0, 0.0))
         assertTrue(cache.fullFrame(0) { true }.entries.isEmpty())
     }
 
     @Test
     fun `virtual displays and far ones are left out`() {
         val cache = ReplayRecordCache()
-        assertNull(cache.onPacket(video.copy(virtual = true), 0, 0.0))
-        cache.onPacket(video, 0, 0.0)
+        assertNull(cache.onPacket(video.copy(virtual = true), 0, 0, 0.0))
+        cache.onPacket(video, 0, 0, 0.0)
         assertTrue(cache.fullFrame(0) { false }.entries.isEmpty())
     }
 }

@@ -24,6 +24,11 @@ data class ReplaySample(
     val loop: Boolean,
     val durationMs: Long,
 ) {
+    /** The same timeline from the server (all but where it is placed in the replay). */
+    fun sameTimelineAs(other: ReplaySample): Boolean =
+        mediaGen == other.mediaGen && positionMs == other.positionMs && rate == other.rate && paused == other.paused &&
+            loop == other.loop && durationMs == other.durationMs
+
     /** The content position at replay time [replayMs]. */
     fun positionAt(replayMs: Long): Long {
         val raw = if (paused) positionMs else positionMs + ((replayMs - anchorMs).coerceAtLeast(0) * rate).roundToLong()
