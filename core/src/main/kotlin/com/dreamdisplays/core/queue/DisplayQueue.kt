@@ -302,6 +302,14 @@ object QueueTiming {
         return if (endAt <= nowMs || endAt - nowMs > earlyMs) nowMs else endAt + clampGapMs(gapMs)
     }
 
+    /**
+     * When a queue restored at [nowMs] (a reload or restart) had something to advance to ([advanceDue]'s `armedAtMs`):
+     * since its earliest waiting entry was added, so a video that ended while the plugin was down moves on at once
+     * instead of playing again first. [nowMs] when that is unknown (no entries, or none with an add time).
+     */
+    fun armedAfterRestore(waiting: List<QueueItem>, nowMs: Long): Long =
+        waiting.map { it.addedAtMs }.filter { it in 1..nowMs }.minOrNull() ?: nowMs
+
     /** Default `[queue] gap_ms`: the pause between a queued video ending by itself and the next one starting. */
     const val DEFAULT_GAP_MS = 200L
 
