@@ -144,7 +144,10 @@ internal class ExportSound(private val displayId: UUID) {
                 addAll(MediaProcess.inputHeaderArgs(audioUrl))
                 addAll(listOf("-rw_timeout", (READ_DEADLINE_MS * 1_000L).toString()))
             }
-            addAll(listOf("-ss", String.format(Locale.ROOT, "%.6f", atNanos / 1e9), "-i", audioUrl))
+            // A seek on the input lands where the container can (HLS: a segment, up to half a second off): seek the
+            // input a little before, keep the stream's own timestamps, and cut exactly at the position on the way out
+            val coarse = (atNanos - COARSE_SEEK_NANOS).coerceAtLeast(0L)
+            addAll(listOf("-ss", seconds(coarse), "-copyts", "-start_at_zero", "-i", audioUrl, "-ss", seconds(atNanos)))
             addAll(listOf("-vn", "-ac", "1", "-ar", RATE.toString(), "-f", "f32le", "-"))
         }
         val p = runCatching { ProcessBuilder(cmd).redirectError(ProcessBuilder.Redirect.DISCARD).start() }.getOrNull()
@@ -154,6 +157,8 @@ internal class ExportSound(private val displayId: UUID) {
         pipeAtNanos = atNanos
         return true
     }
+
+    private fun seconds(nanos: Long): String = String.format(Locale.ROOT, "%.6f", nanos / 1e9)
 
     private fun closePipe() {
         pipe?.close()
@@ -279,6 +284,9 @@ internal class ExportSound(private val displayId: UUID) {
 
         /** Behind the pipe by up to this, the frame is read on from the pipe (a few ms early or late, no reopen). */
         private const val MAX_OVERLAP_NANOS = 100_000_000L
+
+        /** The input is opened this far before the position, which is then cut exactly. */
+        private const val COARSE_SEEK_NANOS = 3_000_000_000L
 
         /** Read-ahead cap: 10 s of sound. */
         private const val MAX_BUFFERED = RATE * 10
