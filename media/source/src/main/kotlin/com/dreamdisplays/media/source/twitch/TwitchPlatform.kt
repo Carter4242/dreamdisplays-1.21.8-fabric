@@ -6,6 +6,8 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.source.ResolvedMedia
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.MediaStreamType
+import com.dreamdisplays.media.player.adskip.LiveRendition
+import com.dreamdisplays.media.player.adskip.TwitchAdSkip
 import com.dreamdisplays.media.source.platform.Platform
 import com.dreamdisplays.media.source.youtube.YtDlpResolver
 import com.dreamdisplays.util.net.DreamHttpClient
@@ -27,9 +29,18 @@ object TwitchPlatform : Platform<MediaSource.Twitch, TwitchMetadata>(
             ?: throw DreamMediaException.NotFound("Twitch channel \"$login\" is offline or does not exist.")
         val renditions = fetchRenditions(TwitchHls.liveUrl(login, playback.token))
         logger.debug("Resolved live channel {}: {} renditions.", login, renditions.size)
+        // Ad skipping reads these playlists in place of the decoders, and signs backups of them by channel
+        TwitchAdSkip.backupSource = TwitchBackupPlaylists
+        for ((rendition, stream) in renditions) {
+            if (stream.type.hasVideo) {
+                TwitchAdSkip.rememberLiveRendition(
+                    stream.url, LiveRendition(login, rendition.height, rendition.fps, rendition.videoGroup),
+                )
+            }
+        }
         TwitchMetadataCache.put(source, playback.metadata)
         return ResolvedMedia(
-            streams = renditions,
+            streams = renditions.map { it.second },
             metadata = playback.metadata.toMediaMetadata(durationMs = null),
             isLive = true,
             isSeekable = false,
@@ -39,7 +50,7 @@ object TwitchPlatform : Platform<MediaSource.Twitch, TwitchMetadata>(
     private fun resolveVod(source: MediaSource.Twitch, id: String): ResolvedMedia {
         val playback = TwitchApi.vodPlayback(id)
             ?: throw DreamMediaException.NotFound("Twitch VOD \"$id\" does not exist or is sub-only.")
-        val renditions = fetchRenditions(TwitchHls.vodUrl(id, playback.token))
+        val renditions = fetchRenditions(TwitchHls.vodUrl(id, playback.token)).map { it.second }
         logger.debug("Resolved VOD {}: {} renditions.", id, renditions.size)
         TwitchMetadataCache.put(source, playback.metadata)
         return ResolvedMedia(
@@ -81,13 +92,13 @@ object TwitchPlatform : Platform<MediaSource.Twitch, TwitchMetadata>(
         )
     }
 
-    private fun fetchRenditions(playlistUrl: String): List<MediaStream> {
+    private fun fetchRenditions(playlistUrl: String): List<Pair<TwitchHls.Rendition, MediaStream>> {
         val playlist = DreamHttpClient.readText(
             playlistUrl,
             DreamHttpClient.RequestOptions(readTimeoutMs = 10_000L, callTimeoutMs = 12_000L),
         )
-        val streams = TwitchHls.parseMaster(playlist).map { it.toMediaStream() }
-        check(streams.any { it.type.hasVideo }) { "Usher master playlist contained no video renditions." }
+        val streams = TwitchHls.parseMaster(playlist).map { it to it.toMediaStream() }
+        check(streams.any { it.second.type.hasVideo }) { "Usher master playlist contained no video renditions." }
         return streams
     }
 

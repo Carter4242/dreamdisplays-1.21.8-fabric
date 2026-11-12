@@ -95,6 +95,16 @@ object TwitchApi {
     }
 
     /**
+     * A live playback token for [login] signed for another player variant ([playerType] on [platform]), as the ad-skip
+     * backups use; null when Twitch withholds it. Throws on transport failure.
+     */
+    fun liveToken(login: String, playerType: String, platform: String): TwitchAccessToken? {
+        val params = """params:{platform:"${escape(platform)}",playerBackend:"mediaplayer",playerType:"${escape(playerType)}"}"""
+        val data = gql("""{streamPlaybackAccessToken(channelName:"${escape(login)}",$params){value signature}}""")
+        return data.obj("streamPlaybackAccessToken")?.toToken()
+    }
+
+    /**
      * Fetches VOD metadata and the video playback access token in one GQL round trip.
      * Returns null when the VOD is unknown or the token is withheld; throws on transport failure.
      */

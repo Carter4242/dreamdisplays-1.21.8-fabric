@@ -13,6 +13,9 @@ import com.dreamdisplays.api.media.source.MediaSource
 import com.dreamdisplays.api.media.stream.MediaStream
 import com.dreamdisplays.api.media.stream.SubtitleTrack
 import com.dreamdisplays.api.playback.model.PlaybackSpeed
+import com.dreamdisplays.media.player.adskip.AdBreakTiming
+import com.dreamdisplays.media.player.adskip.AdSkipSession
+import com.dreamdisplays.media.player.adskip.TwitchAdSkip
 import com.dreamdisplays.media.player.events.PlayerEvents
 import com.dreamdisplays.media.player.managers.AudioFaultBudget
 import com.dreamdisplays.media.player.managers.AudioFaultRoute
@@ -143,6 +146,20 @@ class MediaPlayer(
 
     @Volatile
     private var relayEverOnAir = false
+
+    /** The ad-free playlist a live Twitch channel plays through ([TwitchAdSkip]), or null. */
+    @Volatile
+    private var adSkip: AdSkipSession? = null
+
+    /**
+     * A stitched Twitch ad is running and was taken out: the session is stopped (silent) and the display shows its
+     * ad-break card until the stream is back ([adBreakSecondsLeft]). Set and cleared on the control thread.
+     */
+    @Volatile
+    private var adBreak = false
+
+    /** An ad-break switch is queued on the control thread (the game tick checks at 20 Hz). */
+    private val adBreakSwitchQueued = AtomicBoolean(false)
 
     private var preparedBootstrap: PreparedMedia? = replayBootstrap?.prepared
 
@@ -362,6 +379,8 @@ class MediaPlayer(
         heldReady = false
         // Every resume (plain, held ready, scheduled start, adopted warm) plays at the current volume
         volume.reapply()
+        // Waiting out a Twitch ad: the stream comes back on its own when the ad is over
+        if (adBreak) return@safeExecute
         if (isPausedWarm() || warmUpHeld) {
             sessionManager.resume()
             lifecycle = PlayerState.Playing
@@ -398,6 +417,11 @@ class MediaPlayer(
         val warmUpHeld = warmUpHold.disarm() && sessionManager.isParked()
         pauseRequested = true
         warmingUp = false
+        if (adBreak) {
+            endAdBreakCard()
+            lifecycle = PlayerState.Paused
+            return@safeExecute
+        }
         // Already parked warm: pausing again must not throw the open session away
         if (isPausedWarm()) return@safeExecute
         if (warmUpHeld) {
@@ -679,6 +703,15 @@ class MediaPlayer(
     fun isWaitingForStream(): Boolean = relayStream && waitingForStream && !terminated.get()
 
     /**
+     * While a Twitch ad break is skipped (the display shows its ad-break card instead of the stream): whole seconds until
+     * the stream is expected back, or 0 when unknown. Null at any other time.
+     */
+    fun adBreakSecondsLeft(): Int? {
+        if (!adBreak || terminated.get()) return null
+        return AdBreakTiming.secondsLeft(adSkip?.resumeAtNanos, System.nanoTime())
+    }
+
+    /**
      * True when a live relay stream's picture must not be shown (see [RelayPicture.stale]): the stream ended, is off
      * the air or reconnecting, has shown nothing yet, or is paused with a frame older than [maxAgeNanos]. A still
      * picture on an open connection stays. Always false for any other stream.
@@ -940,7 +973,90 @@ class MediaPlayer(
     fun tick(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true) {
         if (!isReady) return
         volume.updateAttenuation(distance, maxRadius, fullVolumeRadius, squared)
+        checkAdBreak()
         checkAudioHealth()
+    }
+
+    /**
+     * Twitch ad skipping ([TwitchAdSkip]): once the held playlist has played out, the session stops and the card shows;
+     * once the stream is back, it opens again at the live position like any join. Game thread; switches on the control
+     * thread.
+     */
+    private fun checkAdBreak() {
+        val skip = adSkip ?: return
+        val now = System.nanoTime()
+        val switch = if (adBreak) {
+            !skip.holding || skip.gone
+        } else {
+            skip.holding && lifecycle == PlayerState.Playing && sessionManager.isPlaying && !sessionManager.isParked() &&
+                    AdBreakTiming.drained(skip.holdSinceNanos ?: now, now, sessionManager.lastFrameNanos.get())
+        }
+        if (switch && adBreakSwitchQueued.compareAndSet(false, true)) {
+            safeExecute {
+                adBreakSwitchQueued.set(false)
+                if (adBreak) leaveAdBreak() else enterAdBreak()
+            }
+        }
+    }
+
+    /** Stops the session for an ad break (no sound, no corrections) and shows the card. Control thread. */
+    private fun enterAdBreak() {
+        val skip = adSkip ?: return
+        if (adBreak || terminated.get() || !skip.holding) return
+        adBreak = true
+        skip.keepPolling = true
+        val left = AdBreakTiming.secondsLeft(skip.resumeAtNanos, System.nanoTime())
+        logger.info("$debugLabel [ad-skip] Twitch ad break: stream held, card up (back in ~${if (left > 0) "$left s" else "?"}).")
+        stopSession()
+        lifecycle = PlayerState.Playing
+    }
+
+    /** The stream is back after an ad (or gone): opens it again at the live position. Control thread. */
+    private fun leaveAdBreak() {
+        if (!adBreak || terminated.get()) return
+        val skip = adSkip
+        endAdBreakCard()
+        val ss = streams ?: return
+        if (skip == null || skip.gone) {
+            handleSessionStall("live playlist gone during an ad break")
+            return
+        }
+        if (pauseRequested) {
+            lifecycle = PlayerState.Paused
+            return
+        }
+        logger.info("$debugLabel [ad-skip] Twitch ad break over; rejoining the stream at the live position.")
+        startStreams(ss, 0L)
+    }
+
+    private fun endAdBreakCard() {
+        adBreak = false
+        adSkip?.keepPolling = false
+    }
+
+    /**
+     * A live Twitch stream reads its playlist through [TwitchAdSkip] when it can: [streamSet] with its (muxed) rendition
+     * replaced by the ad-free playlist, else unchanged. The previous ad-skip session closes a little later, once the
+     * session reading it is surely gone.
+     */
+    private fun withAdSkip(streamSet: ActiveStreams, live: Boolean): ActiveStreams {
+        val previous = adSkip
+        val video = streamSet.currentVideo
+        val session = if (live && video.url == streamSet.currentAudio.url) {
+            runCatching { TwitchAdSkip.open(video.url, debugLabel) }
+                .onFailure { e -> logger.debug("$debugLabel [ad-skip] not available: $e") }
+                .getOrNull()
+        } else null
+        // Stopped while the playlist was read: nothing will ever close this one but us
+        if (session != null && terminated.get()) {
+            session.close()
+            return streamSet
+        }
+        adSkip = session
+        previous?.let { old -> RETRY_SCHEDULER.schedule({ old.close() }, 15, TimeUnit.SECONDS) }
+        if (session == null) return streamSet
+        val routed = video.copy(url = session.playUrl)
+        return streamSet.copy(currentVideo = routed, currentAudio = routed)
     }
 
     private val audioStall = AudioStallDetector()
@@ -964,7 +1080,8 @@ class MediaPlayer(
         } else {
             sinkMutedSinceNanos = 0L
         }
-        val expecting = playing && sessionManager.audioExpected()
+        // A session playing out the last segments before a Twitch ad: its sound may end a moment before its picture
+        val expecting = playing && sessionManager.audioExpected() && adSkip?.holding != true
         if (audioStall.check(now, expecting, sessionManager.lastPcmOutNanos, sessionManager.lastFrameNanos.get())) {
             safeExecute(::healSilentAudio)
         }
@@ -1021,7 +1138,10 @@ class MediaPlayer(
             // A re-resolve (retry, stall, live quality change) keeps the dub and subtitles this viewer picked; the
             // resolver itself only knows the language the player was created with
             val previous = media
-            val streamSet = MediaStreamSelector.keepAudioTrack(prepared.streamSet, previous?.streams?.currentAudio?.audioIdentity)
+            val streamSet = withAdSkip(
+                MediaStreamSelector.keepAudioTrack(prepared.streamSet, previous?.streams?.currentAudio?.audioIdentity),
+                prepared.isLive,
+            )
             val keepSubtitles = if (previous != null && subtitles.enabled) subtitles.currentLang else null
             val resolved = ResolvedMedia(
                 streams = streamSet,
@@ -1187,6 +1307,12 @@ class MediaPlayer(
             return
         }
         if (lifecycle == PlayerState.Ended) lifecycle = PlayerState.Paused
+        // A Twitch ad is running (a pre-roll at the first open, say): nothing to play until the stream is back
+        if (liveStream && adSkip?.holding == true) {
+            stopSession()
+            enterAdBreak()
+            return
+        }
         streamsEverStarted = true
         val bootstrap = replayBootstrap?.also { replayBootstrap = null }
         val replayActive = sessionManager.isBridging()
@@ -1709,6 +1835,9 @@ class MediaPlayer(
 
     private fun doStop() {
         heldAtEnd = false
+        endAdBreakCard()
+        adSkip?.close()
+        adSkip = null
         warmUpHold.disarm()
         warmingUp = false
         heldReady = false
