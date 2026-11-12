@@ -124,7 +124,8 @@ object QueueManager {
         for ((displayId, queue) in loaded) {
             if (DisplayManager.getDisplayData(displayId) == null) continue
             queues[displayId] = queue
-            armedAt[displayId] = transport.nowMs()
+            // Armed since before the reload: an end that came while the plugin was down is an end to move on at
+            armedAt[displayId] = QueueTiming.armedAfterRestore(queue.items, transport.nowMs())
             entries += queue.size
         }
         if (entries > 0) logger.info("Restored {} queued video(s) on {} display(s).", entries, queues.size)
