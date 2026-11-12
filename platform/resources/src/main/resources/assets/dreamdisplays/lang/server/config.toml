@@ -54,6 +54,11 @@ seek_hold_seconds = 3
 # same frame; 0 starts on receipt (0 to 1000 ms)
 start_lead_max_ms = 150
 
+# A playing synced display changes speed this far ahead (ms) while it plays on, so viewers open the new speed
+# meanwhile and switch without stopping. 0 = pause everyone and restart them at the new speed, as a seek does
+# (0 to 2000; viewers on older clients always get that)
+speed_change_lead_ms = 400
+
 # Playback mode new displays start in: "synced" (everyone sees the same moment) or "local"
 default_mode = "synced"
 

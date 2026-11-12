@@ -46,6 +46,7 @@ object ConfigCommand {
     private val keys: List<Key> = listOf(
         Key("display.resume_hold_seconds", PolicyPaths.Kind.Whole(0, 60)) { it.display.resume_hold_seconds },
         Key("display.seek_hold_seconds", PolicyPaths.Kind.Whole(0, 60)) { it.display.seek_hold_seconds },
+        Key("display.speed_change_lead_ms", PolicyPaths.Kind.Whole(0, 2_000)) { it.display.speed_change_lead_ms },
         Key("display.default_mode", PolicyPaths.Kind.Choice(listOf("local", "synced"))) {
             it.defaultMode.name.lowercase()
         },

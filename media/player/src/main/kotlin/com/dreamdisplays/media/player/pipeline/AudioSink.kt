@@ -37,6 +37,12 @@ internal class AudioSink(private val debugLabel: String) {
         private const val RETRY_DELAY_MS = 200L
         private const val CATCHUP_MIN_NANOS = 40_000_000L
         private const val CATCHUP_MAX_PASSES = 4
+
+        /**
+         * A scheduled switch ([startSwitch] `notBeforeNanos`) skips and primes this long before its instant: reading a
+         * few chunks from a pipe already full of PCM and writing them to a stopped line takes a few ms.
+         */
+        const val SCHEDULED_PRIME_NANOS = 60_000_000L
         private const val MAX_RESYNC_NANOS = 5_000_000_000L
 
         /** How long to wait for FFmpeg to exit after its PCM ended, to read its exit code. */
@@ -186,7 +192,11 @@ internal class AudioSink(private val debugLabel: String) {
      * Content catch-up spec for session starting during playback (discard leading PCM). [tempo] is the speed the
      * process plays at, so the content a skipped PCM span stood for is known.
      */
-    class CatchUp(val contentStartNanos: Long, val playbackClock: () -> Long, val tempo: Double = 1.0)
+    class CatchUp(
+        val contentStartNanos: Long, val playbackClock: () -> Long, val tempo: Double = 1.0,
+        /** Skip to [playbackClock] to the frame (a fixed target), not only gaps of [CATCHUP_MIN_NANOS] or more. */
+        val exact: Boolean = false,
+    )
 
     /**
      * Sessions started from now on play a live relay stream: sound goes out as it arrives, with only a few tens of
@@ -370,7 +380,9 @@ internal class AudioSink(private val debugLabel: String) {
     }
 
     /**
-     * Prewarms a replacement line for a seamless in-place audio-track switch and, once it is primed, flips it in
+     * Prewarms a replacement line for a seamless in-place audio-track switch and, once it is primed, flips it in.
+     * [notBeforeNanos] ([System.nanoTime], 0 = none): the flip waits for that instant, with the old line playing on; the
+     * catch-up skip and priming run just before it, so [catchUp]'s clock is read [SCHEDULED_PRIME_NANOS] ahead of it.
      */
     fun startSwitch(
         proc: Process,
@@ -385,6 +397,7 @@ internal class AudioSink(private val debugLabel: String) {
         onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit = { _, _ -> },
         tempo: Double = 1.0,
         onFault: ((reason: String, stderr: String) -> Unit)? = null,
+        notBeforeNanos: Long = 0L,
     ): Thread {
         val stderrBuf = drainStderr(proc, stopFlag)
         return daemon(
@@ -403,6 +416,7 @@ internal class AudioSink(private val debugLabel: String) {
                     onUnexpectedEnd,
                     tempo,
                     onFault,
+                    notBeforeNanos,
                 )
             },
             "MediaPlayer-audio-switch-line",
@@ -413,7 +427,7 @@ internal class AudioSink(private val debugLabel: String) {
         proc: Process, terminated: AtomicBoolean, stopFlag: AtomicBoolean, contentStartNanos: Long,
         originKnown: Boolean, catchUp: CatchUp?, shouldPromote: () -> Boolean, onPromoted: () -> Unit,
         onAborted: () -> Unit, stderrBuf: StringBuilder, onUnexpectedEnd: (stderr: String, hadPcm: Boolean) -> Unit, tempo: Double,
-        onFault: ((String, String) -> Unit)?,
+        onFault: ((String, String) -> Unit)?, notBeforeNanos: Long = 0L,
     ) {
         var newLine: SourceDataLine? = null
         var session: LineSession? = null
@@ -433,10 +447,15 @@ internal class AudioSink(private val debugLabel: String) {
                 newLine = opened.line
 
                 if (isInterrupted()) return@use
+                // A scheduled flip: the old line plays on until just before its instant
+                if (notBeforeNanos != 0L &&
+                    !sleepUntil(notBeforeNanos - SCHEDULED_PRIME_NANOS) { isInterrupted() || !shouldPromote() }
+                ) return@use
                 val skippedNanos = catchUp?.let { skipCatchUp(input, it, terminated, stopFlag) } ?: 0L
 
                 val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, opened, terminated, stopFlag)
                 if (isInterrupted() || primedBytes <= 0) return@use
+                if (notBeforeNanos != 0L && !sleepUntil(notBeforeNanos) { isInterrupted() || !shouldPromote() }) return@use
 
                 // The flip publishes the new session and its line together, so no clock reader can ever
                 // see the new line paired with the old session's content origin (or vice versa). It is decided
@@ -538,6 +557,21 @@ internal class AudioSink(private val debugLabel: String) {
             if (cause != null) logger.warn("$debugLabel [audio] $message.", cause) else logger.warn("$debugLabel [audio] $message.")
         } else {
             logger.debug("$debugLabel [audio] {}.", message, cause)
+        }
+    }
+
+    /** Waits until [System.nanoTime] reaches [atNanos]; false (at once) when [abort] says so meanwhile. */
+    private fun sleepUntil(atNanos: Long, abort: () -> Boolean): Boolean {
+        while (true) {
+            if (abort()) return false
+            val left = atNanos - System.nanoTime()
+            if (left <= 0L) return true
+            try {
+                Thread.sleep(minOf(left / 1_000_000L, 20L), (minOf(left, 20_000_000L) % 1_000_000L).toInt())
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
         }
     }
 
@@ -657,7 +691,7 @@ internal class AudioSink(private val debugLabel: String) {
         repeat(CATCHUP_MAX_PASSES) {
             val contentNow = catchUp.contentStartNanos + skippedContent()
             val gapNanos = catchUp.playbackClock() - contentNow
-            if (contentToPcmNanos(gapNanos, catchUp.tempo) < CATCHUP_MIN_NANOS) {
+            if (contentToPcmNanos(gapNanos, catchUp.tempo) < if (catchUp.exact) 1L else CATCHUP_MIN_NANOS) {
                 if (skippedBytes > 0L) {
                     logger.debug(
                         "$debugLabel [audio] catch-up skipped ${skippedContent() / 1_000_000} ms " +

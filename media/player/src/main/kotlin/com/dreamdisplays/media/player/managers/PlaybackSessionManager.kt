@@ -36,6 +36,32 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
+ * Fastest speed the in-process decoder serves. It decodes and converts every frame, so past this the session uses the
+ * FFmpeg process, which thins frames out before converting them ([MediaProcess.speedFps]).
+ */
+internal const val LAV_MAX_TEMPO = 2.0
+
+/**
+ * True when a playing video decode carries on unchanged through a speed change [fromTempo] -> [toTempo] (the picture is
+ * paced on the audio clock, which carries the speed): an in-process decoder that still serves [toTempo]
+ * ([LAV_MAX_TEMPO]), or an FFmpeg process whose kept frame rate ([MediaProcess.speedFps]) is the same at both speeds.
+ * [alpha] decodes always run as a process.
+ */
+internal fun videoKeepsPace(inProcess: Boolean, sourceFps: Double, fromTempo: Double, toTempo: Double, alpha: Boolean): Boolean =
+    if (inProcess && !alpha) toTempo <= LAV_MAX_TEMPO
+    else MediaProcess.speedFps(sourceFps, fromTempo) == MediaProcess.speedFps(sourceFps, toTempo)
+
+/**
+ * Content nanos past the heard position where the sound picks up at a speed switch read [aheadNanos] before its
+ * instant: what the old speed ([fromRate], content per real time) still plays until then; for a late switch
+ * ([aheadNanos] < 0) what the new speed ([toRate]) would have played beyond the old one meanwhile, never back (the
+ * picture's clock never runs backwards; a slow-down that went live late is left to the sync engine).
+ */
+internal fun tempoSwitchShiftNanos(aheadNanos: Long, fromRate: Double, toRate: Double): Long =
+    if (aheadNanos >= 0L) kotlin.math.round(aheadNanos * fromRate).toLong()
+    else kotlin.math.round(-aheadNanos * (toRate - fromRate)).toLong().coerceAtLeast(0L)
+
+/**
  * Manages `FFmpeg` session (processes, threads, pipes). Quality switch runs parallel video channel.
  */
 internal class PlaybackSessionManager(
@@ -92,11 +118,8 @@ internal class PlaybackSessionManager(
         /** How many silent-source verdicts to remember; well past any one player's stream ladder. */
         const val SILENT_MEMO_LIMIT = 64
 
-        /**
-         * Fastest speed the in-process decoder serves. It decodes and converts every frame, so past this the
-         * session uses the FFmpeg process, which thins frames out before converting them ([MediaProcess.speedFps]).
-         */
-        const val LAV_MAX_TEMPO = 2.0
+        /** How long a seamless speed switch waits for its new audio's first PCM before the session restarts instead. */
+        const val SPEED_SWITCH_WARMUP_NANOS = 5_000_000_000L
 
         /** Audio URLs proven to carry no audio track (process-wide, insertion-bounded). */
         val SILENT_SOURCES: MutableSet<String> = Collections.newSetFromMap(
@@ -970,6 +993,174 @@ internal class PlaybackSessionManager(
             onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
             tempo = line.tempo,
         )
+    }
+
+    /** The audio generation a pending [beginTempoSwitch] runs under (-1 = none), so only that one is cancelled. */
+    @Volatile
+    private var tempoSwitchGeneration = -1L
+
+    /**
+     * Seamless speed change of a playing session: the audio is opened again at [newTempo] in the background while the
+     * current one plays on, and at [atNanos] ([System.nanoTime]; already passed = as soon as it is ready) it is flipped
+     * in at the position the old speed has reached by then. The picture is paced on the audio clock, so it follows
+     * without its decoder being reopened. A switch that goes live late joins where the new speed would have got to.
+     *
+     * Returns false when this session cannot change speed that way (live or bridging, a quality switch running, or a
+     * video decode that would have to be reopened at [newTempo], see [videoKeepsPace]): the caller restarts it at the
+     * new speed. [onSettled] runs once the switch is over, with whether it went live; a seek, restart or stop
+     * meanwhile supersedes it (it then plays at the speed those opened with).
+     */
+    fun beginTempoSwitch(
+        streamSet: ActiveStreams, newTempo: Double, atNanos: Long, onSettled: (live: Boolean) -> Unit,
+    ): Boolean {
+        if (!isPlaying || terminated.get() || parkFlag.get() || bridging || liveSession) return false
+        if (!audioOriginKnown()) return false
+        synchronized(switchLock) { if (incoming != null) return false }
+        val channel = active ?: return false
+        if (!videoKeepsPace(channel.inProcess, MediaProcess.outputFps(streamSet.currentVideo.fps), tempo, newTempo, outputAlpha)) {
+            return false
+        }
+        val ffmpeg = FFmpegBinary.getPath() ?: return false
+        val generation = bumpAudioGeneration()
+        tempoSwitchGeneration = generation
+        val fromTempo = tempo
+        daemon(
+            { runTempoSwitch(ffmpeg, streamSet, fromTempo, newTempo, atNanos, generation, onSettled) },
+            "MediaPlayer-speed-switch",
+        ).start()
+        return true
+    }
+
+    /** Drops a [beginTempoSwitch] that has not gone live yet (a newer speed was asked for). */
+    fun cancelTempoSwitch() {
+        synchronized(audioOwnerLock) {
+            if (tempoSwitchGeneration == audioSwitchGeneration.get()) audioSwitchGeneration.incrementAndGet()
+        }
+    }
+
+    /** Takes [value] as the session's speed without reopening anything: its processes already run at it. */
+    private fun adoptTempo(value: Double) {
+        tempo = value
+        clock.setRate(value)
+        audioWarmPool.invalidateAll()
+    }
+
+    private fun runTempoSwitch(
+        ffmpeg: String, streamSet: ActiveStreams, fromTempo: Double, toTempo: Double, atNanos: Long, generation: Long,
+        onSettled: (Boolean) -> Unit,
+    ) {
+        val startedNanos = System.nanoTime()
+        fun settle(live: Boolean, how: String) {
+            synchronized(audioOwnerLock) { if (tempoSwitchGeneration == generation) tempoSwitchGeneration = -1L }
+            val lateMs = (System.nanoTime() - atNanos) / 1_000_000
+            logger.info(
+                "[dd-sync] {} speed {}x -> {}x {} ({} ms after it was asked, {} ms {} its instant)",
+                debugLabel.take(8), fromTempo, toTempo, how, (System.nanoTime() - startedNanos) / 1_000_000,
+                kotlin.math.abs(lateMs), if (lateMs >= 0) "after" else "before",
+            )
+            onSettled(live)
+        }
+        if (audioHalf == null) {
+            // Nothing to reopen (a silent source): the picture's clock takes the new pace at the instant
+            sleepUntil(atNanos) { !audioSwitchStillCurrent(generation) }
+            val adopted = synchronized(audioOwnerLock) {
+                audioSwitchStillCurrent(generation).also { if (it) adoptTempo(toTempo) }
+            }
+            settle(adopted, if (adopted) "switched (no sound)" else "superseded")
+            return
+        }
+        val seekNanos = currentPacingNanos().takeIf { it >= 0L } ?: clock.currentTime()
+        val aStop = AtomicBoolean()
+        val ap = try {
+            buildAudioProcess(ffmpeg, streamSet, seekNanos, aStop, toTempo)
+        } catch (e: IOException) {
+            logger.warn("$debugLabel Speed switch: the audio at ${toTempo}x failed to start ($e).")
+            null
+        }
+        if (ap == null || !awaitFirstPcm(ap, generation, startedNanos + SPEED_SWITCH_WARMUP_NANOS)) {
+            ap?.let { aStop.set(true); MediaProcess.gracefulDestroy(it) }
+            settle(false, if (audioSwitchStillCurrent(generation)) "failed to open its sound" else "superseded")
+            return
+        }
+        // Where the sound must pick up: the position the old speed reaches at the instant (read just before it), or
+        // for a late switch where the new speed would have got to by now (never back: the picture holds its clock)
+        val target = {
+            val now = System.nanoTime()
+            val heard = currentPacingNanos().coerceAtLeast(seekNanos)
+            heard + tempoSwitchShiftNanos(atNanos - now, fromTempo * audio.playbackRate, toTempo)
+        }
+        val oldAudio = audioHalf
+        audio.startSwitch(
+            ap, terminated, aStop,
+            contentStartNanos = seekNanos, originKnown = true,
+            catchUp = AudioSink.CatchUp(seekNanos, target, toTempo, exact = true),
+            shouldPromote = { audioSwitchStillCurrent(generation) },
+            onPromoted = promoted@{
+                val owns = synchronized(audioOwnerLock) {
+                    (audioSwitchGeneration.get() == generation).also { current ->
+                        if (current) {
+                            audioHalf = AudioHalf(ap, Thread.currentThread(), aStop)
+                            adoptTempo(toTempo)
+                        }
+                    }
+                }
+                if (!owns) {
+                    aStop.set(true)
+                    daemon({ MediaProcess.gracefulDestroy(ap) }, "MediaPlayer-audio-switch-drop").start()
+                    settle(false, "superseded")
+                    return@promoted
+                }
+                audioFinished = false
+                oldAudio?.stop?.set(true)
+                discardHalvesAsync(null, oldAudio)
+                if (terminated.get() || !isPlaying) {
+                    aStop.set(true)
+                    audio.stop()
+                    MediaProcess.gracefulDestroy(ap)
+                }
+                settle(true, "switched without a stop")
+            },
+            onAborted = {
+                aStop.set(true)
+                MediaProcess.gracefulDestroy(ap)
+                settle(false, if (audioSwitchStillCurrent(generation)) "could not go live" else "superseded")
+            },
+            onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
+            tempo = toTempo,
+            notBeforeNanos = atNanos,
+        )
+    }
+
+    /** Waits (bounded by [deadlineNanos]) for [ap]'s first PCM; false when it gave none or the switch was superseded. */
+    private fun awaitFirstPcm(ap: Process, generation: Long, deadlineNanos: Long): Boolean {
+        while (System.nanoTime() < deadlineNanos && audioSwitchStillCurrent(generation)) {
+            try {
+                if (ap.inputStream.available() > 0) return true
+            } catch (_: IOException) {
+                return false
+            }
+            if (!ap.isAlive) return false
+            try {
+                Thread.sleep(10)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return false
+    }
+
+    private fun sleepUntil(atNanos: Long, abort: () -> Boolean) {
+        while (!abort()) {
+            val left = atNanos - System.nanoTime()
+            if (left <= 0L) return
+            try {
+                Thread.sleep(minOf(left / 1_000_000L, 20L).coerceAtLeast(1L))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+        }
     }
 
     private fun discardHalvesAsync(video: VideoChannel?, audioHalf: AudioHalf?) {

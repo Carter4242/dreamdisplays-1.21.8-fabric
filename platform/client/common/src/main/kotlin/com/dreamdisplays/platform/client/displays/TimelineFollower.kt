@@ -186,11 +186,13 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
     /**
      * Takes the server's [targetMs] / [paused] for the current media, wrapping by the locally known duration when
      * [loop] (Broadcast). Pause state is matched right away; position is corrected here and on every [tick].
+     * [speedSwitch]: the packet is a speed change scheduled [startInMs] ahead that this player follows without a stop.
+     * Returns when (System.nanoTime) the packet takes effect here: its start instant, or now.
      */
     fun apply(
         targetMs: Long, serverTimeMs: Long, paused: Boolean, loop: Boolean, rate: Double = 1.0, startInMs: Int = 0,
-        leadMs: Int = 0, serverDurationMs: Long = 0L,
-    ) {
+        leadMs: Int = 0, serverDurationMs: Long = 0L, speedSwitch: Boolean = false,
+    ): Long {
         // Any newer word from the server replaces a start still waiting for its moment. Cancelling cannot recall one
         // already handed to the client thread, so that one checks it is still the latest word before it plays.
         scheduledStart?.cancel(false)
@@ -209,19 +211,21 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             // A changed lead moves the timeline itself (back, for a lower one): the estimate starts over from this
             // packet, or the earlier, further-ahead packets would keep it at the old lead for half a minute
             applyNow(targetMs, serverTimeMs, paused, loop, if (paused) 0.0 else oneWayLatencyMs(), rate, leadChanged)
-            return
+            return System.nanoTime()
         }
         // A start scheduled ahead: the packet left the server startInMs before the start and took one-way latency to
         // get here. Hold paused on the start frame until then, so every viewer begins on it together. A negative
         // startInMs (a switch packet replayed late, see DisplayMediaController) started that long ago.
+        // A speed change scheduled ahead ([speedSwitch]) is no stop: the timeline plays on at its old speed (the
+        // estimate keeps following it) and goes on from the switch position at the new one from the start instant.
         val owl = oneWayLatencyMs()
         val waitMs = startInMs.coerceAtLeast(-MAX_LATE_START_MS) - owl
         if (waitMs < MIN_SCHEDULE_MS) {
             // Too late to wait: play from where the start has got to by now
             applyNow(targetMs, serverTimeMs, false, loop, -waitMs.coerceAtMost(0.0), rate)
-            return
+            return System.nanoTime()
         }
-        applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
+        if (!speedSwitch) applyNow(targetMs, serverTimeMs, true, loop, 0.0, rate)
         val waitNanos = (waitMs * 1_000_000.0).toLong()
         val dueNanos = System.nanoTime() + waitNanos
         scheduledStart = START_SCHEDULER.schedule({
@@ -235,7 +239,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
                 }
             }
         }, waitNanos / 1_000L, java.util.concurrent.TimeUnit.MICROSECONDS)
+        return dueNanos
     }
+
+    /** True while this display follows a playing server timeline (a scheduled speed change can switch without a stop). */
+    fun followsPlayingTimeline(): Boolean = synchronized(lock) { estimator.hasTimeline && !estimator.paused }
 
     @Volatile
     private var scheduledStart: java.util.concurrent.ScheduledFuture<*>? = null

@@ -73,6 +73,9 @@ data class SettingsSection(
     val seekHoldMs get() = display.seek_hold_seconds * 1000L
     val startLeadMaxMs get() = display.start_lead_max_ms.toLong()
 
+    /** How far ahead a playing synced display's speed change is scheduled (0 = hold everyone while they restart). */
+    val speedChangeLeadMs get() = display.speed_change_lead_ms.toLong()
+
     /** Mode new displays are created in: [PlaybackMode.SYNCED] unless `default_mode = "local"`. */
     val defaultMode: PlaybackMode
         get() = if (display.default_mode.trim().equals("local", ignoreCase = true)) PlaybackMode.LOCAL
@@ -212,6 +215,7 @@ data class SettingsSection(
         val resume_hold_seconds: Int = 1,
         val seek_hold_seconds: Int = 3,
         val start_lead_max_ms: Int = 150,
+        val speed_change_lead_ms: Int = 400,
         val default_mode: String = "synced",
         val auto_pause_when_empty_seconds: Int = 0,
     )
@@ -358,6 +362,7 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             resume_hold_seconds = t.numberOrNull("display.resume_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 1,
             seek_hold_seconds = t.numberOrNull("display.seek_hold_seconds")?.toInt()?.coerceIn(0, 60) ?: 3,
             start_lead_max_ms = t.numberOrNull("display.start_lead_max_ms")?.toInt()?.coerceIn(0, 1_000) ?: 150,
+            speed_change_lead_ms = t.numberOrNull("display.speed_change_lead_ms")?.toInt()?.coerceIn(0, 2_000) ?: 400,
             default_mode = (t?.get("display.default_mode") as? String) ?: "synced",
             auto_pause_when_empty_seconds = t.numberOrNull("display.auto_pause_when_empty_seconds")?.toInt()
                 ?.coerceIn(0, 86_400) ?: 0,

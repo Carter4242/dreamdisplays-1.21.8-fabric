@@ -284,6 +284,10 @@ class MediaPlayer(
 
         var captureSamples: Boolean = true
 
+        /** Runs speed restarts scheduled for an instant ahead ([scheduleSpeedSwitch] where no background switch can). */
+        private val SPEED_SCHEDULER: ScheduledExecutorService =
+            Executors.newSingleThreadScheduledExecutor { r -> daemon(r, "MediaPlayer-speed-at") }
+
         internal val samplesIn = AtomicLong()
         internal val framesToGpu = AtomicLong()
         internal val framesDropped = AtomicLong()
@@ -570,7 +574,49 @@ class MediaPlayer(
         val s = PlaybackSpeed.clamp(speed)
         if (s == requestedSpeed) return
         requestedSpeed = s
+        // A switch scheduled for a moment ahead ([scheduleSpeedSwitch]) is replaced by this one, applied now
+        speedWord.incrementAndGet()
+        sessionManager.cancelTempoSwitch()
         safeExecute(::applySpeed)
+    }
+
+    /**
+     * Plays at [speed] x from [atNanos] ([System.nanoTime]) on, at the current speed until then: a playing session opens
+     * its sound at the new speed in the background and switches to it at that instant without stopping (see
+     * `PlaybackSessionManager.beginTempoSwitch`); one that cannot restarts in place at the new speed at that instant,
+     * and a paused or parked one simply takes it, as [setPlaybackSpeed] does. Asking again for the speed already
+     * asked for changes nothing.
+     */
+    fun scheduleSpeedSwitch(speed: Double, atNanos: Long) {
+        val s = PlaybackSpeed.clamp(speed)
+        if (s == requestedSpeed) return
+        requestedSpeed = s
+        val word = speedWord.incrementAndGet()
+        sessionManager.cancelTempoSwitch()
+        safeExecute { applySpeedAt(atNanos, word) }
+    }
+
+    /** Counts speed requests: a scheduled one only applies while no newer one came. */
+    private val speedWord = AtomicLong()
+
+    private fun applySpeedAt(atNanos: Long, word: Long) {
+        if (terminated.get() || word != speedWord.get()) return
+        val target = effectiveSpeed()
+        if (target == sessionManager.tempo) return
+        val ss = streams
+        if (ss == null || !isReady || !sessionManager.isPlaying || sessionManager.isParked() || isPausedWarm()) {
+            applySpeed()
+            return
+        }
+        // Whatever becomes of the switch (superseded by a seek, a pause, no sound in time), the session ends up at the
+        // asked speed: applySpeed does nothing when it already plays at it
+        val seamless = sessionManager.beginTempoSwitch(ss, target, atNanos) { live ->
+            if (!live && word == speedWord.get()) safeExecute(::applySpeed)
+        }
+        if (seamless) return
+        logger.debug("$debugLabel Speed ${target}x can't switch in the background: restarting at its instant.")
+        val delayNanos = (atNanos - System.nanoTime()).coerceAtLeast(0L)
+        SPEED_SCHEDULER.schedule({ safeExecute { if (word == speedWord.get()) applySpeed() } }, delayNanos, TimeUnit.NANOSECONDS)
     }
 
     /** The speed the current session plays at (1 for live media). */
