@@ -67,6 +67,22 @@ class PolicyLeversTest {
     }
 
     @Test
+    fun `twitch ad skipping is on unless the server turns it off`() {
+        assertTrue(ServerClientSettings.NONE.twitchAdSkip)
+        val path = assertNotNull(PolicyPaths.find("client.twitch_ad_skip"))
+        assertTrue(path.serverWideOnly)
+        val off = assertNotNull(PolicyPaths.apply(null, path, "off"))
+        assertEquals(DisplayPolicy.AdSkip.OFF, off.client?.twitchAdSkip)
+        assertFalse(ServerClientSettings(off).twitchAdSkip)
+        assertEquals("{\"v\":1,\"client\":{\"twitchAdSkip\":\"off\"}}", off.encode().toString(Charsets.UTF_8))
+        assertTrue(settings(DisplayPolicy.Client(twitchAdSkip = DisplayPolicy.AdSkip.AUTO)).twitchAdSkip)
+        assertNull(PolicyPaths.apply(null, path, "sometimes"))
+        // A value from a newer server reads as unset: on
+        val newer = assertNotNull(DisplayPolicy.decode("""{"v":1,"client":{"twitchAdSkip":"backup_only"}}""".toByteArray()))
+        assertTrue(ServerClientSettings(newer).twitchAdSkip)
+    }
+
+    @Test
     fun `an unknown choice from a newer server reads as unset`() {
         val p = assertNotNull(
             DisplayPolicy.decode("""{"v":1,"client":{"videoDecoder":"vulkan","audioBackend":"wasapi","gpuYuv":false}}""".toByteArray()),

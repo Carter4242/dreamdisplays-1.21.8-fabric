@@ -510,6 +510,7 @@ internal fun parsePolicy(t: TomlTable?): DisplayPolicy {
         ytDlpJsRuntime = t.choiceOrNull("policy.client.yt_dlp_js_runtime", DisplayPolicy.JsRuntime.entries),
         queuePreload = t.boolOrNull("policy.client.queue_preload"),
         autoWarm = t.boolOrNull("policy.client.auto_warm"),
+        twitchAdSkip = t.choiceOrNull("policy.client.twitch_ad_skip", DisplayPolicy.AdSkip.entries),
     )
     val debug = DisplayPolicy.Debug(
         syncLogIntervalSeconds = t.numberOrNull("policy.debug.sync_log_interval_seconds")?.toInt(),

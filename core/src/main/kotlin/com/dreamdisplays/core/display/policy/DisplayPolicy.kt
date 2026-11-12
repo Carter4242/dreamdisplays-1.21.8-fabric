@@ -196,6 +196,8 @@ data class DisplayPolicy(
          * on their own (start holds then do not wait for this client on them).
          */
         val autoWarm: Boolean? = null,
+        /** Twitch ad skipping on live channels ([AdSkip]); applies to streams opened after the change. */
+        val twitchAdSkip: AdSkip? = null,
     ) {
         fun mergedOver(base: Client?): Client = Client(
             enabled = enabled ?: base?.enabled,
@@ -216,6 +218,7 @@ data class DisplayPolicy(
             ytDlpJsRuntime = ytDlpJsRuntime ?: base?.ytDlpJsRuntime,
             queuePreload = queuePreload ?: base?.queuePreload,
             autoWarm = autoWarm ?: base?.autoWarm,
+            twitchAdSkip = twitchAdSkip ?: base?.twitchAdSkip,
         )
     }
 
@@ -285,6 +288,18 @@ data class DisplayPolicy(
         AUTO,
 
         /** None: yt-dlp is told to use no runtime (not even one it finds itself) and nothing is downloaded. */
+        @SerialName("off")
+        OFF,
+    }
+
+    /** Twitch ad skipping. Unknown values (from a newer server) read as unset. */
+    @Serializable
+    enum class AdSkip {
+        /** An ad-free copy of the stream while an ad runs, else the ad taken out and a card shown in its place. */
+        @SerialName("auto")
+        AUTO,
+
+        /** Off: Twitch's ads play as they come. */
         @SerialName("off")
         OFF,
     }
@@ -408,7 +423,7 @@ data class DisplayPolicy(
             "client.audioOutputProfile", "client.audioNormalization",
             "client.videoDecoder", "client.gpuYuv", "client.textureUpload", "client.audioBackend",
             "client.disabledResolvers", "client.ffmpegSource", "client.ytDlpSource", "client.ytDlpJsRuntime",
-            "client.queuePreload", "client.autoWarm",
+            "client.queuePreload", "client.autoWarm", "client.twitchAdSkip",
             "debug.syncLogIntervalSeconds", "debug.verbose", "debug.reportIntervalSeconds", "debug.logLevel",
         )
 

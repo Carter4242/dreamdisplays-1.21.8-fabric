@@ -150,6 +150,9 @@ object PolicyPaths {
         },
         Path("client.queue_preload", "client.queuePreload", Kind.Bool) { it.client?.queuePreload },
         Path("client.auto_warm", "client.autoWarm", Kind.Bool) { it.client?.autoWarm },
+        Path("client.twitch_ad_skip", "client.twitchAdSkip", Kind.Choice(listOf("auto", "off"))) {
+            it.client?.twitchAdSkip?.name?.lowercase(Locale.ROOT)
+        },
         Path("debug.sync_log_interval_seconds", "debug.syncLogIntervalSeconds", Kind.Whole(0, 3_600)) {
             it.debug?.syncLogIntervalSeconds
         },
