@@ -32,7 +32,7 @@ import java.util.UUID
 object QueueActions {
     /** The `[queue]` config as [QueueManager] wants it. */
     fun settings(): QueueManager.Settings = PaperServer.config.settings.queue.let {
-        QueueManager.Settings(it.enabled, it.max_items, it.max_per_player)
+        QueueManager.Settings(it.enabled, it.max_items, it.max_per_player, it.gap_ms.toLong())
     }
 
     /** Switches [display] to queue entry [item] exactly like a player-set video; [readyPlayers] preloaded it. */
