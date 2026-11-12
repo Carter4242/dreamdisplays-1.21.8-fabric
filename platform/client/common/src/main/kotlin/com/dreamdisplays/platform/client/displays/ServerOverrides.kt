@@ -86,8 +86,20 @@ object ServerOverrides {
     fun displayAcoustics(policy: DisplayPolicy?): AcousticQuality? =
         settings.displayAcoustics(policy)?.let { name -> AcousticQuality.entries.firstOrNull { it.name == name } }
 
-    /** Effective acoustics tier for the display with [policy]: its own, else the server-wide, else the player's. */
-    fun audioAcoustics(policy: DisplayPolicy?): AcousticQuality = displayAcoustics(policy) ?: audioAcoustics
+    /**
+     * The tier the display with [policy] gives its audio source for itself ([AcousticsTiers.sourceTier]), with the
+     * viewer's own [choice] for it; null = it follows the global [audioAcoustics].
+     */
+    fun sourceAcoustics(policy: DisplayPolicy?, choice: AcousticQuality?): AcousticQuality? =
+        AcousticsTiers.sourceTier(displayAcoustics(policy), settings.acousticsForced, choice)
+
+    /** Effective acoustics tier for the display with [policy] and the viewer's [choice] for it ([AcousticsTiers]). */
+    fun audioAcoustics(policy: DisplayPolicy?, choice: AcousticQuality?): AcousticQuality =
+        sourceAcoustics(policy, choice) ?: audioAcoustics
+
+    /** Whether the server sets the tier of the display with [policy], so the viewer's choice is ignored. */
+    fun acousticsForced(policy: DisplayPolicy?): Boolean =
+        AcousticsTiers.forced(displayAcoustics(policy), settings.acousticsForced)
 
     val unshadedDisplays: Boolean get() = settings.unshadedDisplays(ClientStateManager.config.unshadedDisplays)
 

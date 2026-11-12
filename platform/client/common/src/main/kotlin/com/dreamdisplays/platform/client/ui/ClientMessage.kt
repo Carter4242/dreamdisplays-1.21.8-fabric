@@ -24,6 +24,7 @@ enum class ClientMessage(val key: String) {
     BUTTON_AUDIO3D_TOOLTIP_4("dreamdisplays.button.audio3d.tooltip.4"),
     BUTTON_AUDIO3D_TOOLTIP_5("dreamdisplays.button.audio3d.tooltip.5"),
     BUTTON_AUDIO3D_TOOLTIP_6("dreamdisplays.button.audio3d.tooltip.6"),
+    BUTTON_AUDIO3D_TOOLTIP_7("dreamdisplays.button.audio3d.tooltip.7"),
     BUTTON_BRIGHTNESS("dreamdisplays.button.brightness"),
     BUTTON_BRIGHTNESS_TOOLTIP_1("dreamdisplays.button.brightness.tooltip.1"),
     BUTTON_BRIGHTNESS_TOOLTIP_2("dreamdisplays.button.brightness.tooltip.2"),

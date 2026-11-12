@@ -56,6 +56,12 @@ data class ClientDisplaySettings(
 
     /** Whether the 3D acoustics engine applies to this display; false forces the legacy distance-gain-only path. */
     var acousticsEnabled: Boolean = true,
+
+    /**
+     * The viewer's own 3D audio tier for this display (an `AcousticQuality` name), or null to follow the client's
+     * default tier.
+     */
+    var acoustics: String? = null,
 ) {
 
     companion object {

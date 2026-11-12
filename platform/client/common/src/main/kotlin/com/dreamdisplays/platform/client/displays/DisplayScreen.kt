@@ -177,6 +177,23 @@ class DisplayScreen(
     /** 3D acoustics engine (directivity, occlusion, reverb); false = legacy distance-gain only. */
     var acousticsEnabled: Boolean = savedSettings.acousticsEnabled
 
+    /**
+     * The viewer's own 3D audio tier for this display (its menu slider), or null to follow the default tier. Saved per
+     * display and applied at once; a tier the server sets wins over it ([ServerOverrides.acousticsForced]).
+     */
+    var acousticsChoice: AcousticQuality? = AcousticsTiers.parse(savedSettings.acoustics)
+        set(value) {
+            field = value
+            ClientSettingsStore.setAcoustics(uuid, value?.name)
+            pushAcousticsTier()
+        }
+
+    /** The 3D audio tier this display renders with. */
+    val audioAcousticsTier: AcousticQuality get() = ServerOverrides.audioAcoustics(policy, acousticsChoice)
+
+    /** Whether the server sets this display's 3D audio tier, so [acousticsChoice] does not apply. */
+    val acousticsForced: Boolean get() = ServerOverrides.acousticsForced(policy)
+
     /** Legacy mirror of [mode]; true only for [PlaybackMode.SYNCED]. */
     val isSync: Boolean get() = mode == PlaybackMode.SYNCED
 
@@ -1780,12 +1797,7 @@ class DisplayScreen(
         } else {
             updateDistanceQuality((distance / renderDistance.coerceAtLeast(1)).toFloat())
         }
-        // The display's own tier (its policy) wins over the server-wide / player tier for this source only
-        val ownTier = ServerOverrides.displayAcoustics(policy)
-        if (ownTier != pushedAcoustics) {
-            pushedAcoustics = ownTier
-            ClientAudioModule.setSourceQuality(uuid, ownTier)
-        }
+        val ownTier = pushAcousticsTier()
         if ((ownTier ?: ServerOverrides.audioAcoustics) == AcousticQuality.OFF) return
         val plane = sourcePlane()
         DreamServices.registry.getOrNull(AudioAcousticsServices.ACOUSTICS)?.updateSource(
@@ -1818,8 +1830,22 @@ class DisplayScreen(
         privatePictureWasHidden = hidden
     }
 
+    /**
+     * Hands the engine this display's own tier ([AcousticsTiers.sourceTier]: its policy's, else the viewer's choice
+     * unless the server forces one; null = the global tier) when it changed, or always with [force] (the source was
+     * just (re)registered, which starts it on the global tier). Returns that tier.
+     */
+    internal fun pushAcousticsTier(force: Boolean = false): AcousticQuality? {
+        val ownTier = ServerOverrides.sourceAcoustics(policy, acousticsChoice)
+        if (force || ownTier != pushedAcoustics) {
+            pushedAcoustics = ownTier
+            ClientAudioModule.setSourceQuality(uuid, ownTier)
+        }
+        return ownTier
+    }
+
     private fun probeEnvironment(plane: SourcePlane, distance: Double): AcousticEnvironment {
-        val tier = ServerOverrides.audioAcoustics(policy)
+        val tier = audioAcousticsTier
         if (isPopoutActive || !acousticsEnabled || (tier != AcousticQuality.ADVANCED && tier != AcousticQuality.ULTRA)) {
             cachedEnvironment = AcousticEnvironment.OPEN_AIR
             cachedReverb = null

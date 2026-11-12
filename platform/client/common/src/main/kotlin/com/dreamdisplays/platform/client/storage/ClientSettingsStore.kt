@@ -138,6 +138,14 @@ object ClientSettingsStore : ClientSettingsStorage {
         save()
     }
 
+    /** Saves the viewer's own 3D audio tier for this display (an `AcousticQuality` name), or null to follow the default. */
+    fun setAcoustics(displayUuid: UUID, tier: String?) {
+        val s = getSettings(displayUuid)
+        if (s.acoustics == tier) return
+        s.acoustics = tier
+        save()
+    }
+
     override fun remove(displayUuid: UUID): Boolean {
         val removed = settings.remove(displayUuid) != null
         if (removed) save()
