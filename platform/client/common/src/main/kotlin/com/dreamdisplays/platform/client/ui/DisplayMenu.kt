@@ -125,8 +125,7 @@ class DisplayMenu private constructor(
     private var queueTabRect: UiRect? = null
     private var queueTip: String? = null
 
-    override fun init() {
-        super.init()
+    override fun onInit() {
         val ds = displayScreen
         // Playback controls drive the display through the core PlaybackService instead of mutating
         // the DisplayScreen directly, so the UI no longer reaches into the live screen for these actions.
@@ -896,11 +895,9 @@ class DisplayMenu private constructor(
     }
 
     //? if >=1.21.11 {
-    override fun keyPressed(event: KeyEvent): Boolean =
-        handleHotkey(event.key(), event.modifiers()) || super.keyPressed(event)
+    override fun onKeyPressed(event: KeyEvent): Boolean = handleHotkey(event.key(), event.modifiers())
     //?} else
-    /*override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean =
-        handleHotkey(keyCode, modifiers) || super.keyPressed(keyCode, scanCode, modifiers)*/
+    /*override fun onKeyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean = handleHotkey(keyCode, modifiers)*/
 
     private fun handleHotkey(key: Int, modifiers: Int): Boolean {
         if (modifiers and (MOD_CONTROL or MOD_ALT or MOD_SUPER) != 0) return false
@@ -1065,9 +1062,8 @@ class DisplayMenu private constructor(
 
     override fun isPauseScreen(): Boolean = false
 
-    override fun removed() {
+    override fun onRemoved() {
         if (::preview.isInitialized) preview.close()
-        super.removed()
     }
 
     override fun minContentSize(): Pair<Int, Int> = MIN_CONTENT_W to MIN_CONTENT_H
