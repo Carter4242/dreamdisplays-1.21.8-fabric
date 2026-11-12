@@ -39,3 +39,5 @@ native/target/
 
 # Stonecutter
 versions/
+
+platform/client/fabric/logs/
