@@ -7,6 +7,9 @@ import com.dreamdisplays.core.protocol.common.packets.*
 import com.dreamdisplays.core.services.DisplayStorage
 import com.dreamdisplays.platform.client.DisplaysSwitch
 import com.dreamdisplays.platform.client.Initializer
+import com.dreamdisplays.platform.client.MasterSwitch
+import com.dreamdisplays.platform.client.MasterSwitchRules
+import com.dreamdisplays.platform.client.OffHandling
 import com.dreamdisplays.platform.client.Mod
 import com.dreamdisplays.platform.client.capabilities.CapabilityNegotiationService
 import com.dreamdisplays.platform.client.core.DreamServices
@@ -42,6 +45,15 @@ object ClientPacketManager {
 
     /** Applies an incoming packet to the client state; non-client-bound packets are ignored. */
     fun handle(packet: DreamPacket) {
+        // Switched off in the settings: only cheap bookkeeping for when it is switched back on (see MasterSwitch)
+        if (!MasterSwitch.on) {
+            when (MasterSwitchRules.offHandling(packet)) {
+                OffHandling.APPLY -> {}
+                OffHandling.HOLD -> return MasterSwitch.held.keep(packet as DisplayInfo)
+                OffHandling.TIMELINE -> return MasterSwitch.onTimelineWhileOff(packet as DisplaySync)
+                OffHandling.DROP -> return
+            }
+        }
         when (packet) {
             is ServerHello -> applyServerHello(packet)
             is SetDisplaysEnabled -> applyDisplaysEnabled(packet.enabled)
@@ -87,27 +99,41 @@ object ClientPacketManager {
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.onServerHello(packet)
         DreamServices.registry.getOrNull<CapabilityNegotiationService>()
             ?.onServerCapabilities(packet)
-        Initializer.sendPacket(SetDisplaysEnabled(ClientStateManager.displaysEnabled))
+        Initializer.sendPacket(
+            SetDisplaysEnabled(MasterSwitchRules.displaysOnForServer(MasterSwitch.on, ClientStateManager.displaysEnabled))
+        )
         // A hello on a connection that already had one is a reloaded server, which forgot every report: send them again
         com.dreamdisplays.platform.client.displays.ReportRequests.onServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPanels.onServerHello()
-        com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
+        if (MasterSwitch.on) com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
     }
 
-    /** The server switched displays on or off for this player: for this server only (see [DisplaysSwitch]). */
+    /**
+     * The server switched displays on or off for this player: for this server only (see [DisplaysSwitch]). While the
+     * mod is switched off that is only recorded (see [MasterSwitch.onServerSetWhileOff]).
+     */
     private fun applyDisplaysEnabled(enabled: Boolean) {
+        val wasEnabled = ClientStateManager.displaysEnabled
         ClientStateManager.displaysEnabled = enabled
         val config = ClientStateManager.config
         val (global, disabled) = DisplaysSwitch.afterServerSet(
             config.displaysEnabled, config.displaysDisabledServers, ClientStateManager.connectedServerId, enabled,
         )
-        if (global == config.displaysEnabled && disabled == config.displaysDisabledServers) return
-        config.displaysEnabled = global
-        config.displaysDisabledServers = disabled
-        config.save()
+        if (global != config.displaysEnabled || disabled != config.displaysDisabledServers) {
+            config.displaysEnabled = global
+            config.displaysDisabledServers = disabled
+            config.save()
+        }
+        if (!MasterSwitch.on) {
+            MasterSwitch.onServerSetWhileOff(enabled)
+            return
+        }
+        // Back on: the displays described while off come back as last described
+        if (enabled && !wasEnabled) DisplayLifecycleManager.replayHeld()
     }
 
     private fun handleDelete(packet: DisplayDelete) {
+        MasterSwitch.held.forget(packet.id)
         com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(packet.id)
         com.dreamdisplays.platform.client.displays.RecentTimelines.forget(packet.id)
         DisplayRegistry.screens[packet.id]?.let { DisplayRegistry.unregisterScreen(it) }
@@ -120,6 +146,7 @@ object ClientPacketManager {
 
     private fun handleClearCache(packet: ClearCache) {
         packet.ids.forEach { uuid ->
+            MasterSwitch.held.forget(uuid)
             com.dreamdisplays.platform.client.displays.ServerMediaGens.forget(uuid)
             com.dreamdisplays.platform.client.displays.RecentTimelines.forget(uuid)
             DisplayRegistry.screens[uuid]?.let { DisplayRegistry.unregisterScreen(it) }
@@ -134,6 +161,7 @@ object ClientPacketManager {
     /** Resets per-server negotiation state on disconnect. */
     fun reset() {
         serverSnapshot = ServerHello()
+        MasterSwitch.resetForServer()
         com.dreamdisplays.platform.client.displays.DisplayPolicyCache.clear()
         com.dreamdisplays.platform.client.displays.DisplayRegions.clear()
         com.dreamdisplays.platform.client.displays.ServerMediaGens.reset()

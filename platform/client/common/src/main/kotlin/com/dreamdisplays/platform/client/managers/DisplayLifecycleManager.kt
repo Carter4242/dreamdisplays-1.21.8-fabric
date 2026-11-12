@@ -11,6 +11,8 @@ import com.dreamdisplays.shared.geometry.ConformingLimits
 import com.dreamdisplays.shared.storage.DisplayData
 import com.dreamdisplays.core.protocol.common.packets.DisplayInfo
 import com.dreamdisplays.core.services.DisplayStorage
+import com.dreamdisplays.platform.client.MasterSwitch
+import com.dreamdisplays.platform.client.MasterSwitchRules
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.displays.DisplayDimensions
 import com.dreamdisplays.platform.client.displays.DisplayPolicyCache
@@ -58,7 +60,11 @@ object DisplayLifecycleManager {
         // A display that got a new video: what this client said about the old one is void on the server
         val newMedia = ServerMediaGens.onInfo(packet)
         if (newMedia) DisplayWarmup.reReport(packet.id)
-        if (!ClientStateManager.displaysEnabled) return
+        // Switched off here (`/display off`): kept, so `/display on` shows it as the server last described it
+        if (!ClientStateManager.displaysEnabled) {
+            MasterSwitch.held.keep(packet)
+            return
+        }
 
         val policy = DisplayPolicyCache.update(packet.id, acceptedCustomData(packet))
         DisplayRegions.update(packet)
@@ -144,6 +150,26 @@ object DisplayLifecycleManager {
 
     /** Forgets every display description (leaving a server). */
     fun clearInfo() = lastInfo.clear()
+
+    /** The last description of every display the server described (loaded or not). */
+    internal fun lastDescriptions(): Collection<DisplayInfo> = lastInfo.values.toList()
+
+    /**
+     * Displays are on again here (the mod switched back on, or `/display on`): every description kept while they were
+     * off ([MasterSwitch.held]) goes through [handleInfoPacket], nearest first, as if the player had just come into
+     * range. Each display that loads asks the server for its timeline.
+     */
+    fun replayHeld() {
+        val held = MasterSwitch.held.drain()
+        if (held.isEmpty()) return
+        val player = Minecraft.getInstance().player
+        val ordered = if (player == null) held else MasterSwitchRules.replayOrder(held, player.x, player.y, player.z)
+        logger.info("Displays on again: loading {} display(s) as the server last described them.", ordered.size)
+        for (info in ordered) {
+            runCatching { handleInfoPacket(info) }
+                .onFailure { logger.warn("Could not load display {} again.", info.id, it) }
+        }
+    }
 
     private fun cacheUnloadedDisplay(
         packet: DisplayInfo, facing: FacingUtil, mode: PlaybackMode, dimensionKey: String,

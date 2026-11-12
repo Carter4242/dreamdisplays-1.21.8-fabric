@@ -12,6 +12,7 @@ import net.minecraft.client.renderer.rendertype.RenderType
 /*import net.minecraft.client.renderer.RenderType*/
 import com.dreamdisplays.api.display.model.property.DisplayRotation
 import com.dreamdisplays.api.display.model.property.DisplayFacing
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.displays.DisplayFace
 import com.dreamdisplays.platform.client.displays.DisplayRegistry
 import com.dreamdisplays.platform.client.guard.ClientGuard
@@ -36,6 +37,7 @@ object ScreenRenderer {
      * for [UnshadedDisplayPass]'s second draw of a frame already on screen.
      */
     fun render(stack: PoseStack, camera: Camera, replay: Boolean = false) {
+        if (!MasterSwitch.on) return
         ImmediateRenderCompat.beginBatch()
         try {
             render(stack, camera, replay) { type, appendVertices ->
@@ -48,6 +50,7 @@ object ScreenRenderer {
 
     /** Iterates all registered screens and lets the caller submit quads through the active renderer. */
     fun render(stack: PoseStack, camera: Camera, replay: Boolean = false, drawQuad: QuadRenderer) {
+        if (!MasterSwitch.on) return
         val cameraPos =
             //? if >=1.21.11 {
             camera.position()

@@ -25,6 +25,12 @@ class Config(private val baseDir: File) {
     /** Default volume for new displays, in range `0.0`..`1.0`. */
     var defaultDisplayVolume: Double = 0.5
 
+    /**
+     * The settings screen's "Dream Displays" switch: false stops everything the mod does on this client (see
+     * [MasterSwitch]) until the player turns it back on. No server changes it.
+     */
+    var modEnabled: Boolean = true
+
     /** Whether displays are enabled at all (on every server; a server's own switch is [displaysDisabledServers]). */
     var displaysEnabled: Boolean = true
 
@@ -114,6 +120,7 @@ class Config(private val baseDir: File) {
         val rawDistance = data["default-render-distance"]?.toIntOrNull() ?: defaultDistance
         defaultDistance = ((rawDistance / 16.0).roundToInt().coerceIn(2, 12)) * 16
         defaultDisplayVolume = data["default-default-display-volume"]?.toDoubleOrNull() ?: defaultDisplayVolume
+        modEnabled = data["mod-enabled"]?.toBooleanStrictOrNull() ?: modEnabled
         displaysEnabled = data["displays-enabled"]?.toBooleanStrictOrNull() ?: displaysEnabled
         displaysDisabledServers = data["displays-disabled-servers"]?.let(DisplaysSwitch::parseServers) ?: displaysDisabledServers
         ytdlpCookieSource = data["ytdlp-cookies-from-browser"]
@@ -178,6 +185,7 @@ class Config(private val baseDir: File) {
     /** The file's text for the current values. */
     private fun render(): String {
         return buildString {
+            appendLine("mod-enabled: $modEnabled")
             appendLine("mute-on-alt-tab: $muteOnAltTab")
             appendLine("default-render-distance: $defaultDistance")
             appendLine("default-default-display-volume: $defaultDisplayVolume")

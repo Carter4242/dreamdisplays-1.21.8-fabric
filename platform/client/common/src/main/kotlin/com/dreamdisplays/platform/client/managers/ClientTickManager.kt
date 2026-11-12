@@ -4,6 +4,7 @@ import com.dreamdisplays.api.display.model.property.DisplayId
 import com.dreamdisplays.core.services.keys.AudioAcousticsServices
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.Initializer
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.audio.ListenerPoseTracker
 import com.dreamdisplays.platform.client.capabilities.CapabilityNegotiationService
 import com.dreamdisplays.platform.client.core.ClientApplication
@@ -22,6 +23,7 @@ import com.dreamdisplays.platform.client.render.ShaderPackCompat
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.platform.client.utils.MinecraftScreenUtil
 import com.dreamdisplays.platform.client.net.ProtocolRouter
+import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen
@@ -48,6 +50,15 @@ object ClientTickManager {
     /** Main per-tick update: level changes, hover, render-distance (un)loading, and the menu shortcut. */
     fun tick(minecraft: Minecraft) {
         tickCount++
+        // Switched off in the settings: only what keeps the server informed (a new world or backend gets a hello)
+        val on = MasterSwitch.on
+        if (on) tickWork(minecraft) else ScreenCaptureProcesses.reap(sharing = false, current = null)
+        tickWorld(minecraft)
+        if (!on) return
+        tickDisplays(minecraft)
+    }
+
+    private fun tickWork(minecraft: Minecraft) {
         DreamServices.registry.getOrNull<ClientApplication>()
             ?.emit(ClientLifecycleEvent.Tick(tickCount))
 
@@ -67,7 +78,10 @@ object ClientTickManager {
         runCatching { com.dreamdisplays.platform.client.karaoke.KaraokeClient.tick() }
         // Screen share: capture watchdog, display / range checks and heartbeat, every tick (in a world or not)
         ScreenShare.tick(minecraft)
+    }
 
+    /** Level, dimension and backend changes, and leaving the server. */
+    private fun tickWorld(minecraft: Minecraft) {
         val level = minecraft.level
         if (level != null && (minecraft.currentServer != null || minecraft.isLocalServer)) {
             val connection = minecraft.connection
@@ -113,7 +127,10 @@ object ClientTickManager {
             lastLevel = null
             return
         }
+    }
 
+    private fun tickDisplays(minecraft: Minecraft) {
+        if (minecraft.level == null || !(minecraft.currentServer != null || minecraft.isLocalServer)) return
         // Display under the crosshair, resolved through the DisplayInteractionService contract
         // (replaces the inline RayCastingUtil + isInScreen mapping this manager used to duplicate).
         val hoveredId = DreamServices.registry.getOrNull<DisplayInteractionService>()

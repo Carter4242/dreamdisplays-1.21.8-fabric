@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.guard.ClientGuard
 import com.dreamdisplays.platform.client.render.UnshadedDisplayPass
 //? if >=1.21.1 {
@@ -27,6 +28,6 @@ open class DisplayLatePass {
     open fun onLevelRendered(deltaTracker: DeltaTracker, ci: CallbackInfo) {
     //?} else
     /*open fun onLevelRendered(ci: CallbackInfo) {*/
-        ClientGuard.run("DisplayLatePass") { UnshadedDisplayPass.drawPending() }
+        if (MasterSwitch.on) ClientGuard.run("DisplayLatePass") { UnshadedDisplayPass.drawPending() }
     }
 }

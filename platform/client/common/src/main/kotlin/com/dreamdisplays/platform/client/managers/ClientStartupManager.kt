@@ -10,6 +10,7 @@ import com.dreamdisplays.media.source.youtube.YtDlp
 import com.dreamdisplays.platform.client.Config
 import com.dreamdisplays.platform.client.Focuser
 import com.dreamdisplays.platform.client.Initializer
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.core.ClientApplication
 import com.dreamdisplays.platform.client.core.DefaultClientApplication
 import com.dreamdisplays.platform.client.core.DefaultClientContext
@@ -24,6 +25,7 @@ import com.dreamdisplays.platform.client.storage.WatchedVideoStore
 import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -37,6 +39,7 @@ object ClientStartupManager {
 
     private val qualityRefreshInterval = 2500.milliseconds
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val backgroundWorkStarted = AtomicBoolean(false)
 
     private val defaultModules: List<DreamDisplaysModule> = [
         CoreDisplayModule,
@@ -51,6 +54,7 @@ object ClientStartupManager {
     /** Loads config, wires services, hosts the application, prewarms backends, and launches maintenance loops. */
     fun start() {
         config.reload()
+        MasterSwitch.load(config)
         ClientStateManager.displaysEnabled = config.displaysEnabled
         ClientSettingsStore.load()
         WatchedVideoStore.load()
@@ -62,6 +66,26 @@ object ClientStartupManager {
         defaultModules.forEach(application::registerModule)
         application.start()
 
+        // Switched off in the settings: nothing is fetched, probed or swept until it is switched on
+        if (MasterSwitch.on) startBackgroundWork()
+        Focuser().start()
+        scope.launch {
+            while (isActive) {
+                if (MasterSwitch.on) {
+                    runCatching { DisplayRegistry.getScreens().forEach(DisplayScreen::reloadQuality) }
+                        .onFailure { e -> logger.warn("Quality refresh failed.", e) }
+                }
+                delay(qualityRefreshInterval)
+            }
+        }
+    }
+
+    /**
+     * Prepares `yt-dlp`, `FFmpeg` (downloaded when missing) and the native decoder, and sweeps the disk caches. Once
+     * per game: at start, or when the mod is switched on in its settings if it started switched off.
+     */
+    fun startBackgroundWork() {
+        if (!backgroundWorkStarted.compareAndSet(false, true)) return
         YtDlp.prewarmAsync()
         FFmpegBinary.prewarmAsync()
         NativeMedia.prewarmAsync()
@@ -71,14 +95,6 @@ object ClientStartupManager {
                 .onFailure { e -> logger.warn("Cache sweep failed.", e) }
             runCatching { Thumbnails.sweepDiskCache() }
                 .onFailure { e -> logger.warn("Thumbnail cache sweep failed.", e) }
-        }
-        Focuser().start()
-        scope.launch {
-            while (isActive) {
-                runCatching { DisplayRegistry.getScreens().forEach(DisplayScreen::reloadQuality) }
-                    .onFailure { e -> logger.warn("Quality refresh failed.", e) }
-                delay(qualityRefreshInterval)
-            }
         }
     }
 

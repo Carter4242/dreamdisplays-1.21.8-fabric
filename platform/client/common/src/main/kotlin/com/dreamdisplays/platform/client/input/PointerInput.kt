@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.input
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.core.input.PointerRouter
 import com.dreamdisplays.core.input.PointerTarget
 import com.dreamdisplays.core.runtime.getOrNull
@@ -26,6 +27,7 @@ object PointerInput {
 
     /** Handles a mouse button event for the game window (loader events that already filtered it). */
     fun onButton(button: Int, action: Int): Boolean {
+        if (!MasterSwitch.on) return false
         val mc = Minecraft.getInstance()
         return when (action) {
             ACTION_PRESS -> {
@@ -49,6 +51,7 @@ object PointerInput {
 
     /** Handles a scroll event for the game window (loader events that already filtered it). */
     fun onScroll(): Boolean {
+        if (!MasterSwitch.on) return false
         val mc = Minecraft.getInstance()
         return pointerFree(mc) && router.scroll(scaledX(mc), scaledY(mc), true, targets())
     }

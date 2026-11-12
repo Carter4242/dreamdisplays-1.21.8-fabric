@@ -4,6 +4,7 @@ import com.dreamdisplays.platform.client.utils.literalText
 import com.dreamdisplays.platform.client.utils.translatableText
 import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.platform.client.Config
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.core.modules.ClientAudioModule
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import me.shedaniel.clothconfig2.api.ConfigBuilder
@@ -26,7 +27,16 @@ object ClothConfigScreen {
             .setTitle(text("title"))
         val entries = builder.entryBuilder()
         val general = builder.getOrCreateCategory(text("category.general"))
+        var modEnabled = config.modEnabled
 
+        // The master switch: applied (everything stopped or started) when the screen is saved, see MasterSwitch
+        general.addEntry(
+            entries.startBooleanToggle(text("mod_enabled"), config.modEnabled)
+                .setDefaultValue(true)
+                .setTooltip(text("mod_enabled.tooltip"))
+                .setSaveConsumer { modEnabled = it }
+                .build()
+        )
         general.addEntry(
             entries.startIntSlider(text("new_display_volume"), percent(config.newDisplayVolume), 0, 200)
                 .setDefaultValue(percent(Config.DEFAULT_NEW_DISPLAY_VOLUME))
@@ -85,6 +95,7 @@ object ClothConfigScreen {
             config.save()
             // The server may override it; the player's choice is saved either way
             ClientAudioModule.applyOutputSettings()
+            MasterSwitch.set(modEnabled)
         }
         return builder.build()
     }

@@ -97,7 +97,7 @@ object Initializer {
         ClientStateManager.displaysEnabled =
             DisplaysSwitch.enabledOn(config.displaysEnabled, config.displaysDisabledServers, serverId)
         DisplayRegistry.loadScreensForServer(serverId)
-        NewPipeResolver.warmConnection()
+        if (MasterSwitch.on) NewPipeResolver.warmConnection()
         DreamServices.registry.getOrNull<ClientApplication>()
             ?.emit(ClientLifecycleEvent.ServerJoined(serverId))
     }
@@ -163,7 +163,7 @@ object Initializer {
      * handles the right-click shortcut, and applies focus-mode blindness.
      */
     fun onEndTick(minecraft: Minecraft) = ClientGuard.run("onEndTick") {
-        DisplayYuvRenderTypes.solidColorType()
+        if (MasterSwitch.on) DisplayYuvRenderTypes.solidColorType()
         ClientTickManager.tick(minecraft)
     }
 
@@ -182,7 +182,7 @@ object Initializer {
     private fun renderHud(mc: Minecraft, graphics: GuiGraphics, partialTick: Float) {*/
         if (mc.level == null || mc.player == null) return
         // The "sharing your screen" badge stays up under every menu too, for as long as a capture runs
-        if (MinecraftScreenUtil.currentScreen(mc) != null) {
+        if (!MasterSwitch.on || MinecraftScreenUtil.currentScreen(mc) != null) {
             com.dreamdisplays.platform.client.displays.ScreenShare.renderIndicator(mc, graphics)
             return
         }

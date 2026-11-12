@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.guard.ClientGuard
@@ -61,6 +62,7 @@ open class ScreenOverlay {
             val graphics = GuiGraphics(pose)
         //?}
         */
+        if (!MasterSwitch.on) return
         ClientGuard.run("ScreenOverlay.head") {
             if (FullscreenOverlayManager.isEmpty) return
             val mc = Minecraft.getInstance()
@@ -106,6 +108,7 @@ open class ScreenOverlay {
             val graphics = GuiGraphics(pose)
         //?}
         */
+        if (!MasterSwitch.on) return
         ClientGuard.run("ScreenOverlay.return") {
             val mc = Minecraft.getInstance()
             if (!FullscreenOverlayManager.isEmpty &&

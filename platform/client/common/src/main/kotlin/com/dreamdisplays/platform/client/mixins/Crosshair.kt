@@ -1,5 +1,6 @@
 package com.dreamdisplays.platform.client.mixins
 
+import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.core.runtime.getOrNull
 import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.guard.ClientGuard
@@ -56,6 +57,7 @@ open class Crosshair {
             //?}
             ci: CallbackInfo
         ) {*/
+        if (!MasterSwitch.on) return
         val suppress = ClientGuard.call("Crosshair", false) {
             DreamServices.registry.getOrNull<CrosshairPolicy>()
                 ?.shouldSuppressCrosshair()

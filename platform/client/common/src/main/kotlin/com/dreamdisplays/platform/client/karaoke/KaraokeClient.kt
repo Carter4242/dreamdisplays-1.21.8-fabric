@@ -124,6 +124,19 @@ object KaraokeClient {
         lastReportTick = Long.MIN_VALUE / 2
     }
 
+    /**
+     * The mod was switched off: the singing analysis stops (track tap, mic analysis, its thread). Returns the displays
+     * this player sang on, so they can leave those stages. Client thread.
+     */
+    fun stopForSwitchOff(): Set<UUID> {
+        val sung = leads.keys.toSet()
+        leads.clear()
+        setActive(null)
+        executor?.shutdownNow()
+        executor = null
+        return sung
+    }
+
     /** Every client tick. */
     fun tick() {
         ticks++
