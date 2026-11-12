@@ -90,6 +90,7 @@ object PipPinManager {
     /** Forgets every pin without touching the store: the server stopped; the next one restores its own. */
     fun forgetAll() {
         pins.clear()
+        persistScheduled.set(false)
     }
 
     fun restore() {
@@ -111,6 +112,9 @@ object PipPinManager {
             delay(PERSIST_DEBOUNCE_MS)
             persistScheduled.set(false)
             synchronized(saveLock) { persistNow() }
+        }.invokeOnCompletion {
+            // Cancelled while it waited (the server stopped): the next server in this process must still save
+            persistScheduled.set(false)
         }
     }
 

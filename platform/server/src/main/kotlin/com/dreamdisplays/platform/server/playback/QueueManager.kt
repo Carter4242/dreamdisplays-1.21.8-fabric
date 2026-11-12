@@ -490,6 +490,9 @@ object QueueManager {
             delay(PERSIST_DEBOUNCE_MS)
             persistScheduled.set(false)
             synchronized(saveLock) { DisplayQueueStore.save(snapshot()) }
+        }.invokeOnCompletion {
+            // Cancelled while it waited (the server stopped): the next server in this process must still save
+            persistScheduled.set(false)
         }
     }
 }

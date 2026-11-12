@@ -65,6 +65,8 @@ object VanillaBootstrap {
     fun onServerStopping() {
         VanillaServerApi.stop()
         DisplayManager.save { VanillaServerState.storage?.saveDisplay(it) }
+        // A debounced save still waiting is cancelled with the background scope: write now, as Paper's disable does
+        PipPinManager.flush()
         ServerCoroutines.shutdown()
         VanillaServerState.storage?.disconnect()
         forgetWorld()
