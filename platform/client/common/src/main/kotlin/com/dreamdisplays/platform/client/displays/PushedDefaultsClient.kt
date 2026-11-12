@@ -12,7 +12,9 @@ import java.util.*
  * Applies the values an admin pushed for a display (`/display defaults`, [PushedDefaults]) to this player's own settings
  * for it: each push once, recorded per setting in `client-display-settings.json`, so whatever the player sets afterwards
  * stands until the next push. Runs for every description of a display, so a push lands at once for a player watching it
- * and on first sight (or the next join) for everyone else. The server's policy levers still apply on top.
+ * and on first sight (or the next join) for everyone else. While displays are off here (the mod's switch, `/display
+ * off`) descriptions are held and handled when they come back on, so a push made meanwhile applies then. The server's
+ * policy levers still apply on top.
  */
 object PushedDefaultsClient {
     private val logger = LoggerFactory.getLogger(javaClass)
