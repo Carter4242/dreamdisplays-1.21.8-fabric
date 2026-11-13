@@ -160,7 +160,8 @@ object MediaHostGuard {
     fun resolveSafeUrl(url: String, maxRedirects: Int = 5): String {
         if (isTrustedLocal(url)) return url
         requireAllowed(url)
-        if (allowPrivate) return url
+        // Private addresses allowed (a test setup) still walk redirects: a link that redirects must resolve to the
+        // same target as on every other client, or it cannot be tested at all
         val scheme = runCatching { URI(url.trim()).scheme?.lowercase() }.getOrNull()
         if (scheme != "http" && scheme != "https") return url
 
