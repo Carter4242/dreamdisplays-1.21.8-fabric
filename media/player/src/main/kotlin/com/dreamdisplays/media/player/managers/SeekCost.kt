@@ -5,18 +5,22 @@ package com.dreamdisplays.media.player.managers
  * cooldown). The last seek alone is not enough: a source that is slow to reopen its sound (a CDN that takes a second
  * or two to answer) mixes in-place seeks of tens of ms with ones that stall for two seconds, and judging only the last
  * one flips the stream back to cheap after every fast seek, so sync keeps seeking and every seek risks the next stall.
- * A slow in-place seek, or sound that had to be restarted because it never arrived, keeps the stream expensive for
- * [SLOW_MEMORY_MS].
+ * An in-place seek that stalled for [SLOW_MS] or more (more than the cheap-seek drift it corrects), or sound that had
+ * to be restarted because it never arrived, keeps the stream expensive for [SLOW_MEMORY_MS]. A seek a busy machine
+ * merely slowed to a few hundred ms only makes the next decision expensive, as before.
  */
 internal object SeekCost {
     /** An in-place seek that reached its first frame within this many ms counts as cheap. */
     const val CHEAP_MS = 250L
 
+    /** An in-place seek stalled at least this long marks the stream slow for [SLOW_MEMORY_MS]. */
+    const val SLOW_MS = 1_000L
+
     /** How long a slow seek or a lost sound keeps seeks expensive. */
     const val SLOW_MEMORY_MS = 60_000L
 
     /** Whether a seek that took [tookMs] ([inPlace] or a reopen) marks the stream slow. A reopen is expensive anyway. */
-    fun marksSlow(tookMs: Long, inPlace: Boolean): Boolean = inPlace && tookMs > CHEAP_MS
+    fun marksSlow(tookMs: Long, inPlace: Boolean): Boolean = inPlace && tookMs >= SLOW_MS
 
     /**
      * Whether seeks are cheap now: no seek yet or the last one went in place within [CHEAP_MS], and nothing marked the

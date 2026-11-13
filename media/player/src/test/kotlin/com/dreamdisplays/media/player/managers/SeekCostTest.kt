@@ -23,9 +23,13 @@ class SeekCostTest {
     }
 
     @Test
-    fun `only a slow in-place seek marks the stream slow`() {
-        assertFalse(SeekCost.marksSlow(SeekCost.CHEAP_MS, inPlace = true))
-        assertTrue(SeekCost.marksSlow(SeekCost.CHEAP_MS + 1, inPlace = true))
+    fun `only an in-place seek that stalled a second or more marks the stream slow`() {
+        // A busy machine's 380 ms or 650 ms in-place seek only makes the next decision expensive
+        assertFalse(SeekCost.marksSlow(650L, inPlace = true))
+        assertFalse(SeekCost.marksSlow(SeekCost.SLOW_MS - 1, inPlace = true))
+        assertTrue(SeekCost.marksSlow(SeekCost.SLOW_MS, inPlace = true))
+        assertFalse(SeekCost.cheap(650L, lastInPlace = true, sinceSlowMs = null))
+        assertTrue(SeekCost.cheap(30L, lastInPlace = true, sinceSlowMs = null), "Cheap again after the next fast seek.")
         assertFalse(SeekCost.marksSlow(3_000L, inPlace = false), "A reopen is judged by the last seek alone, as before.")
     }
 }
