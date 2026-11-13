@@ -75,11 +75,7 @@ internal object MediaPreparationService {
             ?.takeIf { !resolved.isLive && resolved.isSeekable && video.url == audio.url && video.type.hasAudio }
             ?.let { ReadAhead.wrap(it, video.url) }
             ?.takeIf { it != video.url }
-        fun MediaStream.routed(): MediaStream = when {
-            buffered != null && url == video.url -> copy(url = buffered)
-            LiveStreamUrls.isLive(url) -> copy(url = LiveStreamUrls.playUrl(url, liveLatencyMs))
-            else -> this
-        }
+        fun MediaStream.routed(): MediaStream = route(this, video.url, buffered, liveLatencyMs)
 
         return PreparedMedia(
             streamSet = ActiveStreams(
@@ -93,5 +89,19 @@ internal object MediaPreparationService {
             durationNanos = durationNanos,
             availableSubtitles = resolved.subtitles,
         )
+    }
+
+    /**
+     * The URL [stream] is opened at: the read-ahead's loopback URL [buffered] when it is the buffered file
+     * ([bufferedSourceUrl], the stream URL the buffer was made for), a live relay's play URL, else its own. Matched on
+     * the stream's own URL, never the link as pasted: a link that redirects (a signed CDN target) differs from both.
+     */
+    internal fun route(stream: MediaStream, bufferedSourceUrl: String, buffered: String?, liveLatencyMs: Int?): MediaStream {
+        val streamUrl = stream.url
+        return when {
+            buffered != null && streamUrl == bufferedSourceUrl -> stream.copy(url = buffered)
+            LiveStreamUrls.isLive(streamUrl) -> stream.copy(url = LiveStreamUrls.playUrl(streamUrl, liveLatencyMs))
+            else -> stream
+        }
     }
 }
