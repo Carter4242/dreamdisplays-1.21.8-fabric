@@ -805,9 +805,20 @@ internal class PlaybackSessionManager(
     /** True while the live channel decodes in-process, the precondition for an in-place seek. */
     val seeksInPlace: Boolean get() = active?.inProcess == true && !parkFlag.get() && !outputAlpha && lavServes(tempo)
 
+    /** When ([System.nanoTime]) a seek was last slow or sound had to be restarted; 0 when never (see [SeekCost]). */
+    @Volatile
+    var lastSlowNanos: Long = 0L
+        private set
+
+    /** Records that seeks on this stream are not cheap right now (its sound fell out and had to be reopened). */
+    fun noteSlow() {
+        lastSlowNanos = System.nanoTime()
+    }
+
     private fun logSeekDone(offsetNanos: Long, startedNanos: Long, how: String) {
         lastSeekInPlace = how == "in-place"
         lastSeekMs = (System.nanoTime() - startedNanos) / 1_000_000
+        if (SeekCost.marksSlow(lastSeekMs, lastSeekInPlace)) noteSlow()
         logger.info(
             "[dd-sync] {} seek to {} ms took {} ms ({})",
             debugLabel.take(8), offsetNanos / 1_000_000, (System.nanoTime() - startedNanos) / 1_000_000, how,

@@ -21,6 +21,7 @@ import com.dreamdisplays.media.player.managers.AudioFaultBudget
 import com.dreamdisplays.media.player.managers.AudioFaultRoute
 import com.dreamdisplays.media.player.managers.AudioStallDetector
 import com.dreamdisplays.media.player.managers.PlaybackSessionManager
+import com.dreamdisplays.media.player.managers.SeekCost
 import com.dreamdisplays.media.player.managers.StatsReporter
 import com.dreamdisplays.media.player.managers.StreamWatchdog
 import com.dreamdisplays.media.player.managers.WarmTrack
@@ -312,7 +313,6 @@ class MediaPlayer(
         private const val MAX_FETCH_RETRIES = 3
         private const val WARM_UP_STALE_NANOS = 20_000_000_000L
         private const val AUDIO_HEAL_NANOS = 1_000_000_000L
-        private const val CHEAP_SEEK_MS = 250L
         private const val MAX_AUDIO_RESTARTS = 3
         private const val AUDIO_RESTART_BUDGET_RESET_NS = 120_000_000_000L
         private const val HWACCEL_FAIL_WINDOW_NS = 5_000_000_000L
@@ -576,13 +576,15 @@ class MediaPlayer(
 
     /**
      * True when a seek now lands within a frame or two: the stream decodes in-process (in-place seeks) and the last
-     * seek on it, if any, was measured cheap (in place, under [CHEAP_SEEK_MS]). After a reopen or any slow seek, seeks
-     * are expensive and sync uses its normal threshold, rate correction and cooldown.
+     * seek on it, if any, was measured cheap (in place, under [SeekCost.CHEAP_MS]). After a reopen, and for a minute
+     * after a slow in-place seek or a sound that had to be restarted ([SeekCost]), seeks are expensive and sync uses
+     * its normal threshold, rate correction and cooldown.
      */
     fun seeksCheaply(): Boolean {
         if (!isReady || liveStream || !seekable || !sessionManager.seeksInPlace) return false
-        val last = sessionManager.lastSeekMs
-        return last < 0L || (sessionManager.lastSeekInPlace && last <= CHEAP_SEEK_MS)
+        val slowAt = sessionManager.lastSlowNanos
+        val sinceSlowMs = if (slowAt == 0L) null else (System.nanoTime() - slowAt) / 1_000_000L
+        return SeekCost.cheap(sessionManager.lastSeekMs, sessionManager.lastSeekInPlace, sinceSlowMs)
     }
 
     /** True while parked by [warmUpPaused] on its start-up cushion: [play] continues at once. */
@@ -1102,6 +1104,8 @@ class MediaPlayer(
                     "${at / 1_000_000} ms. ${audioStateLine()}"
         )
         volume.reapply()
+        // Sound that never arrived makes every seek a gamble on the next reopen: no cheap seeks for a while
+        sessionManager.noteSlow()
         if (!sessionManager.restartAudio(ss, at)) logger.warn("$debugLabel Audio restart was not possible right now.")
     }
 
@@ -1753,6 +1757,8 @@ class MediaPlayer(
         }
         val at = getCurrentTime()
         volume.reapply()
+        // Sound that never arrived makes every seek a gamble on the next reopen: no cheap seeks for a while
+        sessionManager.noteSlow()
         if (!sessionManager.restartAudio(ss, at)) {
             logger.debug("$debugLabel Audio restart after a fault ($reason) not possible now; the self-heal retries.")
         }
