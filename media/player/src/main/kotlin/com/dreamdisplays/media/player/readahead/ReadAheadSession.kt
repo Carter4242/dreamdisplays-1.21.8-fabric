@@ -80,6 +80,8 @@ internal class ReadAheadSession(
         val idleMs: Long = 15_000L,
         val refreshIntervalMs: Long = 10_000L,
         val maxBackoffMs: Long = 15_000L,
+        /** Start and end of the file kept over anything playback has passed: its index, read again by every reopen. */
+        val pinHeaderBytes: Long = 8L shl 20,
     )
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -411,7 +413,8 @@ internal class ReadAheadSession(
         val windowEnd = (minOf(anchor + windowBytes, total) - 1) / config.blockSize
         val keepBehind = config.keepBehindBytes / config.blockSize
         val candidates = blocks.values.filter { it.complete }.map { it.index }
-        for (index in ReadAheadMath.evictionOrder(candidates, anchorBlock, keepBehind, windowEnd)) {
+        val pinned = { index: Long -> ReadAheadMath.inHeader(index, config.blockSize, total, config.pinHeaderBytes) }
+        for (index in ReadAheadMath.evictionOrder(candidates, anchorBlock, keepBehind, windowEnd, pinned)) {
             if (cachedBytes + length <= config.sessionCapBytes) break
             blocks[index]?.let(::removeBlock)
         }

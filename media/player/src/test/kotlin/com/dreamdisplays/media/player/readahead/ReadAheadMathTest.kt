@@ -61,4 +61,21 @@ class ReadAheadMathTest {
         assertEquals((0L..7L).toList() + (30L downTo 21L).toList() + listOf(8L, 9L), order)
         assertEquals(emptyList(), order.filter { it in 10L..20L })
     }
+
+    @Test
+    fun `the file's header is dropped only after everything else outside the window`() {
+        val cached = (0L..30L).toList()
+        val header = { i: Long -> i <= 2L }
+        val order = ReadAheadMath.evictionOrder(cached, anchor = 10, keepBehind = 2, windowEnd = 20, pinned = header)
+        assertEquals((3L..7L).toList() + (30L downTo 21L).toList() + listOf(8L, 9L) + listOf(2L, 1L, 0L), order)
+        assertEquals(emptyList(), order.filter { it in 10L..20L })
+    }
+
+    @Test
+    fun `header blocks are the first and last pinned bytes of the file`() {
+        // 1 000-byte blocks, a 10 000-byte file, 2 500 bytes pinned at each end
+        val pinned = (0L..9L).filter { ReadAheadMath.inHeader(it, 1_000, 10_000, 2_500) }
+        assertEquals(listOf(0L, 1L, 2L, 7L, 8L, 9L), pinned)
+        assertEquals(emptyList(), (0L..9L).filter { ReadAheadMath.inHeader(it, 1_000, 10_000, 0) })
+    }
 }

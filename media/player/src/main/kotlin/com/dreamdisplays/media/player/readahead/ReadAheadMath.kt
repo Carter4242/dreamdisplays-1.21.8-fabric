@@ -57,12 +57,28 @@ internal object ReadAheadMath {
      * Order in which cached blocks are dropped when the buffer is full, best candidate first: blocks
      * playback has already passed (beyond the [keepBehind] blocks kept for small backward seeks),
      * oldest first; then blocks far ahead past the window end, farthest first; then the kept-behind
-     * blocks. Blocks inside the window ahead of [anchor] are never offered.
+     * blocks; last the [pinned] ones (the file's header, which every reopen reads again). Blocks inside
+     * the window ahead of [anchor] are never offered.
      */
-    fun evictionOrder(cached: Collection<Long>, anchor: Long, keepBehind: Long, windowEnd: Long): List<Long> {
-        val behind = cached.filter { it < anchor - keepBehind }.sorted()
-        val beyond = cached.filter { it > windowEnd }.sortedDescending()
-        val kept = cached.filter { it >= anchor - keepBehind && it < anchor }.sorted()
-        return behind + beyond + kept
+    fun evictionOrder(
+        cached: Collection<Long>, anchor: Long, keepBehind: Long, windowEnd: Long,
+        pinned: (Long) -> Boolean = { false },
+    ): List<Long> {
+        val free = cached.filterNot(pinned)
+        val behind = free.filter { it < anchor - keepBehind }.sorted()
+        val beyond = free.filter { it > windowEnd }.sortedDescending()
+        val kept = free.filter { it >= anchor - keepBehind && it < anchor }.sorted()
+        val lastResort = cached.filter { pinned(it) && (it < anchor || it > windowEnd) }.sortedDescending()
+        return behind + beyond + kept + lastResort
+    }
+
+    /**
+     * Whether block [index] of a file of [total] bytes lies in its first or last [pinBytes]: where an MP4 keeps its
+     * index (`moov`, megabytes for a feature film), which every decoder that opens the file reads before seeking.
+     */
+    fun inHeader(index: Long, blockSize: Int, total: Long, pinBytes: Long): Boolean {
+        if (pinBytes <= 0L) return false
+        val start = index * blockSize
+        return start < pinBytes || start + blockSize > total - pinBytes
     }
 }
