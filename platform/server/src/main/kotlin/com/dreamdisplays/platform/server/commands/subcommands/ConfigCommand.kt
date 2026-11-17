@@ -72,7 +72,7 @@ object ConfigCommand {
         },
         Key("clients.urgent_builds", PolicyPaths.Kind.Names("<commits, comma-separated, or none>")) { it.clients.urgent_builds },
         Key("clients.urgent_before", PolicyPaths.Kind.Text(Regex("""none|[0-9a-f]{7,40}"""), "<commit, or none>")) {
-            it.clients.urgent_before
+            it.clients.urgent_before.ifEmpty { null }
         },
         Key("clients.urgent_unknown", PolicyPaths.Kind.Bool) { it.clients.urgent_unknown },
         Key("queue.gap_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.queue.gap_ms },

@@ -275,8 +275,10 @@ data class SettingsSection(
         companion object {
             const val DEFAULT_UPDATE_LINK = "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric/releases/latest"
             const val DEFAULT_URGENT_SOUND = "minecraft:entity.item.pickup"
-            const val DEFAULT_URGENT_BEFORE = "cdaafa2b"
-            val DEFAULT_URGENT_BUILDS = listOf("7522afe5")
+            const val DEFAULT_URGENT_BEFORE = ""
+
+            /** The released protocol-0 builds: no readiness "won't hold" state, so they stall synced starts for everyone. */
+            val DEFAULT_URGENT_BUILDS = listOf("7522afe5", "8b584a90", "ff960715", "3dd12472", "1a2c5310", "79843254", "f66b8390")
         }
     }
 
