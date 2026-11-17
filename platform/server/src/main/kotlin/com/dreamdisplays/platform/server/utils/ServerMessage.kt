@@ -6,6 +6,8 @@ enum class ServerMessage(val key: String) {
     CLIENTS_LINE("clientsLine"),
     CLIENTS_LINE_OUTDATED("clientsLineOutdated"),
     CLIENTS_NONE("clientsNone"),
+    CLIENT_UPDATE_NOTICE("clientUpdateNotice"),
+    CLIENT_UPDATE_NOTICE_LINK("clientUpdateNoticeLink"),
     COMMAND_PLAYERS_ONLY("commandPlayersOnly"),
     CONFIG_BAD_VALUE("configBadValue"),
     CONFIG_HEADER("configHeader"),
