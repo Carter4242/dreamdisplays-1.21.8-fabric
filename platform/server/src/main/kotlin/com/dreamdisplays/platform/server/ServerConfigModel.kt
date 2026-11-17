@@ -251,13 +251,36 @@ data class SettingsSection(
      * Clients section: [latest_build] is the build id `/display diag clients` compares players against (empty = none);
      * [error_reports] asks clients for error / hitch reports, which go to [error_log] (in the plugin folder) along with
      * display commands when [command_log] is on.
+     *
+     * Update notices ([update_notice]): players on a build older than the current release ([latest_version], empty =
+     * this plugin's version, and [latest_build]) get a chat message linking [update_link] after
+     * [update_notice_delay_seconds]; urgent builds ([urgent_builds], everything older than [urgent_before], and jars
+     * without a build id when [urgent_unknown]) get it after [urgent_notice_delay_seconds] with [urgent_sound].
      */
     data class ClientsConfig(
         val latest_build: String = "",
         val error_reports: Boolean = true,
         val error_log: String = "client-errors.log",
         val command_log: Boolean = true,
-    )
+        val update_notice: Boolean = true,
+        val update_link: String = DEFAULT_UPDATE_LINK,
+        val latest_version: String = "",
+        val update_notice_delay_seconds: Int = 0,
+        val urgent_notice_delay_seconds: Int = 5,
+        val urgent_sound: String = DEFAULT_URGENT_SOUND,
+        val urgent_builds: List<String> = DEFAULT_URGENT_BUILDS,
+        val urgent_before: String = DEFAULT_URGENT_BEFORE,
+        val urgent_unknown: Boolean = true,
+    ) {
+        companion object {
+            const val DEFAULT_UPDATE_LINK = "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric/releases/latest"
+            const val DEFAULT_URGENT_SOUND = "minecraft:entity.item.pickup"
+            const val DEFAULT_URGENT_BEFORE = ""
+
+            /** The released protocol-0 builds: no readiness "won't hold" state, so they stall synced starts for everyone. */
+            val DEFAULT_URGENT_BUILDS = listOf("7522afe5", "8b584a90", "ff960715", "3dd12472", "1a2c5310", "79843254", "f66b8390")
+        }
+    }
 
     /** Fullscreen broadcast section. */
     data class FullscreenConfig(
@@ -443,6 +466,20 @@ fun parseServerConfig(t: TomlTable?): ParsedServerConfig = ParsedServerConfig(
             error_reports = t.boolOrNull("clients.error_reports") ?: true,
             error_log = (t?.get("clients.error_log") as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: "client-errors.log",
             command_log = t.boolOrNull("clients.command_log") ?: true,
+            update_notice = t.boolOrNull("clients.update_notice") ?: true,
+            update_link = (t?.get("clients.update_link") as? String)?.trim()
+                ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                ?: SettingsSection.ClientsConfig.DEFAULT_UPDATE_LINK,
+            latest_version = (t?.get("clients.latest_version") as? String)?.trim() ?: "",
+            update_notice_delay_seconds = t.numberOrNull("clients.update_notice_delay_seconds")?.toInt()?.coerceIn(0, 300) ?: 0,
+            urgent_notice_delay_seconds = t.numberOrNull("clients.urgent_notice_delay_seconds")?.toInt()?.coerceIn(0, 300) ?: 5,
+            urgent_sound = (t?.get("clients.urgent_sound") as? String)?.trim()?.lowercase()
+                ?: SettingsSection.ClientsConfig.DEFAULT_URGENT_SOUND,
+            urgent_builds = if (t?.get("clients.urgent_builds") == null) SettingsSection.ClientsConfig.DEFAULT_URGENT_BUILDS
+            else stringList(t, "clients.urgent_builds").map(String::lowercase),
+            urgent_before = (t?.get("clients.urgent_before") as? String)?.trim()?.lowercase()
+                ?: SettingsSection.ClientsConfig.DEFAULT_URGENT_BEFORE,
+            urgent_unknown = t.boolOrNull("clients.urgent_unknown") ?: true,
         ),
     ),
     storage = StorageSection(

@@ -227,6 +227,7 @@ object PaperV2Networking : PluginMessageListener {
         // Before the displays: the policy decides how their players are opened
         com.dreamdisplays.platform.server.policy.ClientDiagnostics.sendPolicy(player)
         DisplayActions.recordVersionAndCheckUpdates(player, hello.modVersion, hello.buildCommit)
+        ClientUpdateNotices.onHello(player, hello)
         DisplayActions.sendAllDisplays(player)
         FullscreenBroadcastManager.onPlayerJoin(player.uniqueId)
         PipPinManager.onPlayerJoin(player.uniqueId)

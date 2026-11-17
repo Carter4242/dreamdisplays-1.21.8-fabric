@@ -76,6 +76,12 @@ object TimelineManager {
     private fun loopsOwnEndOfStream(playerId: UUID): Boolean =
         EndOfStreamGuard.loopsOwnEnd(com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(playerId)?.protocolVersion ?: 0)
 
+    /** True when every seek to the start from [playerId] is their client looping at its own end of stream. */
+    private fun startSeekIsStreamEnd(playerId: UUID): Boolean {
+        val hello = com.dreamdisplays.platform.server.utils.net.V2PlayerTracker.helloOf(playerId)
+        return EndOfStreamGuard.startSeekIsStreamEnd(hello?.protocolVersion ?: 0, hello?.supportsReadiness == true)
+    }
+
     internal const val MAX_SEEK_MS = 24L * 60 * 60 * 1_000
 
     /** Hold after a resume of a paused display; the platform points this at `display.resume_hold_seconds`. */
@@ -229,7 +235,9 @@ object TimelineManager {
         val now = transport.nowMs()
         val target = if (action == PlaybackAction.SEEK) clampSeek(positionMs, display) else 0L
         val verdict = if (!loopsOwnEndOfStream(senderId)) EndOfStreamGuard.Verdict.USER_SEEK
-        else endOfStream.classify(display.id, timelines[display.id], now, action, target, durationMsOf(display))
+        else endOfStream.classify(
+            display.id, timelines[display.id], now, action, target, durationMsOf(display), startSeekIsStreamEnd(senderId),
+        )
         when (verdict) {
             EndOfStreamGuard.Verdict.USER_SEEK -> {}
             // A client's stream ended a moment before the shared clock: the queue moves on at the timeline's own
@@ -240,6 +248,11 @@ object TimelineManager {
                 return false
             }
             EndOfStreamGuard.Verdict.DUPLICATE -> return false
+            // An old client's stream ran out away from the shared end: it gets the shared position back on the next sync
+            EndOfStreamGuard.Verdict.STRAY_END -> {
+                logger.info("Display {}: an old client looped away from the end of stream; not taken as a seek.", display.id)
+                return false
+            }
         }
         val holding = startHolds.remove(display.id) != null
         val current = timelines[display.id] ?: Timeline.start(now, durationMs = durationMsOf(display), loop = true)

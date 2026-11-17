@@ -9,6 +9,8 @@ plugins {
     id("dreamdisplays.shadow-conventions")
     // The plugin's own build id (BuildInfo), the build clients are expected to run when [clients] latest_build is unset
     id("dreamdisplays.build-info")
+    // The commit graph clients' build ids are placed in (ClientUpdateNotices), from git at build time
+    id("dreamdisplays.commit-history")
     alias(libs.plugins.paperweight)
     alias(libs.plugins.platformweaver)
 }

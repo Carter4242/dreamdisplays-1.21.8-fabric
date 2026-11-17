@@ -19,7 +19,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * `/display config [<key> [<value>|reset]]`: reads or sets the server-wide display defaults in `config.toml`
- * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build`, `[queue] gap_ms`, the `[karaoke]` keys, the `[live]` relay URLs and
+ * (the `[display]` hold / mode / auto-pause keys, `[clients] latest_build` and the update-notice keys, `[queue] gap_ms`, the `[karaoke]` keys, the `[live]` relay URLs and
  * every `[policy.*]` default), then reloads the config the way `/display reload` does. The relay publish URL carries
  * credentials: it is only ever shown, replied and logged with them redacted.
  *
@@ -58,6 +58,23 @@ object ConfigCommand {
         },
         Key("clients.error_reports", PolicyPaths.Kind.Bool) { it.clients.error_reports },
         Key("clients.command_log", PolicyPaths.Kind.Bool) { it.clients.command_log },
+        Key("clients.update_notice", PolicyPaths.Kind.Bool) { it.clients.update_notice },
+        Key("clients.update_link", PolicyPaths.Kind.Text(Regex("""(?i)https?://[^\s"]+"""), "<download page URL>")) {
+            it.clients.update_link
+        },
+        Key("clients.latest_version", PolicyPaths.Kind.Text(Regex("""\d+\.\d+(\.\d+)?(-[0-9A-Za-z.-]+)?"""), "<mod version, e.g. 2.0.0>")) {
+            it.clients.latest_version.ifEmpty { null }
+        },
+        Key("clients.update_notice_delay_seconds", PolicyPaths.Kind.Whole(0, 300)) { it.clients.update_notice_delay_seconds },
+        Key("clients.urgent_notice_delay_seconds", PolicyPaths.Kind.Whole(0, 300)) { it.clients.urgent_notice_delay_seconds },
+        Key("clients.urgent_sound", PolicyPaths.Kind.Text(Regex("""none|([a-z0-9_.-]+:)?[a-z0-9_./-]+"""), "<sound, e.g. minecraft:entity.item.pickup, or none>")) {
+            it.clients.urgent_sound
+        },
+        Key("clients.urgent_builds", PolicyPaths.Kind.Names("<commits, comma-separated, or none>")) { it.clients.urgent_builds },
+        Key("clients.urgent_before", PolicyPaths.Kind.Text(Regex("""none|[0-9a-f]{7,40}"""), "<commit, or none>")) {
+            it.clients.urgent_before.ifEmpty { null }
+        },
+        Key("clients.urgent_unknown", PolicyPaths.Kind.Bool) { it.clients.urgent_unknown },
         Key("queue.gap_ms", PolicyPaths.Kind.Whole(0, 5_000)) { it.queue.gap_ms },
         Key("activity.max_entries", PolicyPaths.Kind.Whole(0, 1_000)) { it.activity.max_entries },
         Key("activity.visible_to", PolicyPaths.Kind.Choice(PANEL_VISIBILITY)) { it.activity.visible_to },

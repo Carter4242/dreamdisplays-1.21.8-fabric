@@ -17,6 +17,7 @@ import com.dreamdisplays.platform.server.registrar.CommandRegistrar
 import com.dreamdisplays.platform.server.registrar.ListenerRegistrar
 import com.dreamdisplays.platform.server.storage.StorageBackend
 import com.dreamdisplays.platform.server.storage.TimelineStore
+import com.dreamdisplays.platform.server.utils.net.ClientUpdateNotices
 import com.dreamdisplays.platform.server.utils.net.PaperV2Networking
 import com.dreamdisplays.platform.server.utils.net.QueueActions
 import io.github.arnodoelinger.platformweaver.PaperOnly
@@ -140,6 +141,8 @@ class PaperServer : JavaPlugin() {
 
         // Permission changes reach online clients without a relog (before any hello goes out)
         com.dreamdisplays.platform.server.utils.net.PaperHelloResync.start(this)
+        // Players still online across a plugin reload already had their login's update notice (before any hello arrives)
+        ClientUpdateNotices.onEnable(server.onlinePlayers.map { it.uniqueId })
         ListenerRegistrar.registerListeners(this)
         ChannelRegistrar.registerChannels(this)
         // Players still online across a plugin reload: let their clients handshake again

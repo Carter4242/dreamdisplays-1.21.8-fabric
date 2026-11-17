@@ -315,6 +315,25 @@ error_reports = true
 error_log = "client-errors.log"
 command_log = true
 
+# Update notices: a chat message with a link to update_link for players whose mod build is older than the current
+# release (latest_version, unset = this plugin's version; within one version, by commit against latest_build).
+# Once per login, update_notice_delay_seconds after their client said hello. Builds that are newer, dev builds made
+# off the release's history, and players without the mod get nothing. The text is "clientUpdateNotice" in lang/.
+update_notice = true
+update_link = "https://github.com/Carter4242/dreamdisplays-1.21.8-fabric/releases/latest"
+# latest_version = "2.0.0"
+update_notice_delay_seconds = 0
+
+# Urgent builds (they make playback worse for everyone watching with them) get the same message after
+# urgent_notice_delay_seconds, with urgent_sound played to them only ("none" = silent): the commits in urgent_builds
+# (-dev / -dirty builds of them too), every commit older than urgent_before (unset = no cut-off), and jars from
+# before build ids when urgent_unknown. The default list is the protocol-0 builds, which stall synced starts.
+urgent_notice_delay_seconds = 5
+urgent_sound = "minecraft:entity.item.pickup"
+urgent_builds = ["7522afe5", "8b584a90", "ff960715", "3dd12472", "1a2c5310", "79843254", "f66b8390"]
+# urgent_before = "1a2b3c4d"
+urgent_unknown = true
+
 [reports]
 # Report settings
 # webhook_url is a discord webhook URL for sending reports

@@ -10,24 +10,32 @@ import java.util.concurrent.ConcurrentHashMap
  * Older clients send a seek / restart to 0 when their stream ends, which may be a moment before the shared timeline
  * does; taken as a seek it would restart the video for everyone and keep the queue from moving on. The first such
  * report per end is [Verdict.STREAM_ENDED] (move the queue on, or let the timeline wrap by itself); every other one
- * around that end, from any client, is a [Verdict.DUPLICATE] to drop. Thread-safe.
+ * around that end, from any client, is a [Verdict.DUPLICATE] to drop. Clients from before readiness reports
+ * ([startSeekIsStreamEnd]) also loop far from the shared end (their own stream ran out early): any seek of theirs to
+ * the start is a [Verdict.STRAY_END] to drop. Thread-safe.
  */
 class EndOfStreamGuard(private val graceMs: Long = DEFAULT_GRACE_MS) {
-    enum class Verdict { USER_SEEK, STREAM_ENDED, DUPLICATE }
+    enum class Verdict { USER_SEEK, STREAM_ENDED, DUPLICATE, STRAY_END }
 
     /** Per display: until when (wall ms) restart-looking seeks are end-of-stream reports to drop. */
     private val swallowUntil = ConcurrentHashMap<UUID, Long>()
 
-    /** Classifies [action] to [targetMs] arriving at [nowMs] on [displayId], whose shared clock is [timeline]. */
+    /**
+     * Classifies [action] to [targetMs] arriving at [nowMs] on [displayId], whose shared clock is [timeline].
+     * [startSeekIsEnd]: the sender is a client whose seeks to the start are always its own end-of-stream loop.
+     */
     fun classify(
         displayId: UUID, timeline: Timeline?, nowMs: Long, action: PlaybackAction, targetMs: Long,
-        durationMs: Long = timeline?.durationMs ?: 0L,
+        durationMs: Long = timeline?.durationMs ?: 0L, startSeekIsEnd: Boolean = false,
     ): Verdict {
         if (action != PlaybackAction.SEEK && action != PlaybackAction.RESTART) return Verdict.USER_SEEK
         val target = if (action == PlaybackAction.RESTART) 0L else targetMs
         if (target > QueueTiming.RESTART_TARGET_MAX_MS) return Verdict.USER_SEEK
         swallowUntil[displayId]?.let { if (nowMs <= it) return Verdict.DUPLICATE }
-        if (timeline == null || !QueueTiming.isEndOfStreamLoop(timeline, nowMs, target, durationMs)) return Verdict.USER_SEEK
+        if (timeline == null || !QueueTiming.isEndOfStreamLoop(timeline, nowMs, target, durationMs)) {
+            // Their restart button sends RESTART, which stays a restart for everyone
+            return if (startSeekIsEnd && action == PlaybackAction.SEEK) Verdict.STRAY_END else Verdict.USER_SEEK
+        }
         val endAt = QueueTiming.switchAtMs(timeline, nowMs, QueueTiming.END_OF_STREAM_WINDOW_MS * 2, durationMs) ?: nowMs
         var first = false
         swallowUntil.compute(displayId) { _, old ->
@@ -59,6 +67,14 @@ class EndOfStreamGuard(private val graceMs: Long = DEFAULT_GRACE_MS) {
 
         /** True when a client on [protocolVersion] (0: unknown / release 11) loops its own player by seeking to 0. */
         fun loopsOwnEnd(protocolVersion: Int): Boolean = protocolVersion < HOLDING_PROTOCOL
+
+        /**
+         * True when every seek to the start from a client is its player looping at its own end of stream, wherever the
+         * shared clock is: clients from before readiness reports ([supportsReadiness] unset, protocol 0) loop that way,
+         * and their stream can end well before the shared one does.
+         */
+        fun startSeekIsStreamEnd(protocolVersion: Int, supportsReadiness: Boolean): Boolean =
+            loopsOwnEnd(protocolVersion) && !supportsReadiness
 
         /**
          * Whether a seek or restart arriving while the display is [paused] (or [holding], a start hold that is paused

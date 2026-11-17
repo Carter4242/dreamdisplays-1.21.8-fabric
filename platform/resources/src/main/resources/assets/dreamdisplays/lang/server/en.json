@@ -130,6 +130,8 @@
       }
     ]
   },
+  "clientUpdateNotice": "Your Dream Displays Mod is out of date. {0} and replace the old jar in your mods folder.",
+  "clientUpdateNoticeLink": "&lDownload the new version",
   "newPluginVersion": "&7D |&f New version of Dream Displays plugin (%s) is available! Please update the server plugin!",
   "configReloaded": "&7D | &fDream Displays has been reloaded!",
   "configReloadFailed": "&7D |&f Failed to reload Dream Displays. Please check the console for errors",
