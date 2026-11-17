@@ -15,7 +15,8 @@ import java.util.OptionalInt
 
 /**
  * Display [RenderType] for 1.21.6 - 1.21.10, standing in for 1.21.11's `RenderType.create(name, RenderSetup)`:
- * draws [pipeline] into the main target with every texture in [textures] bound to its sampler name.
+ * draws [pipeline] (or [latePipeline] for [UnshadedDisplayPass]'s copy) into the main target with every texture in
+ * [textures] bound to its sampler name.
  *
  * Vanilla's own route (`RenderType.create` + `CompositeState`) is package-private / protected on these
  * versions, so the draw is done here, mirroring `RenderType.CompositeRenderType.draw`.
@@ -24,6 +25,7 @@ internal class DisplayRenderType(
     typeName: String,
     private val pipeline: RenderPipeline,
     private val textures: List<Pair<String, ResourceLocation>>,
+    private val latePipeline: RenderPipeline? = null,
 ) : RenderType(typeName, BUFFER_SIZE, false, false, {}, {}) {
     private val label = typeName
 
@@ -60,10 +62,13 @@ internal class DisplayRenderType(
             val depthView = if (target.useDepth) RenderSystem.outputDepthTextureOverride ?: target.depthTextureView else null
             val textureManager = mc.textureManager
 
+            // UnshadedDisplayPass's copy goes over the level-pass copy's own depth: it needs its stronger depth bias
+            val activePipeline = latePipeline?.takeIf { UnshadedDisplayPass.drawing } ?: pipeline
+
             RenderSystem.getDevice().createCommandEncoder().createRenderPass(
                 { "Immediate draw for $label" }, colorView, OptionalInt.empty(), depthView, OptionalDouble.empty(),
             ).use { pass ->
-                pass.setPipeline(pipeline)
+                pass.setPipeline(activePipeline)
                 val scissor = RenderSystem.getScissorStateForRenderTypeDraws()
                 if (scissor.enabled()) pass.enableScissor(scissor.x(), scissor.y(), scissor.width(), scissor.height())
                 RenderSystem.bindDefaultUniforms(pass)
