@@ -1,6 +1,9 @@
 package com.dreamdisplays.platform.client.utils
 
-import net.minecraft.Util
+//? if >=1.21.11 {
+import net.minecraft.util.Util
+//?} else
+/*import net.minecraft.Util*/
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ConfirmLinkScreen
 import net.minecraft.client.gui.screens.Screen
