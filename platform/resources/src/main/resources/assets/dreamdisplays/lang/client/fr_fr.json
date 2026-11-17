@@ -58,6 +58,7 @@
   "dreamdisplays.button.delete": "Supprimer",
   "dreamdisplays.button.delete.tooltip.1": "Supprimer l'affichage",
   "dreamdisplays.button.delete.tooltip.2": "Supprime définitivement cet affichage",
+  "dreamdisplays.button.delete.confirm": "Cliquez à nouveau pour supprimer cet affichage",
   "dreamdisplays.button.report": "Signaler",
   "dreamdisplays.button.report.tooltip.1": "Signaler l'affichage",
   "dreamdisplays.button.report.tooltip.2": "Signaler un contenu inapproprié",

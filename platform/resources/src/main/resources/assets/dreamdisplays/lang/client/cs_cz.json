@@ -58,6 +58,7 @@
   "dreamdisplays.button.delete": "Smazat",
   "dreamdisplays.button.delete.tooltip.1": "Smazat displej",
   "dreamdisplays.button.delete.tooltip.2": "Trvale odstraní tento displej",
+  "dreamdisplays.button.delete.confirm": "Kliknutím znovu tento displej smažete",
   "dreamdisplays.button.report": "Nahlásit",
   "dreamdisplays.button.report.tooltip.1": "Nahlásit displej",
   "dreamdisplays.button.report.tooltip.2": "Nahlásit nevhodný obsah",

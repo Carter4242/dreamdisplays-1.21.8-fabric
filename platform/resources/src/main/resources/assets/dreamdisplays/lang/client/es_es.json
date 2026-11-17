@@ -58,6 +58,7 @@
   "dreamdisplays.button.delete": "Eliminar",
   "dreamdisplays.button.delete.tooltip.1": "Eliminar pantalla",
   "dreamdisplays.button.delete.tooltip.2": "Elimina permanentemente esta pantalla",
+  "dreamdisplays.button.delete.confirm": "Haz clic de nuevo para eliminar esta pantalla",
   "dreamdisplays.button.report": "Reportar",
   "dreamdisplays.button.report.tooltip.1": "Reportar pantalla",
   "dreamdisplays.button.report.tooltip.2": "Reportar contenido inapropiado",

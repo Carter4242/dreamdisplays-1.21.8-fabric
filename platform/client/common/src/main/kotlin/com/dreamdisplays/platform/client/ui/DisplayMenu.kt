@@ -119,6 +119,8 @@ class DisplayMenu private constructor(
     private lateinit var loopButton: IconButton
     private lateinit var clearQueueButton: IconButton
     private var clearArmedUntilMs = 0L
+    private val deleteConfirm = ConfirmClick(CLEAR_CONFIRM_MS)
+    private lateinit var deleteButton: IconButton
     private var lastQueueCount = -1
     private var queueFlashUntilMs = 0L
     private var tabRects: List<Pair<BottomTab, UiRect>> = emptyList()
@@ -311,13 +313,17 @@ class DisplayMenu private constructor(
         // Only the error panel places it; keep it hidden in the normal menu so it never strays to (0,0)
         retryButton.visibleWhen = { ds.errored }
 
-        val deleteButton = addUi(
+        // Deleting takes a second click within a few seconds, so one misclick can't remove a screen
+        deleteConfirm.disarm()
+        deleteButton = addUi(
             IconButton(
                 icon = { IconButton.modIcon("delete") },
                 sprites = IconButton.RED_SPRITES,
             ) {
-                displays.delete(displayId)
-                onClose()
+                if (deleteConfirm.click(System.currentTimeMillis())) {
+                    displays.delete(displayId)
+                    onClose()
+                }
             })
         deleteButton.enabledWhen = { ds.owner || ds.isAdmin }
 
@@ -399,7 +405,16 @@ class DisplayMenu private constructor(
             rows = settingsRows(qualityReset, brightnessReset, speedReset, audio3dReset, accessReset),
             ownerActions = [reportButton, deleteButton, shareButton],
             buttonTooltips = [
-                deleteButton to { buttonTooltip(ClientMessage.BUTTON_DELETE.key) },
+                deleteButton to {
+                    if (deleteConfirm.isArmed(System.currentTimeMillis())) {
+                        [
+                            tooltipTitle("${ClientMessage.BUTTON_DELETE.key}.tooltip.1"),
+                            tooltipBody(ClientMessage.BUTTON_DELETE_CONFIRM.key),
+                        ]
+                    } else {
+                        buttonTooltip(ClientMessage.BUTTON_DELETE.key)
+                    }
+                },
                 reportButton to { buttonTooltip(ClientMessage.BUTTON_REPORT.key) },
                 shareButton to {
                     buttonTooltip(
@@ -572,6 +587,7 @@ class DisplayMenu private constructor(
             errorPanel.render(g, width, height)
             DisplayPanels.sync(ds.uuid, activityOpen = false, viewersOpen = false)
             drawChildren(g, mouseX, mouseY, partialTick)
+        drawDeleteArmed(g)
             clearVideoTip(mouseX, mouseY)?.let { renderQueueTooltip(g, it, toRealX(mouseX), toRealY(mouseY)) }
             return
         }
@@ -624,6 +640,7 @@ class DisplayMenu private constructor(
         refreshRelatedVideos()
 
         drawChildren(g, mouseX, mouseY, partialTick)
+        drawDeleteArmed(g)
         if (shareButton.visible) {
             if (ScreenShare.isSharing(ds.uuid)) {
                 val bottom = shareButton.y + shareButton.height
@@ -675,6 +692,14 @@ class DisplayMenu private constructor(
      * next to the header's buttons, else short ones, else icons (with their counts while those fit) whose tooltip is
      * the full label ([TabStrip]).
      */
+    private fun drawDeleteArmed(g: GuiGraphicsCompat) {
+        if (!deleteButton.visible || !deleteConfirm.isArmed(System.currentTimeMillis())) return
+        g.drawOutline(
+            UiRect(deleteButton.x - 1, deleteButton.y - 1, deleteButton.width + 2, deleteButton.height + 2),
+            UiTheme.ACCENT_UPDATE,
+        )
+    }
+
     private fun drawPanelTabs(g: GuiGraphicsCompat, area: UiRect, mouseX: Int, mouseY: Int) {
         val ds = displayScreen
         val x = area.x + UiTheme.PANEL_PADDING_X

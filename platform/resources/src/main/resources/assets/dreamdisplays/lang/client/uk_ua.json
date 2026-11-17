@@ -58,6 +58,7 @@
   "dreamdisplays.button.delete": "Видалити",
   "dreamdisplays.button.delete.tooltip.1": "Видалити дисплей",
   "dreamdisplays.button.delete.tooltip.2": "Назавжди видаляє цей дисплей",
+  "dreamdisplays.button.delete.confirm": "Натисніть ще раз, щоб видалити цей дисплей",
   "dreamdisplays.button.report": "Поскаржитися",
   "dreamdisplays.button.report.tooltip.1": "Поскаржитися на дисплей",
   "dreamdisplays.button.report.tooltip.2": "Поскаржитися на неприйнятний контент",

@@ -35,6 +35,7 @@ enum class ClientMessage(val key: String) {
     BUTTON_SPEED_TOOLTIP_3("dreamdisplays.button.speed.tooltip.3"),
     BUTTON_SPEED_TOOLTIP_4("dreamdisplays.button.speed.tooltip.4"),
     BUTTON_DELETE("dreamdisplays.button.delete"),
+    BUTTON_DELETE_CONFIRM("dreamdisplays.button.delete.confirm"),
     BUTTON_QUALITY("dreamdisplays.button.quality"),
     BUTTON_QUALITY_TOOLTIP_1("dreamdisplays.button.quality.tooltip.1"),
     BUTTON_QUALITY_TOOLTIP_2("dreamdisplays.button.quality.tooltip.2"),
