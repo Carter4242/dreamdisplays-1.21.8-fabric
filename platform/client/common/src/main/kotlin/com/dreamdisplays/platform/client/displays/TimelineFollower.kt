@@ -441,7 +441,9 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
             restartUnseekableHeldEnd(now)
             return
         }
-        val settings = com.dreamdisplays.platform.client.replay.ReplayHooks.syncSettings(screen.syncSettings, estimator.rate)
+        val settings = com.dreamdisplays.platform.client.replay.ReplayHooks.syncSettings(
+            screen.syncSettings, estimator.rate, screen.seeksSlowly,
+        )
         controller.settings = settings
         // The shared clock wraps where the server's does (its timeline's length), not at this player's media length:
         // between the two the server has not restarted yet, and this player holds its last frame
@@ -633,7 +635,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     /** Server resumed while this player is paused: start it so it lands on the live position. */
     private fun resumeAligned() {
-        val cold = coldAfterSnap || !screen.resumesWarm()
+        // In a replay the paused stream is being opened where the replay was scrubbed to (its paused frame): resumed
+        // before it is open, it plays on from there and its late landing is fixed by one seek, rather than being
+        // opened a second time ahead of the replay (the open is the slow part on a slow host)
+        val opening = screen.isWarmingUp && com.dreamdisplays.platform.client.replay.ReplayHooks.inReplay()
+        val cold = !opening && (coldAfterSnap || !screen.resumesWarm())
         coldAfterSnap = false
         warmAdopted = false
         if (cold && !screen.isLive && screen.canSeek() && estimator.hasTimeline && !estimator.paused) {

@@ -18,8 +18,13 @@ import kotlin.math.roundToLong
 /**
  * Export only: one display's sound in a Flashback export. Flashback renders the game's OpenAL context into the export
  * frame by frame (a loopback device: exactly the samples of one frame after it is drawn); this plays the display's sound
- * on that context from an OpenAL source of its own, with exactly the samples that belong to the frame queued before
- * the frame's samples are rendered, so they land in the export on that frame.
+ * on that context from an OpenAL source of its own.
+ *
+ * The source never runs dry between frames: it is kept one frame ahead, holding the samples of the next frame (its
+ * content predicted from this frame's pace) while this frame's are rendered. A source that stops and starts again at
+ * every frame has its voice's filter state reset at each start, which puts a small decaying step into the sound at every
+ * frame boundary (static under the display's sound, 60 times a second at 60 fps). Only a source that does run dry (the
+ * export's first frame, or a frame that never reached here) gets this frame's samples queued as well, before the next.
  *
  * The samples come from an FFmpeg pipe on the display's audio stream (with the players' request headers) opened at the
  * content position: mono, 48 kHz, float, read ahead on a thread of its own. The render thread never waits on the
@@ -38,12 +43,13 @@ internal class ExportSound(private val displayId: UUID) {
     private var failed = false
 
     /**
-     * Queues the [outSamples] samples of one export frame: the content from [fromNanos] to [toNanos] of [audioUrl] (or
-     * silence when [audioUrl] is null or [playing] is false), at ([x], [y], [z]) with [gain], fading out linearly to
-     * [maxDistance] blocks.
+     * One export frame: the content from [fromNanos] to [toNanos] of [audioUrl] (or silence when [audioUrl] is null or
+     * [playing] is false) in [outSamples] samples, at ([x], [y], [z]) with [gain], fading out linearly to [maxDistance]
+     * blocks. Queues the next frame's samples ([nextSamples], the content just after this frame's at its pace), and this
+     * frame's too when the source is not already holding them.
      */
     fun frame(
-        audioUrl: String?, playing: Boolean, fromNanos: Long, toNanos: Long, outSamples: Int,
+        audioUrl: String?, playing: Boolean, fromNanos: Long, toNanos: Long, outSamples: Int, nextSamples: Int,
         x: Double, y: Double, z: Double, gain: Float, maxDistance: Float,
     ) {
         if (outSamples <= 0 || failed) return
@@ -53,24 +59,31 @@ internal class ExportSound(private val displayId: UUID) {
         AL10.alSource3f(source, AL10.AL_POSITION, x.toFloat(), y.toFloat(), z.toFloat())
         AL10.alSourcef(source, AL10.AL_GAIN, gain.coerceIn(0f, 2f))
         AL10.alSourcef(source, AL10.AL_MAX_DISTANCE, maxDistance)
-        val pcm = FloatArray(outSamples)
-        if (audioUrl != null && playing && toNanos > fromNanos) {
-            read(audioUrl, fromNanos, toNanos)?.let { resample(it, pcm) }
-        } else {
-            closePipe() // a pause or a stop: whatever plays next opens where it is then
-        }
-        val buffer = AL10.alGenBuffers()
-        val data = BufferUtils.createFloatBuffer(outSamples).put(pcm).flip()
-        AL10.alBufferData(buffer, AL_FORMAT_MONO_FLOAT32, data, RATE)
-        AL10.alSourceQueueBuffers(source, buffer)
-        // Each frame's samples are all rendered with that frame, so the source runs dry between frames: start it again
-        if (AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING) AL10.alSourcePlay(source)
+        val sounding = audioUrl != null && playing && toNanos > fromNanos
+        if (!sounding) closePipe() // a pause or a stop: whatever plays next opens where it is then
+        val dry = AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING
+        // Ahead by more than the one frame it should be (the export rendered fewer samples than were queued): wait
+        val pending = AL10.alGetSourcei(source, AL10.AL_BUFFERS_QUEUED)
+        if (!dry && pending > MAX_PENDING_BUFFERS) return
+        if (dry) queue(if (sounding) audioUrl else null, fromNanos, toNanos, outSamples)
+        if (nextSamples > 0) queue(if (sounding) audioUrl else null, toNanos, toNanos + (toNanos - fromNanos), nextSamples)
+        if (dry) AL10.alSourcePlay(source)
         val err = AL10.alGetError()
         if (err != AL10.AL_NO_ERROR) {
             logger.warn("Export: OpenAL error {} for display {}; its sound is left out.", err, displayId)
             failed = true
             close()
         }
+    }
+
+    /** Queues [samples] samples of [audioUrl]'s content from [fromNanos] to [toNanos] (silence for a null url). */
+    private fun queue(audioUrl: String?, fromNanos: Long, toNanos: Long, samples: Int) {
+        val pcm = FloatArray(samples)
+        if (audioUrl != null) read(audioUrl, fromNanos, toNanos)?.let { resample(it, pcm) }
+        val buffer = AL10.alGenBuffers()
+        val data = BufferUtils.createFloatBuffer(samples).put(pcm).flip()
+        AL10.alBufferData(buffer, AL_FORMAT_MONO_FLOAT32, data, RATE)
+        AL10.alSourceQueueBuffers(source, buffer)
     }
 
     private fun createSource(): Boolean {
@@ -269,6 +282,9 @@ internal class ExportSound(private val displayId: UUID) {
     companion object {
         private val logger = LoggerFactory.getLogger("DreamDisplays/Flashback")
         const val RATE = 48_000
+
+        /** Buffers queued (this frame's and the next) beyond which the export is ahead of what was rendered. */
+        private const val MAX_PENDING_BUFFERS = 3
 
         /** AL_EXT_float32's mono format (OpenAL Soft). */
         private const val AL_FORMAT_MONO_FLOAT32 = 0x10010

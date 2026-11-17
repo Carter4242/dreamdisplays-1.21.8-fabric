@@ -62,18 +62,21 @@ object ReplayHooks {
 
     /**
      * The sync settings a display follows its timeline with: [base] outside replays. In a replay, where nobody else
-     * watches the same display and a seek costs nothing shared, drift is seeked away as soon as it is about
-     * [REPLAY_DRIFT_CONTENT_MS] of content at the timeline's [rate], rather than left to a 1 % rate change up to 1.5 s.
+     * watches the same display, drift is seeked away as soon as it is about [REPLAY_DRIFT_CONTENT_MS] of content at the
+     * timeline's [rate], rather than left to a 1 % rate change up to 1.5 s. Not on a stream whose seeks are known to be
+     * slow ([seeksSlowly]: a host where each seek freezes the picture for a second or more): it keeps [base], since a
+     * seek every few hundred ms of drift would freeze it far more than the drift shows.
      */
-    fun syncSettings(base: SyncSettings, rate: Double): SyncSettings {
+    fun syncSettings(base: SyncSettings, rate: Double, seeksSlowly: Boolean = false): SyncSettings {
         val b = bridge ?: return base
-        return if (b.inReplay()) replaySyncSettings(base, rate) else base
+        return if (b.inReplay()) replaySyncSettings(base, rate, seeksSlowly) else base
     }
 
     /** Content ms a replay lets a display drift before it seeks. */
     const val REPLAY_DRIFT_CONTENT_MS = 400.0
 
-    internal fun replaySyncSettings(base: SyncSettings, rate: Double): SyncSettings {
+    internal fun replaySyncSettings(base: SyncSettings, rate: Double, seeksSlowly: Boolean = false): SyncSettings {
+        if (seeksSlowly) return base
         // The follower judges drift in real time: at 4x, 400 ms of content is 100 ms
         val threshold = (REPLAY_DRIFT_CONTENT_MS / rate.coerceIn(0.1, 10.0)).toInt().coerceIn(100, base.seekThresholdMs)
         return base.copy(

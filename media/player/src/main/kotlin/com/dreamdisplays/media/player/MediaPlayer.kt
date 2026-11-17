@@ -587,6 +587,15 @@ class MediaPlayer(
         return SeekCost.cheap(sessionManager.lastSeekMs, sessionManager.lastSeekInPlace, sinceSlowMs)
     }
 
+    /**
+     * True for [SeekCost.SLOW_MEMORY_MS] after an in-place seek here stalled a second or more, or its sound had to be
+     * restarted: a slow host, where every seek freezes the picture for about that long.
+     */
+    fun seeksSlowly(): Boolean {
+        val slowAt = sessionManager.lastSlowNanos
+        return slowAt != 0L && (System.nanoTime() - slowAt) / 1_000_000L < SeekCost.SLOW_MEMORY_MS
+    }
+
     /** True while parked by [warmUpPaused] on its start-up cushion: [play] continues at once. */
     fun isHeldReady(): Boolean = heldReady && isPausedWarm()
 

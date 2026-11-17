@@ -54,6 +54,15 @@ class Server : ModInitializer {
         FabricSelectionListener.register()
 
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
+            // Flashback plays a replay on a server of its own, in a temporary world it deletes and rebuilds while it
+            // runs (every seek back): no displays live there (the client's replay support shows them), and a database
+            // held open in that world keeps Flashback from deleting it
+            if (isReplayServer(server)) {
+                replayServer = server
+                VanillaServerState.server = null // never a world played before it, which is gone
+                logger.info("Flashback replay server: Dream Displays' server side stays off for it.")
+                return@register
+            }
             VanillaServerState.server = server
             val dataDir = server.getWorldPath(LevelResource.LEVEL_DATA_FILE).parent
                 .resolve("dreamdisplays").toFile().also { it.mkdirs() }
@@ -64,7 +73,11 @@ class Server : ModInitializer {
             logger.info("Server started. Storage connected.")
         }
 
-        ServerLifecycleEvents.SERVER_STOPPING.register { _ ->
+        ServerLifecycleEvents.SERVER_STOPPING.register { server ->
+            if (server === replayServer) {
+                replayServer = null
+                return@register
+            }
             logger.info("Server stopping. Saving displays...")
             VanillaBootstrap.onServerStopping()
         }
@@ -108,6 +121,9 @@ class Server : ModInitializer {
     }
     //?}
 
+    /** The Flashback replay server running now, which the server side left alone. */
+    private var replayServer: MinecraftServer? = null
+
     companion object {
         /** Logger. */
         val logger = LoggerFactory.getLogger(javaClass)
@@ -129,6 +145,12 @@ class Server : ModInitializer {
         val config: VanillaConfig; get() = configInstance
         val server: MinecraftServer?; get() = VanillaServerState.server
         val storage: StorageManager?; get() = VanillaServerState.storage
+
+        private const val FLASHBACK_REPLAY_SERVER = "com.moulberry.flashback.playback.ReplayServer"
+
+        /** True for the server Flashback plays a replay on (matched by name: Flashback is not a dependency). */
+        internal fun isReplayServer(server: MinecraftServer): Boolean =
+            generateSequence<Class<*>>(server.javaClass) { it.superclass }.any { it.name == FLASHBACK_REPLAY_SERVER }
 
         @Deprecated("Scheduled for removal in 2.0.0")
         // TODO: scheduled for removal in 2.0.0

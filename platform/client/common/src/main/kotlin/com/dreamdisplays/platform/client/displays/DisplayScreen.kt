@@ -1368,6 +1368,9 @@ class DisplayScreen(
     /** True when a seek now lands within a frame or two (see [MediaPlayer.seeksCheaply]). */
     internal val seeksCheaply: Boolean get() = mediaPlayer?.seeksCheaply() == true
 
+    /** True while seeks here are known to freeze the picture for a second or more (see [MediaPlayer.seeksSlowly]). */
+    internal val seeksSlowly: Boolean get() = mediaPlayer?.seeksSlowly() == true
+
     /** True while [holdReadyForBroadcast] is opening the paused stream. */
     internal val isWarmingUp: Boolean get() = mediaPlayer?.isWarmingUp() == true
 
