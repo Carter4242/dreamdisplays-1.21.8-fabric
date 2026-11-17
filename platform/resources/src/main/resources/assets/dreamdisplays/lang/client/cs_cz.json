@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "Na tomto displeji se zatím nic nestalo.",
   "dreamdisplays.activity.automatic": "Automaticky",
   "dreamdisplays.activity.console": "Server",
+  "dreamdisplays.activity.click_to_open": "Kliknutím otevřete",
   "dreamdisplays.activity.play": "spustil(a) přehrávání",
   "dreamdisplays.activity.pause": "pozastavil(a)",
   "dreamdisplays.activity.seek": "přetočil(a) z %s na %s",

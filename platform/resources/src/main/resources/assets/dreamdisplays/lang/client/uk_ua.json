@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "На цьому дисплеї ще нічого не відбувалося.",
   "dreamdisplays.activity.automatic": "Автоматично",
   "dreamdisplays.activity.console": "Сервер",
+  "dreamdisplays.activity.click_to_open": "Натисніть, щоб відкрити",
   "dreamdisplays.activity.play": "запустив(ла) відтворення",
   "dreamdisplays.activity.pause": "поставив(ла) на паузу",
   "dreamdisplays.activity.seek": "перемотав(ла) з %s на %s",

@@ -189,6 +189,7 @@
   "dreamdisplays.activity.empty": "Nothing has happened on this display yet.",
   "dreamdisplays.activity.automatic": "Automatic",
   "dreamdisplays.activity.console": "Server",
+  "dreamdisplays.activity.click_to_open": "Click to open",
   "dreamdisplays.activity.play": "played",
   "dreamdisplays.activity.pause": "paused",
   "dreamdisplays.activity.seek": "seeked from %s to %s",

@@ -94,6 +94,7 @@ enum class ClientMessage(val key: String) {
     ACTIVITY_TAB_SHORT("dreamdisplays.activity.tab.short"),
     ACTIVITY_EMPTY("dreamdisplays.activity.empty"),
     ACTIVITY_CONSOLE("dreamdisplays.activity.console"),
+    ACTIVITY_CLICK_TO_OPEN("dreamdisplays.activity.click_to_open"),
     VIEWERS_TAB("dreamdisplays.viewers.tab"),
     VIEWERS_TAB_SHORT("dreamdisplays.viewers.tab.short"),
     VIEWERS_EMPTY("dreamdisplays.viewers.empty"),

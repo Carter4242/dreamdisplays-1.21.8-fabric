@@ -358,7 +358,7 @@ class DisplayMenu private constructor(
 
         // "Up next": the bottom panel's second tab and the loop toggle in the tab header
         queueSection = QueueSection(ds)
-        activitySection = ActivitySection(ds)
+        activitySection = ActivitySection(ds) { this }
         viewersSection = ViewersSection(ds)
         loopButton = addUi(IconButton("loop") {
             DisplayQueues.setLoop(ds.uuid, DisplayQueues.of(ds.uuid)?.loop != true)
@@ -860,6 +860,7 @@ class DisplayMenu private constructor(
             }
             return true
         }
+        if (showingActivity() && activitySection.handleClick(mx, my)) return true
         if (showingActivity() || showingViewers()) {
             // The hidden suggestions panel still sits under the list: keep its cards from catching the click
             return suggestionsRect?.contains(mx, my) == true

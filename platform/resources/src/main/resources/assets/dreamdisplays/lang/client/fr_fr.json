@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "Rien ne s'est encore passé sur cet affichage.",
   "dreamdisplays.activity.automatic": "Automatique",
   "dreamdisplays.activity.console": "Serveur",
+  "dreamdisplays.activity.click_to_open": "Cliquez pour ouvrir",
   "dreamdisplays.activity.play": "a lancé la lecture",
   "dreamdisplays.activity.pause": "a mis en pause",
   "dreamdisplays.activity.seek": "a déplacé la lecture de %s à %s",

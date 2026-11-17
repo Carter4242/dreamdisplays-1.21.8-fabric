@@ -25,6 +25,26 @@ class ActivityTextTest {
     private fun row(kind: ActivityKind) = ActivityEntryWire(kind = kind.wire)
 
     @Test
+    fun `only video rows with a plain http link are clickable`() {
+        fun link(kind: ActivityKind, url: String) = ActivityText.link(ActivityEntryWire(kind = kind.wire, url = url))
+        assertEquals("https://huggingface.co/datasets/a/b/resolve/main/v.mp4?x=1", link(ActivityKind.VIDEO_SET, " https://huggingface.co/datasets/a/b/resolve/main/v.mp4?x=1 "))
+        assertEquals("http://example.com/v", link(ActivityKind.QUEUE_ADD, "http://example.com/v"))
+        assertEquals("https://youtu.be/abc", link(ActivityKind.QUEUE_SKIP, "https://youtu.be/abc"))
+        assertNull(link(ActivityKind.PLAY, "https://youtu.be/abc"))
+        assertNull(link(ActivityKind.VIDEO_SET, ""))
+        assertNull(link(ActivityKind.VIDEO_SET, "javascript:alert(1)"))
+        assertNull(link(ActivityKind.VIDEO_SET, "file:///c:/x.mp4"))
+        assertNull(link(ActivityKind.VIDEO_SET, "ftp://example.com/x"))
+        assertNull(link(ActivityKind.VIDEO_SET, "youtube.com/watch?v=abc"))
+        assertNull(link(ActivityKind.VIDEO_SET, "https:///nohost"))
+        assertNull(link(ActivityKind.VIDEO_SET, "https://exa mple.com/x"))
+        assertNull(link(ActivityKind.VIDEO_SET, "https://example.com/a\u0007b"))
+        assertNull(link(ActivityKind.VIDEO_SET, "https://example.com/" + "a".repeat(300) + "\u2026"))
+        assertNull(link(ActivityKind.VIDEO_SET, "https://example.com/" + "a".repeat(600)))
+        assertNull(ActivityText.link(ActivityEntryWire(kind = 9999, url = "https://youtu.be/abc")))
+    }
+
+    @Test
     fun `rows read plainly`() {
         assertEquals("played", english(row(ActivityKind.PLAY)))
         assertEquals("seeked from 3:26 to 1:02:10", english(row(ActivityKind.SEEK).copy(fromMs = 206_000, toMs = 3_730_000)))
@@ -95,7 +115,7 @@ class ActivityTextTest {
         /** Menu strings of the two tabs, outside the rows themselves. */
         val VIEWER_KEYS = [
             "dreamdisplays.activity.tab", "dreamdisplays.activity.tab.short", "dreamdisplays.activity.empty",
-            "dreamdisplays.activity.automatic", "dreamdisplays.activity.console", "dreamdisplays.viewers.tab",
+            "dreamdisplays.activity.automatic", "dreamdisplays.activity.console", "dreamdisplays.activity.click_to_open", "dreamdisplays.viewers.tab",
             "dreamdisplays.viewers.tab.short", "dreamdisplays.viewers.empty", "dreamdisplays.viewers.via.nearby",
             "dreamdisplays.viewers.via.pip", "dreamdisplays.viewers.via.fullscreen", "dreamdisplays.viewers.status.loading",
             "dreamdisplays.viewers.status.buffering", "dreamdisplays.viewers.status.error",

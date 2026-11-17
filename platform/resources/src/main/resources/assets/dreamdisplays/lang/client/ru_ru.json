@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "На этом дисплее пока ничего не происходило.",
   "dreamdisplays.activity.automatic": "Автоматически",
   "dreamdisplays.activity.console": "Сервер",
+  "dreamdisplays.activity.click_to_open": "Нажмите, чтобы открыть",
   "dreamdisplays.activity.play": "запустил(а) воспроизведение",
   "dreamdisplays.activity.pause": "поставил(а) на паузу",
   "dreamdisplays.activity.seek": "перемотал(а) с %s на %s",

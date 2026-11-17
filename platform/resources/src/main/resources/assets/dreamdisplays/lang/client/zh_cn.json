@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "这个显示屏上还没有任何动态。",
   "dreamdisplays.activity.automatic": "自动",
   "dreamdisplays.activity.console": "服务器",
+  "dreamdisplays.activity.click_to_open": "点击打开",
   "dreamdisplays.activity.play": "开始播放",
   "dreamdisplays.activity.pause": "暂停",
   "dreamdisplays.activity.seek": "将进度从 %s 跳到 %s",

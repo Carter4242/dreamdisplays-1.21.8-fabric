@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "Auf dieser Anzeige ist noch nichts passiert.",
   "dreamdisplays.activity.automatic": "Automatisch",
   "dreamdisplays.activity.console": "Server",
+  "dreamdisplays.activity.click_to_open": "Zum Öffnen klicken",
   "dreamdisplays.activity.play": "hat die Wiedergabe gestartet",
   "dreamdisplays.activity.pause": "hat pausiert",
   "dreamdisplays.activity.seek": "hat von %s auf %s gespult",

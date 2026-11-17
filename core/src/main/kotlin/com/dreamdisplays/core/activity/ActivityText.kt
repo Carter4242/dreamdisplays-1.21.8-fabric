@@ -75,6 +75,36 @@ object ActivityText {
         }
     }
 
+    /** Kinds whose row names a video (and so can open its link). */
+    private val VIDEO_KINDS = setOf(
+        ActivityKind.VIDEO_SET, ActivityKind.VIDEO_CLEAR, ActivityKind.QUEUE_ADD, ActivityKind.QUEUE_REMOVE,
+        ActivityKind.QUEUE_MOVE, ActivityKind.QUEUE_SKIP, ActivityKind.QUEUE_NEXT,
+    )
+
+    /**
+     * The link row [e] can open: its video's full URL, only when the row names a video and the URL is a plain
+     * http(s) link with a host. Null otherwise, including a URL the server cut short (ends with "…"), which would
+     * open the wrong page.
+     */
+    fun link(e: ActivityEntryWire): String? {
+        val kind = ActivityKind.fromWire(e.kind) ?: return null
+        if (kind !in VIDEO_KINDS) return null
+        return safeHttpUrl(e.url)
+    }
+
+    /** [raw] trimmed when it is an absolute http / https URL with a host, no whitespace or control characters, else null. */
+    fun safeHttpUrl(raw: String): String? {
+        val url = raw.trim()
+        if (url.isEmpty() || url.length > MAX_LINK || url.endsWith("…")) return null
+        if (url.any { it.isWhitespace() || it.isISOControl() }) return null
+        val uri = try { java.net.URI(url) } catch (_: java.net.URISyntaxException) { return null }
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        return if (uri.host.isNullOrEmpty()) null else url
+    }
+
+    const val MAX_LINK = 512
+
     /** Translation key of a mode / access token inside a row, or null when it has none (shown as is). */
     fun tokenKey(t: String): String? = if (t in TOKENS) PREFIX + "value." + t else null
 

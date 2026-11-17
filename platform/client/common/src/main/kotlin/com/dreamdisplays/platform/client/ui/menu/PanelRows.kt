@@ -6,6 +6,9 @@ import com.dreamdisplays.platform.client.ui.drawText
 import com.dreamdisplays.platform.client.ui.enableScissorPoseAware
 //?}
 import com.dreamdisplays.platform.client.ui.kit.*
+//? if >=1.21.11 {
+import com.mojang.blaze3d.platform.cursor.CursorTypes
+//?}
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
 import kotlin.math.abs
@@ -24,6 +27,7 @@ abstract class PanelRows {
     private var lastFrameNanos = 0L
     private var maxScroll = 0
     private var strip: UiRect? = null
+    private var hoveredRow = -1
 
     /** Tooltip lines for the row under the mouse this frame, or null. */
     var tooltip: List<String>? = null
@@ -38,10 +42,26 @@ abstract class PanelRows {
     /** Paints row [index] into [r]; returns its tooltip lines when [hover]. */
     protected abstract fun drawRow(g: GuiGraphicsCompat, f: Font, index: Int, r: UiRect, hover: Boolean): List<String>?
 
+    /** True when clicking row [index] does something (it then gets a hand cursor); see [onRowClick]. */
+    protected open fun isClickable(index: Int): Boolean = false
+
+    /** Called for a left click on row [index], only when [isClickable]. */
+    protected open fun onRowClick(index: Int) {}
+
+    /** Handles a left click at ([mouseX], [mouseY]); true when it hit a clickable row. */
+    fun handleClick(mouseX: Int, mouseY: Int): Boolean {
+        val r = strip ?: return false
+        val i = hoveredRow
+        if (i < 0 || !r.contains(mouseX, mouseY) || !isClickable(i)) return false
+        onRowClick(i)
+        return true
+    }
+
     /** Draws the panel into [panel]; the header line is left to the screen's tabs. */
     fun render(g: GuiGraphicsCompat, panel: UiRect, mouseX: Int, mouseY: Int) {
         g.drawPanelSprite(panel)
         tooltip = null
+        hoveredRow = -1
         val f = Minecraft.getInstance().font
         val stripRect = UiRect(panel.x + 10, panel.y + 10 + HEADER_H + 6, panel.w - 22, panel.h - 10 - HEADER_H - 6 - 10)
         strip = stripRect
@@ -72,6 +92,17 @@ abstract class PanelRows {
             val r = UiRect(stripRect.x, stripRect.y + i * step - scroll, stripRect.w, rowH)
             val hover = r.contains(mouseX, mouseY) && stripRect.contains(mouseX, mouseY)
             g.fill(r.x, r.y, r.right, r.bottom, if (hover) UiTheme.CARD_BG_HOVER else UiTheme.CARD_BG)
+            if (hover) {
+                hoveredRow = i
+                if (isClickable(i)) {
+                    //? if >=1.21.11 {
+                    g.requestCursor(CursorTypes.POINTING_HAND)
+                    //?}
+                    //? if >=1.21.6 <1.21.11 {
+                    LegacyCursor.POINTING_HAND.request()
+                    //?}
+                }
+            }
             drawRow(g, f, i, r, hover)?.let { if (hover) tooltip = it }
         }
         g.disableScissor()

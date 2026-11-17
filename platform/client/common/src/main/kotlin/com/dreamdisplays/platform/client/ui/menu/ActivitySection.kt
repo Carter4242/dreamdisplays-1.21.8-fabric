@@ -14,15 +14,17 @@ import com.dreamdisplays.platform.client.ui.drawText
 import com.dreamdisplays.platform.client.ui.kit.UiRect
 import com.dreamdisplays.platform.client.ui.kit.UiText
 import com.dreamdisplays.platform.client.ui.kit.UiTheme
+import com.dreamdisplays.platform.client.utils.LinkOpener
 import com.dreamdisplays.platform.client.utils.translatableText
 import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.screens.Screen
 
 /**
  * The "Activity" tab of the display menu's bottom panel: the last things done on the display, newest first, one row
  * each: who (head and name), what, and how long ago (the exact time on hover). Rows that happened by themselves
  * (the queue moved on, the video started over) are grey and have no player.
  */
-class ActivitySection(private val ds: DisplayScreen) : PanelRows() {
+class ActivitySection(private val ds: DisplayScreen, private val screen: () -> Screen) : PanelRows() {
     private var rows: List<ActivityEntryWire> = emptyList()
     private var clockOffsetMs = 0L
 
@@ -32,6 +34,14 @@ class ActivitySection(private val ds: DisplayScreen) : PanelRows() {
         rows = activity?.rows.orEmpty().filter { ActivityKind.fromWire(it.kind) != null }
         clockOffsetMs = activity?.clockOffsetMs ?: 0L
         return rows.size
+    }
+
+    override fun isClickable(index: Int): Boolean =
+        LinkOpener.enabled() && rows.getOrNull(index)?.let(ActivityText::link) != null
+
+    override fun onRowClick(index: Int) {
+        val url = rows.getOrNull(index)?.let(ActivityText::link) ?: return
+        LinkOpener.open(url, screen())
     }
 
     override fun emptyText(): String =
@@ -72,7 +82,14 @@ class ActivitySection(private val ds: DisplayScreen) : PanelRows() {
             row.console -> ClientMessage.ACTIVITY_CONSOLE.text()
             else -> row.actorName
         }
-        return [if (automatic) description else "$who $description", ActivityText.exact(row.atMs)]
+        val lines = [if (automatic) description else "$who $description"]
+        val link = ActivityText.link(row) ?: return lines + ActivityText.exact(row.atMs)
+        // The full link, wrapped, and a hint when it can be clicked
+        val result = lines.toMutableList()
+        result += wrapChars(f, link, 220).map { "§9$it" }
+        if (LinkOpener.enabled()) result += "§7" + ClientMessage.ACTIVITY_CLICK_TO_OPEN.text()
+        result += ActivityText.exact(row.atMs)
+        return result
     }
 
     private fun describe(row: ActivityEntryWire): String {
@@ -81,6 +98,21 @@ class ActivitySection(private val ds: DisplayScreen) : PanelRows() {
     }
 
     companion object {
+        /** [s] cut into lines of at most [maxW] pixels at any character (a link has no spaces to wrap at). */
+        fun wrapChars(font: Font, s: String, maxW: Int): List<String> {
+            val out = ArrayList<String>()
+            val cur = StringBuilder()
+            for (ch in s) {
+                if (cur.isNotEmpty() && font.width(cur.toString() + ch) > maxW) {
+                    out += cur.toString()
+                    cur.setLength(0)
+                }
+                cur.append(ch)
+            }
+            if (cur.isNotEmpty()) out += cur.toString()
+            return out
+        }
+
         /** [line] in the game's language; arguments with a key of their own are translated too. */
         fun translate(line: ActivityText.Line): String {
             val args = line.args.mapIndexed { i, arg ->

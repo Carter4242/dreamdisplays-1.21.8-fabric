@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "עדיין לא קרה דבר בתצוגה הזו.",
   "dreamdisplays.activity.automatic": "אוטומטי",
   "dreamdisplays.activity.console": "שרת",
+  "dreamdisplays.activity.click_to_open": "לחצו לפתיחה",
   "dreamdisplays.activity.play": "הפעיל נגינה",
   "dreamdisplays.activity.pause": "השהה",
   "dreamdisplays.activity.seek": "דילג מ-%s ל-%s",

@@ -133,6 +133,7 @@
   "dreamdisplays.activity.empty": "Aún no ha pasado nada en esta pantalla.",
   "dreamdisplays.activity.automatic": "Automático",
   "dreamdisplays.activity.console": "Servidor",
+  "dreamdisplays.activity.click_to_open": "Haz clic para abrir",
   "dreamdisplays.activity.play": "reprodujo",
   "dreamdisplays.activity.pause": "pausó",
   "dreamdisplays.activity.seek": "saltó de %s a %s",
