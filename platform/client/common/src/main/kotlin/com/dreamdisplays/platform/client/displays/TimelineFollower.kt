@@ -633,7 +633,11 @@ internal class TimelineFollower(private val screen: DisplayScreen) {
 
     /** Server resumed while this player is paused: start it so it lands on the live position. */
     private fun resumeAligned() {
-        val cold = coldAfterSnap || !screen.resumesWarm()
+        // In a replay the paused stream is being opened where the replay was scrubbed to (its paused frame): resumed
+        // before it is open, it plays on from there and its late landing is fixed by one seek, rather than being
+        // opened a second time ahead of the replay (the open is the slow part on a slow host)
+        val opening = screen.isWarmingUp && com.dreamdisplays.platform.client.replay.ReplayHooks.inReplay()
+        val cold = !opening && (coldAfterSnap || !screen.resumesWarm())
         coldAfterSnap = false
         warmAdopted = false
         if (cold && !screen.isLive && screen.canSeek() && estimator.hasTimeline && !estimator.paused) {
