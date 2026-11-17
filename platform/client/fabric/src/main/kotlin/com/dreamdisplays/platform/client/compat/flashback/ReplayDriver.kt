@@ -36,6 +36,19 @@ class ReplayDriver(private val send: (DreamPacket) -> Unit) {
     ) {
         class Timeline(val paused: Boolean, val rate: Double, val positionMs: Long, val atMs: Long, val mediaGen: Long)
 
+        /** A paused position a small step from the one told, and since when the replay has held it (see [settled]). */
+        var stepMs = Long.MIN_VALUE
+        var stepSinceMs = 0L
+
+        /** True once the replay has held paused position [positionMs] for [forMs]: a step it took and stayed at. */
+        fun settled(positionMs: Long, nowMs: Long, forMs: Long): Boolean {
+            if (positionMs != stepMs) {
+                stepMs = positionMs
+                stepSinceMs = nowMs
+            }
+            return nowMs - stepSinceMs >= forMs
+        }
+
         /** Where the client's player is headed now, from the last timeline it got. */
         fun expectedMs(nowMs: Long): Long? {
             val t = timeline ?: return null
@@ -110,7 +123,13 @@ class ReplayDriver(private val send: (DreamPacket) -> Unit) {
             abs(last.rate - rate) > RATE_EPSILON -> true
             nowMs - last.atMs < MIN_INTERVAL_MS -> false
             clock.positionsFrozen -> false
-            paused -> abs(position - last.positionMs) > PAUSED_MOVE_MS
+            // A paused display shows a moved replay at once, but a step of a tick or so only once the replay stays
+            // there: resuming, Flashback's clock runs on a tick before the replay reports playing, and showing that
+            // tick would reopen a held stream just before it plays on
+            paused -> abs(position - last.positionMs).let { moved ->
+                moved > PAUSED_MOVE_MS &&
+                    (moved > PAUSED_STEP_MS * maxOf(1.0, clock.speed) || t.settled(position, nowMs, PAUSED_STEP_SETTLE_MS))
+            }
             else -> nowMs - last.atMs >= KEEPALIVE_MS || abs(position - (t.expectedMs(nowMs) ?: position)) > DRIFT_MS * rate
         }
         if (!due) return
@@ -153,6 +172,8 @@ class ReplayDriver(private val send: (DreamPacket) -> Unit) {
         private const val KEEPALIVE_MS = 1_000L
         private const val DRIFT_MS = 250.0
         private const val PAUSED_MOVE_MS = 40L
+        private const val PAUSED_STEP_MS = 150L
+        private const val PAUSED_STEP_SETTLE_MS = 150L
         private const val RATE_EPSILON = 0.005
     }
 }

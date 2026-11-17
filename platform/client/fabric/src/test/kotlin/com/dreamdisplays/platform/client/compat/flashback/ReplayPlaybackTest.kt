@@ -144,6 +144,29 @@ class ReplayPlaybackTest {
     }
 
     @Test
+    fun `a paused step of a tick is shown once the replay stays there, never on the way to playing`() {
+        val rig = Rig()
+        val v = views(sample(0))
+        rig.step(playing(0), v)
+        rig.now += 300
+        assertEquals(10_000, rig.syncs(held(10_000), v).single().currentTimeMs)
+        // Resuming: Flashback's clock runs a tick ahead while the replay still reports paused, then it plays
+        rig.now += 400
+        assertTrue(rig.syncs(held(10_045), v).isEmpty())
+        rig.now += 50
+        assertFalse(rig.syncs(playing(10_050), v).single().isPaused)
+        // A step of a tick that stays: shown once it held for a moment
+        rig.now += 300
+        assertEquals(10_350, rig.syncs(held(10_350), v).single().currentTimeMs)
+        rig.now += 300
+        assertTrue(rig.syncs(held(10_400), v).isEmpty())
+        rig.now += 100
+        assertTrue(rig.syncs(held(10_400), v).isEmpty())
+        rig.now += 100
+        assertEquals(10_400, rig.syncs(held(10_400), v).single().currentTimeMs)
+    }
+
+    @Test
     fun `a jump while playing is sent at once, small wobble is not`() {
         val rig = Rig()
         val v = views(sample(0))
