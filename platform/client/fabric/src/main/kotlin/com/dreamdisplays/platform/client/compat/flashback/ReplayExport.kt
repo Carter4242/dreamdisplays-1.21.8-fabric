@@ -31,6 +31,7 @@ internal class ReplayExport(
         lastFrameMs = replayMs
         val (samples, carry) = samplesForFrame(sampleCarry, framerate)
         sampleCarry = carry
+        val nextSamples = samplesForFrame(carry, framerate).first
         val frameMs = 1000.0 / framerate
         shown.clear()
         for ((id, view) in views) {
@@ -52,6 +53,7 @@ internal class ReplayExport(
             val c = centre(view)
             sounds.getOrPut(id) { ExportSound(id) }.frame(
                 audioUrl = audioUrl, playing = !sample.paused, fromNanos = fromNanos, toNanos = toNanos, outSamples = samples,
+                nextSamples = nextSamples,
                 x = c[0], y = c[1], z = c[2], gain = if (screen.muted) 0f else screen.volume, maxDistance = MAX_DISTANCE,
             )
         }
