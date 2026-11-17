@@ -20,6 +20,15 @@ fun ClientHello.hasFeature(feature: ClientFeature): Boolean =
     feature.wire in features
 
 /**
+ * True if a synced start may wait for this client to report itself ready: it reports readiness and can also say it
+ * won't hold a display ready ([ClientFeature.READINESS_UNHOLDABLE]: live, unseekable or failed media, displays it
+ * doesn't keep warm). Clients without that state report not-ready there forever, so a start waiting for them only
+ * ever ends at the hold's cap.
+ */
+fun ClientHello.startsMayWaitFor(): Boolean =
+    supportsReadiness && hasFeature(ClientFeature.READINESS_UNHOLDABLE)
+
+/**
  * Builds the wire [DisplaySync] for [id] in [mode], stamped with the current [nowMs] anchor; [mediaGen] is the
  * display's [com.dreamdisplays.core.protocol.common.packets.DisplayInfo.mediaGen] (0 = not stamped).
  */

@@ -1,6 +1,7 @@
 package com.dreamdisplays.platform.server.playback
 
 import com.dreamdisplays.core.protocol.common.packets.DisplayReadiness
+import com.dreamdisplays.core.protocol.common.startsMayWaitFor
 import com.dreamdisplays.core.protocol.common.packets.MediaGen
 import com.dreamdisplays.platform.server.managers.DisplayManager
 import com.dreamdisplays.platform.server.managers.PlayerManager
@@ -14,7 +15,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * Server end of display readiness: which clients hold which display ready to play at once (paused on a decoded frame,
  * stream and sound open) and where. Clients that support it ([com.dreamdisplays.core.protocol.common.packets.ClientHello.supportsReadiness])
- * report through [DisplayReadiness] packets; clients that do not are never waited for and simply follow the timeline.
+ * report through [DisplayReadiness] packets; clients that do not, or that can't report a display they won't hold
+ * ready ([startsMayWaitFor]), are never waited for and simply follow the timeline.
  *
  * [TimelineManager] uses it to end a start hold (resume, seek, restart, new video) the moment every viewer is ready,
  * and to schedule the start [leadMs] ahead so they all begin on the same frame. Other features that want a display to
@@ -34,8 +36,8 @@ object ReadinessTracker {
     /** Largest scheduled-start lead in ms (0 = start on receipt); the platform points this at `display.start_lead_max_ms`. */
     var startLeadMaxMs: () -> Long = { 150L }
 
-    /** True if [playerId]'s client reports readiness. */
-    fun supports(playerId: UUID): Boolean = V2PlayerTracker.helloOf(playerId)?.supportsReadiness == true
+    /** True if [playerId]'s client reports readiness, "won't hold" included: a start may wait for it. */
+    fun supports(playerId: UUID): Boolean = V2PlayerTracker.helloOf(playerId)?.startsMayWaitFor() == true
 
     /** Applies a client's report and tells the listeners. */
     fun onReport(playerId: UUID, packet: DisplayReadiness) {
