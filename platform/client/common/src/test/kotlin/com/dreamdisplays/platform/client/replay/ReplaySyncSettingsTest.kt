@@ -24,6 +24,13 @@ class ReplaySyncSettingsTest {
     }
 
     @Test
+    fun `in a replay a stream whose seeks are slow keeps its own settings`() {
+        val base = SyncSettings.DEFAULT
+        assertSame(base, ReplayHooks.replaySyncSettings(base, 1.0, seeksSlowly = true))
+        assertSame(base, ReplayHooks.replaySyncSettings(base, 4.0, seeksSlowly = true))
+    }
+
+    @Test
     fun `the dead band stays inside the threshold, and a policy without corrective seeks keeps it`() {
         val tight = ReplayHooks.replaySyncSettings(SyncSettings(deadBandMs = 300), 4.0)
         assertEquals(50, tight.deadBandMs)
