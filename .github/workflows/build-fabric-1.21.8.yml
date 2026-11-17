@@ -36,13 +36,14 @@ jobs:
         run: |
           echo "mod=$(grep '^version=' gradle.properties | cut -d= -f2 | tr -d '\r')" >> "$GITHUB_OUTPUT"
           echo "mc=$(python3 -c 'import json; print(json.load(open("versions.json"))["active"])')" >> "$GITHUB_OUTPUT"
+          echo "natives=$(grep '^natives_version=' gradle.properties | cut -d= -f2 | tr -d '\r')" >> "$GITHUB_OUTPUT"
 
       # The native video libraries (Rust + FFmpeg) don't depend on the Minecraft version, so instead of
       # building them for every platform we take them from upstream's official Fabric 1.21.11 jar of the
-      # same mod version.
-      - name: Fetch prebuilt natives from the matching upstream release
+      # version pinned as natives_version in gradle.properties (this fork's version numbers differ from upstream's).
+      - name: Fetch prebuilt natives from the pinned upstream release
         env:
-          MOD: ${{ steps.v.outputs.mod }}
+          MOD: ${{ steps.v.outputs.natives }}
         run: |
           url=$(curl -sf "https://api.modrinth.com/v2/project/dreamdisplays/version?loaders=%5B%22fabric%22%5D&game_versions=%5B%221.21.11%22%5D" \
             | python3 -c 'import json, os, sys; v = [x for x in json.load(sys.stdin) if x["version_number"] == os.environ["MOD"]]; print(v[0]["files"][0]["url"])')
@@ -63,6 +64,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MOD: ${{ steps.v.outputs.mod }}
+          NATIVES: ${{ steps.v.outputs.natives }}
           MC: ${{ steps.v.outputs.mc }}
         run: |
           jar="build/libs/dreamdisplays-fabric-${MC}-${MOD}.jar"
@@ -72,7 +74,7 @@ jobs:
 
           - Client: \`dreamdisplays-fabric-…jar\` for Minecraft 1.21.7 or 1.21.8, Fabric Loader 0.16.14+, Fabric API.
           - Server: \`dreamdisplays-paper-…jar\` for Paper 1.21.x. Use both from this release together.
-          - Built from ${GITHUB_SHA::8}. Native video libraries come from upstream's official ${MOD} release."
+          - Built from ${GITHUB_SHA::8}. Native video libraries come from upstream's official ${NATIVES} release."
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$jar" --clobber
             gh release edit "$tag" --notes "$notes"
