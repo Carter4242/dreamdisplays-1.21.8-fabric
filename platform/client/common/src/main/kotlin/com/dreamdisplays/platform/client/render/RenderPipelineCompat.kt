@@ -19,6 +19,7 @@ internal object RenderPipelineCompat {
         vertexShader: Identifier,
         fragmentShader: Identifier,
         samplers: List<String>,
+        lateDraw: Boolean = false,
     ): RenderPipeline {
         val builder = RenderPipeline.builder()
             .withLocation(location)
@@ -26,7 +27,7 @@ internal object RenderPipelineCompat {
             .withFragmentShader(fragmentShader)
             .withCull(false)
 
-        configureDepth(builder)
+        configureDepth(builder, lateDraw)
         configureBlend(builder)
         if (supportsBindGroupLayouts()) {
             configure262(builder, samplers)
@@ -62,8 +63,27 @@ internal object RenderPipelineCompat {
 
     private const val DEPTH_BIAS = 3.0f
 
-    /** Configures the depth state of the pipeline. */
-    fun configureDepth(builder: RenderPipelineBuilder) {
+    /**
+     * Polygon offset of a display drawn in the level pass (versions before `DepthStencilState`): one depth slope plus three depth-buffer
+     * steps toward the viewer. The world-space surface offset alone falls below the depth buffer's resolution far away,
+     * and big quads seen nearly edge-on lose it to rasterization error.
+     */
+    private const val LEVEL_BIAS_SLOPE = 1.0f
+    private const val LEVEL_BIAS_UNITS = 3.0f
+
+    /**
+     * Polygon offset of [UnshadedDisplayPass]'s copy, which is tested against the depth the level-pass copy wrote. That
+     * one went through the shader pack, whose temporal anti-aliasing jitters every vertex by up to a pixel; edge-on, a
+     * pixel is a large depth step, so the copy needs two more depth slopes of headroom than the level-pass draw.
+     */
+    private const val LATE_BIAS_SLOPE = 3.0f
+    private const val LATE_BIAS_UNITS = 6.0f
+
+    /**
+     * Configures the depth state of the pipeline. [lateDraw] = the pipeline of [UnshadedDisplayPass]'s copy (only
+     * differs before `DepthStencilState`).
+     */
+    fun configureDepth(builder: RenderPipelineBuilder, lateDraw: Boolean = false) {
         val builderClass = builder.javaClass
         val depthStencilStateClass = loadClass(
             "com.mojang.renderpearl.api.pipeline.DepthStencilState",
@@ -84,6 +104,13 @@ internal object RenderPipelineCompat {
         builderClass.getMethod("withDepthTestFunction", depthTestFunctionClass).invoke(builder, lequalDepth)
         runCatching {
             builderClass.getMethod("withDepthWrite", Boolean::class.javaPrimitiveType).invoke(builder, true)
+        }
+        // Standard depth here (the depth test is LEQUAL): a negative offset pulls the quad toward the viewer
+        val slope = if (lateDraw) LATE_BIAS_SLOPE else LEVEL_BIAS_SLOPE
+        val units = if (lateDraw) LATE_BIAS_UNITS else LEVEL_BIAS_UNITS
+        runCatching {
+            builderClass.getMethod("withDepthBias", Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+                .invoke(builder, -slope, -units)
         }
     }
 

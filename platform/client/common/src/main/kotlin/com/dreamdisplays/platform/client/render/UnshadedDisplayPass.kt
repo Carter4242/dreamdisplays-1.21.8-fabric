@@ -27,6 +27,10 @@ object UnshadedDisplayPass {
 
     val active: Boolean get() = tailHookAlive && enabled && ShaderPackCompat.isShaderPackActive
 
+    /** True while this pass draws (render thread only). */
+    var drawing = false
+        private set
+
     fun capture(stack: PoseStack, camera: Camera) {
         if (!active || !MasterSwitch.on) {
             pending = false
@@ -69,8 +73,10 @@ object UnshadedDisplayPass {
         //?} else
         /*RenderSystem.applyModelViewMatrix()*/
         try {
+            drawing = true
             ScreenRenderer.render(PoseStack(), camera, replay = true)
         } finally {
+            drawing = false
             //? if >=1.20.5 {
             modelView.popMatrix()
             //?} else

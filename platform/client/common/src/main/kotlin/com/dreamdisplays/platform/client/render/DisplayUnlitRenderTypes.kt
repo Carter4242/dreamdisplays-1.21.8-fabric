@@ -28,9 +28,14 @@ object DisplayUnlitRenderTypes {
     //? if >=1.21.6 {
     private const val SAMPLER_TEXTURE = "Sampler0"
 
-    private val texturedPipeline: RenderPipeline by lazy {
+    private val texturedPipeline: RenderPipeline by lazy { createTexturedPipeline(lateDraw = false) }
+
+    /** [texturedPipeline] for [UnshadedDisplayPass]'s copy (a stronger depth bias; used before `RenderSetup`). */
+    private val lateTexturedPipeline: RenderPipeline by lazy { createTexturedPipeline(lateDraw = true) }
+
+    private fun createTexturedPipeline(lateDraw: Boolean): RenderPipeline {
         val pipeline = RenderPipelineCompat.createDisplayPipeline(
-            identifier(Initializer.MOD_ID, "pipeline/display_unlit_textured"),
+            identifier(Initializer.MOD_ID, "pipeline/display_unlit_textured" + if (lateDraw) "_late" else ""),
             identifier(Initializer.MOD_ID, "core/display_fog" +
                 //? if >=26.3 {
                 "_rp"
@@ -42,9 +47,10 @@ object DisplayUnlitRenderTypes {
                 //?} else
                 /*""*/),
             [SAMPLER_TEXTURE],
+            lateDraw,
         )
         assignIrisTexturedProgram(pipeline)
-        pipeline
+        return pipeline
     }
 
     /** Creates an unlit [RenderType] named [name] that samples texture [id]. */
@@ -57,7 +63,7 @@ object DisplayUnlitRenderTypes {
                 .createRenderSetup(),
         )
         //?} else
-        /*DisplayRenderType(name, texturedPipeline, listOf(SAMPLER_TEXTURE to id))*/
+        /*DisplayRenderType(name, texturedPipeline, listOf(SAMPLER_TEXTURE to id), lateTexturedPipeline)*/
     )
 
     private fun assignIrisTexturedProgram(pipeline: RenderPipeline) {
