@@ -27,6 +27,7 @@ import com.dreamdisplays.platform.client.core.DreamServices
 import com.dreamdisplays.platform.client.input.MouseButtons
 import com.dreamdisplays.platform.client.displays.DisplayQueues
 import com.dreamdisplays.platform.client.displays.DisplayScreen
+import com.dreamdisplays.platform.client.displays.DisplayVolume
 import com.dreamdisplays.platform.client.displays.ScreenShare
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.dreamdisplays.media.player.process.ShareAudio
@@ -97,6 +98,9 @@ class DisplayMenu private constructor(
     )
 
     private lateinit var volume: ValueSlider
+
+    /** The volume boost setting [volume]'s track was built for. */
+    private var volumeBoost = false
     private lateinit var quality: ValueSlider
     private lateinit var brightness: ValueSlider
     private lateinit var speed: SpeedField
@@ -139,13 +143,15 @@ class DisplayMenu private constructor(
         val videoReady = { ds.isVideoStarted && !ds.errored }
         val notErrored = { !ds.errored }
 
+        // The track spans 0-200 %, or 0-400 % with the volume boost setting (read again whenever the menu opens)
+        val boost = DisplayVolume.boost
+        volumeBoost = boost
         volume = addUi(
             ValueSlider(
-                initial = ds.volume.toDouble(),
-                label = { literalText("${(it * 200).roundToInt()}%") },
-                // Volume's fraction maps to 0-200%, so a 5%-of-displayed-value stop is 0.025 of the fraction.
-                step = 0.025,
-            ) { playback.setVolume(displayId, it.toFloat()) })
+                initial = DisplayVolume.toSlider(ds.volume, boost),
+                label = { literalText("${DisplayVolume.percent(DisplayVolume.fromSlider(it, boost).toDouble())}%") },
+                step = DisplayVolume.sliderStep(boost),
+            ) { playback.setVolume(displayId, DisplayVolume.fromSlider(it, boost)) })
         // Volume and mute are stored on the display and applied when its player starts, so they work while loading
         volume.enabledWhen = notErrored
         volume.visibleWhen = notErrored
@@ -1001,9 +1007,9 @@ class DisplayMenu private constructor(
             playback.seek(displayId, target / 1_000_000L)
         }
         fun nudgeVolume(delta: Double) {
-            val next = (((volume.value + delta) / VOLUME_STEP).roundToInt() * VOLUME_STEP).coerceIn(0.0, 1.0)
-            volume.value = next
-            playback.setVolume(displayId, next.toFloat())
+            val next = DisplayVolume.nudge(DisplayVolume.fromSlider(volume.value, volumeBoost), delta, volumeBoost)
+            volume.value = DisplayVolume.toSlider(next, volumeBoost)
+            playback.setVolume(displayId, next)
         }
         when (key) {
             KEY_SPACE -> {

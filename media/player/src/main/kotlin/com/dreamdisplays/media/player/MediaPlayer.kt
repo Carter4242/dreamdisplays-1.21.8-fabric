@@ -846,7 +846,7 @@ class MediaPlayer(
     }
 
     /**
-     * Sets the user-controlled volume (0.0–2.0).
+     * Sets the user-controlled volume (0.0–2.0): the gain applied to the samples, 1.0 = the stream's own level.
      *
      * Distance attenuation is applied on top.
      */

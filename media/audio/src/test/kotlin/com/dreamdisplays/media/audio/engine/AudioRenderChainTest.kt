@@ -148,6 +148,35 @@ class AudioRenderChainTest {
         assertEquals(1.0, first / settled, 0.15)
     }
 
+    @Test
+    fun `a boosted gain of 2 doubles a quiet source and limits a loud one on every tier`() {
+        for (quality in AcousticQuality.entries) {
+            fun settled(amplitude: Double, gain: Double): Pair<Double, Int> {
+                val chain = newChain(quality = quality)
+                chain.updateState(defaultState())
+                var last = 0.0
+                var peak = 0
+                repeat(40) {
+                    val buf = tone(amplitude).also { chain.process(it, it.size, gain) }
+                    last = rms(buf)
+                    for (i in 0 until buf.size / 2) {
+                        val s = (buf[i * 2 + 1].toInt() shl 8) or (buf[i * 2].toInt() and 0xFF)
+                        peak = maxOf(peak, kotlin.math.abs(s))
+                    }
+                }
+                return last to peak
+            }
+            val (quiet1, _) = settled(0.05, 1.0)
+            val (quiet2, _) = settled(0.05, 2.0)
+            assertEquals(2.0, quiet2 / quiet1, 0.1, "$quality: gain 2 did not double a quiet source.")
+            val (loud1, _) = settled(0.9, 1.0)
+            val (loud2, peak2) = settled(0.9, 2.0)
+            // Samples that wrapped round (sign flips at full scale) would pull the level down, not up
+            assertTrue(loud2 >= loud1 * 0.95, "$quality: boosted loud source came out quieter ($loud2 < $loud1).")
+            assertTrue(peak2 > 16000, "$quality: boosted loud source lost its peaks ($peak2).")
+        }
+    }
+
     private fun settledRms(quality: AcousticQuality, amplitude: Double): Double {
         val chain = newChain(quality = quality, binaural = false, normalization = true)
         chain.updateState(defaultState())

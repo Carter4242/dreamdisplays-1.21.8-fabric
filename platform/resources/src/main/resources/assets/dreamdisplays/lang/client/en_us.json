@@ -149,6 +149,8 @@
   "dreamdisplays.config.mod_enabled.tooltip": "Off stops everything Dream Displays does on this client, to check whether it causes lag. Stays off until turned back on",
   "dreamdisplays.config.new_display_volume": "New display volume",
   "dreamdisplays.config.new_display_volume.tooltip": "Starting volume of displays you see for the first time",
+  "dreamdisplays.config.volume_boost": "Volume boost",
+  "dreamdisplays.config.volume_boost.tooltip": "Lets display volume go up to 400%%",
   "dreamdisplays.config.new_display_quality": "New display quality",
   "dreamdisplays.config.new_display_quality.tooltip": "Starting quality of displays you see for the first time",
   "dreamdisplays.config.display_distance": "Display distance",

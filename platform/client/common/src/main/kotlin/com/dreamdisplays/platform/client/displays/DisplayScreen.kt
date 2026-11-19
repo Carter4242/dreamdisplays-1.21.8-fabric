@@ -338,13 +338,16 @@ class DisplayScreen(
     /** A fullscreen broadcast's volume / quality for this display, over the viewer's own; never saved. */
     private val broadcast = BroadcastOverrides()
 
-    /** User-set volume (`0.0`..`1.0`); writes apply the effective volume and persist the setting. */
-    var volume: Float = savedSettings.volume
+    /**
+     * User-set volume (`0.0`..`1.0`, to `2.0` with the volume boost; see [DisplayVolume]); writes apply the effective
+     * volume and persist the setting.
+     */
+    var volume: Float = DisplayVolume.clamp(savedSettings.volume, DisplayVolume.boost)
         set(value) {
-            field = value
+            field = DisplayVolume.clamp(value, DisplayVolume.boost)
             broadcast.onViewerVolume()
             applyEffectiveVolume()
-            ClientSettingsStore.updateSettings(uuid, value, quality, brightness, muted, paused)
+            ClientSettingsStore.updateSettings(uuid, field, quality, brightness, muted, paused)
             DisplayRegistry.recordScreen(this)
         }
 

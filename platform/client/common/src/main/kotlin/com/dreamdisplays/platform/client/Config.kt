@@ -63,6 +63,9 @@ class Config(private val baseDir: File) {
     /** Volume a display starts at the first time it is seen, `0.0`..`1.0` (`1.0` is 200% in the menu); a server default wins over it. */
     var newDisplayVolume: Double = DEFAULT_NEW_DISPLAY_VOLUME
 
+    /** Whether a display's own volume slider goes up to 400 % (saved volume `2.0`) instead of 200 % (`1.0`). */
+    var volumeBoost: Boolean = false
+
     /** Quality a display starts at the first time it is seen: `auto` or a height such as `1080`. */
     var newDisplayQuality: String = DEFAULT_NEW_DISPLAY_QUALITY
 
@@ -134,6 +137,7 @@ class Config(private val baseDir: File) {
         } ?: audioAcoustics
         audioNormalization = data["audio-normalization"]?.toBooleanStrictOrNull() ?: audioNormalization
         newDisplayVolume = data["new-display-volume"]?.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: newDisplayVolume
+        volumeBoost = data["volume-boost"]?.toBooleanStrictOrNull() ?: volumeBoost
         newDisplayQuality = data["new-display-quality"]?.let { VideoQuality.parse(it).serialize() } ?: newDisplayQuality
         displayDistanceChunks = data["display-distance-chunks"]?.toIntOrNull()?.coerceIn(0, MAX_DISTANCE_CHUNKS)
             ?: displayDistanceChunks
@@ -199,6 +203,7 @@ class Config(private val baseDir: File) {
             appendLine("audio-output-profile: ${if (audioBinauralOutput) "headphones" else "speakers"}")
             appendLine("audio-normalization: $audioNormalization")
             appendLine("new-display-volume: $newDisplayVolume")
+            appendLine("volume-boost: $volumeBoost")
             appendLine("new-display-quality: $newDisplayQuality")
             appendLine("display-distance-chunks: $displayDistanceChunks")
             appendLine("max-active-displays: $maxActiveDisplays")

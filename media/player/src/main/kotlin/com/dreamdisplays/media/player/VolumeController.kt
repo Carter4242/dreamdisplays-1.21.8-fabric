@@ -26,9 +26,9 @@ internal class VolumeController(
     /** Pushes the effective volume to the pipeline again (after a hold, or when the sink lost it). */
     fun reapply() = applyVolume(effectiveVolume)
 
-    /** Sets the user-controlled volume (clamped to 0.0-2.0) and re-applies the effective value. */
+    /** Sets the user-controlled volume (clamped to 0.0-[MAX_USER_GAIN]) and re-applies the effective value. */
     fun setUserVolume(volume: Float) {
-        userVolume = volume.toDouble().coerceIn(0.0, 2.0)
+        userVolume = volume.toDouble().coerceIn(0.0, MAX_USER_GAIN)
         lastMaster = AudioOutputHooks.masterVolumeOrFull()
         applyVolume(userVolume * lastAttenuation * lastMaster)
     }
@@ -49,6 +49,12 @@ internal class VolumeController(
     }
 
     internal companion object {
+        /**
+         * Highest user gain the sink is given (before distance and master volume): the client's saved display volume
+         * is this gain, shown doubled in its menu, so 2.0 is 400 % (the volume boost); the sink soft-limits above 1.
+         */
+        const val MAX_USER_GAIN = 2.0
+
         /** Volume multiplier (0..1) at [distance]; see [updateAttenuation]. */
         fun attenuation(distance: Double, maxRadius: Double, fullVolumeRadius: Double = 0.0, squared: Boolean = true): Double {
             val full = fullVolumeRadius.coerceAtLeast(0.0)

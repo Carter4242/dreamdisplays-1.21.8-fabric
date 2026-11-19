@@ -88,6 +88,18 @@ object ClientSettingsStore : ClientSettingsStorage {
         save()
     }
 
+    /** Lowers every saved display volume above [max] to [max] (the volume boost was turned off). */
+    fun capVolumes(max: Float) {
+        var changed = false
+        settings.values.forEach { s ->
+            if (s.volume > max) {
+                s.volume = max
+                changed = true
+            }
+        }
+        if (changed) save()
+    }
+
     override fun setUrlOverride(displayUuid: UUID, url: String?, lang: String?) {
         val s = getSettings(displayUuid)
         // A screen share / live relay URL is never written to client-display-settings.json

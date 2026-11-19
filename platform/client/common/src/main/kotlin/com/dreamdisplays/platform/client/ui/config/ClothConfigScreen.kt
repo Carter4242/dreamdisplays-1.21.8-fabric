@@ -6,6 +6,7 @@ import com.dreamdisplays.api.media.model.VideoQuality
 import com.dreamdisplays.platform.client.Config
 import com.dreamdisplays.platform.client.MasterSwitch
 import com.dreamdisplays.platform.client.core.modules.ClientAudioModule
+import com.dreamdisplays.platform.client.displays.DisplayVolume
 import com.dreamdisplays.platform.client.managers.ClientStateManager
 import me.shedaniel.clothconfig2.api.ConfigBuilder
 import net.minecraft.client.gui.screens.Screen
@@ -43,6 +44,14 @@ object ClothConfigScreen {
                 .setTextGetter { literalText("$it%") }
                 .setTooltip(text("new_display_volume.tooltip"))
                 .setSaveConsumer { config.newDisplayVolume = it / 200.0 }
+                .build()
+        )
+        // Lets a display's own volume slider reach 400 %; turning it off brings louder displays back to 200 % on save
+        general.addEntry(
+            entries.startBooleanToggle(text("volume_boost"), config.volumeBoost)
+                .setDefaultValue(false)
+                .setTooltip(text("volume_boost.tooltip"))
+                .setSaveConsumer { config.volumeBoost = it }
                 .build()
         )
         general.addEntry(
@@ -96,6 +105,7 @@ object ClothConfigScreen {
             // The server may override it; the player's choice is saved either way
             ClientAudioModule.applyOutputSettings()
             MasterSwitch.set(modEnabled)
+            DisplayVolume.applyLimit(config.volumeBoost)
         }
         return builder.build()
     }
