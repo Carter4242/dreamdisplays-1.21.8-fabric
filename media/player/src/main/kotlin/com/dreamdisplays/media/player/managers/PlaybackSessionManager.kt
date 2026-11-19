@@ -132,8 +132,11 @@ internal class PlaybackSessionManager(
         /** How many silent-source verdicts to remember; well past any one player's stream ladder. */
         const val SILENT_MEMO_LIMIT = 64
 
-        /** Sound joining the picture this far off (either way) is reported; pacing alone hides up to ~half of it. */
-        const val AV_JOIN_REPORT_NANOS = 400_000_000L
+        /**
+         * Sound joining the picture this far off (either way) is reported. Cold starts measure a few hundred ms either
+         * way against the wall clock without anything being audibly off, so only a clear offset counts.
+         */
+        const val AV_JOIN_REPORT_NANOS = 1_000_000_000L
 
         /** How long a fresh audio process may stay silent while it opens before the silent-audio heal restarts it. */
         const val AUDIO_OPEN_GRACE_NANOS = 8_000_000_000L
