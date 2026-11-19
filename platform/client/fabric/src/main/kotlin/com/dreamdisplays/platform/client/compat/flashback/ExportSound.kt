@@ -100,7 +100,7 @@ internal class ExportSound(private val displayId: UUID) {
         AL10.alSourcef(source, AL10.AL_REFERENCE_DISTANCE, 0f)
         AL10.alSourcef(source, AL10.AL_ROLLOFF_FACTOR, 1f)
         AL10.alSourcef(source, AL10.AL_PITCH, 1f)
-        // AL_GAIN is clamped to AL_MAX_GAIN (1 by default): a boosted volume (up to 2) would play at 1 without this
+        // AL_GAIN is clamped to AL_MAX_GAIN (1 by default): a volume above 200 % (gain up to 2) would play at 1 without this
         AL10.alSourcef(source, AL10.AL_MAX_GAIN, 2f)
         return true
     }

@@ -51,7 +51,7 @@ internal class VolumeController(
     internal companion object {
         /**
          * Highest user gain the sink is given (before distance and master volume): the client's saved display volume
-         * is this gain, shown doubled in its menu, so 2.0 is 400 % (the volume boost); the sink soft-limits above 1.
+         * is this gain, shown doubled in its menu, so 2.0 is 400 % (the extended range); the sink soft-limits above 1.
          */
         const val MAX_USER_GAIN = 2.0
 

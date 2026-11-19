@@ -5,8 +5,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** The volume boost's gains (up to 2.0, 400 % in the menu) reach the samples and are limited, never wrapped. */
-class VolumeBoostGainTest {
+/** Gains above 1 (display volume over 200 %, up to 2.0 = 400 %) reach the samples and are limited, never wrapped. */
+class ExtendedVolumeGainTest {
     private fun applied(user: Float): Double {
         var last = -1.0
         VolumeController(0.5) { last = it }.setUserVolume(user)

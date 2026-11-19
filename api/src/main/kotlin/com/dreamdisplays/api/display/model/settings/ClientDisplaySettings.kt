@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class ClientDisplaySettings(
-    /** Volume in the range [0.0, 1.0] (to 2.0 with the client's volume boost setting); the menu shows it doubled, 1.0 = 200%. */
+    /** Volume in the range [0.0, 1.0] (to 2.0 with the client's "Volume up to 400%" setting); the menu shows it doubled, 1.0 = 200%. */
     var volume: Float = DEFAULT_VOLUME,
 
     /** Video quality, e.g. "720" or "1080". */

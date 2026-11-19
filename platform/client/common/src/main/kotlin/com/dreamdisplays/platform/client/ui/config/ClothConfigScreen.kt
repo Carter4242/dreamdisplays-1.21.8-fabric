@@ -48,10 +48,10 @@ object ClothConfigScreen {
         )
         // Lets a display's own volume slider reach 400 %; turning it off brings louder displays back to 200 % on save
         general.addEntry(
-            entries.startBooleanToggle(text("volume_boost"), config.volumeBoost)
+            entries.startBooleanToggle(text("extended_volume"), config.extendedVolume)
                 .setDefaultValue(false)
-                .setTooltip(text("volume_boost.tooltip"))
-                .setSaveConsumer { config.volumeBoost = it }
+                .setTooltip(text("extended_volume.tooltip"))
+                .setSaveConsumer { config.extendedVolume = it }
                 .build()
         )
         general.addEntry(
@@ -105,7 +105,7 @@ object ClothConfigScreen {
             // The server may override it; the player's choice is saved either way
             ClientAudioModule.applyOutputSettings()
             MasterSwitch.set(modEnabled)
-            DisplayVolume.applyLimit(config.volumeBoost)
+            DisplayVolume.applyLimit(config.extendedVolume)
         }
         return builder.build()
     }

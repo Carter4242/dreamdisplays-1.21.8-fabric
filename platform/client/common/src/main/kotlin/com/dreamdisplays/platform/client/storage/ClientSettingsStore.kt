@@ -88,7 +88,7 @@ object ClientSettingsStore : ClientSettingsStorage {
         save()
     }
 
-    /** Lowers every saved display volume above [max] to [max] (the volume boost was turned off). */
+    /** Lowers every saved display volume above [max] to [max] (the extended range was turned off). */
     fun capVolumes(max: Float) {
         var changed = false
         settings.values.forEach { s ->

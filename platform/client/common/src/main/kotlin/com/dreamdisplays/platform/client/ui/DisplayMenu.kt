@@ -99,8 +99,8 @@ class DisplayMenu private constructor(
 
     private lateinit var volume: ValueSlider
 
-    /** The volume boost setting [volume]'s track was built for. */
-    private var volumeBoost = false
+    /** The extended-volume setting [volume]'s track was built for. */
+    private var extendedVolume = false
     private lateinit var quality: ValueSlider
     private lateinit var brightness: ValueSlider
     private lateinit var speed: SpeedField
@@ -143,15 +143,15 @@ class DisplayMenu private constructor(
         val videoReady = { ds.isVideoStarted && !ds.errored }
         val notErrored = { !ds.errored }
 
-        // The track spans 0-200 %, or 0-400 % with the volume boost setting (read again whenever the menu opens)
-        val boost = DisplayVolume.boost
-        volumeBoost = boost
+        // The track spans 0-200 %, or 0-400 % with the "Volume up to 400%" setting (read again whenever the menu opens)
+        val extended = DisplayVolume.extended
+        extendedVolume = extended
         volume = addUi(
             ValueSlider(
-                initial = DisplayVolume.toSlider(ds.volume, boost),
-                label = { literalText("${DisplayVolume.percent(DisplayVolume.fromSlider(it, boost).toDouble())}%") },
-                step = DisplayVolume.sliderStep(boost),
-            ) { playback.setVolume(displayId, DisplayVolume.fromSlider(it, boost)) })
+                initial = DisplayVolume.toSlider(ds.volume, extended),
+                label = { literalText("${DisplayVolume.percent(DisplayVolume.fromSlider(it, extended).toDouble())}%") },
+                step = DisplayVolume.sliderStep(extended),
+            ) { playback.setVolume(displayId, DisplayVolume.fromSlider(it, extended)) })
         // Volume and mute are stored on the display and applied when its player starts, so they work while loading
         volume.enabledWhen = notErrored
         volume.visibleWhen = notErrored
@@ -1007,8 +1007,8 @@ class DisplayMenu private constructor(
             playback.seek(displayId, target / 1_000_000L)
         }
         fun nudgeVolume(delta: Double) {
-            val next = DisplayVolume.nudge(DisplayVolume.fromSlider(volume.value, volumeBoost), delta, volumeBoost)
-            volume.value = DisplayVolume.toSlider(next, volumeBoost)
+            val next = DisplayVolume.nudge(DisplayVolume.fromSlider(volume.value, extendedVolume), delta, extendedVolume)
+            volume.value = DisplayVolume.toSlider(next, extendedVolume)
             playback.setVolume(displayId, next)
         }
         when (key) {
