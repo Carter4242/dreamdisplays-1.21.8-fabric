@@ -147,8 +147,9 @@ class ScreenCaptureArgsTest {
         assertFalse("-init_hw_device" in a)
         assertTrue("anullsrc=r=96000:cl=stereo" in a)
         assertFalse("-an" in a)
-        // The same capture is what a screen's test runs (no sound there)
-        assertEquals(graph, ScreenCapture.inputArgs(Source.GFXCAPTURE, screen, Encoder.NVENC, ScreenCapture.Settings()).valueOf("-filter_complex"))
+        // The same capture is what a screen's test runs (no sound there, so no wall-clock stamps either)
+        val test = ScreenCapture.inputArgs(Source.GFXCAPTURE, screen, Encoder.NVENC, ScreenCapture.Settings()).valueOf("-filter_complex")!!
+        assertEquals(graph.substringBefore(",setpts="), test.substringBefore(",hwdownload"))
         // A handle with the top bit set reads as the unsigned number FFmpeg parses
         assertTrue(ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, screen.copy(hmonitor = -2L), Encoder.X264, publish)
             .valueOf("-filter_complex")!!.startsWith("gfxcapture=hmonitor=18446744073709551614:"))

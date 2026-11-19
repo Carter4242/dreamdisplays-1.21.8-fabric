@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 class ShareChecksTest {
     @Test
-    fun `a request starts one round; one while it runs makes exactly one more`() {
+    fun `a request starts one round, one while it runs makes exactly one more`() {
         val spawned = ArrayList<Runnable>()
         var rounds = 0
         lateinit var checks: ShareChecks
