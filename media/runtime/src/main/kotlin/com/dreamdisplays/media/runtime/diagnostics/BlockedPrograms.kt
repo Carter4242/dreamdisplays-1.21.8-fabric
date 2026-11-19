@@ -33,5 +33,7 @@ object BlockedPrograms {
 
     /** True for Windows' "An Application Control policy has blocked this file" (error 4551). */
     fun isPolicyBlock(message: String?): Boolean =
-        message != null && ("error=4551" in message || "Application Control policy" in message)
+        message != null && (POLICY_ERROR.containsMatchIn(message) || "Application Control policy" in message)
+
+    private val POLICY_ERROR = Regex("""error=4551(?!\d)""")
 }
