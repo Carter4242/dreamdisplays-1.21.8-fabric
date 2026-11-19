@@ -283,6 +283,17 @@ class ReadAheadServerTest {
     }
 
     @Test
+    fun `buffered bytes describe the stream asked about, not the display's other files`() {
+        val url = register()
+        request(url, "bytes=0-49999")
+        assertTrue(server.bufferedBytes(url) > 0L)
+        // The same display now plays something the read-ahead does not serve (a YouTube stream, a range proxy URL)
+        assertEquals(-1L, server.bufferedBytes("https://rr1.googlevideo.com/videoplayback?id=1"))
+        assertEquals(-1L, server.bufferedBytes(url.substringBeforeLast('/') + "/0123456789abcdef0123456789abcdef"))
+        assertEquals(-1L, server.bufferedBytes("http://127.0.0.1:1/" + url.substringAfterLast('/')))
+    }
+
+    @Test
     fun `eviction takes the longest-idle sessions first`() {
         assertEquals(listOf("b", "c"), ReadAheadServer.evictionOrder(listOf("a" to 30L, "b" to 10L, "c" to 20L), 2))
         assertEquals(emptyList(), ReadAheadServer.evictionOrder(listOf("a" to 30L), 0))

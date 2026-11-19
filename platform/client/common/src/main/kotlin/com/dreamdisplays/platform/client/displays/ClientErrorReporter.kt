@@ -187,7 +187,7 @@ object ClientErrorReporter {
             decodeQueue = signals.decodeQueue,
             audioUnderrun = within(signals.audioUnderrunAtNanos),
             audioBufferedMs = signals.audioBufferedMs,
-            netBufferedBytes = runCatching { ReadAhead.bufferedBytes(screen.uuid) }.getOrDefault(-1L),
+            netBufferedBytes = runCatching { ReadAhead.bufferedBytes(mp.capturedStreamRawUrl()) }.getOrDefault(-1L),
             syncAction = sync,
             pipeline = runCatching { mp.pipelineLabel() }.getOrDefault("?"),
         )

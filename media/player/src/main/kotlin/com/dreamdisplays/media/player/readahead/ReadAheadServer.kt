@@ -105,13 +105,15 @@ internal class ReadAheadServer(
         return synchronized(byKey) { byToken.containsKey(token) }
     }
 
-    /** Lets [displayId]'s sessions drop their buffers; they re-fill if read again. */
-    /** Bytes cached for [displayId] across its sessions, or -1 when it has none. */
-    fun bufferedBytes(displayId: UUID): Long {
-        val sessions = synchronized(byKey) { byKey.filterKeys { it.displayId == displayId }.values.toList() }
-        return if (sessions.isEmpty()) -1L else sessions.sumOf { it.bufferedBytes }
+    /** Bytes cached by the session [url] (a URL [register] returned) names, or -1 when it names none. */
+    fun bufferedBytes(url: String): Long {
+        val port = server?.localPort ?: return -1L
+        val prefix = "http://$LOOPBACK_HOST:$port/"
+        if (!url.startsWith(prefix)) return -1L
+        return session(url.substring(prefix.length).substringBefore('?'))?.bufferedBytes ?: -1L
     }
 
+    /** Lets [displayId]'s sessions drop their buffers; they re-fill if read again. */
     fun release(displayId: UUID) {
         val sessions = synchronized(byKey) { byKey.filterKeys { it.displayId == displayId }.values.toList() }
         sessions.forEach(ReadAheadSession::release)

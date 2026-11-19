@@ -92,11 +92,15 @@ object ReadAhead {
             ?: streamUrl
     }
 
-    /** Called when [displayId]'s player stops: its buffers are dropped once no decoder still reads them. */
-    /** Bytes the read-ahead currently holds for [displayId], or -1 when it buffers nothing for it. */
-    fun bufferedBytes(displayId: UUID): Long =
-        if (serverHolder.isInitialized()) server.bufferedBytes(displayId) else -1L
+    /**
+     * Bytes the read-ahead holds for the stream a decoder opens at [streamUrl], or -1 when that stream is not read
+     * through it (an extractor source, a file played unbuffered). Keyed by the stream, never by the display: a display
+     * that moved on from a buffered file to a YouTube video still has the file's idle session.
+     */
+    fun bufferedBytes(streamUrl: String?): Long =
+        if (streamUrl != null && serverHolder.isInitialized()) server.bufferedBytes(streamUrl) else -1L
 
+    /** Called when [displayId]'s player stops: its buffers are dropped once no decoder still reads them. */
     fun release(displayId: UUID) {
         if (serverHolder.isInitialized()) server.release(displayId)
     }
