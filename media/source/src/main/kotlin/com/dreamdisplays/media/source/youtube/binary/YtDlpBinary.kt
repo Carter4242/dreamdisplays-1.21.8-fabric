@@ -61,6 +61,19 @@ object YtDlpBinary {
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * Output of a `yt-dlp` whose Python could not verify a server's HTTPS certificate: an interpreter with no root
+     * certificates (python.org's macOS build until "Install Certificates.command" is run) and no `certifi`. The
+     * standalone binary brings its own certificates.
+     */
+    private val CERTIFICATE_FAILURE = Regex(
+        "CERTIFICATE_VERIFY_FAILED|certificate verify failed|SSLCertVerificationError|SSL certificate problem",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Why a zipapp call failed because of its Python rather than the video. */
+    enum class ZipappFailure { INTERPRETER, CERTIFICATE }
+
     private const val BINARY_REFRESH_MS: Long = 1L * 24L * 60L * 60L * 1_000L
 
     @Volatile
@@ -108,6 +121,15 @@ object YtDlpBinary {
     @Volatile
     private var zipappNote: String = ""
 
+    /** The zipapp failed on its Python this session: the binary stays in use even when the command is picked again. */
+    @Volatile
+    private var zipappAbandoned = false
+
+    /** Times this session switched from the zipapp to the binary, so the environment report can be sent again. */
+    @Volatile
+    var zipappSwitches: Int = 0
+        private set
+
     @Volatile
     private var versionProbe: Pair<List<String>, String>? = null
 
@@ -130,10 +152,7 @@ object YtDlpBinary {
      */
     fun describe(): Info {
         val command = resolvedCommand
-        val note = buildList {
-            if (zipappNote.isNotEmpty()) add(zipappNote)
-            if (skippedPythons.isNotEmpty()) add("too old for yt-dlp: ${skippedPythons.joinToString(", ")}")
-        }.joinToString("; ")
+        val note = note()
         if (command == null) return Info("not probed", "", "", "", "", note)
         val zipapp = isZipapp(command)
         val mode = when {
@@ -159,6 +178,12 @@ object YtDlpBinary {
             note = note,
         )
     }
+
+    /** The [Info.note]: why the zipapp is not in use, and the interpreters too old for it. */
+    internal fun note(): String = buildList {
+        if (zipappNote.isNotEmpty()) add(zipappNote)
+        if (skippedPythons.isNotEmpty()) add("too old for yt-dlp: ${skippedPythons.joinToString(", ")}")
+    }.joinToString("; ")
 
     /**
      * Returns the path to a usable `yt-dlp` binary: the `dreamdisplays.ytdlp` override, else the bundled copy (downloaded
@@ -242,8 +267,7 @@ object YtDlpBinary {
         synchronized(this) {
             forgetIfPreferenceChanged(preference)
             resolvedCommand?.let { return it }
-            // An installed yt-dlp first: no zipapp (that is the mod's own copy)
-            val zipapp = if (override() != null || preference == "system") null else zipappCommand()
+            val zipapp = if (zipappAllowed(preference)) zipappCommand() else null
             val command = zipapp ?: [resolve()]
             resolvedCommand = command
             resolvedFor = preference
@@ -299,20 +323,76 @@ object YtDlpBinary {
     fun looksLikeInterpreterFailure(output: String?): Boolean =
         output != null && INTERPRETER_FAILURE.containsMatchIn(output)
 
+    /** True when `yt-dlp` output says its Python could not verify an HTTPS certificate. */
+    fun looksLikeCertificateFailure(output: String?): Boolean =
+        output != null && CERTIFICATE_FAILURE.containsMatchIn(output)
+
     /**
-     * Drops the zipapp fast path [failed] for the rest of the session after it failed with [output], switching to the
-     * standalone binary. Returns true when the current command is now a different one (so a retry can use it).
+     * Whether a zipapp call that failed with [output] failed because of its Python, so the standalone binary should take
+     * over: the Python can't run `yt-dlp`, or it can't verify YouTube's certificate ([youtube]: the link is a YouTube
+     * one). A certificate failure on another site may be that site's own, so it does not count.
      */
-    fun abandonZipapp(failed: List<String>, output: String): Boolean {
+    fun zipappFailure(output: String?, youtube: Boolean): ZipappFailure? = when {
+        looksLikeInterpreterFailure(output) -> ZipappFailure.INTERPRETER
+        youtube && looksLikeCertificateFailure(output) -> ZipappFailure.CERTIFICATE
+        else -> null
+    }
+
+    /**
+     * Whether [resolveCommand] may pick the zipapp under [preference]: not with an override or a preferred system
+     * install (the zipapp is the mod's own copy), nor after it failed on its Python this session.
+     */
+    internal fun zipappAllowed(preference: String): Boolean =
+        override() == null && preference != "system" && !zipappAbandoned
+
+    /**
+     * Drops the zipapp fast path [failed] for the rest of the session after it failed with [output] ([why]), switching
+     * to the standalone [binary] (downloaded when missing). Returns true when the current command is now a different one
+     * (so a retry can use it): also when another call already switched.
+     */
+    fun abandonZipapp(
+        failed: List<String>,
+        output: String,
+        why: ZipappFailure = ZipappFailure.INTERPRETER,
+        binary: () -> String = ::resolve,
+    ): Boolean {
         synchronized(this) {
             if (resolvedCommand != failed) return resolvedCommand != null
             val reason = output.lineSequence().lastOrNull { it.isNotBlank() }?.trim()?.take(200)
-            logger.warn("yt-dlp zipapp can't run on {} ({}); using the standalone yt-dlp binary instead.", failed[0], reason)
-            zipappNote = "zipapp failed on ${failed[0]} ($reason); switched to the binary"
-            resolvedCommand = runCatching { [resolve()] }.onFailure { e ->
-                logger.warn("Standalone yt-dlp binary unavailable: ${e.message}.")
+            val next = runCatching { listOf(binary()) }.onFailure { e ->
+                logger.warn("yt-dlp zipapp failed on {} ({}), and the standalone yt-dlp binary is unavailable: {}.", failed[0], reason, e.message)
             }.getOrNull() ?: return false
+            when (why) {
+                ZipappFailure.INTERPRETER -> {
+                    logger.warn("yt-dlp zipapp can't run on {} ({}); using the standalone yt-dlp binary instead.", failed[0], reason)
+                    zipappNote = "zipapp failed on ${failed[0]} ($reason); switched to the binary"
+                }
+
+                ZipappFailure.CERTIFICATE -> {
+                    logger.warn(
+                        "yt-dlp zipapp: {} can't verify YouTube's HTTPS certificate (no root certificates; {}); " +
+                            "switched to the standalone yt-dlp binary {} for this session.",
+                        failed[0], reason, next[0],
+                    )
+                    zipappNote = "zipapp on ${failed[0]} failed the SSL certificate check ($reason); switched to the binary"
+                }
+            }
+            resolvedCommand = next
+            zipappAbandoned = true
+            zipappSwitches++
             return true
+        }
+    }
+
+    /** Test hook: the session's command is [command], as if just picked, with no zipapp failure yet. */
+    internal fun resetForTest(command: List<String>?) {
+        synchronized(this) {
+            resolved = null
+            resolvedCommand = command
+            resolvedFor = preference()
+            zipappAbandoned = false
+            zipappNote = ""
+            zipappSwitches = 0
         }
     }
 

@@ -16,6 +16,7 @@ import com.dreamdisplays.media.runtime.diagnostics.HitchClassifier
 import com.dreamdisplays.media.runtime.diagnostics.HitchSample
 import com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
 import com.dreamdisplays.media.runtime.diagnostics.PlaybackFailure
+import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.capabilities.ClientEnvironmentProbe
 import com.dreamdisplays.shared.capability.ServerFeature
@@ -64,6 +65,9 @@ object ClientErrorReporter {
     private var envSends = 0
     private var envBuiltAtMs = 0L
 
+    /** [YtDlpBinary.zipappSwitches] when the last summary was built: a switch since then sends it again. */
+    private var envYtDlpSwitches = 0
+
     @Volatile
     private var envBuilding = false
 
@@ -97,6 +101,7 @@ object ClientErrorReporter {
         lastEnvSent = null
         envSends = 0
         envBuiltAtMs = 0L
+        envYtDlpSwitches = 0
         envReady = null
     }
 
@@ -236,7 +241,9 @@ object ClientErrorReporter {
             }
         }
         val firstDue = lastEnvSent == null && now - enabledAtMs >= ENV_FIRST_DELAY_MS
-        val refreshDue = pending && envSends < MAX_ENV_SENDS && now - envBuiltAtMs >= ENV_REFRESH_MS
+        // yt-dlp switched from the zipapp to the binary: the server's summary still names the zipapp
+        val ytDlpSwitched = lastEnvSent != null && YtDlpBinary.zipappSwitches != envYtDlpSwitches
+        val refreshDue = envSends < MAX_ENV_SENDS && (ytDlpSwitched || pending && now - envBuiltAtMs >= ENV_REFRESH_MS)
         if (!envBuilding && (firstDue || refreshDue)) startEnvBuild(now)
         // Reports wait for a summary being built, so the server has it before the first one (bounded wait)
         if (envBuilding && now - envBuiltAtMs < 5_000L) return
@@ -310,6 +317,7 @@ object ClientErrorReporter {
     private fun startEnvBuild(now: Long) {
         envBuilding = true
         envBuiltAtMs = now
+        envYtDlpSwitches = YtDlpBinary.zipappSwitches
         val render = ClientEnvironmentProbe.renderFacts()
         DreamCoroutines.clientIo.launch {
             try {

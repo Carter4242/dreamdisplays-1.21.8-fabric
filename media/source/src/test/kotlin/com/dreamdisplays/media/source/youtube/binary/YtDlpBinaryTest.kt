@@ -46,6 +46,97 @@ class YtDlpBinaryTest {
         assertFalse(YtDlpBinary.looksLikeInterpreterFailure(null))
     }
 
+    /** The error every client got on python.org's macOS Python before "Install Certificates.command". */
+    private val certFailure =
+        "ERROR: [youtube] dQw4w9WgXcQ: Unable to download API page: [SSL: CERTIFICATE_VERIFY_FAILED] certificate " +
+            "verify failed: unable to get local issuer certificate (_ssl.c:1000)"
+
+    @Test
+    fun certificateFailuresAreRecognized() {
+        assertTrue(YtDlpBinary.looksLikeCertificateFailure(certFailure))
+        // The requests handler's wording
+        assertTrue(
+            YtDlpBinary.looksLikeCertificateFailure(
+                "ERROR: [youtube] abc: Unable to download webpage: HTTPSConnectionPool(host='www.youtube.com', port=443): " +
+                    "Max retries exceeded (Caused by SSLError(SSLCertVerificationError(1, 'certificate verify failed')))",
+            ),
+        )
+        // curl_cffi's
+        assertTrue(YtDlpBinary.looksLikeCertificateFailure("ERROR: curl: (60) SSL certificate problem: unable to get local issuer certificate"))
+        // A dropped connection is not a trust failure
+        assertFalse(YtDlpBinary.looksLikeCertificateFailure("ERROR: [youtube] abc: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred"))
+        assertFalse(YtDlpBinary.looksLikeCertificateFailure("ERROR: [youtube] abc: Video unavailable"))
+        assertFalse(YtDlpBinary.looksLikeCertificateFailure(null))
+    }
+
+    @Test
+    fun aCertificateFailureBlamesThePythonOnlyForYouTube() {
+        assertEquals(YtDlpBinary.ZipappFailure.CERTIFICATE, YtDlpBinary.zipappFailure(certFailure, youtube = true))
+        // Another site's certificate may really be bad: no switch
+        assertNull(YtDlpBinary.zipappFailure(certFailure, youtube = false))
+        val tooOld = "ImportError: You are using an unsupported version of Python. Only Python versions 3.11 and above"
+        assertEquals(YtDlpBinary.ZipappFailure.INTERPRETER, YtDlpBinary.zipappFailure(tooOld, youtube = true))
+        assertEquals(YtDlpBinary.ZipappFailure.INTERPRETER, YtDlpBinary.zipappFailure(tooOld, youtube = false))
+        assertNull(YtDlpBinary.zipappFailure("ERROR: [youtube] abc: Video unavailable", youtube = true))
+        assertNull(YtDlpBinary.zipappFailure(null, youtube = true))
+    }
+
+    private val zipapp = ["/Library/Frameworks/Python.framework/Versions/3.13/bin/python3", "libs/yt-dlp/yt-dlp.pyz"]
+
+    @Test
+    fun aCertificateFailureSwitchesTheSessionToTheBinary() {
+        try {
+            YtDlpBinary.resetForTest(zipapp)
+            assertEquals("yt-dlp zipapp", YtDlpBinary.label())
+            var provisioned = 0
+            val binary = { provisioned++; "libs/yt-dlp/yt-dlp_macos" }
+            assertTrue(YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE, binary))
+            assertEquals("yt-dlp binary", YtDlpBinary.label())
+            assertEquals(1, YtDlpBinary.zipappSwitches)
+            assertTrue("failed the SSL certificate check" in YtDlpBinary.note(), YtDlpBinary.note())
+            assertTrue("switched to the binary" in YtDlpBinary.note(), YtDlpBinary.note())
+            // Picking the command again (a changed source preference) keeps the binary for the session
+            assertFalse(YtDlpBinary.zipappAllowed("auto"))
+            assertFalse(YtDlpBinary.zipappAllowed("bundled"))
+            // A client of the same race that failed on the zipapp too retries on the binary, provisioned once
+            assertTrue(YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE, binary))
+            assertEquals(1, provisioned)
+            assertEquals(1, YtDlpBinary.zipappSwitches)
+        } finally {
+            YtDlpBinary.resetForTest(null)
+        }
+    }
+
+    @Test
+    fun withNoBinaryToSwitchToTheZipappStays() {
+        try {
+            YtDlpBinary.resetForTest(zipapp)
+            assertFalse(
+                YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE) { throw IOException("offline") },
+            )
+            assertEquals("yt-dlp zipapp", YtDlpBinary.label())
+            assertEquals(0, YtDlpBinary.zipappSwitches)
+            assertTrue(YtDlpBinary.zipappAllowed("auto"))
+            assertEquals("", YtDlpBinary.note())
+        } finally {
+            YtDlpBinary.resetForTest(null)
+        }
+    }
+
+    @Test
+    fun aFailureOnAnOutdatedCommandRetriesOnTheCurrentOne() {
+        try {
+            YtDlpBinary.resetForTest(["libs/yt-dlp/yt-dlp"])
+            // Not the command that failed: the current one is already the binary, so a retry may use it
+            assertTrue(YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE) { error("not provisioned") })
+            assertEquals(0, YtDlpBinary.zipappSwitches)
+            YtDlpBinary.resetForTest(null)
+            assertFalse(YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE) { error("not provisioned") })
+        } finally {
+            YtDlpBinary.resetForTest(null)
+        }
+    }
+
     @Test
     fun zipappCommandIsRecognized() {
         assertTrue(YtDlpBinary.isZipapp(["python3", "libs/yt-dlp/yt-dlp.pyz"]))

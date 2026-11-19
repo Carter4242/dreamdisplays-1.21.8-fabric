@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.youtube.process
 
+import com.dreamdisplays.api.media.source.YouTubeUrls
 import com.dreamdisplays.media.runtime.diagnostics.ResolveTrail
 import com.dreamdisplays.media.runtime.system.Processes
 import com.dreamdisplays.media.source.youtube.binary.YtDlpBinary
@@ -41,6 +42,15 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
 
         private const val MAX_REMEMBERED_ERRORS = 64
         private const val MAX_WARNED_VIDEOS = 256
+
+        /** First line of the resolve step for a zipapp call on [python] that failed ([why]) and was retried on the binary. */
+        internal fun switchNote(why: YtDlpBinary.ZipappFailure, python: String): String {
+            val name = python.substringAfterLast('/').substringAfterLast('\\')
+            return when (why) {
+                YtDlpBinary.ZipappFailure.CERTIFICATE -> "switched to yt-dlp binary ($name failed the SSL certificate check)"
+                YtDlpBinary.ZipappFailure.INTERPRETER -> "switched to yt-dlp binary ($name can't run the zipapp)"
+            }
+        }
     }
 
     /** Last `yt-dlp` error output per video, so a total failure can say why (see [YtDlpErrors]). */
@@ -242,12 +252,16 @@ class YtDlpClientRace(private val cookies: YtCookieManager) {
         }
         if (process.exitValue() != 0) {
             val output = stderr.toString().trim()
-            // The zipapp's Python can't run this yt-dlp (too old, broken install): every call would fail the same
-            // way within a second, so switch to the standalone binary for the session and try this one again on it.
-            if (!retriedOnBinary && YtDlpBinary.isZipapp(base) && YtDlpBinary.looksLikeInterpreterFailure(output) &&
-                YtDlpBinary.abandonZipapp(base, output)
-            ) {
-                ResolveTrail.record(videoUrl, "yt-dlp zipapp", client ?: "cookies", ok = false, error = "${base[0]}: $output")
+            // The zipapp's Python can't run this yt-dlp (too old, broken install) or can't verify YouTube's certificate
+            // (no root certificates): every call would fail the same way, so switch to the standalone binary for the
+            // session and try this one again on it.
+            val why = if (retriedOnBinary || !YtDlpBinary.isZipapp(base)) null
+            else YtDlpBinary.zipappFailure(output, youtube = YouTubeUrls.extractVideoId(videoUrl) != null)
+            if (why != null && YtDlpBinary.abandonZipapp(base, output, why)) {
+                ResolveTrail.record(
+                    videoUrl, "yt-dlp zipapp", client ?: "cookies", ok = false,
+                    error = "${switchNote(why, base[0])}\n$output",
+                )
                 ResolveTrail.recordStderr(videoUrl, output)
                 return runClientFetch(videoUrl, client, retriedOnBinary = true, onStarted = onStarted)
             }
