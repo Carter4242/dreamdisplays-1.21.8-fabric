@@ -25,6 +25,12 @@ sealed interface ShareRow {
     data class Note(val text: String) : ShareRow
 
     /**
+     * A note for something still being worked out ("Checking screens…"): while one shows, the picker keeps reading
+     * its rows again, so what was being checked appears in place.
+     */
+    data class Pending(val text: String) : ShareRow
+
+    /**
      * Something to pick. [onPick] returns the next page's rows (the picker stays open on them) or null (done, it
      * closes). [selected] marks the default.
      */
@@ -33,11 +39,12 @@ sealed interface ShareRow {
 
 /**
  * The "Share screen" popup that opens above the share button: what to share (screens, then windows), then what it
- * sounds like. Its rows are read when it opens, so a monitor plugged in or a window opened since shows up; a long
- * list scrolls (wheel or scrollbar).
+ * sounds like. Its rows are read when it opens (`listRows(true)`), so a monitor plugged in or a window opened since
+ * shows up, and again every [REFRESH_MS] while a [ShareRow.Pending] shows (`listRows(false)`); a long list scrolls
+ * (wheel or scrollbar).
  */
 class ShareDropdown(
-    private val listRows: () -> List<ShareRow>,
+    private val listRows: (opening: Boolean) -> List<ShareRow>,
 ) : PopupLayer {
     override var visible: Boolean = false
 
@@ -54,25 +61,38 @@ class ShareDropdown(
     private var lastFrameNanos = 0L
     private var draggingScrollbar = false
 
+    private var lastRefreshMs = 0L
+
     /** Toggles dropdown visibility, re-reading the rows when it opens. */
     fun toggle() {
-        if (!visible) show(listRows()) else hide()
+        if (!visible) show(listRows(true)) else hide()
     }
 
-    private fun show(next: List<ShareRow>) {
+    private fun show(next: List<ShareRow>, keepScroll: Boolean = false) {
         rows = next
+        lastRefreshMs = System.currentTimeMillis()
         val font = Minecraft.getInstance().font
         val longest = rows.maxOfOrNull {
             when (it) {
                 is ShareRow.Item -> font.width(it.label)
                 is ShareRow.Header -> font.width(it.text)
                 is ShareRow.Note -> font.width(it.text)
+                is ShareRow.Pending -> font.width(it.text)
             }
         } ?: 0
         width = ShareDropdownSizing.widthFor(longest)
-        scrollTarget = 0f
-        scrollPx = 0f
-        visible = rows.any { it is ShareRow.Item }
+        if (!keepScroll) {
+            scrollTarget = 0f
+            scrollPx = 0f
+        }
+        visible = rows.any { it is ShareRow.Item || it is ShareRow.Pending }
+    }
+
+    /** While something is being checked, the open list is read again now and then (it keeps its scroll). */
+    private fun refreshIfPending() {
+        if (!visible || rows.none { it is ShareRow.Pending }) return
+        if (System.currentTimeMillis() - lastRefreshMs < REFRESH_MS) return
+        show(listRows(false), keepScroll = true)
     }
 
     /** Hides the dropdown. */
@@ -103,6 +123,7 @@ class ShareDropdown(
      * shifted sideways to stay inside a screen [screenW] wide, so no label is cut off at its edge.
      */
     fun draw(g: GuiGraphicsCompat, anchorCenterX: Int, anchorY: Int, mouseX: Int, mouseY: Int, screenW: Int = Int.MAX_VALUE) {
+        refreshIfPending()
         val now = System.nanoTime()
         val dt = if (lastFrameNanos == 0L) 0.016f else ((now - lastFrameNanos) / 1e9f).coerceIn(0f, 0.1f)
         lastFrameNanos = now
@@ -167,6 +188,12 @@ class ShareDropdown(
 
                 is ShareRow.Note -> g.drawText(
                     font, UiText.trim(font, row.text, textW), inner + 4, itemY + (h - font.lineHeight) / 2 + 1,
+                    scaleAlpha(UiTheme.TEXT_SECONDARY, animProgress), false,
+                )
+
+                is ShareRow.Pending -> g.drawText(
+                    font, UiText.trim(font, row.text + ".".repeat(((System.currentTimeMillis() / 400L) % 4L).toInt()), textW),
+                    inner + 4, itemY + (h - font.lineHeight) / 2 + 1,
                     scaleAlpha(UiTheme.TEXT_SECONDARY, animProgress), false,
                 )
 
@@ -292,6 +319,7 @@ class ShareDropdown(
         private const val SB_GRAB = 3
         private const val SCREEN_MARGIN = 4
         private const val SCROLL_EASE_RATE = 8f
+        private const val REFRESH_MS = 300L
     }
 }
 

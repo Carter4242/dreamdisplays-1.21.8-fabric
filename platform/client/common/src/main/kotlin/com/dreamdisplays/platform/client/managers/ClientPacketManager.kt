@@ -105,7 +105,7 @@ object ClientPacketManager {
         // A hello on a connection that already had one is a reloaded server, which forgot every report: send them again
         com.dreamdisplays.platform.client.displays.ReportRequests.onServerHello()
         com.dreamdisplays.platform.client.displays.DisplayPanels.onServerHello()
-        if (MasterSwitch.on) com.dreamdisplays.platform.client.displays.ScreenShare.prewarm()
+        // No screen share tests here: they start when a display menu first opens (see the share warm-up)
     }
 
     /**

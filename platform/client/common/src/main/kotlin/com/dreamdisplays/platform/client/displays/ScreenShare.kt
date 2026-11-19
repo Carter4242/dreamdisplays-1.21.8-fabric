@@ -18,7 +18,6 @@ import com.dreamdisplays.media.player.process.ScreenCaptureProcesses
 import com.dreamdisplays.media.player.process.ShareAudio
 import com.dreamdisplays.media.player.process.win.AudioPipe
 import com.dreamdisplays.media.player.process.win.WinAudio
-import com.dreamdisplays.media.player.process.win.WinScreens
 import com.dreamdisplays.media.player.process.win.WinWindows
 import com.dreamdisplays.platform.client.Initializer
 import com.dreamdisplays.platform.client.managers.ClientPacketManager
@@ -185,23 +184,68 @@ object ScreenShare {
     /** True while this client shares to [displayId]. */
     fun isSharing(displayId: UUID): Boolean = running?.displayId == displayId
 
-    /**
-     * What may be shared. On Windows every screen on the desktop, read from DXGI each time the picker opens (left to
-     * right); elsewhere, and if DXGI cannot be read, the monitors GLFW sees (primary first). Render thread only.
-     */
-    fun monitors(): List<ScreenCapture.Monitor> {
-        if (ScreenCapture.sourceForThisOs() == ScreenCapture.Source.DDAGRAB) {
-            val ffmpeg = FFmpegBinary.getPathIfResolved()
-            val screens = ScreenCapture.windowsScreens(ffmpeg)?.takeIf { it.isNotEmpty() }
-                ?: ScreenCapture.knownWindowsScreens(ffmpeg)?.takeIf { it.isNotEmpty() }
-            if (screens != null) {
-                // A screen plugged in since the last look gets its plan worked out now, before it is picked
-                if (ffmpeg != null && screens.any { ScreenCapture.knownChoice(ffmpeg, it) == null }) prepare(ffmpeg, screens)
-                return screens
-            }
-        }
-        return glfwMonitors()
+    /** Whether a screen in the picker can be shared now. */
+    enum class ScreenState {
+        /** Tested: it captures. */
+        READY,
+
+        /** Not tested yet, or being tested again (the picker says "checking"). */
+        CHECKING,
+
+        /** No capture source gave it a frame: shown, but cannot be picked. */
+        UNAVAILABLE,
     }
+
+    /** One screen in the picker. */
+    data class ScreenOption(val monitor: ScreenCapture.Monitor, val state: ScreenState)
+
+    /** The picker's screens; [checking] while screen tests run (the picker says so and keeps reading this). */
+    data class ScreenList(val screens: List<ScreenOption>, val checking: Boolean)
+
+    /**
+     * What may be shared, and whether each screen can be. On Windows every screen on the desktop, read from DXGI
+     * each time (left to right), each one only [ScreenState.READY] once its capture was tested (see [warmUp]); a
+     * screen not tested yet starts the tests. [recheck] (the picker opening) also tests again a screen found
+     * unshareable a while ago. Elsewhere the monitors GLFW sees (primary first), all ready. Render thread only.
+     */
+    fun screens(recheck: Boolean): ScreenList {
+        if (ScreenCapture.sourceForThisOs() != ScreenCapture.Source.DDAGRAB) {
+            return ScreenList(glfwMonitors().map { ScreenOption(it, ScreenState.READY) }, checking = false)
+        }
+        val ffmpeg = FFmpegBinary.getPathIfResolved()
+        val listed = ScreenCapture.windowsScreens(ffmpeg)?.takeIf { it.isNotEmpty() }
+            ?: ffmpeg?.let { ScreenCapture.knownWindowsScreens(it) }?.takeIf { it.isNotEmpty() }
+        if (listed == null) {
+            // No list yet: DXGI cannot be read here, and the tests find the screens through FFmpeg
+            if (recheck && (ffmpeg == null || ScreenCapture.knownWindowsScreens(ffmpeg) == null)) checks.request()
+            return ScreenList([], checks.running)
+        }
+        var due = false
+        val options = listed.map { screen ->
+            val known = ffmpeg?.let { cached(it, screen) }
+            val state = when {
+                // FFmpeg could not be had at the last try: nothing can be tested until the picker opens again
+                ffmpeg == null && noFfmpeg && !recheck && !checks.running -> ScreenState.UNAVAILABLE
+                known == null -> ScreenState.CHECKING.also { due = true }
+                screenKey(screen) in checking -> ScreenState.CHECKING
+                known.works -> ScreenState.READY
+                !ScreenCapture.needsCheck(known) -> ScreenState.UNAVAILABLE
+                recheck -> ScreenState.CHECKING.also { due = true }
+                checks.running -> ScreenState.CHECKING
+                else -> ScreenState.UNAVAILABLE
+            }
+            ScreenOption(screen, state)
+        }
+        if (due) checks.request()
+        return ScreenList(options, options.any { it.state == ScreenState.CHECKING })
+    }
+
+    /** [screen]'s cached plan, when it is this screen's (its name may have gone to another monitor since). */
+    private fun cached(ffmpeg: String, screen: ScreenCapture.Monitor): ScreenCapture.Choice? =
+        ScreenCapture.knownChoice(ffmpeg, screen)?.takeIf { it.monitor.key == screen.key }
+
+    private fun screenKey(screen: ScreenCapture.Monitor): String =
+        screen.deviceName.ifEmpty { "${screen.adapter}:${screen.index}" }
 
     /**
      * The monitors GLFW sees (primary first), each with what names its screen ([ScreenCapture.Monitor.key]): on
@@ -239,47 +283,70 @@ object ScreenShare {
         glfwScreens = runCatching { glfwMonitors() }.getOrNull()
     }
 
-    private val preparing = java.util.concurrent.atomic.AtomicBoolean()
+    // ---- Screen tests ----
 
-    /** Works out each screen's capture source and encoder in the background (a few short `FFmpeg` runs each). */
-    private fun prepare(ffmpeg: String, screens: List<ScreenCapture.Monitor>) {
-        if (!preparing.compareAndSet(false, true)) return
-        thread("DreamDisplays-screen-share-probe") {
-            try {
-                screens.forEach { runCatching { ScreenCapture.choose(ffmpeg, it) } }
-            } finally {
-                preparing.set(false)
-            }
-        }
-    }
+    /** Screens whose capture is being tested right now (see [screenKey]). */
+    private val checking: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    private val checks = ShareChecks(::runChecks)
+
+    /** The last round of tests found no FFmpeg to test with. */
+    @Volatile
+    private var noFfmpeg = false
+
+    /** The tests were started from a display menu this game session (see [warmUp]). */
+    @Volatile
+    private var warmed = false
 
     /**
-     * The server lets this player share: find the encoders (and on Windows each screen's plan) now, in the
-     * background, so the picker is complete and the first share starts at once.
+     * A display menu opened: the first time in a game session, where this player may share, the capture tests start
+     * in the background (encoders, each screen's capture, the 60 fps encode test, Windows Graphics Capture), so the
+     * picker is ready by the time the share button is clicked. Nothing is tested at join: most players never share,
+     * and each test is an `FFmpeg` run (Smart App Control may even pop up about it).
      */
-    fun prewarm() {
-        if (!available) return
-        thread("DreamDisplays-screen-share-probe") {
-            val ffmpeg = FFmpegBinary.getPath() ?: return@thread
-            if (ScreenCapture.sourceForThisOs() == ScreenCapture.Source.DDAGRAB) {
-                val screens = ScreenCapture.windowsScreens(ffmpeg) ?: ScreenCapture.probeWindowsScreens(ffmpeg)
-                if (preparing.compareAndSet(false, true)) {
-                    try {
-                        screens.forEach { screen ->
-                            runCatching {
-                                val plan = ScreenCapture.choose(ffmpeg, screen)?.plan ?: return@runCatching
-                                // The 60 fps encode test too (~2 s once per encoder), so the first share starts at once
-                                ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, ScreenCapture.Settings().maxHeight, 0)
-                                ScreenCapture.prepareEncoder(ffmpeg, plan.encoder)
-                            }
-                        }
-                    } finally {
-                        preparing.set(false)
+    fun warmUp() {
+        if (warmed || !available) return
+        warmed = true
+        checks.request()
+    }
+
+    /** One round of tests (see [ShareChecks]): every screen not tested yet, or due a new test. Off the render thread. */
+    private fun runChecks() {
+        val ffmpeg = FFmpegBinary.getPath()
+        noFfmpeg = ffmpeg == null
+        if (ffmpeg == null) {
+            // Nothing tested: the next display menu (or the picker opening) tries again
+            warmed = false
+            return
+        }
+        if (ScreenCapture.sourceForThisOs() != ScreenCapture.Source.DDAGRAB) {
+            runCatching { ScreenCapture.prepareEncoder(ffmpeg, ScreenCapture.pickEncoder(ffmpeg)) }
+            return
+        }
+        // Windows Graphics Capture first: windows use it, and it is each screen's fallback after Desktop Duplication
+        runCatching { ScreenCapture.windowCapture(ffmpeg) }
+        val screens = ScreenCapture.windowsScreens(ffmpeg) ?: ScreenCapture.probeWindowsScreens(ffmpeg)
+        val due = screens.filter { ScreenCapture.needsCheck(cached(ffmpeg, it)) }
+        due.forEach { checking += screenKey(it) }
+        val plans = ArrayList<ScreenCapture.Plan>()
+        for (screen in due) {
+            try {
+                runCatching { ScreenCapture.choose(ffmpeg, screen) }
+                    .onFailure {
+                        logger.warn("Screen share: testing {} failed: {}", screen.deviceName, it.toString())
+                        ScreenCapture.rememberUnusable(ffmpeg, screen, false, it.toString())
                     }
-                }
-                ScreenCapture.windowCapture(ffmpeg)
-            } else {
-                ScreenCapture.prepareEncoder(ffmpeg, ScreenCapture.pickEncoder(ffmpeg))
+                    .getOrNull()?.takeIf { it.works }?.let { plans += it.plan }
+            } finally {
+                checking -= screenKey(screen)
+            }
+        }
+        // Then what makes the first share start at once: the 60 fps encode test (~2 s once per encoder) and the
+        // encoder's IDR option; the screens are offered meanwhile
+        for (plan in plans.distinct()) {
+            runCatching {
+                ScreenCapture.chooseFps(ffmpeg, plan.source, plan.encoder, ScreenCapture.Settings().maxHeight, 0)
+                ScreenCapture.prepareEncoder(ffmpeg, plan.encoder)
             }
         }
     }
@@ -468,10 +535,17 @@ object ScreenShare {
             fail(r, SCREEN_GONE)
             return
         }
+        // No capture source gives this screen a frame (the picker never offers it; x264 forced by the server tests anew)
+        if (!choice.works) {
+            report(r, choice, choice.plan, failedTests(choice), "unavailable", final = true,
+                "screen share: no capture source works for this screen")
+            fail(r, SCREEN_UNCAPTURABLE)
+            return
+        }
         r.settings = settingsFor(r, ffmpeg, choice.plan)
         // The plan only came after something failed on this PC: worth knowing, though the player sees nothing
         if (choice.attempts.any { !it.ok } && plannedFallbacksReported.add(ffmpeg + choice.monitor.deviceName + choice.plan)) {
-            report(r, choice, choice.plan, "", "planned_fallback", final = false,
+            report(r, choice, choice.plan, failedTests(choice), "planned_fallback", final = false,
                 "screen share needed a fallback: ${choice.plan} after ${choice.attempts.count { !it.ok }} failed test(s)")
         }
         val first = runScreen(r, ffmpeg, choice, publishUrl, announce = true) ?: return
@@ -482,9 +556,12 @@ object ScreenShare {
             fail(r, again.reason)
             return
         }
-        // Died at once: one quiet retry on the safe path (x264, and GDI capture unless only the encoder failed)
+        // Died at once: one quiet retry on the safe path (x264, and Windows Graphics Capture after Desktop Duplication
+        // itself failed)
         val encoderFailed = ScreenCapture.isEncoderOpenFailure(first.output)
-        val safe = if (first.ranMs < EARLY_EXIT_MS) ScreenCapture.safePlan(choice.plan, choice.monitor, encoderFailed) else null
+        val screenWgc = choice.plan.source == ScreenCapture.Source.DDAGRAB &&
+                runCatching { ScreenCapture.windowCapture(ffmpeg).monitors }.getOrDefault(false)
+        val safe = if (first.ranMs < EARLY_EXIT_MS) ScreenCapture.safePlan(choice.plan, encoderFailed, screenWgc) else null
         if (safe == null) {
             report(r, choice, choice.plan, first.output, "failed", final = true, first.reason)
             fail(r, first.reason)
@@ -604,15 +681,12 @@ object ScreenShare {
     private fun locateNow(ffmpeg: String, choice: ScreenCapture.Choice): Found {
         val m = choice.monitor
         return when (choice.plan.source) {
-            ScreenCapture.Source.DDAGRAB, ScreenCapture.Source.GDIGRAB -> when (val l = ScreenCapture.locateOnWindows(m)) {
+            ScreenCapture.Source.DDAGRAB -> when (val l = ScreenCapture.locateOnWindows(m)) {
                 ScreenCapture.Located.Unknown -> Found.NotNow
                 ScreenCapture.Located.Gone -> Found.Gone
                 is ScreenCapture.Located.Here -> {
                     val bound = ScreenCapture.rebind(choice, l.ways)
                     when {
-                        // A rectangle copy needs no adapter: any way to the screen gives its rectangle now
-                        choice.plan.source == ScreenCapture.Source.GDIGRAB ->
-                            Found.Ready(bound ?: choice.copy(monitor = l.ways.first()))
                         bound == null -> Found.NotNow
                         bound.monitor.byVendor -> Found.Ready(bound)
                         else -> ScreenCapture.confirmed(ffmpeg, bound.monitor)?.let { Found.Ready(bound.copy(monitor = it)) } ?: Found.NotNow
@@ -632,7 +706,19 @@ object ScreenShare {
                 is ScreenCapture.Located.Here -> Found.Ready(choice.copy(monitor = l.ways.first()))
             }
 
-            ScreenCapture.Source.GFXCAPTURE -> Found.NotNow
+            // Windows Graphics Capture takes the screen by its HMONITOR (any adapter): looked up now, it changes with
+            // the display setup
+            ScreenCapture.Source.GFXCAPTURE -> when (val l = ScreenCapture.locateOnWindows(m)) {
+                ScreenCapture.Located.Unknown -> Found.NotNow
+                ScreenCapture.Located.Gone -> Found.Gone
+                is ScreenCapture.Located.Here -> {
+                    val way = ScreenCapture.rebind(choice, l.ways)?.monitor ?: l.ways.first()
+                    ScreenCapture.hmonitorOf(way)?.let { Found.Ready(choice.copy(monitor = way.copy(hmonitor = it))) } ?: Found.NotNow
+                }
+            }
+
+            // GDI captures windows only
+            ScreenCapture.Source.GDIGRAB -> Found.NotNow
         }
     }
 
@@ -726,6 +812,7 @@ object ScreenShare {
     private const val GONE_CHECKS = 3
 
     private const val SCREEN_GONE = "the shared screen was disconnected or replaced"
+    private const val SCREEN_UNCAPTURABLE = "this screen can't be captured on this PC (try sharing a window)"
     /** Window sharing exists on Windows only: elsewhere the hint would point at nothing. */
     private val SCREEN_UNIDENTIFIED =
         "the screen could not be identified" + if (OsInfo.isWindows) " (try sharing a window)" else ""
@@ -755,6 +842,10 @@ object ScreenShare {
 
     private const val EARLY_EXIT_MS = 5_000L
 
+    /** [choice]'s failed tests, one line each, for a report's stderr. */
+    private fun failedTests(choice: ScreenCapture.Choice): String =
+        choice.attempts.filterNot { it.ok }.joinToString("\n") { "${it.plan}@${it.adapter}: ${it.error.replace('\n', ' ')}" }
+
     /** Plans already reported as needing a fallback this session. */
     private val plannedFallbacksReported = Collections.synchronizedSet(HashSet<String>())
 
@@ -781,8 +872,8 @@ object ScreenShare {
         } ?: (wallMicros - ScreenCapture.UNCLOCKED_START_MICROS)
         if (!r.withAudio) r.audio = null
         val input = if (r.withAudio) startAudio(r, baseNanos) else null
-        val windowCapture = (target as? ScreenCapture.Window)?.let { ScreenCapture.windowCapture(ffmpeg) }
-            ?: ScreenCapture.WindowCapture(ScreenCapture.Source.GFXCAPTURE, false)
+        val windowCapture = if (plan.source == ScreenCapture.Source.GFXCAPTURE) ScreenCapture.windowCapture(ffmpeg)
+        else ScreenCapture.WindowCapture(ScreenCapture.Source.GFXCAPTURE, false)
         val args = ScreenCapture.args(
             ffmpeg, plan.source, target, plan.encoder, publishUrl, r.settings, input, baseMicros, windowCapture,
             audioStartMicros = wallMicros,
@@ -849,18 +940,12 @@ object ScreenShare {
     /**
      * The check that [target], captured with [source], is still what the capture holds (true), is not (false), or
      * cannot be told (null); none where the capture follows its target itself (Desktop Duplication fails with
-     * "access lost" on any change, Windows Graphics Capture ends with its window). A rectangle capture (GDI, x11grab)
-     * copies fixed desktop coordinates whatever screen is there now; avfoundation's display may go away.
+     * "access lost" on any change, Windows Graphics Capture follows its window or HMONITOR). A rectangle capture
+     * (x11grab) copies fixed desktop coordinates whatever screen is there now; avfoundation's display may go away.
      */
     private fun screenWatch(target: ScreenCapture.Target, source: ScreenCapture.Source): (() -> Boolean?)? {
         val m = target as? ScreenCapture.Monitor ?: return null
         val check: () -> Boolean? = when (source) {
-            ScreenCapture.Source.GDIGRAB -> {
-                // Compared with the screen at that rectangle as the same API saw it at the start (one coordinate space)
-                val baseline = runCatching { WinScreens.screenAt(m.x, m.y, m.width, m.height) }.getOrNull()
-                fun now(): Boolean = ScreenCapture.rectStillShows(m, baseline, WinScreens.screenAt(m.x, m.y, m.width, m.height))
-                ::now
-            }
             ScreenCapture.Source.X11GRAB -> fun(): Boolean? = glfwScreens?.let { ScreenCapture.stillAt(m, it) }
             ScreenCapture.Source.AVFOUNDATION ->
                 fun(): Boolean? = MacDisplays.activeIds()?.let { ScreenCapture.avfoundationIndex(m, it) != null }

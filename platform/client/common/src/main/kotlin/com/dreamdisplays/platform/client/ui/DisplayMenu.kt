@@ -131,6 +131,9 @@ class DisplayMenu private constructor(
 
     override fun onInit() {
         val ds = displayScreen
+        // The first display menu of the session starts the screen share's capture tests in the background (where
+        // this player may share), so the share picker is ready by the time it is opened
+        ScreenShare.warmUp()
         // Playback controls drive the display through the core PlaybackService instead of mutating
         // the DisplayScreen directly, so the UI no longer reaches into the live screen for these actions.
         val displayId = DisplayId(ds.uuid)
@@ -1037,11 +1040,24 @@ class DisplayMenu private constructor(
         return true
     }
 
-    /** Share picker, first page: screens, then (Windows) windows; on macOS a note that no sound goes along. */
-    private fun shareTargetRows(): List<ShareRow> = buildList {
+    /**
+     * Share picker, first page: screens, then (Windows) windows; on macOS a note that no sound goes along. A screen
+     * whose capture was not tested yet is not offered: "Checking screens" shows in its place until it is; one that
+     * cannot be captured shows greyed, with why. [opening]: the picker opens (not a refresh while checking).
+     */
+    private fun shareTargetRows(opening: Boolean): List<ShareRow> = buildList {
         val os = ScreenShare.audioOs
         add(ShareRow.Header(ClientMessage.SHARE_SCREENS.text()))
-        ScreenShare.monitors().forEach { m -> add(ShareRow.Item(ScreenCapture.label(m)) { shareAudioRows(m) }) }
+        val screens = ScreenShare.screens(recheck = opening)
+        screens.screens.forEach { o ->
+            when (o.state) {
+                ScreenShare.ScreenState.READY -> add(ShareRow.Item(ScreenCapture.label(o.monitor)) { shareAudioRows(o.monitor) })
+                ScreenShare.ScreenState.UNAVAILABLE ->
+                    add(ShareRow.Note(ClientMessage.SHARE_SCREEN_UNAVAILABLE.text(ScreenCapture.label(o.monitor))))
+                ScreenShare.ScreenState.CHECKING -> {}
+            }
+        }
+        if (screens.checking) add(ShareRow.Pending(ClientMessage.SHARE_CHECKING.text()))
         val windows = ScreenShare.windows()
         if (windows.isNotEmpty()) {
             add(ShareRow.Header(ClientMessage.SHARE_WINDOWS.text()))

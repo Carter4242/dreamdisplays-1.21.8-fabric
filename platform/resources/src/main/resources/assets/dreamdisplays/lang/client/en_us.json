@@ -81,6 +81,8 @@
   "dreamdisplays.share.failed": "Screen share stopped: %s",
   "dreamdisplays.share.refused": "Screen share not started: %s",
   "dreamdisplays.share.screens": "Screens",
+  "dreamdisplays.share.checking": "Checking screens",
+  "dreamdisplays.share.screen.unavailable": "%s - can't be captured",
   "dreamdisplays.share.windows": "Windows",
   "dreamdisplays.share.window.silent.app": "This window is shared without sound: its app could not be found. Restore the window and share it again.",
   "dreamdisplays.share.window.silent.windows": "This window is shared without sound: this version of Windows can't capture one app's sound. Share a screen to choose its sound.",

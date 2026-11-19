@@ -56,19 +56,20 @@ class ScreenCaptureLiveTest {
             val bad = Plan(Source.DDAGRAB, wrong)
             val badResult = run(ScreenCapture.args(ffmpeg, bad.source, screen, bad.encoder, "rtmp://127.0.0.1:9/x").dropLast(3) +
                     listOf("-frames:v", "5", "-f", "null", "-"))
-            val safe = ScreenCapture.safePlan(bad, screen, ScreenCapture.isEncoderOpenFailure(badResult.second))
+            val safe = ScreenCapture.safePlan(bad, ScreenCapture.isEncoderOpenFailure(badResult.second),
+                ScreenCapture.windowCapture(ffmpeg).monitors)
             println("  forced $bad: exit ${badResult.first} encoderFailure=${ScreenCapture.isEncoderOpenFailure(badResult.second)} -> retry $safe")
             if (badResult.first != 0) {
                 assertNotNull(safe)
-                val ok = publish(screen, safe, "s${i + 1}_retry")
+                val ok = publish(screen.copy(hmonitor = ScreenCapture.hmonitorOf(screen) ?: 0), safe, "s${i + 1}_retry")
                 rows += "| ${screen.name} | ${screen.deviceName} | runtime retry after $bad | $safe | - | ${if (ok) "published" else "FAILED"} |"
                 assertTrue(ok, "retry publishes")
             }
-            // GDI on its own, as used when Desktop Duplication cannot open a screen
-            val gdi = Plan(Source.GDIGRAB, Encoder.X264)
-            val ok = publish(screen, gdi, "s${i + 1}_gdi")
-            rows += "| ${screen.name} | ${screen.deviceName} | gdigrab forced | $gdi | - | ${if (ok) "published" else "FAILED"} |"
-            assertTrue(ok, "gdi publishes")
+            // Windows Graphics Capture on its own, as used when Desktop Duplication gives a screen no frame
+            val wgc = Plan(Source.GFXCAPTURE, Encoder.X264)
+            val ok = publish(screen.copy(hmonitor = assertNotNull(ScreenCapture.hmonitorOf(screen))), wgc, "s${i + 1}_wgc")
+            rows += "| ${screen.name} | ${screen.deviceName} | gfxcapture forced | $wgc | - | ${if (ok) "published" else "FAILED"} |"
+            assertTrue(ok, "gfxcapture publishes")
         }
         println("RESULTS")
         rows.forEach(::println)

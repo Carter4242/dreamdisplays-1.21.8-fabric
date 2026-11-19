@@ -18,7 +18,6 @@ import com.dreamdisplays.platform.client.managers.DisplayLifecycleManager
 import com.dreamdisplays.platform.client.managers.DisplayWarmup
 import com.dreamdisplays.platform.client.managers.FullscreenController
 import com.dreamdisplays.platform.client.managers.FullscreenPrepareController
-import com.dreamdisplays.platform.client.net.ProtocolRouter
 import com.dreamdisplays.platform.client.overlay.OverlayManager
 import com.dreamdisplays.platform.client.ui.FullscreenOverlayManager
 import com.dreamdisplays.shared.capability.ServerFeature
@@ -121,7 +120,6 @@ object MasterSwitch {
         stagesLeft.clear()
         ClientStartupManager.startBackgroundWork()
         tellServer()
-        if (ProtocolRouter.v2Negotiated) ScreenShare.prewarm()
         if (ClientStateManager.displaysEnabled) DisplayLifecycleManager.replayHeld()
     }
 

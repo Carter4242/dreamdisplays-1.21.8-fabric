@@ -17,14 +17,16 @@ import java.util.concurrent.TimeUnit
  *
  * On Windows each screen gets its own [Plan]: the first capture source and encoder that run that screen's real
  * pipeline (Desktop Duplication on the screen's own graphics adapter with that GPU's encoder, then the other hardware
- * encoders, then x264; GDI capture if Desktop Duplication cannot open the screen at all).
+ * encoders, then x264; Windows Graphics Capture of the screen, same encoder order, if Desktop Duplication gives it no
+ * frame). A screen neither captures is not shareable ([Choice.works] false). GDI never captures a screen: it copies a
+ * GPU-presented game as one frozen frame while its test passes.
  */
 object ScreenCapture {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     /**
-     * Where the picture comes from. [GDIGRAB] is the Windows fallback when Desktop Duplication cannot open a screen
-     * (and when a build lacks [GFXCAPTURE], which captures one window).
+     * Where the picture comes from. [GFXCAPTURE] (Windows Graphics Capture) captures one window, and a screen where
+     * Desktop Duplication gives no frame; [GDIGRAB] only captures a window, and only with a build that lacks it.
      */
     enum class Source(val ffmpegName: String) {
         DDAGRAB("ddagrab"), GDIGRAB("gdigrab"), AVFOUNDATION("avfoundation"), X11GRAB("x11grab"), GFXCAPTURE("gfxcapture")
@@ -56,6 +58,11 @@ object ScreenCapture {
          * process, and a GPU preference set for the game (common on laptops) puts its GPU first only for the game.
          */
         val ffmpegAdapter: Int = -1,
+        /**
+         * The screen's `HMONITOR` for a Windows Graphics Capture of it (0: not looked up). Looked up right before
+         * each capture (see [hmonitorOf]): a display change hands out new ones.
+         */
+        val hmonitor: Long = 0,
     ) : Target
 
     /** H.264 encoders tried in order; the first that encodes a test picture here wins. */
@@ -135,7 +142,7 @@ object ScreenCapture {
         val cap = if (serverMaxFps > 0) serverMaxFps else 60
         if (!sixtyPossible(cap, source, encoder)) return minOf(30, cap)
         val probe = Settings.forFps(60).limitedTo(0, maxHeight)
-        // The prewarm measured the full size: a smaller picture encodes no slower, so a full size within budget
+        // The warm-up measured the full size: a smaller picture encodes no slower, so a full size within budget
         // spares the share start a ~2 s test at the server's height
         val full = Settings.forFps(60)
         if (probe.maxHeight <= full.maxHeight && (measuredMsPerFrame(ffmpeg, encoder, full) ?: Double.MAX_VALUE) <= SIXTY_BUDGET_MS) {
@@ -160,8 +167,22 @@ object ScreenCapture {
     /** One pipeline test while choosing a [Plan]: [adapter] as `FFmpeg` was told to open it, [error] when it failed. */
     data class Attempt(val plan: Plan, val adapter: String, val ok: Boolean, val error: String = "", val elapsedMs: Long = 0)
 
-    /** The [Plan] chosen for a screen, the exact [monitor] variant it runs on, and the tests behind it. */
-    data class Choice(val monitor: Monitor, val plan: Plan, val attempts: List<Attempt>)
+    /**
+     * The [Plan] chosen for a screen, the exact [monitor] variant it runs on, and the tests behind it. [works] is false
+     * when no capture source gave that screen a frame: it is not offered and never shared ([plan] is a placeholder);
+     * [checkedAtMs] is when that was found (it is checked again after [RECHECK_UNUSABLE_MS]).
+     */
+    data class Choice(
+        val monitor: Monitor, val plan: Plan, val attempts: List<Attempt>, val works: Boolean = true,
+        val checkedAtMs: Long = 0,
+    )
+
+    /** How long a screen found unshareable stays so before the picker checks it again. */
+    const val RECHECK_UNUSABLE_MS = 30_000L
+
+    /** True when [choice] (a cached one, or none) needs its screen tested (again). */
+    fun needsCheck(choice: Choice?, nowMs: Long = System.currentTimeMillis()): Boolean =
+        choice == null || (!choice.works && nowMs - choice.checkedAtMs >= RECHECK_UNUSABLE_MS)
 
     /** The capture source on this OS, or null where there is none (Linux under Wayland: see [linuxSource]). */
     fun sourceForThisOs(): Source? = when {
@@ -238,16 +259,24 @@ object ScreenCapture {
     fun knownChoice(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean = false): Choice? =
         choices[choiceKey(ffmpeg, monitor, softwareOnly)]
 
+    /** [monitor] could not be tested at all ([why]): it counts as unshareable until it is due a new test. */
+    fun rememberUnusable(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean, why: String) {
+        choices[choiceKey(ffmpeg, monitor, softwareOnly)] = Choice(monitor, Plan(Source.DDAGRAB, Encoder.X264),
+            [Attempt(Plan(Source.DDAGRAB, Encoder.X264), "test", ok = false, error = why.take(300))],
+            works = false, checkedAtMs = System.currentTimeMillis())
+    }
+
     /** The share of [monitor] ran fine with [choice] (e.g. a fallback after the first plan failed): keep it. */
     fun rememberChoice(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean, choice: Choice) {
         choices[choiceKey(ffmpeg, monitor, softwareOnly)] = choice
     }
 
     /**
-     * How to share [monitor]: the first source and encoder that encode two frames of its real pipeline. On macOS and
+     * How to share [monitor]: the first source and encoder that encode frames of its real pipeline. On macOS and
      * Linux that is the OS source with the best encoder. On Windows: Desktop Duplication on the screen's own adapter
      * (or a duplicate of the screen on another adapter) with that GPU's encoder, the other hardware encoders, then
-     * x264; then GDI capture. [softwareOnly] (the server asked for it) tries x264 only. Cached per screen; blocks for
+     * x264; then Windows Graphics Capture of the screen in the same encoder order; when neither works, a Choice that
+     * does not [Choice.works]. [softwareOnly] (the server asked for it) tries x264 only. Cached per screen; blocks for
      * a few `FFmpeg` runs the first time, so call off the render thread. Null when DXGI no longer lists that screen
      * (Windows): nothing else is ever captured in its place.
      */
@@ -261,6 +290,12 @@ object ScreenCapture {
         }
         // A plan cached under this screen name for another monitor (the name went to it since) is not this screen's
         knownChoice(ffmpeg, monitor, softwareOnly)?.takeIf { it.monitor.key == monitor.key }?.let { cached ->
+            // Found unshareable a moment ago: stays so (the picker does not offer it) until it is due a new test
+            if (!cached.works) {
+                if (!needsCheck(cached)) return cached
+                choices.remove(choiceKey(ffmpeg, monitor, softwareOnly))
+                return@let
+            }
             // The screen as it is now: monitors sleep, get plugged, rearranged, resized while the game stays open
             val fresh = when (val l = locateOnWindows(cached.monitor)) {
                 Located.Unknown -> return cached
@@ -280,10 +315,14 @@ object ScreenCapture {
             choices.remove(choiceKey(ffmpeg, monitor, softwareOnly))
         }
         val choice = chooseOnWindows(ffmpeg, monitor, softwareOnly) ?: return null
-        logger.info(
-            "Screen share plan for {}: {} on {} (tried {}).", monitor.deviceName.ifEmpty { monitor.name },
-            choice.plan, adapterLabel(choice.monitor), choice.attempts.joinToString { "${it.plan}@${it.adapter}=${if (it.ok) "ok" else "fail"}" },
-        )
+        val tried = choice.attempts.joinToString { "${it.plan}@${it.adapter}=${if (it.ok) "ok" else "fail"}" }
+        if (choice.works) {
+            logger.info("Screen share plan for {}: {} on {} (tried {}).", monitor.deviceName.ifEmpty { monitor.name },
+                choice.plan, adapterLabel(choice.monitor), tried)
+        } else {
+            logger.warn("Screen share: {} cannot be captured (tried {}): {}", monitor.deviceName.ifEmpty { monitor.name }, tried,
+                choice.attempts.filterNot { it.ok }.joinToString(" || ") { "${it.plan}@${it.adapter}: ${it.error.replace('\n', ' ')}" })
+        }
         choices[choiceKey(ffmpeg, monitor, softwareOnly)] = choice
         return choice
     }
@@ -403,6 +442,18 @@ object ScreenCapture {
         return monitor.copy(ffmpegAdapter = j).takeIf { confirm(ffmpeg, it) }
     }
 
+    /**
+     * [monitor]'s `HMONITOR` now (Windows): the screen covering its rectangle, when that is the same screen (its
+     * Windows name and monitors); null otherwise or off Windows. The handle is the same in every process of the
+     * session, so `FFmpeg` captures it by this number.
+     */
+    fun hmonitorOf(monitor: Monitor): Long? = runCatching {
+        if (!OsInfo.isWindows || !monitor.rectKnown || monitor.width <= 0 || monitor.height <= 0) return null
+        val (handle, screen) = com.dreamdisplays.media.player.process.win.WinScreens
+            .monitorAt(monitor.x, monitor.y, monitor.width, monitor.height) ?: return null
+        handle.takeIf { handle != 0L && sameScreen(monitor, screen) }
+    }.onFailure { logger.debug("HMONITOR of {} unavailable: {}", monitor.deviceName, it.toString()) }.getOrNull()
+
     /** The adapter index `FFmpeg` is told for [monitor]. */
     internal fun adapterIndexFor(monitor: Monitor): Int = if (monitor.ffmpegAdapter >= 0) monitor.ffmpegAdapter else monitor.adapter
 
@@ -440,24 +491,58 @@ object ScreenCapture {
     private val CAPTURE_LOST = Regex("(?i)AcquireNextFrame failed|887a0026|ACCESS_LOST")
 
     private fun chooseOnWindows(ffmpeg: String, monitor: Monitor, softwareOnly: Boolean): Choice? {
-        val attempts = ArrayList<Attempt>()
         val variants = variantsOf(monitor)
         if (variants.isEmpty()) {
             logger.info("Screen share: {} is no longer connected.", monitor.deviceName)
             return null
         }
+        val probes = object : PlanProbes {
+            override fun encoders(monitor: Monitor) = encodersFor(ffmpeg, monitor, softwareOnly)
+            override fun probe(plan: Plan, monitor: Monitor) = probePipeline(ffmpeg, plan, monitor)
+            override fun ffmpegAdapter(pciId: String, skip: Int) = ffmpegAdapterOf(ffmpeg, pciId, skip)
+            override val screenWgc: Boolean get() = windowCapture(ffmpeg).monitors
+            override fun hmonitor(monitor: Monitor) = hmonitorOf(monitor)
+        }
+        return planFor(variants, probes)
+    }
+
+    /** What [planFor] runs and asks (real `FFmpeg` runs in [chooseOnWindows]; fakes in tests). */
+    internal interface PlanProbes {
+        /** Encoders to try on [monitor], best first. */
+        fun encoders(monitor: Monitor): List<Encoder>
+
+        /** Runs [plan] on [monitor] for a frame or two. */
+        fun probe(plan: Plan, monitor: Monitor): ProbeResult
+
+        /** `FFmpeg`'s index for the GPU [pciId] when it is not [skip], or null. */
+        fun ffmpegAdapter(pciId: String, skip: Int): Int?
+
+        /** This `FFmpeg` can capture a whole screen with Windows Graphics Capture. */
+        val screenWgc: Boolean
+
+        /** [monitor]'s `HMONITOR` now, or null. */
+        fun hmonitor(monitor: Monitor): Long?
+    }
+
+    /**
+     * [variants]' plan (every way to reach one screen, see [variantsOf]): Desktop Duplication on each way with each
+     * encoder, then Windows Graphics Capture of the screen with each encoder; the first that encodes wins. A failure
+     * of the capture itself skips that source's other encoders. Neither working: a Choice that does not [Choice.works].
+     */
+    internal fun planFor(variants: List<Monitor>, probes: PlanProbes, nowMs: () -> Long = System::currentTimeMillis): Choice {
+        val attempts = ArrayList<Attempt>()
         // Desktop Duplication, on each adapter that shows this screen
         for (variant in variants) {
             var m = variant
-            for (encoder in encodersFor(ffmpeg, m, softwareOnly)) {
+            for (encoder in probes.encoders(m)) {
                 val plan = Plan(Source.DDAGRAB, encoder)
-                var r = probePipeline(ffmpeg, plan, m)
+                var r = probes.probe(plan, m)
                 var wrongAdapter = r.pciId != null && m.adapterPciId.isNotEmpty() && r.pciId != m.adapterPciId
                 if (wrongAdapter && !m.byVendor && m.ffmpegAdapter < 0) {
                     // FFmpeg numbers this GPU differently (two GPUs of one vendor, a GPU preference set for the game)
-                    ffmpegAdapterOf(ffmpeg, m.adapterPciId, skip = m.adapter)?.let { j ->
+                    probes.ffmpegAdapter(m.adapterPciId, m.adapter)?.let { j ->
                         m = m.copy(ffmpegAdapter = j)
-                        r = probePipeline(ffmpeg, plan, m)
+                        r = probes.probe(plan, m)
                         wrongAdapter = r.pciId != null && r.pciId != m.adapterPciId
                     }
                 }
@@ -466,22 +551,31 @@ object ScreenCapture {
                 attempts += Attempt(plan, adapterLabel(m), ok, if (ok) "" else error, r.elapsedMs)
                 if (ok) return Choice(m, plan, attempts)
                 // The capture itself (or the adapter) failed: no other encoder will help on this variant
-                if (wrongAdapter || !isEncoderOpenFailure(r.tail)) break
+                if (wrongAdapter || !isEncoderOpenFailure(r.output)) break
             }
         }
-        // GDI: copies the desktop rectangle, any adapter; hardware encoders then open a device of their own
+        // Windows Graphics Capture of the whole screen (the compositor's picture, any adapter); never GDI, which
+        // passes its test yet shows a GPU-presented game as one frozen frame
         val first = variants.first()
-        if (first.rectKnown && first.width > 0 && first.height > 0) {
-            for (encoder in encodersFor(ffmpeg, first, softwareOnly)) {
-                val plan = Plan(Source.GDIGRAB, encoder)
-                val r = probePipeline(ffmpeg, plan, first)
-                attempts += Attempt(plan, "gdi", r.ok, if (r.ok) "" else r.tail, r.elapsedMs)
-                if (r.ok) return Choice(first, plan, attempts)
-                if (!isEncoderOpenFailure(r.tail)) break
+        if (probes.screenWgc) {
+            val h = probes.hmonitor(first)
+            if (h == null || h == 0L) {
+                attempts += Attempt(Plan(Source.GFXCAPTURE, Encoder.X264), "wgc", false, "no HMONITOR for ${first.deviceName}")
+            } else {
+                val m = first.copy(hmonitor = h)
+                for (encoder in probes.encoders(m)) {
+                    val plan = Plan(Source.GFXCAPTURE, encoder)
+                    val r = probes.probe(plan, m)
+                    attempts += Attempt(plan, "wgc", r.ok, if (r.ok) "" else r.tail, r.elapsedMs)
+                    // Kept without its HMONITOR: each capture looks it up again
+                    if (r.ok) return Choice(first, plan, attempts)
+                    if (!isEncoderOpenFailure(r.output)) break
+                }
             }
-            return Choice(first, Plan(Source.GDIGRAB, Encoder.X264), attempts)
+        } else {
+            attempts += Attempt(Plan(Source.GFXCAPTURE, Encoder.X264), "wgc", false, "this FFmpeg has no screen gfxcapture")
         }
-        return Choice(first, Plan(Source.DDAGRAB, Encoder.X264), attempts)
+        return Choice(first, Plan(Source.DDAGRAB, Encoder.X264), attempts, works = false, checkedAtMs = nowMs())
     }
 
     /** Hardware encoders for [monitor]'s GPU first (on another GPU's device they fail), then the others, then x264. */
@@ -496,27 +590,35 @@ object ScreenCapture {
         return usableEncoders(ffmpeg).sortedBy { if (it == own) 0 else if (it.hardware) 1 else 2 }
     }
 
-    /** The safe plan to retry with after [plan] failed at once: x264, and GDI capture too unless only the encoder failed. */
-    fun safePlan(plan: Plan, monitor: Monitor, encoderFailed: Boolean): Plan? {
-        val gdi = plan.source == Source.DDAGRAB && monitor.rectKnown && monitor.width > 0
-        return when {
-            plan.encoder != Encoder.X264 && (encoderFailed || !gdi) -> Plan(plan.source, Encoder.X264)
-            gdi -> Plan(Source.GDIGRAB, Encoder.X264)
-            plan.encoder != Encoder.X264 -> Plan(plan.source, Encoder.X264)
-            else -> null
-        }
+    /**
+     * The safe plan to retry a screen with after [plan] failed at once: x264 when only the encoder failed; Windows
+     * Graphics Capture (x264) after Desktop Duplication itself failed, where [screenWgc] (this `FFmpeg` captures
+     * screens with it); else x264 on the same source. Never GDI. Null when nothing safer is left.
+     */
+    fun safePlan(plan: Plan, encoderFailed: Boolean, screenWgc: Boolean): Plan? = when {
+        plan.encoder != Encoder.X264 && encoderFailed -> Plan(plan.source, Encoder.X264)
+        plan.source == Source.DDAGRAB && screenWgc -> Plan(Source.GFXCAPTURE, Encoder.X264)
+        plan.encoder != Encoder.X264 -> Plan(plan.source, Encoder.X264)
+        else -> null
     }
 
-    internal data class ProbeResult(val ok: Boolean, val pciId: String?, val tail: String, val elapsedMs: Long)
+    /** One pipeline test: [tail] is [errorTail] of the run's [output]. */
+    internal data class ProbeResult(
+        val ok: Boolean, val pciId: String?, val tail: String, val elapsedMs: Long, val output: String = tail,
+    )
 
-    /** Encodes two frames of [plan] on [monitor] to nowhere. */
+    /**
+     * Encodes two frames of [plan] on [monitor] to nowhere (one for Windows Graphics Capture: it sends a frame only
+     * when the screen changes, and a still screen would hold a second one back).
+     */
     internal fun probePipeline(ffmpeg: String, plan: Plan, monitor: Monitor, settings: Settings = Settings()): ProbeResult {
+        val frames = if (plan.source == Source.GFXCAPTURE) "1" else "2"
         val args: List<String> = listOf(ffmpeg, "-hide_banner", "-loglevel", "verbose", "-nostats") +
                 inputArgs(plan.source, monitor, plan.encoder, settings) + listOf("-an") + encoderArgs(plan.encoder, settings) +
-                listOf("-frames:v", "2", "-f", "null", "-")
+                listOf("-frames:v", frames, "-f", "null", "-")
         val r = exec(args)
         val pci = USING_DEVICE.find(r.output)?.let { "${it.groupValues[1]}:${it.groupValues[2]}".lowercase() }
-        return ProbeResult(r.ok, pci, r.tail, r.elapsedMs)
+        return ProbeResult(r.ok, pci, r.tail, r.elapsedMs, r.output)
     }
 
     private class RunResult(val ok: Boolean, val output: String, val tail: String, val elapsedMs: Long)
@@ -544,12 +646,43 @@ object ScreenCapture {
         }
     }
 
-    /** The lines of `FFmpeg` output that say what went wrong (at most the last 4). */
-    fun errorTail(output: String): String = output.lineSequence()
-        .filter { ERROR_LINE.containsMatchIn(it) }
-        .toList().takeLast(4).joinToString("\n") { it.trim().take(300) }
+    /**
+     * The lines of `FFmpeg` output that say what went wrong, shortened (`[ddagrab]` for `[Parsed_ddagrab_0 @ 0x...]`):
+     * first the capture source's own lines (the last [TAIL_CAPTURE_LINES]: how far it got and why it stopped, e.g.
+     * `Failed to enumerate DXGI output 1`), then the last [TAIL_ERROR_LINES] other error lines. The aftermath every
+     * failed run prints (`Could not open encoder before EOF`, `Terminating thread ... -22`, `Conversion failed!`) only
+     * when nothing else says anything. Capture lines first: report fields are cut at 300 characters.
+     */
+    fun errorTail(output: String): String {
+        val lines = output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val capture = lines.filter { CAPTURE_FAILURE.containsMatchIn(it) && !CAPTURE_NOISE.containsMatchIn(it) }
+            .takeLast(TAIL_CAPTURE_LINES)
+        val errors = lines.filter { ERROR_LINE.containsMatchIn(it) && it !in capture }
+        val telling = errors.filterNot { AFTERMATH.containsMatchIn(it) }.takeLast(TAIL_ERROR_LINES)
+        val kept = capture + telling.ifEmpty { errors.takeLast(TAIL_ERROR_LINES) }
+        return kept.joinToString("\n") { shortLine(it).take(300) }
+    }
+
+    /** [line] without `FFmpeg`'s context addresses, a filter instance named by its filter (`[ddagrab]`). */
+    internal fun shortLine(line: String): String =
+        line.replace(LOG_ADDRESS, "]").replace(PARSED_FILTER, "[\$1]")
+
+    private const val TAIL_CAPTURE_LINES = 4
+    private const val TAIL_ERROR_LINES = 3
 
     private val ERROR_LINE = Regex("(?i)error|fail|unable|cannot|could not|not support|no such|invalid|denied|unsupported")
+
+    /** What every failed run prints after the real cause (the encoder only saw the graph end). */
+    private val AFTERMATH = Regex(
+        "(?i)Could not open encoder before EOF|Task finished with error code|Terminating thread with return code|" +
+            "Conversion failed|Nothing was written into output file|Exiting with exit code|Error while filtering|" +
+            "Error sending frames to consumers",
+    )
+
+    /** A capture source's lines that say nothing about its picture (which device it got handed). */
+    private val CAPTURE_NOISE = Regex("(?i)hw_device_ctx")
+    private val LOG_ADDRESS = Regex(""" @ (?:0x)?[0-9a-fA-F]+]""")
+    private val PARSED_FILTER = Regex("""\[Parsed_([a-z0-9]+?)_\d+]""")
     private val USING_DEVICE = Regex("""Using device ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})""")
 
     /**
@@ -558,8 +691,9 @@ object ScreenCapture {
      */
     fun isEncoderOpenFailure(output: String): Boolean = ENCODER_OPEN_FAILURE.containsMatchIn(output)
 
+    // "Could not open encoder before EOF" is no encoder failure: the filter graph (the capture) ended before a frame
     private val ENCODER_OPEN_FAILURE = Regex(
-        "Error while opening encoder|Could not open encoder|Failed to create derived|AMF failed to initiali[sz]e|" +
+        "Error while opening encoder|Could not open encoder(?! before EOF)|Failed to create derived|AMF failed to initiali[sz]e|" +
                 "nvenc API version|OpenEncodeSessionEx failed|No NVENC capable devices|Error creating a MFX session|" +
                 "Cannot load nvcuda|Cannot load amfrt|\\[(?:h264_(?:nvenc|amf|qsv|videotoolbox)|libx264)[^\\]]*\\][^\\n]*(?:error|fail)",
         RegexOption.IGNORE_CASE,
@@ -605,9 +739,10 @@ object ScreenCapture {
     /**
      * How [ffmpeg] captures a single window: Windows Graphics Capture (`gfxcapture`, FFmpeg 8+: GPU frames, covered
      * windows included) when it has it, else GDI (`gdigrab`, which shows hardware-drawn windows black). [dupFrames]:
-     * the build repeats the last frame of a window that draws nothing, rather than stalling the stream.
+     * the build repeats the last frame of a window that draws nothing, rather than stalling the stream. [monitors]:
+     * its `gfxcapture` also captures a whole screen (`hmonitor`), the screens' fallback after Desktop Duplication.
      */
-    data class WindowCapture(val source: Source, val dupFrames: Boolean)
+    data class WindowCapture(val source: Source, val dupFrames: Boolean, val monitors: Boolean = false)
 
     @Volatile
     private var windowCapture: Pair<String, WindowCapture>? = null
@@ -616,14 +751,15 @@ object ScreenCapture {
     fun windowCapture(ffmpeg: String): WindowCapture {
         windowCapture?.takeIf { it.first == ffmpeg }?.let { return it.second }
         val found = parseWindowCapture(exec(listOf(ffmpeg, "-hide_banner", "-h", "filter=gfxcapture")).output)
-        logger.info("Screen share window capture: {}{}.", found.source.ffmpegName, if (found.dupFrames) " (dup_frames)" else "")
+        logger.info("Screen share window capture: {}{}{}.", found.source.ffmpegName, if (found.dupFrames) " (dup_frames)" else "",
+            if (found.monitors) " (screens too)" else "")
         windowCapture = ffmpeg to found
         return found
     }
 
     /** Reads `ffmpeg -h filter=gfxcapture`: an unknown filter prints no option table. */
     internal fun parseWindowCapture(help: String): WindowCapture =
-        if ("hwnd" in help && "gfxcapture AVOptions" in help) WindowCapture(Source.GFXCAPTURE, "dup_frames" in help)
+        if ("hwnd" in help && "gfxcapture AVOptions" in help) WindowCapture(Source.GFXCAPTURE, "dup_frames" in help, "hmonitor" in help)
         else WindowCapture(Source.GDIGRAB, dupFrames = true)
 
     /**
@@ -660,9 +796,10 @@ object ScreenCapture {
         val forcedIdr = forcedIdrOption(ffmpeg, encoder)
         add(ffmpeg)
         addAll(["-hide_banner", "-loglevel", "error", "-nostats"])
-        // A window without sound still carries a silent track: a still window sends no frames, and without any packets
-        // the viewers' connection times out and reconnects (a screen keeps sending frames, and skips the audio delay)
-        val sound = audio ?: if (target is Window) ShareAudio.Input.Silence else null
+        // A window (or a screen through Windows Graphics Capture) without sound still carries a silent track: a still
+        // picture sends no frames there, and without any packets the viewers' connection times out and reconnects
+        // (Desktop Duplication and the others keep sending frames, and skip the audio delay)
+        val sound = audio ?: if (target is Window || source == Source.GFXCAPTURE) ShareAudio.Input.Silence else null
         val clocked = sound != null || clockBaseMicros > 0
         val video = videoArgs(source, target, encoder, settings, if (clocked) clockBaseMicros else null, windowCapture)
         addAll(video.inputs)
@@ -746,7 +883,9 @@ object ScreenCapture {
                 // screen is still, so the stream never pauses); downloaded once, scaled on the CPU. It only sees the
                 // screens of one graphics adapter, so a screen on another one names its adapter. The source has to sit
                 // in -filter_complex: as `-f lavfi -i ddagrab` it never gets -filter_hw_device and always opens the
-                // default adapter, whichever screen was asked for.
+                // default adapter, whichever screen was asked for. An HDR (10-bit / FP16) desktop needs nothing more:
+                // ddagrab's default output_fmt (8bit) asks Windows for BGRA only, which converts it to SDR; its 10-bit
+                // and FP16 outputs would reach viewers untone-mapped (washed out).
                 val m = requireNotNull(monitor) { "ddagrab captures a monitor" }
                 inputs.addAll(adapterArgs(m))
                 output.addAll(["-filter_complex",
@@ -755,30 +894,32 @@ object ScreenCapture {
             }
 
             Source.GFXCAPTURE -> {
-                // Windows Graphics Capture of one window, covered or not, on a GPU device of its own. Its frames keep
-                // the window's size at the start; a window resized later is scaled into them with its aspect kept
-                // (black bars). A window that draws nothing (minimized) sends nothing unless the build repeats frames.
-                val w = requireNotNull(window) { "gfxcapture captures a window" }
+                // Windows Graphics Capture of one window, covered or not, or of a whole screen (by HMONITOR), on a GPU
+                // device of its own. Its frames keep the start size; a window (or screen mode) resized later is scaled
+                // into them with its aspect kept (black bars). A picture that does not change (a still screen, a
+                // minimized window) sends nothing unless the build repeats frames.
+                val item = if (window != null) {
+                    "hwnd=${java.lang.Long.toUnsignedString(window.hwnd)}"
+                } else {
+                    val m = requireNotNull(monitor)
+                    require(m.hmonitor != 0L) { "gfxcapture captures a screen by its HMONITOR" }
+                    "hmonitor=${java.lang.Long.toUnsignedString(m.hmonitor)}"
+                }
                 val dup = if (windowCapture.dupFrames) ":dup_frames=1" else ""
                 output.addAll(["-filter_complex",
-                    "gfxcapture=hwnd=${java.lang.Long.toUnsignedString(w.hwnd)}:max_framerate=$fps:capture_cursor=1" +
+                    "gfxcapture=$item:max_framerate=$fps:capture_cursor=1" +
                             ":capture_border=0:display_border=0:resize_mode=scale_aspect$dup$wallClock," +
                             "hwdownload,format=bgra,$fit,format=$pixFmt[v]",
                     "-map", "[v]"])
             }
 
             Source.GDIGRAB -> {
-                // GDI: copies the screen's rectangle of the desktop (primary screen's top left is 0,0), or one
-                // window; slower than Desktop Duplication but works where it cannot (old drivers, remote sessions)
+                // GDI: one window, where the build has no Windows Graphics Capture. Never a screen: GDI copies a
+                // GPU-presented game (flip model) as one frozen frame, while its test passes
+                val w = requireNotNull(window) { "gdigrab captures a window, never a screen" }
                 inputs.addAll(offset)
                 inputs.addAll(["-f", "gdigrab", "-draw_mouse", "1", "-framerate", fps])
-                if (window != null) {
-                    inputs.addAll(["-i", "hwnd=${java.lang.Long.toUnsignedString(window.hwnd)}"])
-                } else {
-                    val m = requireNotNull(monitor)
-                    inputs.addAll(["-offset_x", m.x.toString(), "-offset_y", m.y.toString()])
-                    inputs.addAll(["-video_size", "${m.width}x${m.height}", "-i", "desktop"])
-                }
+                inputs.addAll(["-i", "hwnd=${java.lang.Long.toUnsignedString(w.hwnd)}"])
                 output.addAll(["-vf", "$fit,format=$pixFmt"])
             }
 

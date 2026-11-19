@@ -5,11 +5,29 @@ import com.dreamdisplays.media.player.process.ScreenCapture.Encoder
 import com.dreamdisplays.media.player.process.ScreenCapture.Source
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ScreenCaptureArgsTest {
     private val monitor = ScreenCapture.Monitor(1, "DELL U2720Q", 2560, 0, 3840, 2160)
+
+    /** A Desktop Duplication test that got no screen (as the bundled FFmpeg 9 prints it, `-loglevel verbose`). */
+    private val DDAGRAB_NO_OUTPUT = """
+        [Parsed_scale_3 @ 0000022a4c28d480] w:min(1920,iw) h:min(1080,ih) flags:'' interl:0
+        [Parsed_ddagrab_0 @ 0000022a4c28d280] Using provided hw_device_ctx
+        [Parsed_ddagrab_0 @ 0000022a4c28d280] Failed to enumerate DXGI output 7
+        [Parsed_ddagrab_0 @ 0000022a4c28d280] Failed to configure output pad on Parsed_ddagrab_0
+        [fc#0 @ 0000022a529af780] Error configuring filter graph: Generic error in an external library
+        [fc#0 @ 0000022a529af780] Task finished with error code: -542398533 (Generic error in an external library)
+        [fc#0 @ 0000022a529af780] Terminating thread with return code -542398533 (Generic error in an external library)
+        [vost#0:0/libx264 @ 0000022a529be5c0] [enc:libx264 @ 0000022a5293c100] Encoder thread received EOF
+        [vost#0:0/libx264 @ 0000022a529be5c0] [enc:libx264 @ 0000022a5293c100] Could not open encoder before EOF
+        [vost#0:0/libx264 @ 0000022a529be5c0] Task finished with error code: -22 (Invalid argument)
+        [vost#0:0/libx264 @ 0000022a529be5c0] Terminating thread with return code -22 (Invalid argument)
+        [out#0/null @ 0000022a528f7dc0] Nothing was written into output file, because at least one of its streams received no packets.
+        Conversion failed!
+    """.trimIndent()
     private val publish = "srt://relay.example.com:8890?streamid=publish:ddabc"
 
     private fun List<String>.valueOf(flag: String): String? =
@@ -112,15 +130,30 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
-    fun `gdi capture copies the screen's desktop rectangle`() {
+    fun `gdi never captures a screen, it shows a gpu-presented game frozen`() {
         val left = ScreenCapture.Monitor(0, "Screen 1", -1920, 0, 1920, 1080, adapter = 1, deviceName = "\\\\.\\DISPLAY2")
-        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, left, Encoder.X264, publish)
-        assertEquals("gdigrab", a.valueOf("-f"))
-        assertEquals("-1920", a.valueOf("-offset_x"))
-        assertEquals("0", a.valueOf("-offset_y"))
-        assertEquals("1920x1080", a.valueOf("-video_size"))
-        assertEquals("desktop", a.valueOf("-i"))
+        assertFailsWith<IllegalArgumentException> { ScreenCapture.args("FFMPEG", Source.GDIGRAB, left, Encoder.X264, publish) }
+    }
+
+    @Test
+    fun `windows graphics capture shares a screen by its hmonitor, with a silent track to keep a still screen alive`() {
+        val screen = ScreenCapture.Monitor(0, "Screen 1", 0, 0, 2560, 1440, adapter = 0, deviceName = "\\\\.\\DISPLAY1", hmonitor = 384110573L)
+        val a = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, screen, Encoder.NVENC, publish,
+            windowCapture = ScreenCapture.WindowCapture(Source.GFXCAPTURE, dupFrames = false, monitors = true))
+        val graph = a.valueOf("-filter_complex")!!
+        assertTrue(graph.startsWith("gfxcapture=hmonitor=384110573:max_framerate=30:capture_cursor=1:"), graph)
+        assertTrue(":display_border=0" in graph && ":resize_mode=scale_aspect" in graph && ",hwdownload,format=bgra," in graph, graph)
+        assertFalse("hwnd=" in graph)
         assertFalse("-init_hw_device" in a)
+        assertTrue("anullsrc=r=96000:cl=stereo" in a)
+        assertFalse("-an" in a)
+        // The same capture is what a screen's test runs (no sound there)
+        assertEquals(graph, ScreenCapture.inputArgs(Source.GFXCAPTURE, screen, Encoder.NVENC, ScreenCapture.Settings()).valueOf("-filter_complex"))
+        // A handle with the top bit set reads as the unsigned number FFmpeg parses
+        assertTrue(ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, screen.copy(hmonitor = -2L), Encoder.X264, publish)
+            .valueOf("-filter_complex")!!.startsWith("gfxcapture=hmonitor=18446744073709551614:"))
+        // Without a looked-up HMONITOR nothing is captured (gfxcapture would fall back to a window or fail)
+        assertFailsWith<IllegalArgumentException> { ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, screen.copy(hmonitor = 0), Encoder.X264, publish) }
     }
 
     @Test
@@ -135,14 +168,22 @@ class ScreenCaptureArgsTest {
     }
 
     @Test
-    fun `the safe plan drops to x264, and to gdi unless only the encoder failed`() {
-        val screen = ScreenCapture.Monitor(0, "Screen 1", 0, 0, 1920, 1080, adapter = 0, deviceName = "\\\\.\\DISPLAY6")
+    fun `the safe plan drops to x264, and to windows graphics capture when desktop duplication itself failed, never gdi`() {
         val amf = ScreenCapture.Plan(Source.DDAGRAB, Encoder.AMF)
-        assertEquals(ScreenCapture.Plan(Source.DDAGRAB, Encoder.X264), ScreenCapture.safePlan(amf, screen, encoderFailed = true))
-        assertEquals(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264), ScreenCapture.safePlan(amf, screen, encoderFailed = false))
-        assertEquals(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264),
-            ScreenCapture.safePlan(ScreenCapture.Plan(Source.DDAGRAB, Encoder.X264), screen, encoderFailed = false))
-        assertEquals(null, ScreenCapture.safePlan(ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264), screen, encoderFailed = false))
+        val ddX264 = ScreenCapture.Plan(Source.DDAGRAB, Encoder.X264)
+        val wgcX264 = ScreenCapture.Plan(Source.GFXCAPTURE, Encoder.X264)
+        assertEquals(ddX264, ScreenCapture.safePlan(amf, encoderFailed = true, screenWgc = true))
+        assertEquals(wgcX264, ScreenCapture.safePlan(amf, encoderFailed = false, screenWgc = true))
+        assertEquals(wgcX264, ScreenCapture.safePlan(ddX264, encoderFailed = false, screenWgc = true))
+        // A build without screen gfxcapture: x264 on Desktop Duplication, then nothing
+        assertEquals(ddX264, ScreenCapture.safePlan(amf, encoderFailed = false, screenWgc = false))
+        assertEquals(null, ScreenCapture.safePlan(ddX264, encoderFailed = false, screenWgc = false))
+        // The fallback itself failing: x264 on it, then nothing
+        assertEquals(wgcX264, ScreenCapture.safePlan(ScreenCapture.Plan(Source.GFXCAPTURE, Encoder.NVENC), encoderFailed = false, screenWgc = true))
+        assertEquals(null, ScreenCapture.safePlan(wgcX264, encoderFailed = false, screenWgc = true))
+        for (encoderFailed in listOf(true, false)) for (wgc in listOf(true, false)) for (p in listOf(amf, ddX264, wgcX264)) {
+            assertTrue(ScreenCapture.safePlan(p, encoderFailed, wgc)?.source != Source.GDIGRAB)
+        }
     }
 
     @Test
@@ -152,6 +193,11 @@ class ScreenCaptureArgsTest {
         assertTrue(ScreenCapture.isEncoderOpenFailure("[vost#0:0/h264_qsv] [enc:h264_qsv] Error while opening encoder - maybe incorrect parameters"))
         assertFalse(ScreenCapture.isEncoderOpenFailure("[Parsed_ddagrab_0 @ 0x1] Failed to enumerate DXGI output 1"))
         assertFalse(ScreenCapture.isEncoderOpenFailure("[tcp @ 0x1] Connection to tcp://relay:1935 failed: Connection refused"))
+        // Every run whose capture gives no frame ends like this: the encoder never got one, it did not fail to open
+        assertFalse(ScreenCapture.isEncoderOpenFailure(DDAGRAB_NO_OUTPUT))
+        assertFalse(ScreenCapture.isEncoderOpenFailure(
+            "[vost#0:0/libx264 @ 000001] [enc:libx264 @ 000002] Could not open encoder before EOF\n" +
+                "[vost#0:0/libx264 @ 000001] Task finished with error code: -22 (Invalid argument)"))
     }
 
     @Test
@@ -174,9 +220,9 @@ class ScreenCaptureArgsTest {
         // Only another GPU shows it now: the plan (that GPU's encoder) no longer applies
         assertEquals(null, ScreenCapture.rebind(choice, listOf(d3.copy(adapter = 1, vendorId = 0x8086, adapterPciId = intel))))
         assertEquals(null, ScreenCapture.rebind(choice, emptyList()))
-        // GDI plans copy the rectangle: a new resolution is picked up
-        val gdi = choice.copy(plan = ScreenCapture.Plan(Source.GDIGRAB, Encoder.X264))
-        assertEquals(1920, ScreenCapture.rebind(gdi, listOf(d3.copy(width = 1920, height = 1080)))!!.monitor.width)
+        // A new resolution is picked up (Windows Graphics Capture plans too)
+        val wgc = choice.copy(plan = ScreenCapture.Plan(Source.GFXCAPTURE, Encoder.X264))
+        assertEquals(1920, ScreenCapture.rebind(wgc, listOf(d3.copy(width = 1920, height = 1080)))!!.monitor.width)
     }
 
     @Test
@@ -219,6 +265,9 @@ class ScreenCaptureArgsTest {
         assertFalse("anullsrc" in withSound.joinToString(" "))
         // A GDI-captured window too
         assertTrue("anullsrc=r=96000:cl=stereo" in ScreenCapture.args("FFMPEG", Source.GDIGRAB, window, Encoder.X264, "rtmp://h/live/x"))
+        // A screen through Windows Graphics Capture, but never through Desktop Duplication (which repeats frames)
+        val wgcScreen = monitor.copy(hmonitor = 7)
+        assertTrue("anullsrc=r=96000:cl=stereo" in ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, wgcScreen, Encoder.X264, "rtmp://h/live/x"))
         // On the share's clock: the silence starts at FFmpeg's launch, shifted from the clock base like piped sound
         val stamped = ScreenCapture.args("FFMPEG", Source.GFXCAPTURE, window, Encoder.NVENC, "rtmp://h/live/x",
             clockBaseMicros = base, audioStartMicros = base + 3_250_000L)
@@ -318,6 +367,11 @@ class ScreenCaptureArgsTest {
         assertEquals(ScreenCapture.WindowCapture(Source.GFXCAPTURE, true), ScreenCapture.parseWindowCapture(help))
         assertEquals(ScreenCapture.WindowCapture(Source.GFXCAPTURE, false), ScreenCapture.parseWindowCapture(help.substringBefore("   dup")))
         assertEquals(Source.GDIGRAB, ScreenCapture.parseWindowCapture("Unknown filter 'gfxcapture'.").source)
+        assertFalse(ScreenCapture.parseWindowCapture("Unknown filter 'gfxcapture'.").monitors)
+        assertFalse(ScreenCapture.parseWindowCapture(help).monitors)
+        // FFmpeg 9's gfxcapture also takes a screen
+        val nine = "gfxcapture AVOptions:\n   monitor_idx  <int>\n   hwnd  <uint64>\n   hmonitor  <uint64>\n   output_fmt  <int>"
+        assertEquals(ScreenCapture.WindowCapture(Source.GFXCAPTURE, dupFrames = false, monitors = true), ScreenCapture.parseWindowCapture(nine))
     }
 
     @Test
@@ -361,10 +415,10 @@ class ScreenCaptureArgsTest {
 
     @Test
     fun `gdi capture with sound keeps its wall clock stamps less the base`() {
-        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, monitor, Encoder.X264, "rtmp://h/live/x", audio = pipe, clockBaseMicros = base)
+        val a = ScreenCapture.args("FFMPEG", Source.GDIGRAB, window, Encoder.X264, "rtmp://h/live/x", audio = pipe, clockBaseMicros = base)
         assertEquals(listOf("-1762862345.123456"), a.valuesOf("-itsoffset"))
         assertTrue(a.indexOf("-itsoffset") < a.indexOf("gdigrab"))
-        assertEquals(listOf("desktop", pipe.path), a.valuesOf("-i"))
+        assertEquals(listOf("hwnd=${0x2A0F3C}", pipe.path), a.valuesOf("-i"))
         assertEquals(listOf("0:v:0", "1:a:0"), a.valuesOf("-map"))
         assertTrue(a.indexOf("-vf") > a.indexOf(pipe.path))
     }

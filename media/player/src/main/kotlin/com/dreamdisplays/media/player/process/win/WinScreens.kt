@@ -2,6 +2,7 @@ package com.dreamdisplays.media.player.process.win
 
 import com.dreamdisplays.media.player.process.ScreenCapture
 import com.sun.jna.Memory
+import com.sun.jna.Pointer
 import com.sun.jna.WString
 
 /**
@@ -51,7 +52,10 @@ object WinScreens {
      * The screen covering most of [x], [y], [width], [height] now: its name, its own rectangle and [monitorKey]; null
      * when no screen does.
      */
-    fun screenAt(x: Int, y: Int, width: Int, height: Int): ScreenCapture.Monitor? {
+    fun screenAt(x: Int, y: Int, width: Int, height: Int): ScreenCapture.Monitor? = monitorAt(x, y, width, height)?.second
+
+    /** [screenAt] with that screen's `HMONITOR` (the same handle in every process of this session). */
+    fun monitorAt(x: Int, y: Int, width: Int, height: Int): Pair<Long, ScreenCapture.Monitor>? {
         val rect = Memory(16).apply {
             setInt(0, x); setInt(4, y); setInt(8, x + width); setInt(12, y + height)
         }
@@ -61,7 +65,7 @@ object WinScreens {
         val left = info.getInt(MI_RECT)
         val top = info.getInt(MI_RECT + 4)
         val name = String(info.getCharArray(MI_DEVICE, 32)).substringBefore('\u0000').trim()
-        return ScreenCapture.Monitor(
+        return Pointer.nativeValue(monitor) to ScreenCapture.Monitor(
             index = -1, name = "", x = left, y = top, width = info.getInt(MI_RECT + 8) - left,
             height = info.getInt(MI_RECT + 12) - top, deviceName = name, key = monitorKey(name),
         )
