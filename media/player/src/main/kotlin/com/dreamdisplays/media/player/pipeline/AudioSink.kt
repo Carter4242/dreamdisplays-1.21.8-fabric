@@ -277,6 +277,9 @@ internal class AudioSink(private val debugLabel: String) {
         )
     }
 
+    /** True once the current line session has put PCM on its line. */
+    fun pcmFlowing(): Boolean = current?.pcmFlowing == true
+
     @Volatile
     private var parked: AtomicBoolean? = null
 

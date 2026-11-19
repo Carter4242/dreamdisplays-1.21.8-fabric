@@ -1092,7 +1092,9 @@ class MediaPlayer(
             sinkMutedSinceNanos = 0L
         }
         // A session playing out the last segments before a Twitch ad: its sound may end a moment before its picture
-        val expecting = playing && sessionManager.audioExpected() && adSkip?.holding != true
+        // A sound process still opening (a slow separate audio stream) is waited for, not restarted from scratch
+        val expecting = playing && sessionManager.audioExpected() && adSkip?.holding != true &&
+            !sessionManager.audioStillOpening(now)
         if (audioStall.check(now, expecting, sessionManager.lastPcmOutNanos, sessionManager.lastFrameNanos.get())) {
             safeExecute(::healSilentAudio)
         }

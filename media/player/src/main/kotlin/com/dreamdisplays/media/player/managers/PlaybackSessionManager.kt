@@ -135,6 +135,9 @@ internal class PlaybackSessionManager(
         /** Sound joining the picture this far off (either way) is reported; pacing alone hides up to ~half of it. */
         const val AV_JOIN_REPORT_NANOS = 400_000_000L
 
+        /** How long a fresh audio process may stay silent while it opens before the silent-audio heal restarts it. */
+        const val AUDIO_OPEN_GRACE_NANOS = 8_000_000_000L
+
         /** How long a seamless speed switch waits for its new audio's first PCM before the session restarts instead. */
         const val SPEED_SWITCH_WARMUP_NANOS = 5_000_000_000L
 
@@ -147,7 +150,9 @@ internal class PlaybackSessionManager(
         )
     }
 
-    private class AudioHalf(val process: Process?, val thread: Thread, val stop: AtomicBoolean)
+    private class AudioHalf(val process: Process?, val thread: Thread, val stop: AtomicBoolean) {
+        val startedNanos: Long = System.nanoTime()
+    }
 
     /**
      * One decode channel. With an [alpha] plan it always runs an `FFmpeg` process into the JVM pipe as straight-alpha
@@ -578,6 +583,17 @@ internal class PlaybackSessionManager(
                 "tempo=$tempo silent=$silentSession finished=$audioFinished incoming=${incoming != null} process=$procState " +
                 "thread=${half?.thread?.state} stopFlag=${half?.stop?.get()} feeder=${audioFeeder != null} " +
                 "pipeline=${pipelineLabel()} ${audio.describe()}"
+    }
+
+    /**
+     * True while the current audio process is alive but has not produced its first sound yet, for at most
+     * [AUDIO_OPEN_GRACE_NANOS] after it started: a separate audio stream (YouTube's) can take seconds to open, and
+     * restarting it for being silent only starts that wait over. It joins the picture when it comes (see [joinCatchUp]).
+     */
+    fun audioStillOpening(now: Long = System.nanoTime()): Boolean {
+        val half = audioHalf ?: return false
+        val proc = half.process ?: return false
+        return proc.isAlive && !audio.pcmFlowing() && now - half.startedNanos < AUDIO_OPEN_GRACE_NANOS
     }
 
     /** True when this session should be putting sound on the line now: active, running, not a silent source. */
