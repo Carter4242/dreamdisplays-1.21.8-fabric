@@ -15,6 +15,12 @@ internal class AudioMasterClock(
 
     /** Content time per wall time (the playback speed); scales the wall-time steps this clock fills in. */
     private val rate: () -> Double = { 1.0 },
+
+    /**
+     * Called as sound with a known origin starts a new line session while the picture already runs on the wall clock,
+     * with how far the picture is ahead of that sound (negative: behind it). Outside the clock's lock.
+     */
+    private val onSoundJoined: (pictureAheadNanos: Long) -> Unit = {},
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -59,9 +65,13 @@ internal class AudioMasterClock(
             synchronized(lock) { lastOutAdvanceNanos = nowNanos() }
             return wallNanos
         }
-        synchronized(lock) {
+        var joined = Long.MIN_VALUE
+        val out = synchronized(lock) {
             val now = nowNanos()
-            if (sample.epoch != epoch) beginEpoch(sample, wallNanos, now)
+            if (sample.epoch != epoch) {
+                beginEpoch(sample, wallNanos, now)
+                if (sample.originKnown && wallNanos >= 0L && !suspended) joined = wallNanos - sample.nanos
+            }
             if (!sample.originKnown && !streamAnchored) alignToStream(exactBias)
 
             // Wall time only drives a takeover while playback runs: a pause or park (and the first read after one)
@@ -99,8 +109,10 @@ internal class AudioMasterClock(
                 !takeover && sample.originKnown && wallNanos >= 0L &&
                         now - lastOutAdvanceNanos >= STALL_TAKEOVER_NANOS -> beginTakeover(sample, now)
             }
-            return lastOut
+            lastOut
         }
+        if (joined != Long.MIN_VALUE) onSoundJoined(joined)
+        return out
     }
 
     private fun beginTakeover(sample: AudioSink.ClockSample, now: Long) {

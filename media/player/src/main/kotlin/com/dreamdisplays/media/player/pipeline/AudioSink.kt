@@ -37,6 +37,8 @@ internal class AudioSink(private val debugLabel: String) {
         private const val RETRY_DELAY_MS = 200L
         private const val CATCHUP_MIN_NANOS = 40_000_000L
         private const val CATCHUP_MAX_PASSES = 4
+        private const val FIRST_PCM_WAIT_NANOS = 30_000_000_000L
+        private const val FIRST_PCM_POLL_MS = 5L
 
         /**
          * A scheduled switch ([startSwitch] `notBeforeNanos`) skips and primes this long before its instant: reading a
@@ -451,7 +453,7 @@ internal class AudioSink(private val debugLabel: String) {
                 if (notBeforeNanos != 0L &&
                     !sleepUntil(notBeforeNanos - SCHEDULED_PRIME_NANOS) { isInterrupted() || !shouldPromote() }
                 ) return@use
-                val skippedNanos = catchUp?.let { skipCatchUp(input, it, terminated, stopFlag) } ?: 0L
+                val skippedNanos = catchUp?.let { skipCatchUp(input, it, terminated, stopFlag, proc) } ?: 0L
 
                 val primedBytes = if (isInterrupted()) 0 else primeSwitchLine(input, opened, terminated, stopFlag)
                 if (isInterrupted() || primedBytes <= 0) return@use
@@ -652,7 +654,7 @@ internal class AudioSink(private val debugLabel: String) {
                     logger.debug("$debugLabel [audio] aborted before start gate opened (terminated / stopped).")
                     return@runCatching
                 }
-                catchUp?.let { session.contentStartNanos += skipCatchUp(input, it, terminated, stopFlag) }
+                catchUp?.let { session.contentStartNanos += skipCatchUp(input, it, terminated, stopFlag, proc) }
                 if (terminated.get() || stopFlag.get()) return@runCatching
                 if (!publishLine(session, ln)) {
                     logger.debug("$debugLabel [audio] session superseded before its line started; abandoning it.")
@@ -681,8 +683,8 @@ internal class AudioSink(private val debugLabel: String) {
         }
     }
 
-    private fun skipCatchUp(
-        input: InputStream, catchUp: CatchUp, terminated: AtomicBoolean, stopFlag: AtomicBoolean,
+    internal fun skipCatchUp(
+        input: InputStream, catchUp: CatchUp, terminated: AtomicBoolean, stopFlag: AtomicBoolean, proc: Process? = null,
     ): Long {
         val scratch = ByteArray(CHUNK_BYTES)
         var skippedBytes = 0L
@@ -701,6 +703,10 @@ internal class AudioSink(private val debugLabel: String) {
             logger.debug("$debugLabel [audio] catch-up skipped ${skippedContent() / 1_000_000} ms of PCM (target ${gapNanos / 1_000_000} ms).")
             return skippedContent()
         }
+        // The picture runs on the wall clock until this sound flows: how far it got is only known once PCM exists.
+        // Measured at the gate instead, a source slow to open (YouTube's separate audio) joins at the old target and
+        // drags the master clock back by its whole open time, leaving the picture that far ahead of the sound.
+        awaitFirstPcm(input, terminated, stopFlag, proc)
         repeat(CATCHUP_MAX_PASSES) {
             val contentNow = catchUp.contentStartNanos + skippedContent()
             val gapNanos = catchUp.playbackClock() - contentNow
@@ -723,6 +729,28 @@ internal class AudioSink(private val debugLabel: String) {
             if (terminated.get() || stopFlag.get()) return skippedContent()
         }
         return skippedContent()
+    }
+
+    /**
+     * Waits until [input] has PCM to read, the process ended ([proc] no longer alive with nothing buffered), the
+     * session is stopped, or [FIRST_PCM_WAIT_NANOS] passed.
+     */
+    private fun awaitFirstPcm(input: InputStream, terminated: AtomicBoolean, stopFlag: AtomicBoolean, proc: Process?) {
+        val deadline = System.nanoTime() + FIRST_PCM_WAIT_NANOS
+        while (!terminated.get() && !stopFlag.get() && System.nanoTime() < deadline) {
+            val ready = try {
+                input.available() > 0
+            } catch (_: java.io.IOException) {
+                return
+            }
+            if (ready || (proc != null && !proc.isAlive)) return
+            try {
+                Thread.sleep(FIRST_PCM_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+        }
     }
 
     /** Pumps PCM to [ln] until it ends or is stopped; true when the PCM stream itself ended (its natural end). */

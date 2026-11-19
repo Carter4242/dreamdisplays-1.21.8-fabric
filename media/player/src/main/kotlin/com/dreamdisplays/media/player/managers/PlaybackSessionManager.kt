@@ -132,6 +132,9 @@ internal class PlaybackSessionManager(
         /** How many silent-source verdicts to remember; well past any one player's stream ladder. */
         const val SILENT_MEMO_LIMIT = 64
 
+        /** Sound joining the picture this far off (either way) is reported; pacing alone hides up to ~half of it. */
+        const val AV_JOIN_REPORT_NANOS = 400_000_000L
+
         /** How long a seamless speed switch waits for its new audio's first PCM before the session restarts instead. */
         const val SPEED_SWITCH_WARMUP_NANOS = 5_000_000_000L
 
@@ -372,6 +375,20 @@ internal class PlaybackSessionManager(
     }
 
     private fun audioOriginKnown(): Boolean = !liveSession && audioFeeder == null
+
+    /**
+     * Where the picture stands for sound that joins it late: the wall clock the video paces on until the sound flows
+     * (started by the first frame), frozen while parked.
+     */
+    private fun pictureNanos(): Long = parkedPositionNanos() ?: clock.currentTime()
+
+    /**
+     * Sound (re)opened at [offsetNanos] skips to the picture once its first PCM arrives, so a source that is slow to
+     * open (a separate audio stream) joins in sync instead of the clock jumping back to [offsetNanos]. Null when the
+     * sound's origin is unknown (live).
+     */
+    private fun joinCatchUp(offsetNanos: Long, tempo: Double): AudioSink.CatchUp? =
+        if (audioOriginKnown()) AudioSink.CatchUp(offsetNanos, ::pictureNanos, tempo) else null
 
     fun audioSourceGone(): Boolean = audioFeeder?.sourceGone == true
 
@@ -657,6 +674,7 @@ internal class PlaybackSessionManager(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
                         startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
+                        catchUp = joinCatchUp(offsetNanos, tempo),
                     ),
                     aStop,
                 )
@@ -720,6 +738,7 @@ internal class PlaybackSessionManager(
                             it, terminated, aStop,
                             contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
                             startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
+                            catchUp = joinCatchUp(offsetNanos, tempo),
                         ),
                         aStop,
                     )
@@ -774,6 +793,7 @@ internal class PlaybackSessionManager(
                         it, terminated, aStop,
                         contentStartNanos = offsetNanos, originKnown = audioOriginKnown(),
                         startGate = firstVideoFrame, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop), tempo = tempo,
+                        catchUp = joinCatchUp(offsetNanos, tempo),
                     ),
                     aStop,
                 )
@@ -856,7 +876,7 @@ internal class PlaybackSessionManager(
             ap, terminated, aStop,
             contentStartNanos = offsetNanos, originKnown = originKnown,
             startGate = null, onUnexpectedEnd = endFor(aStop), onFault = faultFor(aStop),
-            catchUp = if (originKnown) AudioSink.CatchUp(offsetNanos, { clock.currentTime() }, tempo) else null,
+            catchUp = joinCatchUp(offsetNanos, tempo),
             tempo = tempo,
         )
         audioHalf = AudioHalf(ap, at, aStop)
@@ -1393,7 +1413,38 @@ internal class PlaybackSessionManager(
     fun parkedPositionNanos(): Long? =
         (phase.get() as? Phase.Parked)?.frozenNanos?.takeIf { parkFlag.get() && it >= 0 }
 
-    private val masterClock = AudioMasterClock(debugLabel, requestAudioResync = audio::requestResync, rate = { tempo })
+    private val masterClock =
+        AudioMasterClock(debugLabel, requestAudioResync = audio::requestResync, rate = { tempo }, onSoundJoined = ::onSoundJoined)
+
+    /**
+     * Sound that starts well off the picture leaves them that far apart until something re-syncs them, and nothing
+     * on screen shows it: logged, and reported to the server as an `av_sync` hitch.
+     */
+    private fun onSoundJoined(pictureAheadNanos: Long) {
+        val offMs = pictureAheadNanos / 1_000_000L
+        if (kotlin.math.abs(pictureAheadNanos) < AV_JOIN_REPORT_NANOS) {
+            if (MediaPlayer.DEBUG) logger.debug("$debugLabel A / V: sound joined the picture $offMs ms off.")
+            return
+        }
+        val how = if (offMs > 0) "behind" else "ahead of"
+        logger.warn("$debugLabel A / V: sound joined ${kotlin.math.abs(offMs)} ms $how the picture.")
+        val diagnostics = com.dreamdisplays.media.runtime.diagnostics.PlaybackDiagnostics
+        if (!diagnostics.enabled) return
+        val id = diagnostics.displayIdOf(debugLabel) ?: return
+        diagnostics.emit(
+            com.dreamdisplays.media.runtime.diagnostics.PlaybackFailure(
+                displayId = id,
+                url = "",
+                kind = "DECODE",
+                message = "sound joined ${kotlin.math.abs(offMs)} ms $how the picture",
+                stage = "av_sync",
+                hitch = true,
+                durationMs = kotlin.math.abs(offMs),
+                positionMs = clock.currentTime() / 1_000_000L,
+                action = if (offMs > 0) "sound_behind" else "sound_ahead",
+            )
+        )
+    }
 
     private fun pacingClockNanos(): Long {
         // While a replay -> live bridge is active the wall clock is clamped to the live edge so it never

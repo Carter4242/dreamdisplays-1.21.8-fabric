@@ -311,4 +311,27 @@ class AudioMasterClockTest {
         val out = clock.nanos(sample(0, epoch = 1, originKnown = false), 5 * second, suspended = false) { null }
         assertEquals(5 * second, out)
     }
+
+    @Test
+    fun `sound that joins behind a running picture is reported once per session`() {
+        val joins = ArrayList<Long>()
+        val clock = AudioMasterClock("test", onSoundJoined = { joins.add(it) })
+        // The picture ran 3 s on the wall clock while the separate audio stream was still opening
+        clock.nanos(sample(10 * second, epoch = 1), wallNanos = 13 * second, suspended = false) { null }
+        clock.nanos(sample(11 * second, epoch = 1), wallNanos = 14 * second, suspended = false) { null }
+        assertEquals([3 * second], joins)
+        // A session that joins in step reports a near-zero offset
+        clock.nanos(sample(20 * second, epoch = 2), wallNanos = 20 * second + 20 * ms, suspended = false) { null }
+        assertEquals([3 * second, 20 * ms], joins)
+    }
+
+    @Test
+    fun `no join offset without a running picture clock, while parked, or for a live origin`() {
+        val joins = ArrayList<Long>()
+        val clock = AudioMasterClock("test", onSoundJoined = { joins.add(it) })
+        clock.nanos(sample(10 * second, epoch = 1), wallNanos = -1L, suspended = false) { null }
+        clock.nanos(sample(10 * second, epoch = 2), wallNanos = 15 * second, suspended = true) { null }
+        clock.nanos(sample(0, epoch = 3, originKnown = false), wallNanos = 15 * second, suspended = false) { null }
+        assertEquals(emptyList(), joins)
+    }
 }
