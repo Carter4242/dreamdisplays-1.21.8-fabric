@@ -538,7 +538,10 @@ object ScreenCapture {
             val text = out.toString()
             val ms = (System.nanoTime() - t0) / 1_000_000
             RunResult(done && p.exitValue() == 0, text, if (done) errorTail(text) else "timed out after ${timeoutSeconds}s", ms)
-        }.getOrElse { RunResult(false, "", it.message ?: it.javaClass.simpleName, (System.nanoTime() - t0) / 1_000_000) }
+        }.getOrElse {
+            com.dreamdisplays.media.runtime.diagnostics.BlockedPrograms.note("FFmpeg", it)
+            RunResult(false, "", it.message ?: it.javaClass.simpleName, (System.nanoTime() - t0) / 1_000_000)
+        }
     }
 
     /** The lines of `FFmpeg` output that say what went wrong (at most the last 4). */

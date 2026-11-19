@@ -146,7 +146,10 @@ object YtDlpBinary {
             val text = if (exit == 0) out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty()
             else "failed (exit ${exit ?: "timeout"}): ${out.trim().lineSequence().lastOrNull { it.isNotBlank() }?.take(120)}"
             text.take(160)
-        }.getOrElse { e -> "failed: ${e.message}" }.also { versionProbe = command to it }
+        }.getOrElse { e ->
+            com.dreamdisplays.media.runtime.diagnostics.BlockedPrograms.note("yt-dlp", e)
+            "failed: ${e.message}"
+        }.also { versionProbe = command to it }
         return Info(
             mode = mode,
             version = version,

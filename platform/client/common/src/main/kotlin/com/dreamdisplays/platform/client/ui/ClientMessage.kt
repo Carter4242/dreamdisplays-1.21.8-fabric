@@ -62,6 +62,7 @@ enum class ClientMessage(val key: String) {
     ERROR_LOADINGERROR_HINT("dreamdisplays.error.loadingerror.hint"),
     MESSAGE_OUTDATED_SERVER("dreamdisplays.message.outdated_server"),
     MESSAGE_SWITCHED_OFF("dreamdisplays.message.switched_off"),
+    MESSAGE_PROGRAM_BLOCKED("dreamdisplays.message.program_blocked"),
     MODE_AUDIO_ADVANCED("dreamdisplays.mode.audio_advanced"),
     MODE_AUDIO_ENHANCED("dreamdisplays.mode.audio_enhanced"),
     MODE_AUDIO_OFF("dreamdisplays.mode.audio_off"),

@@ -82,7 +82,10 @@ object FFmpegBinary {
             val firstLine = p.inputStream.bufferedReader().use { r -> r.readLine().orEmpty() }
             if (!p.waitFor(5, TimeUnit.SECONDS)) p.destroyForcibly()
             firstLine.removePrefix("ffmpeg version ").substringBefore(" Copyright").trim().take(120)
-        }.getOrElse { e -> "failed: ${e.message}" }.also { versionProbe = path to it }
+        }.getOrElse { e ->
+            com.dreamdisplays.media.runtime.diagnostics.BlockedPrograms.note("FFmpeg", e)
+            "failed: ${e.message}"
+        }.also { versionProbe = path to it }
         return Info(
             source = source,
             path = path,

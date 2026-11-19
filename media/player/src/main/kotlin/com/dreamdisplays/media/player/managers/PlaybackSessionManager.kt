@@ -699,6 +699,7 @@ internal class PlaybackSessionManager(
             phase.set(Phase.Active)
         } catch (e: IOException) {
             logger.error("$debugLabel Failed to start FFmpeg", e)
+            com.dreamdisplays.media.runtime.diagnostics.BlockedPrograms.note("FFmpeg", e)
             events.onError(DreamMediaException.Decode("Failed to start FFmpeg: ${e.message}", e))
         }
     }

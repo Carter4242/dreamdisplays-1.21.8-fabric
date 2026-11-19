@@ -139,6 +139,7 @@
   "dreamdisplays.access.locked": "Locked",
   "dreamdisplays.message.outdated_server": "This server's Dream Displays is too old, so displays can't be used here. Ask the server admins to update it",
   "dreamdisplays.message.switched_off": "Dream Displays is switched off in its settings, so displays stay off here. Turn it on in Mods > Dream Displays",
+  "dreamdisplays.message.program_blocked": "Windows Smart App Control is blocking %s, so videos can't play. Turn it off in Windows Security > App & browser control > Smart App Control settings, then refresh the display.",
   "dreamdisplays.config.title": "Dream Displays settings",
   "dreamdisplays.config.category.general": "General",
   "dreamdisplays.config.value.auto": "Auto",

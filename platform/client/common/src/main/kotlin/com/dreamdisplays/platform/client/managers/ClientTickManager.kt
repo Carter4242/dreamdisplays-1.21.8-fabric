@@ -217,6 +217,13 @@ object ClientTickManager {
 
         ViewerReporter.tick()
         com.dreamdisplays.platform.client.displays.ClientErrorReporter.tick()
+        // Windows refused to start FFmpeg / yt-dlp (Smart App Control): nothing can play until the player fixes it
+        if (minecraft.player != null) com.dreamdisplays.media.runtime.diagnostics.BlockedPrograms.take()?.let { program ->
+            com.dreamdisplays.platform.client.displays.DisplayQueues.notifyLocal(
+                com.dreamdisplays.platform.client.ui.ClientMessage.MESSAGE_PROGRAM_BLOCKED.component(program)
+                    .withStyle(net.minecraft.ChatFormatting.YELLOW)
+            )
+        }
 
         // The sneak + use menu shortcut itself fires from the UseItemMenu mixin, which also cancels the use.
         DisplayMenuInputHandler.tickUseKey(minecraft)
