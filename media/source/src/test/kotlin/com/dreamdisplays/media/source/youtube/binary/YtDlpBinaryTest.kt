@@ -93,8 +93,8 @@ class YtDlpBinaryTest {
             assertTrue(YtDlpBinary.abandonZipapp(zipapp, certFailure, YtDlpBinary.ZipappFailure.CERTIFICATE, binary))
             assertEquals("yt-dlp binary", YtDlpBinary.label())
             assertEquals(1, YtDlpBinary.zipappSwitches)
+            assertTrue(YtDlpBinary.note().startsWith("switched to the binary: zipapp on "), YtDlpBinary.note())
             assertTrue("failed the SSL certificate check" in YtDlpBinary.note(), YtDlpBinary.note())
-            assertTrue("switched to the binary" in YtDlpBinary.note(), YtDlpBinary.note())
             // Picking the command again (a changed source preference) keeps the binary for the session
             assertFalse(YtDlpBinary.zipappAllowed("auto"))
             assertFalse(YtDlpBinary.zipappAllowed("bundled"))

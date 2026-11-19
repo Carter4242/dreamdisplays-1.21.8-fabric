@@ -374,7 +374,9 @@ object YtDlpBinary {
                             "switched to the standalone yt-dlp binary {} for this session.",
                         failed[0], reason, next[0],
                     )
-                    zipappNote = "zipapp on ${failed[0]} failed the SSL certificate check ($reason); switched to the binary"
+                    // The switch first: the report keeps only the start of a long note
+                    zipappNote = "switched to the binary: zipapp on ${failed[0]} failed the SSL certificate check " +
+                        "(${reason?.substringBefore(" (caused by ")})"
                 }
             }
             resolvedCommand = next
